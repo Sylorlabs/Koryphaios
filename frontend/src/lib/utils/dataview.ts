@@ -129,7 +129,13 @@ export function parseDataviewQuery(src: string): ParsedQuery {
     const parts = sections.WHERE.split(/\b(AND|OR)\b/i);
     for (let i = 0; i < parts.length; i += 2) {
       const clauseStr = parts[i].trim();
-      if (!clauseStr) continue;
+      if (!clauseStr) {
+        // An empty clause string means the WHERE section is malformed —
+        // e.g. "WHERE AND OR" splits into ["", "AND", "", "OR", ""].
+        // Silently skipping would produce zero clauses, which means no
+        // filtering (all rows returned) — a fail-open bypass. Fail closed.
+        throw new Error(`Bad WHERE clause: empty clause in "${sections.WHERE}"`);
+      }
       const cm = /^(\S+)\s*(>=|<=|!=|=|>|<|contains)\s*(.+)$/i.exec(clauseStr);
       if (!cm) throw new Error(`Bad WHERE clause: "${clauseStr}"`);
       parsed.where.clauses.push({

@@ -448,33 +448,33 @@ describe('Bash Command Security', () => {
 
   // ─── Sandbox escape vectors ─────────────────────────────────────────────
   describe('Sandbox escape vectors', () => {
-    // VULNERABILITY: ln (symlink) is not in the blocked commands list.
+    // FIXED: ln -s to an absolute path is now blocked by a dangerous pattern.
     // A symlink can be used to bypass path restrictions by creating a
     // symlink to a file outside the sandbox root, then reading it.
-    it.skip('blocks symlink-based escape: ln -s /etc/passwd ./escape', () => {
+    it('blocks symlink-based escape: ln -s /etc/passwd ./escape', () => {
       const result = validateBashCommand('ln -s /etc/passwd ./escape', { isSandboxed: true });
       expect(result.safe).toBe(false);
     });
 
-    // VULNERABILITY: /proc/1/environ is not blocked. Reading it leaks the
-    // parent process's environment variables, which may contain secrets
-    // (API keys, session tokens, database credentials).
-    it.skip('blocks reading /proc/1/environ to steal parent process environment', () => {
+    // FIXED: /proc/1/environ is now blocked by a dangerous pattern.
+    // Reading it leaks the parent process's environment variables, which
+    // may contain secrets (API keys, session tokens, database credentials).
+    it('blocks reading /proc/1/environ to steal parent process environment', () => {
       const result = validateBashCommand('cat /proc/1/environ', { isSandboxed: true });
       expect(result.safe).toBe(false);
     });
 
-    // VULNERABILITY: /proc/self/environ is not blocked. Reading it leaks
-    // the sandbox process's own environment, which may contain injected
-    // secrets or API keys.
-    it.skip('blocks reading /proc/self/environ to leak sandbox secrets', () => {
+    // FIXED: /proc/self/environ is now blocked by a dangerous pattern.
+    // Reading it leaks the sandbox process's own environment, which may
+    // contain injected secrets or API keys.
+    it('blocks reading /proc/self/environ to leak sandbox secrets', () => {
       const result = validateBashCommand('cat /proc/self/environ', { isSandboxed: true });
       expect(result.safe).toBe(false);
     });
 
-    // VULNERABILITY: Parent directory traversal via .. is not blocked.
-    // `cat ../../../etc/passwd` can read files outside the sandbox root.
-    it.skip('blocks parent directory traversal via .. in paths', () => {
+    // FIXED: Parent directory traversal via .. is now blocked by a dangerous
+    // pattern. `cat ../../../etc/passwd` can read files outside the sandbox root.
+    it('blocks parent directory traversal via .. in paths', () => {
       const result = validateBashCommand('cat ../../../etc/passwd', { isSandboxed: true });
       expect(result.safe).toBe(false);
     });
@@ -496,10 +496,10 @@ describe('Bash Command Security', () => {
       expect(result.safe).toBe(false);
     });
 
-    // VULNERABILITY: /proc/1/cmdline is not blocked. Reading it reveals
-    // the parent process's command line, which may contain secrets passed
-    // as CLI arguments.
-    it.skip('blocks accessing /proc/1/cmdline to discover the parent process', () => {
+    // FIXED: /proc/1/cmdline is now blocked by a dangerous pattern.
+    // Reading it reveals the parent process's command line, which may
+    // contain secrets passed as CLI arguments.
+    it('blocks accessing /proc/1/cmdline to discover the parent process', () => {
       const result = validateBashCommand('cat /proc/1/cmdline', { isSandboxed: true });
       expect(result.safe).toBe(false);
     });

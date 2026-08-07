@@ -583,26 +583,16 @@ describe('CSP header injection in real HTTP responses', () => {
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });
 
-  // VULNERABILITY: When Elysia's internal not-found handling fires (i.e. no
-  // route matches AND there is no catch-all), the response does NOT pass
-  // through onAfterHandle, so security headers are silently dropped. In the
-  // probe above, an unmatched path returned status 500 with no CSP header.
-  // A 404/500 page served without CSP is an injection surface. This is
-  // skipped (not fixed) per instructions; the fix would be to ensure the
-  // security-headers middleware runs in an onResponse hook that covers
-  // Elysia's built-in error responses, not only onAfterHandle.
-  test.skip('CSP header is present on Elysia built-in unmatched-route responses', async () => {
-    const bareApp = new Elysia()
-      .onAfterHandle(({ set }) => {
-        const nonce = generateCSPNonce();
-        const headers = buildSecurityHeaders({ cspNonce: nonce });
-        for (const [name, value] of Object.entries(headers)) {
-          if (value) set.headers[name] = value;
-        }
-      })
-      .get('/', () => ({ ok: true }));
+  // FIXED: Elysia's internal not-found handler bypasses onAfterHandle, so
+  // security headers were silently dropped on unmatched routes. The fix is
+  // the securityHeadersElysia() plugin which registers onAfterHandle, onError,
+  // AND a catch-all .all('*', ...) route so unmatched paths are intercepted
+  // before Elysia's built-in 404 fires.
+  test('CSP header is present on Elysia built-in unmatched-route responses', async () => {
+    const { securityHeadersElysia } = await import('../../middleware/security-headers');
+    const bareApp = new Elysia().use(securityHeadersElysia() as unknown as Parameters<Elysia['use']>[0]).get('/', () => ({ ok: true }));
     const res = await bareApp.handle(new Request('http://localhost/does-not-exist'));
-    // Desired behavior: security headers present even on the built-in 404.
+    // Security headers present even on the unmatched 404.
     expect(res.headers.get('content-security-policy')).toBeTruthy();
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });

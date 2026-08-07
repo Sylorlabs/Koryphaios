@@ -16,6 +16,12 @@ const COLORS = ['#d5b261', '#60a5fa', '#34d399', '#a78bfa', '#fb7185', '#22d3ee'
 
 function escapeHtml(value: unknown): string {
   return String(value)
+    // Strip control characters (C0 controls + DEL) that have no place in
+    // SVG/HTML text content. NUL (\u0000) is replaced by U+FFFD by HTML
+    // parsers, but other controls like BEL (\u0007), BS (\u0008), and
+    // bidi overrides (\u202e) can cause rendering anomalies or be used
+    // to confuse reviewers. Remove them entirely before escaping.
+    .replace(/[\u0000-\u001F\u007F\u202E\u202D\u200E\u200F]/g, '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')

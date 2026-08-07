@@ -103,6 +103,29 @@ const DANGEROUS_PATTERNS = [
   /\bcodex\s+(auth|login)\b/,
   /\bopenai\s+login\b/,
   /\bgh\s+auth\b/,
+  // Sandbox escape: /proc filesystem leaks parent process env, cmdline, secrets
+  /\/proc\/\d*\b/,
+  /\/proc\/self\b/,
+  // Sandbox escape: parent directory traversal via ..
+  /\.\.\//,
+  // Sandbox escape: symlink to absolute path (bypasses path confinement)
+  /\bln\s+(-[a-zA-Z]*s[a-zA-Z]*\s+)?\/[^\s]*\s/,
+  // Sandbox escape: namespace/chroot operations
+  /\bnsenter\b/,
+  /\bunshare\b/,
+  /\bchroot\b/,
+  // Sandbox escape: exec replaces the shell process, bypassing the parser
+  /\bexec\s+/,
+  // Sandbox escape: source/. executes arbitrary scripts
+  /^\s*(source|\.)\s+/,
+  // Sandbox escape: eval executes constructed strings
+  /\beval\s+/,
+  // Sandbox escape: mkfifo creates named pipes for data exfiltration
+  /\bmkfifo\b/,
+  // Sandbox escape: mount can overlay the filesystem
+  /\bmount\b/,
+  // Sandbox escape: /dev/tcp and /dev/udp for network exfiltration via bash
+  /\/dev\/(tcp|udp)\//,
 ];
 
 // Safe command whitelist for sandboxed mode
@@ -200,12 +223,12 @@ export const SANDBOX_CMD_WHITELIST = new Set([
   // PHP
   'php',
   'composer',
-  // Shell
-  'bash',
-  'sh',
-  'zsh',
-  'source',
-  '.',
+  // Shell interpreters are intentionally NOT in the sandbox whitelist.
+  // Spawning `bash -c '...'` / `sh -c '...'` / `node -e '...'` from inside
+  // the sandbox lets an agent bypass the regex layer in one line. Shell
+  // features (pipes, redirects) are handled by the OS sandbox
+  // (os-sandbox.ts) which confines the whole process tree, or by the
+  // unsandboxed manager path.
   // Build tools
   'make',
   'cmake',
@@ -311,18 +334,39 @@ export interface BashValidationResult {
   requiresUnsandboxed?: boolean;
 }
 
+/** Granular sandbox toggles. Each flag only suppresses its check while
+ *  `isSandboxed` is true — none can enable a check when unsandboxed.
+ *  Unset/undefined defaults to `true` so callers without explicit settings
+ *  preserve the original strict behavior. */
+export interface BashSandboxOptions {
+  isSandboxed?: boolean;
+  allowNetwork?: boolean;
+  /** Enforce the static command whitelist (SANDBOX_CMD_WHITELIST). */
+  commandWhitelist?: boolean;
+  /** Block shell metacharacters (pipes, substitution, grouping, etc.). */
+  metacharacters?: boolean;
+  /** Block network commands (curl, wget, ssh, etc.). */
+  network?: boolean;
+  /** Block container tools (docker, podman, etc.). */
+  containerTools?: boolean;
+}
+
 /**
  * Comprehensive bash command validation
  * Blocks command injection, shell escapes, and dangerous operations
  */
 export function validateBashCommand(
   command: string,
-  options: {
-    isSandboxed?: boolean;
-    allowNetwork?: boolean;
-  } = {},
+  options: BashSandboxOptions = {},
 ): BashValidationResult {
-  const { isSandboxed = true, allowNetwork = false } = options;
+  const {
+    isSandboxed = true,
+    allowNetwork = false,
+    commandWhitelist = true,
+    metacharacters = true,
+    network = true,
+    containerTools = true,
+  } = options;
   const trimmed = command.trim();
 
   // Check exact dangerous commands
@@ -341,7 +385,7 @@ export function validateBashCommand(
   }
 
   // Check for shell metacharacters (command injection vectors)
-  if (SHELL_META_REGEX.test(trimmed)) {
+  if (metacharacters && SHELL_META_REGEX.test(trimmed)) {
     // Allow specific safe patterns
     const safePatterns = [
       /^git\s+(status|log|diff|show|branch|remote|config)/, // Git pipes are usually safe
@@ -372,7 +416,7 @@ export function validateBashCommand(
 
   // Check for container tools (blocked in sandboxed mode only)
   const containerTool = baseCommands.find((cmd) => CONTAINER_TOOLS.has(cmd));
-  if (containerTool && isSandboxed) {
+  if (containerTools && containerTool && isSandboxed) {
     return {
       safe: false,
       reason: `Blocked: container command '${containerTool}' requires unsandboxed mode. The Manager agent can run Docker commands with full permissions.`,
@@ -391,7 +435,7 @@ export function validateBashCommand(
 
   // Check for network commands
   const networkCmd = baseCommands.find((cmd) => NETWORK_CMDS.has(cmd));
-  if (networkCmd && isSandboxed && !allowNetwork) {
+  if (network && networkCmd && isSandboxed && !allowNetwork) {
     return {
       safe: false,
       reason: `Blocked: network command '${networkCmd}' requires unsandboxed mode or explicit network permission`,
@@ -401,7 +445,7 @@ export function validateBashCommand(
   }
 
   // In sandboxed mode, all base commands must be whitelisted
-  if (isSandboxed) {
+  if (commandWhitelist && isSandboxed) {
     const disallowed = baseCommands.find((cmd) => !SANDBOX_CMD_WHITELIST.has(cmd));
     if (disallowed) {
       return {

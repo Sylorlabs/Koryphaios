@@ -108,23 +108,20 @@ describe('adversarial chart spec injection', () => {
     // rendered inside an SVG <text> element, fully escaped).
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<img');
-    // Note: control characters (e.g. NUL) are NOT stripped by escapeHtml —
-    // see the skipped test below for that sanitization gap.
+    // Control characters (NUL, BEL, etc.) are now stripped by escapeHtml.
+    expect(html).not.toContain('\x00');
   });
 
-  it.skip('labels with control characters are stripped (sanitization gap)', () => {
-    // VULNERABILITY (low severity): escapeHtml() in chart-renderer.ts only
-    // escapes & < > " ' — it does not strip control characters (NUL, BEL,
-    // etc.). The HTML parser neutralizes NUL (→ U+FFFD) so this is not
-    // directly exploitable, but control chars in SVG <text> could cause
-    // rendering anomalies or confuse downstream sanitizers. A fix would
-    // strip or replace control chars (except tab/newline) in escapeHtml.
+  it('labels with control characters are stripped', () => {
+    // FIXED: escapeHtml() now strips C0 control characters (NUL, BEL, etc.)
+    // and bidi override characters before escaping HTML metacharacters.
     const html = renderKoryChart(JSON.stringify({
       type: 'bar',
-      labels: ['A\x00B'],
+      labels: ['A\x00B\x07C'],
       datasets: [{ data: [1] }],
     }));
     expect(html).not.toContain('\x00');
+    expect(html).not.toContain('\x07');
   });
 
   it('escapes labels with bidi override characters', () => {

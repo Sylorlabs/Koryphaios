@@ -248,20 +248,18 @@ describe('adversarial query injection', () => {
     expect(html).toMatch(/dataview-empty|dataview-list|dataview-error/);
   });
 
-  it.skip('rejects a WHERE clause with only operators (parser silently ignores)', () => {
-    // VULNERABILITY (low severity): parseDataviewQuery splits WHERE on
-    // \b(AND|OR)\b and skips empty clause strings (`if (!clauseStr) continue`).
-    // So "WHERE AND OR" produces no clauses and is silently treated as a
-    // no-op WHERE (all rows returned) instead of a parse error. A malformed
-    // query should error, not silently match everything. A fix would reject
-    // a WHERE section that yields zero clauses after parsing.
+  it('rejects a WHERE clause with only operators (fail closed)', () => {
+    // FIXED: parseDataviewQuery now throws when a WHERE clause is empty
+    // (e.g. "WHERE AND OR" splits into ["", "AND", "", "OR", ""]). Previously
+    // this was silently treated as a no-op WHERE (all rows returned) — a
+    // fail-open bypass. Now it fails closed with a parse error.
     const html = renderDataviewQuery('LIST WHERE AND OR', notes);
     expect(html).toContain('dataview-error');
   });
 
   it('handles a WHERE clause with only operators without crashing', () => {
-    // Even though the parser silently ignores "WHERE AND OR" (see skipped
-    // test above), it must not crash or produce unescaped output.
+    // "WHERE AND OR" now throws a parse error (fail closed), but must not
+    // crash or produce unescaped output.
     const html = renderDataviewQuery('LIST WHERE AND OR', notes);
     expect(html).not.toContain('<script');
     expect(html).not.toContain('<img');
