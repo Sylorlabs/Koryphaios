@@ -36,7 +36,7 @@ jobs:
 
           if echo "$COMMIT_MSG" | grep -q "/update"; then
             echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "🚀 /update trigger detected — will create release"
+            echo "/update trigger detected — will create release"
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
             echo "No /update trigger found — skipping release"
@@ -46,7 +46,7 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         run: |
           # tauri.conf.json is the source of truth for the version the updater
-          # compares against. Bump its patch version and sync to all version files.
+          # compares against. Bump its patch version and sync to ALL version files.
           CURRENT=$(jq -r .version desktop/src-tauri/tauri.conf.json)
           echo "Current version: $CURRENT"
 
@@ -65,14 +65,24 @@ jobs:
           jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp
           mv package.json.tmp package.json
 
-          # desktop/package.json
-          jq ".version = \"$NEW_VERSION\"" desktop/package.json > desktop-pkg.tmp
-          mv desktop-pkg.tmp desktop/package.json
+          # Workspace package.json files — all must stay aligned.
+          for pkg in desktop/package.json backend/package.json frontend/package.json shared/package.json mcp-server/package.json; do
+            if [ -f "$pkg" ]; then
+              jq ".version = \"$NEW_VERSION\"" "$pkg" > "${pkg}.tmp"
+              mv "${pkg}.tmp" "$pkg"
+            fi
+          done
+
+          # Frontend static app config
+          if [ -f frontend/static/app.config.json ]; then
+            jq ".app.version = \"$NEW_VERSION\"" frontend/static/app.config.json > app.config.json.tmp
+            mv app.config.json.tmp frontend/static/app.config.json
+          fi
 
           # Commit and tag
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json desktop/package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json
+          git add package.json desktop/package.json backend/package.json frontend/package.json shared/package.json mcp-server/package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json frontend/static/app.config.json
           git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
           git tag "v$NEW_VERSION"
           git push origin "v$NEW_VERSION"

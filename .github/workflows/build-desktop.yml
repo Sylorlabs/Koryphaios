@@ -11,6 +11,8 @@ on:
     paths:
       - 'desktop/**'
       - 'frontend/**'
+      - 'backend/**'
+      - 'shared/**'
       - '.github/workflows/build-desktop.yml'
   workflow_dispatch:
     inputs:
@@ -23,14 +25,56 @@ on:
           - release
           - debug
 
+# Pin Bun to a known-good version. Using "latest" caused breakage when a new
+# Bun release shipped breaking changes overnight. Bump this deliberately.
+env:
+  BUN_VERSION: '1.3.14'
+
 permissions:
   contents: write
 
 jobs:
+  # Build the frontend once on Linux and share it as an artifact.
+  # The frontend produces platform-independent static assets, so building it
+  # on every platform job (4+ times) was wasteful and a source of divergence.
+  build-frontend:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: bun run build
+        env:
+          BUILD_MODE: static
+          NODE_ENV: production
+
+      - name: Upload frontend build
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-build
+          path: frontend/build/client
+          if-no-files-found: error
+          retention-days: 1
+
   # Build for Windows
   build-windows:
     runs-on: blacksmith-2vcpu-windows-2025
     timeout-minutes: 60
+    needs: [build-frontend]
 
     steps:
       - name: Checkout repository
@@ -39,26 +83,32 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
+      - name: Set up MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-toolkit@v1
+        with:
+          arch: x64
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          key: windows-x64
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: bun install
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/client
 
       - name: Compile embedded backend payload
         shell: bash
@@ -68,9 +118,6 @@ jobs:
           TARGET="x86_64-pc-windows-msvc"
           OUTFILE="$GITHUB_WORKSPACE/desktop/src-tauri/embedded-backend/koryphaios-backend-${TARGET}.exe"
           mkdir -p "$(dirname "$OUTFILE")"
-          # Bake the collaboration relay endpoint so shipped builds can host/join
-          # out of the box (it's an endpoint, not a secret; the host secret stays
-          # runtime-only). Overridable at dev time via the .env RELAY_URL.
           DEFINE=()
           [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
           bun build --compile --target=bun-windows-x64 "${DEFINE[@]}" backend/src/server.ts --outfile="$OUTFILE"
@@ -122,6 +169,7 @@ jobs:
   build-macos:
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 60
+    needs: [build-frontend]
     strategy:
       matrix:
         include:
@@ -139,7 +187,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -147,19 +195,20 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          key: macos-${{ matrix.arch }}
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: bun install
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/client
 
       - name: Compile embedded backend payload
         shell: bash
@@ -172,7 +221,7 @@ jobs:
           [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
           bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" backend/src/server.ts --outfile="$OUTFILE"
 
-      - name: Build Tauri app (Universal Binary)
+      - name: Build Tauri app
         working-directory: ./desktop
         run: |
           bun run tauri build --target ${{ matrix.target }}
@@ -181,11 +230,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # `-` is Tauri's explicit ad-hoc signing identity. It is not an Apple
-      # Developer ID and still requires a one-time Gatekeeper override, but it
-      # keeps a browser-downloaded Apple Silicon app from being labelled
-      # "damaged" solely because it has no code signature. A future
-      # APPLE_SIGNING_IDENTITY secret overrides this value for full signing.
       - name: Verify macOS bundle code signature
         shell: bash
         run: |
@@ -223,6 +267,7 @@ jobs:
   build-linux:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 60
+    needs: [build-frontend]
     strategy:
       matrix:
         include:
@@ -249,7 +294,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -257,19 +302,20 @@ jobs:
           toolchain: stable
           target: ${{ matrix.target }}
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          key: linux-${{ matrix.arch }}
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: bun install
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/client
 
       - name: Compile embedded backend payload
         shell: bash
@@ -345,7 +391,7 @@ jobs:
   build-macos-universal:
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 60
-    needs: [build-macos]
+    needs: [build-macos, build-frontend]
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
@@ -355,7 +401,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -366,19 +412,20 @@ jobs:
       - name: Add x86_64 target
         run: rustup target add x86_64-apple-darwin
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+          key: macos-universal
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: bun install
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: bun run build
-        env:
-          BUILD_MODE: static
-          NODE_ENV: production
+      - name: Download frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/build/client
 
       - name: Compile universal embedded backend payload
         shell: bash
@@ -458,7 +505,7 @@ jobs:
             -name '*.AppImage' -o -name '*.AppImage.sig' \
           \) -print0)
           test "${#ASSETS[@]}" -gt 0
-          printf 'Publishing %s verified release assets\\n' "${#ASSETS[@]}"
+          printf 'Publishing %s verified release assets\n' "${#ASSETS[@]}"
           gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo Sylorlabs/Koryphaios
 
   # Generate and upload latest.json (Tauri updater manifest) from .sig files
@@ -557,7 +604,7 @@ jobs:
   # Summary job
   build-summary:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [build-windows, build-macos, build-linux, build-macos-universal]
+    needs: [build-frontend, build-windows, build-macos, build-linux, build-macos-universal]
     if: always()
 
     steps:
@@ -565,6 +612,7 @@ jobs:
         run: |
           echo "Build Status Summary:"
           echo "===================="
+          echo "Frontend: ${{ needs.build-frontend.result }}"
           echo "Windows: ${{ needs.build-windows.result }}"
           echo "macOS: ${{ needs.build-macos.result }}"
           echo "macOS universal: ${{ needs.build-macos-universal.result }}"
