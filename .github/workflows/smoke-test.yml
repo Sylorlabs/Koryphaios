@@ -1,0 +1,302 @@
+name: Smoke Test
+
+# Post-release smoke test: download the assembled installers, install them,
+# launch the app, and verify the backend health endpoint responds.
+#
+# This catches runtime regressions that can't be tested from Linux:
+#   - WebView rendering issues (WebView2 on Windows, WKWebView on macOS)
+#   - Backend spawn failures (console window, named pipes, permissions)
+#   - Bundle structure problems (missing resources, wrong paths)
+#   - Code signing / Gatekeeper issues on macOS
+#
+# Runs AFTER release-desktop.yml publishes the installers. Does NOT block
+# the release — reports failures as a separate check so you can decide
+# whether to pull the release.
+
+on:
+  workflow_run:
+    workflows: ["Release Desktop Apps"]
+    types: [completed]
+    branches: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to smoke test (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: '1.3.14'
+
+jobs:
+  # ─── Determine the tag to test ─────────────────────────────────────────────
+  resolve-tag:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      should-run: ${{ steps.resolve.outputs.should_run }}
+    steps:
+      - id: resolve
+        run: |
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.workflow_run.conclusion }}" == "success" ]]; then
+            # Extract tag from the workflow_run branch name (v0.2.0)
+            BRANCH="${{ github.event.workflow_run.head_branch }}"
+            if [[ "$BRANCH" == v* ]]; then
+              echo "tag=$BRANCH" >> $GITHUB_OUTPUT
+              echo "should_run=true" >> $GITHUB_OUTPUT
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "Workflow run branch '$BRANCH' is not a version tag, skipping"
+            fi
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "Source workflow did not succeed, skipping smoke test"
+          fi
+
+  # ─── Windows smoke test ────────────────────────────────────────────────────
+  smoke-windows:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.should-run == 'true'
+    runs-on: blacksmith-2vcpu-windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Download Windows installer from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        shell: pwsh
+        run: |
+          $installer = gh release download "$TAG" --repo Sylorlabs/Koryphaios `
+            --pattern "*x64-setup.exe" --dir . --clobber
+          if (-not (Test-Path "*-x64-setup.exe")) {
+            Write-Error "No Windows installer found in release $TAG"
+            exit 1
+          }
+          $exe = Get-ChildItem "*-x64-setup.exe" | Select-Object -First 1
+          Write-Host "Downloaded: $($exe.Name) ($($exe.Length) bytes)"
+          echo "INSTALLER_PATH=$($exe.FullName)" >> $env:GITHUB_ENV
+
+      - name: Install silently
+        shell: pwsh
+        run: |
+          # NSIS installers support /S for silent install and /D for install dir
+          Start-Process -FilePath "$env:INSTALLER_PATH" -ArgumentList "/S","/D=$env:LOCALAPPDATA\Koryphaios" -Wait -NoNewWindow
+          if (-not (Test-Path "$env:LOCALAPPDATA\Koryphaios\Koryphaios.exe")) {
+            Write-Error "Koryphaios.exe not found after install"
+            exit 1
+          }
+          Write-Host "Installed to $env:LOCALAPPDATA\Koryphaios"
+
+      - name: Launch app and verify backend health
+        shell: pwsh
+        run: |
+          $appExe = "$env:LOCALAPPDATA\Koryphaios\Koryphaios.exe"
+          $dataDir = "$env:LOCALAPPDATA\com.sylorlabs.koryphaios"
+          $activePortFile = Join-Path $dataDir ".koryphaios\.active-port.json"
+
+          Write-Host "Launching Koryphaios..."
+          $proc = Start-Process -FilePath $appExe -PassThru -WindowStyle Minimized
+          Write-Host "App launched with PID $($proc.Id)"
+
+          $maxWait = 90
+          $elapsed = 0
+          $healthy = $false
+          $port = 3001
+
+          while ($elapsed -lt $maxWait -and -not $healthy) {
+            Start-Sleep -Seconds 2
+            $elapsed += 2
+
+            # Check if the process is still alive
+            if ($proc.HasExited) {
+              Write-Error "App process exited with code $($proc.ExitCode) after ${elapsed}s"
+              exit 1
+            }
+
+            # Check for active-port.json (backend may have fallen back to a different port)
+            if (Test-Path $activePortFile) {
+              try {
+                $portInfo = Get-Content $activePortFile -Raw | ConvertFrom-Json
+                if ($portInfo.port) { $port = $portInfo.port }
+              } catch {}
+            }
+
+            # Poll health endpoint
+            try {
+              $response = Invoke-WebRequest -Uri "http://127.0.0.1:$port/api/health" `
+                -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+              $body = $response.Content | ConvertFrom-Json
+              if ($body.ok -eq $true) {
+                Write-Host "Backend healthy on port $port after ${elapsed}s!"
+                Write-Host "Health response: $($response.Content)"
+                $healthy = $true
+              }
+            } catch {
+              # Backend not ready yet, keep waiting
+            }
+          }
+
+          if (-not $healthy) {
+            Write-Error "Backend did not become healthy within ${maxWait}s"
+            # Collect logs before failing
+            $logDir = Join-Path $dataDir "logs"
+            if (Test-Path $logDir) {
+              Write-Host "--- Backend logs ---"
+              Get-ChildItem $logDir -Filter "*.log" | ForEach-Object {
+                Write-Host "=== $($_.Name) ==="
+                Get-Content $_.FullName -Tail 50
+              }
+            }
+            exit 1
+          }
+
+          Write-Host "Windows smoke test PASSED"
+
+      - name: Cleanup — kill the app
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name "Koryphaios" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "koryphaios-backend-*" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          Write-Host "Cleanup complete"
+
+  # ─── macOS smoke test ──────────────────────────────────────────────────────
+  smoke-macos:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.should-run == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            dmg-pattern: "*x86_64*.dmg"
+          - arch: aarch64
+            dmg-pattern: "*aarch64*.dmg"
+    steps:
+      - name: Download macOS DMG from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          gh release download "$TAG" --repo Sylorlabs/Koryphaios \
+            --pattern "${{ matrix.dmg-pattern }}" --dir . --clobber
+          DMG=$(ls *.dmg | head -1)
+          test -n "$DMG" || { echo "No DMG found matching ${{ matrix.dmg-pattern }}"; exit 1; }
+          echo "Downloaded: $DMG ($(stat -f%z "$DMG") bytes)"
+          echo "DMG_PATH=$DMG" >> $GITHUB_ENV
+
+      - name: Mount DMG and install
+        run: |
+          MOUNT_POINT=$(hdiutil attach "$DMG_PATH" -nobrowse -quiet | tail -1 | cut -f3)
+          echo "Mounted at: $MOUNT_POINT"
+          # Copy .app to /Applications (bypasses Gatekeeper for ad-hoc signed apps)
+          APP=$(find "$MOUNT_POINT" -name "Koryphaios.app" -maxdepth 1 | head -1)
+          test -d "$APP" || { echo "No Koryphaios.app in DMG"; exit 1; }
+          rm -rf /Applications/Koryphaios.app
+          cp -R "$APP" /Applications/
+          # Remove quarantine attribute (ad-hoc signed apps get quarantined)
+          xattr -cr /Applications/Koryphaios.app
+          hdiutil detach "$MOUNT_POINT" -quiet
+          echo "Installed to /Applications/Koryphaios.app"
+
+      - name: Launch app and verify backend health
+        run: |
+          DATA_DIR="$HOME/Library/Application Support/com.sylorlabs.koryphaios"
+          ACTIVE_PORT="$DATA_DIR/.koryphaios/.active-port.json"
+          PORT=3001
+
+          echo "Launching Koryphaios..."
+          open /Applications/Koryphaios.app
+          sleep 3
+
+          # Get the app PID
+          APP_PID=$(pgrep -f "Koryphaios.app/Contents/MacOS/Koryphaios" | head -1)
+          if [ -z "$APP_PID" ]; then
+            echo "ERROR: App process not found after launch"
+            exit 1
+          fi
+          echo "App launched with PID $APP_PID"
+
+          MAX_WAIT=90
+          ELAPSED=0
+          HEALTHY=false
+
+          while [ $ELAPSED -lt $MAX_WAIT ] && [ "$HEALTHY" = "false" ]; do
+            sleep 2
+            ELAPSED=$((ELAPSED + 2))
+
+            # Check if process is still alive
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              echo "ERROR: App process exited after ${ELAPSED}s"
+              exit 1
+            fi
+
+            # Check for active-port.json
+            if [ -f "$ACTIVE_PORT" ]; then
+              PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            fi
+
+            # Poll health endpoint
+            RESPONSE=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/health" 2>/dev/null || echo "")
+            if [ -n "$RESPONSE" ]; then
+              OK=$(echo "$RESPONSE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('ok', False))" 2>/dev/null || echo "False")
+              if [ "$OK" = "True" ]; then
+                echo "Backend healthy on port $PORT after ${ELAPSED}s!"
+                echo "Health response: $RESPONSE"
+                HEALTHY=true
+              fi
+            fi
+          done
+
+          if [ "$HEALTHY" = "false" ]; then
+            echo "ERROR: Backend did not become healthy within ${MAX_WAIT}s"
+            # Collect logs
+            LOG_DIR="$DATA_DIR/logs"
+            if [ -d "$LOG_DIR" ]; then
+              echo "--- Backend logs ---"
+              for log in "$LOG_DIR"/*.log; do
+                echo "=== $(basename "$log") ==="
+                tail -50 "$log" 2>/dev/null
+              done
+            fi
+            exit 1
+          fi
+
+          echo "macOS smoke test PASSED (${{ matrix.arch }})"
+
+      - name: Cleanup — kill the app
+        if: always()
+        run: |
+          pkill -f "Koryphaios.app/Contents/MacOS/Koryphaios" 2>/dev/null || true
+          pkill -f "koryphaios-backend" 2>/dev/null || true
+          sleep 2
+          echo "Cleanup complete"
+
+  # ─── Summary ───────────────────────────────────────────────────────────────
+  smoke-summary:
+    needs: [resolve-tag, smoke-windows, smoke-macos]
+    if: always()
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Smoke Test Summary
+        run: |
+          echo "Smoke Test Results for tag ${{ needs.resolve-tag.outputs.tag }}"
+          echo "============================================"
+          echo "Windows x64:    ${{ needs.smoke-windows.result }}"
+          echo "macOS x86_64:   ${{ needs.smoke-macos.result }}"
+          echo ""
+          if [[ "${{ needs.smoke-windows.result }}" == "success" ]] && \
+             [[ "${{ needs.smoke-macos.result }}" == "success" ]]; then
+            echo "All smoke tests PASSED"
+          else
+            echo "WARNING: Some smoke tests failed — check the logs"
+            echo "The release is already published; investigate whether a patch is needed"
+          fi
