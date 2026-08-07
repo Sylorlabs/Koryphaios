@@ -26,6 +26,10 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ### 🚀 Improvements
 
+- **Backend decoupled from Rust shell**: the backend now ships as a Tauri resource read from disk at runtime instead of being embedded in the Rust binary via `include_bytes!`. This eliminates the need for Windows/macOS Rust compilation on every release — most releases only swap the backend binary in the resources directory.
+- **Windows installer assembled on Linux**: NSIS installers are produced via `makensis` on Linux, no Windows runner needed. macOS bundles are assembled from pre-built shells with codesign + DMG creation — no Rust compilation, just file assembly (~2 min vs 30+ min).
+- **Pre-built shell caching**: the 1,800-line Tauri shell is compiled once per platform and cached as a CI artifact (90-day retention). It's only recompiled when `desktop/src-tauri/**` changes, not on every backend or frontend update.
+- **Post-release smoke tests**: Windows and macOS runners download the published installers, install them silently, launch the app, and poll the backend `/api/health` endpoint to verify the full stack works. Non-blocking — reports failures as a separate check.
 - **AppImage CI runtime independence**: Linux AppImage builds no longer depend on the build-host runtime, improving portability across distributions.
 - **Cross-platform artifact validation**: release artifacts are validated per-platform before publishing, preventing silent partial shipments.
 - **Serialized release publishing**: verified release publishing is serialized to avoid race conditions between artifact upload and updater-metadata generation.
