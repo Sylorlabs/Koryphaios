@@ -144,14 +144,20 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   });
 }
 
-export function modelDefFromCliName(cliName: string): ModelDef {
+export function modelDefFromCliName(line: string): ModelDef {
+  // agy models outputs "cliName\tdisplayName" pairs, e.g.:
+  //   gemini-3.6-flash-high\tGemini 3.6 Flash (High)
+  // The CLI expects the first column as --model; the second is the
+  // human-readable display name for the UI.
+  const [cliName, displayName] = line.split('\t');
+  const name = displayName?.trim() || cliName;
   const id = `antigravity-${cliName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+$/, '')}`;
   return {
     id,
-    name: cliName,
+    name,
     provider: 'antigravity',
     apiModelId: cliName,
     contextWindow: 0,
