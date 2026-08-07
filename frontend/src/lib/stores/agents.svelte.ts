@@ -391,6 +391,25 @@ export function getManagerStatus(): AgentStatus {
   return 'idle';
 }
 
+/** Returns the manager status for a specific session (not just the active
+ *  one). Used by the sidebar to show reasoning/thinking indicators on all
+ *  sessions, not just the currently selected one. */
+export function getManagerStatusForSession(sessionId: string | null | undefined): AgentStatus {
+  if (!sessionId) return 'idle';
+  const perSession = managerStatusBySession.get(sessionId);
+  if (isActiveStatus(perSession)) return perSession!;
+  const manager = agents.get('kory-manager');
+  if (manager && isActiveStatus(manager.status) && manager.sessionId === sessionId) {
+    return manager.status;
+  }
+  for (const a of agents.values()) {
+    if (a.sessionId === sessionId && isActiveStatus(a.status)) {
+      return a.status;
+    }
+  }
+  return 'idle';
+}
+
 /** True when the session's manager is parked waiting (background terminal or
  *  a question to the user) — the composer shows the Waiting button state. */
 export function isSessionWaiting(sessionId: string | null | undefined): boolean {
@@ -563,6 +582,7 @@ export const agentStore = {
     return agentThreadVersion;
   },
   getManagerStatus,
+  getManagerStatusForSession,
   isSessionRunning,
   isSessionWaiting,
   getContextUsage,

@@ -1458,6 +1458,7 @@ export const wsStore = {
   },
   isSessionRunning: agentStore.isSessionRunning,
   isSessionWaiting: agentStore.isSessionWaiting,
+  getManagerStatusForSession: agentStore.getManagerStatusForSession,
   isSessionBusy: (sessionId: string | null | undefined) =>
     !!sessionId && (busySessions.has(sessionId) || agentStore.isSessionRunning(sessionId)),
   markSessionAgentsStopped,

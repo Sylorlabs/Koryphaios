@@ -442,16 +442,16 @@
                 {/if}
               </div>
             {:else}
-              {#if sessionStore.activeSessionId === session.id && wsStore.managerStatus !== 'idle'}
+              {#if wsStore.getManagerStatusForSession(session.id) !== 'idle'}
                 <div
                   class="shrink-0 flex items-center justify-center rounded-lg"
                   style="width: 18px; height: 18px; background: rgba(var(--color-accent-rgb), 0.08);"
                 >
                   <AnimatedStatusIcon
-                    status={wsStore.managerStatus}
+                    status={wsStore.getManagerStatusForSession(session.id)}
                     size={14}
                     isManager={true}
-                    phase={wsStore.koryPhase}
+                    phase={sessionStore.activeSessionId === session.id ? wsStore.koryPhase : ''}
                   />
                 </div>
               {:else if primaryGoal}
