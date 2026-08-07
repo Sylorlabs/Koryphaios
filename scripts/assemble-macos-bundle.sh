@@ -147,7 +147,21 @@ ENTITLEMENTS
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 echo "Code signature verified."
 
-# ─── Create DMG ─────────────────────────────────────────────────────────────
+# ─── Create .app.tar.gz for Tauri updater ───────────────────────────────────
+# The Tauri updater on macOS downloads a .app.tar.gz, extracts it, and
+# replaces the .app bundle in place. It CANNOT install a DMG. We produce
+# both: the tar.gz for the updater and the DMG for manual download.
+TARGZ_NAME="${OUTPUT_DIR}/${APP_NAME}_${ARCH}.app.tar.gz"
+rm -f "$TARGZ_NAME"
+
+# tar from the parent directory so the archive contains "Koryphaios.app/"
+# (not the full path), which is what the Tauri updater expects to extract.
+TAR_CWD=$(dirname "$APP_BUNDLE")
+TAR_BASE=$(basename "$APP_BUNDLE")
+tar -czf "$TARGZ_NAME" -C "$TAR_CWD" "$TAR_BASE"
+echo "Updater tarball created: $TARGZ_NAME"
+
+# ─── Create DMG for manual download ─────────────────────────────────────────
 DMG_NAME="${OUTPUT_DIR}/${APP_NAME}-${VERSION}-${ARCH}.dmg"
 rm -f "$DMG_NAME"
 

@@ -226,19 +226,20 @@ jobs:
           test "$(stat -c%s "$INSTALLER")" -gt 1000000
           echo "Installer size: $(stat -c%s "$INSTALLER") bytes"
 
-      - name: Sign installer (if signing key available)
-        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+      - name: Sign installer for updater
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # Tauri's signer is used to create .sig files for the updater.
-          # We sign the installer so the updater can verify integrity.
+          # Tauri's signer creates .sig files that the updater verifies
+          # before installing. Without these, the updater rejects the update.
           INSTALLER=$(find artifacts -name "*-x64-setup.exe" -print -quit)
           npx @tauri-apps/cli signer sign \
             --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
             --private-key-password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
-            "$INSTALLER" || echo "Signing skipped (signer not available)"
+            "$INSTALLER"
+          echo "Signed: $INSTALLER"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -300,17 +301,20 @@ jobs:
             --arch "${{ matrix.arch }}" \
             --output-dir artifacts
 
-      - name: Sign DMG for updater (if signing key available)
-        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+      - name: Sign .app.tar.gz for updater
+        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          DMG=$(find artifacts -name "*.dmg" -print -quit)
+          # The Tauri updater downloads the .app.tar.gz and verifies its
+          # signature before extracting. Sign the tarball, not the DMG.
+          TARGZ=$(find artifacts -name "*.app.tar.gz" -print -quit)
           npx @tauri-apps/cli signer sign \
             --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
             --private-key-password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
-            "$DMG" || echo "Signing skipped (signer not available)"
+            "$TARGZ"
+          echo "Signed: $TARGZ"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -494,9 +498,11 @@ jobs:
         run: |
           mapfile -d '' ASSETS < <(find release-artifacts -type f \( \
             -name '*.dmg' -o -name '*.dmg.sig' -o \
+            -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' -o \
             -name '*.msi' -o -name '*.msi.sig' -o \
             -name '*.exe' -o -name '*.exe.sig' -o \
-            -name '*.deb' -o -name '*.rpm' -o \
+            -name '*.deb' -o -name '*.deb.sig' -o \
+            -name '*.rpm' -o -name '*.rpm.sig' -o \
             -name '*.AppImage' -o -name '*.AppImage.sig' \
           \) -print0)
           test "${#ASSETS[@]}" -gt 0
@@ -531,20 +537,36 @@ jobs:
             url="https://github.com/$REPO/releases/download/$TAG/$base_name"
             platform=""
             case "$base_name" in
-              *aarch64*.dmg)        platform="darwin-aarch64" ;;
-              *universal*.dmg)      platform="darwin-universal" ;;
-              *x86_64*.dmg|*x64*.dmg) platform="darwin-x86_64" ;;
+              # macOS: the updater needs .app.tar.gz (NOT .dmg)
+              *aarch64*.app.tar.gz)   platform="darwin-aarch64" ;;
+              *x86_64*.app.tar.gz|*x64*.app.tar.gz) platform="darwin-x86_64" ;;
+              # Linux: the updater needs the AppImage
               *amd64*.AppImage|*x86_64*.AppImage) platform="linux-x86_64" ;;
+              # Windows: the updater runs the NSIS installer
               *x64-setup*.exe|*-setup*.exe) platform="windows-x86_64" ;;
+              # Skip DMG sigs — the updater doesn't use DMGs
+              *.dmg) echo "Skipping DMG sig (updater uses .app.tar.gz): $base_name"; continue ;;
+              # Skip MSI if NSIS is available
+              *.msi)
+                if ls sigs/*-setup.exe.sig 1>/dev/null 2>&1; then
+                  echo "Skipping MSI sig (NSIS available): $base_name"; continue
+                fi
+                platform="windows-x86_64" ;;
               *) echo "::warning::Unknown platform for $base_name, skipping"; continue ;;
             esac
-            if [[ "$platform" == "windows-x86_64" && "$base_name" == *.msi ]]; then
-              if ls sigs/*-setup.exe.sig 1>/dev/null 2>&1; then continue; fi
-            fi
+            [ -z "$platform" ] && continue
             echo "Mapping: $base_name -> $platform"
             PLATFORMS=$(echo "$PLATFORMS" | jq \
               --arg p "$platform" --arg s "$sig_content" --arg u "$url" \
               '.[$p] = {signature: $s, url: $u}')
+          done
+
+          # Verify all required platforms are present
+          for required in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
+            if [ "$(echo "$PLATFORMS" | jq --arg p "$required" 'has($p)')" != "true" ]; then
+              echo "::error::Missing required platform $required in latest.json"
+              exit 1
+            fi
           done
 
           RELEASE_INFO=$(gh release view "$TAG" --repo "$REPO" --json body,createdAt)
