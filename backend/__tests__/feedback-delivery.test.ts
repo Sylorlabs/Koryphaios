@@ -4,7 +4,7 @@ import { deliverFeedback, type FeedbackSubmission } from '../src/feedback/delive
 const submission: FeedbackSubmission = {
   category: 'bug',
   message: 'The workspace stopped responding after reconnecting.',
-  appVersion: '1.0.20',
+  appVersion: '0.2.0',
   platform: 'Linux',
 };
 
