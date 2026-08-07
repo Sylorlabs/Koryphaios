@@ -137,7 +137,7 @@ export function validateConfig(config: unknown): ConfigValidationResult {
     const result = ServerConfigSchema.safeParse(config);
     if (!result.success) {
       // Convert Zod errors to our format
-      result.error.errors.forEach(error => {
+      result.error.issues.forEach((error: { path: PropertyKey[]; message: string; code?: string }) => {
         errors.push({
           path: error.path.join('.'),
           message: error.message,
@@ -211,7 +211,7 @@ export function validateConfig(config: unknown): ConfigValidationResult {
         errors.push({
           path: issue.path.join('.'),
           message: issue.message,
-          value: issue.code === 'invalid_type' ? issue.received : undefined,
+          value: issue.code === 'invalid_type' ? (issue as { input?: unknown }).input : undefined,
         });
       }
     } else {

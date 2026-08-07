@@ -4,8 +4,9 @@
 
 import { EventEmitter } from 'events';
 
-import type { DetectedError, ErrorSource, ErrorFilter } from '@/types/index.js';
 import { ErrorCategory, ErrorSeverity } from '@/types/errors.js';
+import type { DetectedError, ErrorSource, ErrorFilter } from '@/types/index.js';
+import { Logger } from '@/utils/logger.js';
 
 export interface ErrorDetectorOptions {
   enabled: boolean;
@@ -32,10 +33,15 @@ export abstract class BaseErrorDetector extends EventEmitter {
   protected isRunning = false;
   protected errorBuffer: DetectedError[] = [];
   protected detectionCount = 0;
+  protected logger: Logger;
 
   constructor(options: ErrorDetectorOptions) {
     super();
     this.options = options;
+    this.logger = new Logger('info', {
+      logFile: undefined,
+      enableConsole: false,
+    });
   }
 
   abstract getSource(): ErrorSource;

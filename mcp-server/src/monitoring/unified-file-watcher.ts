@@ -4,12 +4,14 @@
  */
 
 import { EventEmitter } from 'events';
-import { watch, type FSWatcher } from 'chokidar';
-import { extname, basename, relative, resolve } from 'path';
 import { promises as fs } from 'fs';
+import { extname, basename, relative, resolve } from 'path';
 
-import { Logger } from '@/utils/logger.js';
+import { watch, type FSWatcher } from 'chokidar';
+
+
 import { debounce } from '@/utils/helpers.js';
+import { Logger } from '@/utils/logger.js';
 
 export interface FileChangeEvent {
   type: 'file-changed' | 'file-added' | 'file-deleted' | 'config-changed';
@@ -163,7 +165,6 @@ export class UnifiedFileWatcher extends EventEmitter {
       persistent: true,
       ignoreInitial: true,
       followSymlinks: false,
-      dot: true,
       usePolling: false,
       ignorePermissionErrors: true,
       awaitWriteFinish: {

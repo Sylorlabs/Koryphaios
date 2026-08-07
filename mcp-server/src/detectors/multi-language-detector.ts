@@ -6,6 +6,7 @@
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import { join, extname } from 'path';
+
 import { watch, type FSWatcher } from 'chokidar';
 
 import {
@@ -13,9 +14,9 @@ import {
   type ErrorDetectorOptions,
   type ErrorDetectorCapabilities,
 } from './base-detector.js';
-import type { DetectedError, ErrorSource } from '@/types/index.js';
+
 import { ErrorCategory, ErrorSeverity } from '@/types/errors.js';
-import { Logger } from '@/utils/logger.js';
+import type { DetectedError, ErrorSource } from '@/types/index.js';
 
 export interface LanguageCompilerConfig {
   language: string;
@@ -54,14 +55,12 @@ export interface CompilationResult {
 
 export class MultiLanguageDetector extends BaseErrorDetector {
   private config: MultiLanguageConfig;
-  private logger: Logger;
   private fileWatcher: FSWatcher | null = null;
   private compilationQueue: Map<string, Promise<CompilationResult>> = new Map();
   private lastCompilationTimes: Map<string, number> = new Map();
 
   constructor(options: ErrorDetectorOptions, config?: Partial<MultiLanguageConfig>) {
     super(options);
-    this.logger = new Logger('info', { logFile: undefined });
 
     this.config = {
       workspaceRoot: process.cwd(),
@@ -551,7 +550,7 @@ export class MultiLanguageDetector extends BaseErrorDetector {
         `Compiling ${langConfig.language}${specificFile ? ` (${specificFile})` : ''}`
       );
 
-      let args = [...langConfig.checkArgs];
+      const args = [...langConfig.checkArgs];
 
       if (specificFile) {
         args.push(specificFile);

@@ -4,26 +4,27 @@
 
 import { EventEmitter } from 'events';
 
-import type { DetectedError, ErrorDetectionConfig } from '@/types/index.js';
 import { BaseErrorDetector, type ErrorDetectorOptions } from './base-detector.js';
-import { ConsoleErrorDetector } from './console-detector.js';
-import { RuntimeErrorDetector } from './runtime-detector.js';
 import { BuildErrorDetector } from './build-detector.js';
-import { LinterErrorDetector } from './linter-detector.js';
+import { BuildToolDetector } from './build-tool-detector.js';
+import { ConsoleErrorDetector } from './console-detector.js';
 import { IDEErrorDetector } from './ide-detector.js';
+import { LinterErrorDetector } from './linter-detector.js';
+import { MultiLanguageDetector } from './multi-language-detector.js';
+import { ProcessMonitorDetector } from './process-monitor-detector.js';
+import { RuntimeErrorDetector } from './runtime-detector.js';
 import { StaticAnalysisDetector } from './static-analysis-detector.js';
 import { TestErrorDetector } from './test-detector.js';
-import { BuildToolDetector } from './build-tool-detector.js';
-import { ProcessMonitorDetector } from './process-monitor-detector.js';
-import { MultiLanguageDetector } from './multi-language-detector.js';
+
+import { HeuristicDiagnosticEngine } from '@/diagnostics/heuristic-engine.js';
 import {
   ProactiveMonitoringCoordinator,
   type ProactiveMonitoringConfig,
 } from '@/monitoring/proactive-monitoring-coordinator.js';
-import { Logger } from '@/utils/logger.js';
-import { HeuristicDiagnosticEngine } from '@/diagnostics/heuristic-engine.js';
 import type { ErrorAnalysis } from '@/types/diagnostics.js';
 import type { FixSuggestion } from '@/types/errors.js';
+import type { DetectedError, ErrorDetectionConfig } from '@/types/index.js';
+import { Logger } from '@/utils/logger.js';
 
 export interface DetectorManagerOptions {
   config: ErrorDetectionConfig;
@@ -51,7 +52,6 @@ export class ErrorDetectorManager extends EventEmitter {
   private proactiveCoordinator: ProactiveMonitoringCoordinator | null = null;
   private diagnosticEngine: HeuristicDiagnosticEngine;
   private startTimings: Record<string, number> = {};
-  private lastStartTime = 0;
   private startupMetrics = {
     totalStartTime: 0,
     detectorStartTimes: {} as Record<string, number>,
@@ -243,7 +243,6 @@ export class ErrorDetectorManager extends EventEmitter {
 
     this._isRunning = true;
     this.startupInProgress = true;
-    this.lastStartTime = startTime;
 
     // Start all enabled detectors, but avoid blocking startup on slow detectors
     const enabledDetectors: string[] = [];
@@ -267,7 +266,7 @@ export class ErrorDetectorManager extends EventEmitter {
     const startupTimeoutMs = 3000;
     await Promise.race([
       Promise.all(startupPromises),
-      new Promise<void>((resolve, reject) =>
+      new Promise<void>((_resolve, reject) =>
         setTimeout(() => reject(new Error('detector-startup-timeout')), startupTimeoutMs)
       ),
     ]).catch(error => {
@@ -362,8 +361,8 @@ export class ErrorDetectorManager extends EventEmitter {
     try {
       if (source) {
         // Detect errors from specific source
-        const detector = this.detectors.get(normalizedSource);
-        if (detector) {
+        const detector = normalizedSource ? this.detectors.get(normalizedSource) : undefined;
+        if (detector && normalizedSource) {
           this.startupMetrics.errorDetectionCounts[normalizedSource] =
             (this.startupMetrics.errorDetectionCounts[normalizedSource] || 0) + 1;
           const sourceErrors = await this.detectWithTimeout(normalizedSource, detector, target);

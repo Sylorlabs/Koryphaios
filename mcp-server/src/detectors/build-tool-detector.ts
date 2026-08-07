@@ -16,7 +16,6 @@ import {
 } from './base-detector.js';
 import type { DetectedError, ErrorSource } from '@/types/index.js';
 import { ErrorCategory, ErrorSeverity } from '@/types/errors.js';
-import { Logger } from '@/utils/logger.js';
 
 export interface BuildToolConfig {
   workspaceRoot: string;
@@ -52,7 +51,6 @@ export interface BuildProcess {
 
 export class BuildToolDetector extends BaseErrorDetector {
   private config: BuildToolConfig;
-  private logger: Logger;
   private fileWatcher: FSWatcher | null = null;
   private buildProcesses: Map<string, BuildProcess> = new Map();
   private pollingTimer: NodeJS.Timeout | null = null;
@@ -60,7 +58,6 @@ export class BuildToolDetector extends BaseErrorDetector {
 
   constructor(options: ErrorDetectorOptions, config?: Partial<BuildToolConfig>) {
     super(options);
-    this.logger = new Logger('info', { logFile: undefined });
 
     this.config = {
       workspaceRoot: process.cwd(),

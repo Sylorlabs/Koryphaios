@@ -2,12 +2,13 @@
  * IDE integration detector for capturing errors from IDE diagnostic APIs
  */
 
-import type { DetectedError, ErrorSource, ErrorContext, ErrorStackFrame } from '@/types/index.js';
 import {
   BaseErrorDetector,
   type ErrorDetectorOptions,
   type ErrorDetectorCapabilities,
 } from './base-detector.js';
+
+import type { DetectedError, ErrorSource, ErrorContext, ErrorStackFrame } from '@/types/index.js';
 
 interface IDEDiagnostic {
   file: string;
@@ -126,15 +127,6 @@ export class IDEErrorDetector extends BaseErrorDetector {
     // Otherwise collect all diagnostics
     await this.collectDiagnostics();
     return this.getBufferedErrors();
-  }
-
-  private isVSCodeEnvironment(): boolean {
-    // Check if we're running in VS Code extension context
-    return (
-      (typeof globalThis !== 'undefined' && 'vscode' in globalThis) ||
-      process.env['VSCODE_PID'] !== undefined ||
-      process.env['TERM_PROGRAM'] === 'vscode'
-    );
   }
 
   private async initializeVSCodeIntegration(): Promise<void> {

@@ -3,21 +3,22 @@
  * Coordinates proactive error detection across all detectors and build processes
  */
 
-import { EventEmitter } from 'events';
-import { watch, type FSWatcher as ChokidarFSWatcher } from 'chokidar';
-import { promises as fs, watchFile, unwatchFile } from 'fs';
 import { type ChildProcess } from 'child_process';
+import { EventEmitter } from 'events';
+import { promises as fs, watchFile, unwatchFile } from 'fs';
 import { join, extname, basename, relative } from 'path';
 
-import type { DetectedError } from '@/types/index.js';
+import { watch, type FSWatcher as ChokidarFSWatcher } from 'chokidar';
+
 import type { ErrorDetectorManager } from '@/detectors/error-detector-manager.js';
-import { FileWatcher } from '@/utils/file-watcher.js';
-import type { WorkspaceEvent } from '@/types/index.js';
 import {
   UnifiedFileWatcher,
   type FileChangeEvent,
   type FileWatchingStats,
 } from '@/monitoring/unified-file-watcher.js';
+import type { DetectedError } from '@/types/index.js';
+import type { WorkspaceEvent } from '@/types/index.js';
+import { FileWatcher } from '@/utils/file-watcher.js';
 import { Logger } from '@/utils/logger.js';
 
 export interface ProactiveMonitoringConfig {
@@ -277,7 +278,6 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
       cwd: this.config.workspaceRoot,
       persistent: true,
       ignoreInitial: true,
-      dot: true,
       ignorePermissionErrors: true,
     });
     this.configWatchers.set(pattern, watcher);

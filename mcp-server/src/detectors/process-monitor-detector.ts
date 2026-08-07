@@ -4,17 +4,17 @@
  */
 
 import { exec } from 'child_process';
-import { promisify } from 'util';
 import { platform } from 'os';
+import { promisify } from 'util';
 
 import {
   BaseErrorDetector,
   type ErrorDetectorOptions,
   type ErrorDetectorCapabilities,
 } from './base-detector.js';
-import type { DetectedError, ErrorSource } from '@/types/index.js';
+
 import { ErrorCategory, ErrorSeverity } from '@/types/errors.js';
-import { Logger } from '@/utils/logger.js';
+import type { DetectedError, ErrorSource } from '@/types/index.js';
 
 const execAsync = promisify(exec);
 
@@ -54,7 +54,6 @@ export interface ProcessAlert {
 
 export class ProcessMonitorDetector extends BaseErrorDetector {
   private config: ProcessMonitorConfig;
-  private logger: Logger;
   private monitoringTimer: NodeJS.Timeout | null = null;
   private trackedProcesses: Map<number, SystemProcessInfo> = new Map();
   private processAlerts: Map<number, ProcessAlert[]> = new Map();
@@ -62,7 +61,6 @@ export class ProcessMonitorDetector extends BaseErrorDetector {
 
   constructor(options: ErrorDetectorOptions, config?: Partial<ProcessMonitorConfig>) {
     super(options);
-    this.logger = new Logger('info', { logFile: undefined });
 
     this.config = {
       workspaceRoot: process.cwd(),
