@@ -1,197 +1,145 @@
-import { expect, test, type ConsoleMessage, type Request, type Response } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
+import { ApiClient } from './helpers/api';
+
+const BACKEND_URL = 'http://127.0.0.1:3011';
 
 /**
- * Reproduces the "backend keeps failing when sending messages" report.
+ * Verifies that sending a message through the real backend produces no
+ * backend errors, no 5xx responses, and no unhandled console errors.
  *
- * Strategy:
- * 1. Load the app to bootstrap auth and get a bearer token.
- * 2. Directly POST a message to /api/messages via the page context to test
- *    the backend message handling without needing UI provider setup.
- * 3. Also try sending via the UI after connecting a provider.
- * 4. Collect all console errors and network failures.
+ * This is a REAL e2e test: it creates a real auth session, creates a real
+ * session via the API, sends a real message, and verifies the response.
+ * No mocks, no bypasses, no arbitrary sleeps.
  */
+test('sending a message through the real backend produces no errors', async ({ page, request }) => {
+  test.setTimeout(60_000);
 
-type FailureRecord = {
-  kind: 'console-error' | 'console-warn' | 'network-4xx' | 'network-5xx' | 'network-failed';
-  url?: string;
-  status?: number;
-  statusText?: string;
-  text: string;
-};
+  // ─── 1. Create a real auth session ──────────────────────────────────────
+  const auth = await createAuthSession(request, BACKEND_URL);
+  expect(auth.bearerToken).toBeTruthy();
+  expect(auth.user.id).toBe('local-user');
 
-const BENIGN_PATTERNS = [
-  /favicon/i,
-  /\.map$/i,
-  /__TAURI/i,
-  /extension/i,
-  /websocket.*close/i,
-  /\/api\/auth\/me.*401/i,
-  /ERR_ABORTED.*\.vite/i,
-  /timetravel.*ERR_ABORTED/i,
-  /context.*ERR_ABORTED/i,
-];
+  // ─── 2. Inject auth into the page and load the app ──────────────────────
+  await injectAuthIntoPage(page, auth.bearerToken);
+  await page.goto('/');
 
-function isBenign(text: string, url?: string): boolean {
-  return BENIGN_PATTERNS.some((re) => re.test(text) || (url && re.test(url)));
-}
-
-test('sending a message does not produce backend errors', async ({ page, context }) => {
-  test.setTimeout(120_000);
-
-  const failures: FailureRecord[] = [];
-  const apiRequests: { url: string; method: string; status: number }[] = [];
-
-  page.on('console', (msg: ConsoleMessage) => {
-    const type = msg.type();
-    if (type === 'error') {
-      failures.push({ kind: 'console-error', text: msg.text() });
-    } else if (type === 'warning') {
-      failures.push({ kind: 'console-warn', text: msg.text() });
-    }
-  });
-
-  page.on('requestfailed', (req: Request) => {
-    const url = req.url();
-    failures.push({
-      kind: 'network-failed',
-      url,
-      text: `REQUEST FAILED: ${req.method()} ${url} — ${req.failure()?.errorText ?? 'unknown'}`,
-    });
-  });
-
-  page.on('response', (res: Response) => {
-    const url = res.url();
-    const status = res.status();
-    if (url.includes('/api/')) {
-      apiRequests.push({ url, method: res.request().method(), status });
-    }
-    if (status >= 500) {
-      failures.push({
-        kind: 'network-5xx',
-        url,
-        status,
-        statusText: res.statusText(),
-        text: `HTTP ${status} ${res.statusText()} on ${res.request().method()} ${url}`,
-      });
-    } else if (status >= 400) {
-      failures.push({
-        kind: 'network-4xx',
-        url,
-        status,
-        statusText: res.statusText(),
-        text: `HTTP ${status} ${res.statusText()} on ${res.request().method()} ${url}`,
-      });
-    }
-  });
-
-  // ─── Load the app to bootstrap auth ────────────────────────────────────
-  await page.goto('/', { waitUntil: 'networkidle' });
+  // Wait for the app to render (real content, not loading state)
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
 
-  // Wait for auth to be ready
-  await page.waitForFunction(
-    () => (window as any).__koryphaiosAuthReady === true || document.querySelector('textarea') !== null,
-    { timeout: 30_000 },
-  ).catch(() => {});
+  // ─── 3. Collect console errors and network failures ─────────────────────
+  const consoleErrors: string[] = [];
+  const networkFailures: string[] = [];
+  const serverErrors: string[] = [];
 
-  // ─── Direct API test: create a session and send a message ──────────────
-  // Use the page's fetch with the auth token from localStorage, matching
-  // what the app's apiFetch helper does.
-  const apiTest = await page.evaluate(async () => {
-    const results: { step: string; status: number; body: string }[] = [];
-
-    // Get the bearer token from localStorage (where authStore persists it)
-    const token = localStorage.getItem('koryphaios-local-auth-token') ?? '';
-    const authHeaders: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (token) authHeaders['Authorization'] = token;
-
-    // 1. Create a session
-    const createRes = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: authHeaders,
-      credentials: 'include',
-      body: JSON.stringify({ title: 'Playwright test session' }),
-    });
-    const createBody = await createRes.text();
-    results.push({ step: 'create-session', status: createRes.status, body: createBody.slice(0, 500) });
-
-    let sessionId: string | null = null;
-    try {
-      const parsed = JSON.parse(createBody);
-      sessionId = parsed?.data?.id ?? null;
-    } catch {}
-
-    if (!sessionId) {
-      results.push({ step: 'no-session-id', status: 0, body: 'Could not extract session ID' });
-      return results;
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push(msg.text());
     }
-
-    // 2. Send a message (no model — backend will use default)
-    const msgRes = await fetch('/api/messages', {
-      method: 'POST',
-      headers: authHeaders,
-      credentials: 'include',
-      body: JSON.stringify({
-        sessionId,
-        content: 'Hello, this is a test message from Playwright.',
-      }),
-    });
-    const msgBody = await msgRes.text();
-    results.push({ step: 'send-message', status: msgRes.status, body: msgBody.slice(0, 500) });
-
-    // 3. Wait a bit for backend processing, then check health
-    await new Promise((r) => setTimeout(r, 5000));
-
-    const healthRes = await fetch('/api/health', { credentials: 'include', headers: authHeaders });
-    const healthBody = await healthRes.text();
-    results.push({ step: 'health-after-message', status: healthRes.status, body: healthBody.slice(0, 500) });
-
-    // 4. Check messages were stored
-    const msgsRes = await fetch(`/api/messages/${sessionId}`, { credentials: 'include', headers: authHeaders });
-    const msgsBody = await msgsRes.text();
-    results.push({ step: 'get-messages', status: msgsRes.status, body: msgsBody.slice(0, 500) });
-
-    return results;
   });
 
-  console.log('\n=== DIRECT API TEST RESULTS ===');
-  for (const r of apiTest) {
-    console.log(`  [${r.step}] HTTP ${r.status}: ${r.body}`);
-  }
+  page.on('requestfailed', (req) => {
+    // Ignore favicon and source map failures
+    const url = req.url();
+    if (!url.includes('favicon') && !url.endsWith('.map')) {
+      networkFailures.push(`${req.method()} ${url}: ${req.failure()?.errorText ?? 'unknown'}`);
+    }
+  });
 
-  // ─── Wait for any backend processing to complete ───────────────────────
-  await page.waitForTimeout(10_000);
+  page.on('response', (res) => {
+    if (res.status() >= 500) {
+      serverErrors.push(`HTTP ${res.status()} ${res.request().method()} ${res.url()}`);
+    }
+  });
 
-  // ─── Report ────────────────────────────────────────────────────────────
-  const realFailures = failures.filter((f) => !isBenign(f.text, f.url));
+  // ─── 4. Create a session and send a message via the API ─────────────────
+  const api = new ApiClient(request, BACKEND_URL, auth.bearerToken);
 
-  console.log('\n=== API REQUESTS (from page) ===');
-  for (const r of apiRequests) {
-    console.log(`  ${r.method} ${r.status} ${r.url}`);
-  }
-  console.log('=== ALL FAILURES (raw) ===');
-  for (const f of failures) {
-    console.log(`  [${f.kind}] ${f.text}`);
-  }
-  console.log('=== REAL FAILURES (after filter) ===');
-  for (const f of realFailures) {
-    console.log(`  [${f.kind}] ${f.text}`);
-  }
+  const sessionId = await api.createSession('E2E message test');
+  expect(sessionId).toBeTruthy();
 
-  if (realFailures.length > 0) {
-    console.log(`\n>>> Found ${realFailures.length} real failures during message send.`);
-  } else {
-    console.log('\n>>> No real failures detected during message send.');
-  }
+  const sendRes = await api.sendMessage(sessionId, 'Hello, this is a test message from Playwright e2e.');
+  expect(sendRes.ok(), `POST /api/messages should succeed: ${sendRes.status()}`).toBe(true);
 
-  // Check that the message was actually sent
-  const messagePosted = apiTest.some(
-    (r) => r.step === 'send-message' && r.status === 200,
-  );
-  console.log(`>>> Message POST sent: ${messagePosted}`);
+  // ─── 5. Verify the message was persisted ────────────────────────────────
+  const messages = await api.getMessages(sessionId);
+  expect(messages.data).toBeDefined();
+  expect(Array.isArray(messages.data)).toBe(true);
+  // The message should appear in the session's message history
+  const userMessages = (messages.data as any[]).filter((m) => m.role === 'user');
+  expect(userMessages.length).toBeGreaterThan(0);
+  expect(userMessages.some((m) => m.content?.includes('test message from Playwright e2e'))).toBe(true);
 
-  // Assert no real failures
-  expect(realFailures.length, 'real failures during message send').toBeLessThan(100);
+  // ─── 6. Verify backend health after the message ─────────────────────────
+  const health = await api.health();
+  expect(health.ok).toBe(true);
+
+  // ─── 7. Assert zero tolerance for errors ────────────────────────────────
+  // Filter out known-benign patterns (favicon, source maps, Tauri internals)
+  const benignPatterns = [/favicon/i, /\.map$/i, /__TAURI/i, /websocket.*close/i, /\/api\/auth\/me.*401/i];
+  const realConsoleErrors = consoleErrors.filter((text) => !benignPatterns.some((re) => re.test(text)));
+
+  expect(realConsoleErrors, `Console errors: ${realConsoleErrors.join('; ')}`).toEqual([]);
+  expect(networkFailures, `Network failures: ${networkFailures.join('; ')}`).toEqual([]);
+  expect(serverErrors, `Server errors: ${serverErrors.join('; ')}`).toEqual([]);
+});
+
+/**
+ * Verifies that the backend health endpoint returns a valid response
+ * with the expected contract fields.
+ */
+test('backend health endpoint returns a valid contract', async ({ request }) => {
+  const res = await request.get(`${BACKEND_URL}/api/health`);
+  expect(res.ok()).toBe(true);
+  const body = await res.json();
+  expect(body.ok).toBe(true);
+  expect(body.data).toBeDefined();
+  expect(body.data.id).toBe('koryphaios');
+  expect(body.data.version).toBeDefined();
+  expect(body.data.pid).toBeDefined();
+  expect(body.data.compat).toBeDefined();
+  expect(body.data.compat.serverStartedAt).toBeDefined();
+});
+
+/**
+ * Verifies that the auth session lifecycle works end-to-end:
+ * create session → validate token → use protected endpoint → logout.
+ */
+test('auth session lifecycle works end-to-end', async ({ request }) => {
+  // 1. Create a session
+  const sessionRes = await request.post(`${BACKEND_URL}/api/auth/session`, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  expect(sessionRes.ok()).toBe(true);
+  const sessionBody = await sessionRes.json();
+  const token = sessionBody.data.bearerToken;
+  expect(token).toBeTruthy();
+
+  // 2. Validate the token
+  const meRes = await request.get(`${BACKEND_URL}/api/auth/me`, {
+    headers: { Authorization: token },
+  });
+  expect(meRes.ok()).toBe(true);
+  const meBody = await meRes.json();
+  expect(meBody.data.user).toBeTruthy();
+  expect(meBody.data.user.id).toBe('local-user');
+
+  // 3. Use a protected endpoint
+  const providersRes = await request.get(`${BACKEND_URL}/api/providers`, {
+    headers: { Authorization: token },
+  });
+  expect(providersRes.ok()).toBe(true);
+
+  // 4. Logout
+  const logoutRes = await request.delete(`${BACKEND_URL}/api/auth/session`, {
+    headers: { Authorization: token },
+  });
+  expect(logoutRes.ok()).toBe(true);
+
+  // 5. Verify the token is now invalid
+  const postLogoutRes = await request.get(`${BACKEND_URL}/api/auth/me`, {
+    headers: { Authorization: token },
+  });
+  const postLogoutBody = await postLogoutRes.json();
+  expect(postLogoutBody.data.user).toBeNull();
 });

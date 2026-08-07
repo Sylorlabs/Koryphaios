@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { renderKoryColors } from './color-renderer';
 
 describe('renderKoryColors', () => {
@@ -80,5 +80,75 @@ describe('renderKoryColors', () => {
     });
     const result = renderKoryColors(deep);
     expect(result).toBeNull();
+  });
+});
+
+describe('adversarial CSS injection attempts', () => {
+  it('rejects CSS calc() injection containing expression()', () => {
+    // calc() is not in the accepted functional notation set (only rgb/rgba/hsl/hsla),
+    // so this must be rejected entirely — no expression() reaches the style attr.
+    const result = renderKoryColors('calc(1px + expression(alert(1)))');
+    expect(result).toBeNull();
+  });
+
+  it('rejects CSS var() injection', () => {
+    // var() is not an accepted color functional notation.
+    const result = renderKoryColors('var(--evil)');
+    expect(result).toBeNull();
+  });
+
+  it('rejects malformed hex codes', () => {
+    expect(renderKoryColors('#gggggg')).toBeNull();
+    expect(renderKoryColors('#1234567')).toBeNull();
+    expect(renderKoryColors('#123456789')).toBeNull();
+  });
+
+  it('does not allow __proto__ pollution via JSON input', () => {
+    // JSON.parse does not pollute prototypes, and the collector only reads
+    // value/color/label/name keys — __proto__ is ignored.
+    const result = renderKoryColors(JSON.stringify({ __proto__: { polluted: true }, value: '#fff' }));
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // The valid color is still rendered.
+    expect(result).toContain('background:#fff');
+  });
+
+  it('handles a very long color value (10k chars) without crashing', () => {
+    const long = '#' + 'a'.repeat(10000);
+    const start = Date.now();
+    const result = renderKoryColors(long);
+    const elapsed = Date.now() - start;
+    // Malformed hex (too long) is rejected, not rendered.
+    expect(result).toBeNull();
+    expect(elapsed).toBeLessThan(2000);
+  });
+
+  it('rejects NaN/Infinity in rgba values', () => {
+    // The FN_INNER_RE only allows digits, dots, commas, percent — letters
+    // like 'NaN' or 'Infinity' are rejected.
+    expect(renderKoryColors('rgba(NaN,0,0,1)')).toBeNull();
+    expect(renderKoryColors('rgba(Infinity,0,0,1)')).toBeNull();
+  });
+
+  it('rejects CSS comment injection in color values', () => {
+    // A trailing comment must not survive into the style attribute.
+    const result = renderKoryColors('red/* */');
+    // 'red/* */' is not a named color and not valid functional notation.
+    expect(result).toBeNull();
+  });
+
+  it('rejects multiple semicolons used for style injection', () => {
+    // Attempt to chain a second declaration (background image fetch).
+    const result = renderKoryColors('red; background: url(evil)');
+    // The value contains a semicolon and space — not a valid named color,
+    // and sanitizeColorValue rejects it.
+    expect(result).toBeNull();
+  });
+
+  it('rejects backtick injection for template literal escape', () => {
+    // Backticks are not valid in any accepted color notation.
+    const result = renderKoryColors('`red`');
+    expect(result).toBeNull();
+    // Ensure no raw backtick could reach output even if somehow rendered.
+    if (result) expect(result).not.toContain('`');
   });
 });

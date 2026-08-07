@@ -1431,6 +1431,7 @@
             placeholder={disabled ? disabledMessage : placeholder}
             rows="1"
             class="input w-full"
+            data-testid="composer-input"
             disabled={disabled || !!configurationWarning}
             style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || configurationWarning ? 'opacity: 0.6; cursor: not-allowed;' : ''}"
           ></textarea>

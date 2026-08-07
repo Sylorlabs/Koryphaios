@@ -115,6 +115,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-title"
+      data-testid="feedback-dialog"
     >
       <div class="relative border-b border-[var(--color-border)] px-6 py-5">
         <div

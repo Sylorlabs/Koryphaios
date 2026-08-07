@@ -88,6 +88,7 @@
   {#if sidebarVisible}
     <nav
       class="{mobileSidebar ? 'fixed inset-y-0 left-0 z-50 shadow-2xl' : 'shrink-0'} border-r flex min-h-0 flex-col"
+      data-testid="session-sidebar"
       style="
         width: var(--sidebar-width);
         min-width: var(--sidebar-min-width);
@@ -231,7 +232,7 @@
         </div>
       {/if}
 
-      <section class="flex flex-1 min-h-0 flex-col overflow-hidden" role="main" aria-label="Chat feed">
+      <section class="flex flex-1 min-h-0 flex-col overflow-hidden" role="main" aria-label="Chat feed" data-testid="chat-feed">
         {@render feed?.()}
       </section>
 

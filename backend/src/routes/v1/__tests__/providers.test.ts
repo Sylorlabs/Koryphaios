@@ -1,0 +1,563 @@
+import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+// Test fixtures represent provider-reported discovery; product code ships no list.
+// discoveredCopilotModels was removed — the mock now returns [] to match
+// the real CopilotProvider behavior (no bundled models before discovery).
+const discoveredCodexModels = [{ id: 'codex-test', name: 'Codex test', provider: 'codex' as const, contextWindow: 0, maxOutputTokens: 4096 }];
+
+process.env.NODE_ENV = 'test';
+process.env.SESSION_TOKEN_SECRET =
+  process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
+
+const dbPath = join(tmpdir(), `koryphaios-provider-routes-${process.pid}.sqlite`);
+process.env.DATABASE_URL = `sqlite://${dbPath}`;
+
+const startCopilotDeviceAuthMock = mock(async () => ({
+  deviceCode: 'device-code-123',
+  userCode: 'ABCD-EFGH',
+  verificationUri: 'https://github.com/login/device',
+  verificationUriComplete: 'https://github.com/login/device?user_code=ABCD-EFGH',
+  expiresIn: 900,
+  interval: 5,
+}));
+const pollCopilotDeviceAuthMock = mock(async () => ({
+  accessToken: 'gho_device_token',
+}));
+const startKimiCodeDeviceAuthMock = mock(async () => ({
+  deviceCode: 'kimi-device-code-123',
+  userCode: 'KIMI-5678',
+  verificationUri: 'https://auth.kimi.com/device',
+  verificationUriComplete: 'https://auth.kimi.com/device?user_code=KIMI-5678',
+  expiresIn: 900,
+  interval: 5,
+}));
+const pollKimiCodeDeviceAuthMock = mock(async () => ({
+  accessToken: 'kimi-device-token',
+  refreshToken: 'kimi-refresh-token',
+  tokenType: 'Bearer',
+  expiresIn: 3600,
+  scope: 'openid profile',
+}));
+const resetCodexDeviceAuthSessionsMock = mock(() => {});
+const logoutCodexAppServerMock = mock(async () => {});
+const clearKimiCodeAuthStateMock = mock(() => {});
+const saveKimiCodeAuthStateMock = mock(() => {});
+const createKimiCodeAuthMarkerMock = mock(() => 'oauth:kimicode:test-marker');
+const startCodexChatgptDeviceCodeLoginMock = mock(async () => ({
+  loginId: 'codex-login-123',
+  verificationUrl: 'https://auth.openai.com/codex/device',
+  userCode: 'CODEX-1234',
+}));
+const waitForCodexLoginCompletionMock = mock(async () => ({
+  loginId: 'codex-login-123',
+  success: false,
+  error: 'authorization_pending',
+}));
+const codexAccountMock = mock(async () => ({
+  account: { type: 'chatgpt', email: 'user@example.com', planType: 'plus' },
+  requiresOpenaiAuth: true,
+}));
+
+mock.module('../../../providers/copilot', () => ({
+  CopilotProvider: class {
+    readonly name = 'copilot';
+    readonly config: Record<string, unknown>;
+    constructor(config: Record<string, unknown>) {
+      this.config = config;
+    }
+    isAvailable() {
+      return !!this.config && !this.config.disabled;
+    }
+    listModels() {
+      // Return [] by default to match the real CopilotProvider behavior
+      // (no bundled model list before authenticated discovery). The mock is
+      // process-wide in Bun, so returning discoveredCopilotModels here would
+      // leak into copilot-models.test.ts and break it.
+      return [];
+    }
+    async *streamResponse() {}
+  },
+  exchangeGitHubTokenForCopilotAsync: async () => 'gho_device_token',
+  startCopilotDeviceAuth: startCopilotDeviceAuthMock,
+  pollCopilotDeviceAuth: pollCopilotDeviceAuthMock,
+}));
+
+mock.module('../../../providers/kimicode-auth', () => ({
+  startKimiCodeDeviceAuth: startKimiCodeDeviceAuthMock,
+  pollKimiCodeDeviceAuth: pollKimiCodeDeviceAuthMock,
+  clearKimiCodeAuthState: clearKimiCodeAuthStateMock,
+  saveKimiCodeAuthState: saveKimiCodeAuthStateMock,
+  createKimiCodeAuthMarker: createKimiCodeAuthMarkerMock,
+  isKimiCodeAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('oauth:kimicode:'),
+  createKimiCodeCliMarker: (profileDir: string) =>
+    `cli:kimicode:${Buffer.from(profileDir).toString('base64url')}`,
+  isKimiCodeCliMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:kimicode:'),
+  isKimiCodeMarker: (value: string | null | undefined) =>
+    typeof value === 'string' &&
+    (value.startsWith('oauth:kimicode:') || value.startsWith('cli:kimicode:')),
+  kimiCodeMarkerProfileDir: (value: string) => {
+    if (typeof value !== 'string') return null;
+    if (value.startsWith('oauth:kimicode:')) return '/tmp/kory-kimi-home';
+    if (value.startsWith('cli:kimicode:')) {
+      try {
+        return (
+          Buffer.from(value.slice('cli:kimicode:'.length), 'base64url').toString('utf-8') || null
+        );
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  },
+  loadKimiCodeAuthState: () => null,
+  resolveKimiCodeAccessToken: async (value: string | null | undefined) => value ?? null,
+}));
+
+mock.module('../../../providers/codex', () => ({
+  CodexProvider: class {
+    readonly name = 'codex';
+    readonly config: Record<string, unknown>;
+    constructor(config: Record<string, unknown>) {
+      this.config = config;
+    }
+    isAvailable() {
+      return !!this.config && !this.config.disabled;
+    }
+    listModels() {
+      return discoveredCodexModels;
+    }
+    async *streamResponse() {}
+  },
+  resetCodexDeviceAuthSessions: resetCodexDeviceAuthSessionsMock,
+}));
+
+mock.module('../../../providers/codex-app-server', () => ({
+  getManagedCodexAppServer: () => ({
+    startChatgptDeviceCodeLogin: startCodexChatgptDeviceCodeLoginMock,
+    waitForLoginCompletion: waitForCodexLoginCompletionMock,
+    account: codexAccountMock,
+    logout: logoutCodexAppServerMock,
+  }),
+}));
+
+mock.module('../../../providers/auth-utils', () => ({
+  isCodexCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:codex:'),
+  createCodexCLIAuthMarker: () => `cli:codex:${Date.now()}`,
+  createCodexCLIProfileMarker: (profileDir: string) =>
+    `cli:codex:${Buffer.from(profileDir).toString('base64url')}`,
+  detectClaudeCodeLogin: () => true,
+  detectClaudeCodeToken: () => null,
+  createClaudeCLIAuthMarker: () => `cli:claude:${Date.now()}`,
+  isClaudeCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:claude:'),
+  detectGrokCLILogin: () => true,
+  createGrokCLIAuthMarker: () => `cli:grok:${Date.now()}`,
+  isGrokCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:grok:'),
+  detectGrokXaiKey: () => null,
+  detectAntigravityCLILogin: () => true,
+  createAntigravityCLIAuthMarker: () => `cli:antigravity:${Date.now()}`,
+  isAntigravityCLIAuthMarker: (value: string | null | undefined) =>
+    typeof value === 'string' && value.startsWith('cli:antigravity:'),
+  detectAntigravityApiKey: () => null,
+  isGeminiCLIAuthMarker: () => false,
+  createGeminiCLIAuthMarker: () => 'cli:gemini:test',
+  detectCodexCLILogin: () => false,
+  detectCursorCLILogin: () => false,
+  createCursorCLIAuthMarker: () => 'cursor-cli-session',
+  isCursorCLIAuthMarker: (value: string | null | undefined) => value === 'cursor-cli-session',
+  detectDevinCLILogin: () => false,
+  createDevinCLIAuthMarker: () => 'devin-cli-session',
+  isDevinCLIAuthMarker: (value: string | null | undefined) => value === 'devin-cli-session',
+  detectClineCLILogin: () => false,
+  createClineCLIAuthMarker: () => 'cline-cli-session',
+  isClineCLIAuthMarker: (value: string | null | undefined) => value === 'cline-cli-session',
+  detectFreebuffCLILogin: () => false,
+  createFreebuffCLIAuthMarker: () => 'cli:freebuff:test',
+  isFreebuffCLIAuthMarker: (value: string | null | undefined) => value === 'cli:freebuff:test',
+  readFreebuffAuthToken: () => null,
+  readFreebuffCredentials: () => null,
+  detectJulesApiKey: () => null,
+  detectKimiCodeCLILogin: () => false,
+  clearCachedToken: () => {},
+  clearTokenCache: () => {},
+  getKoryCodexHome: () => '/tmp/codex-home',
+}));
+
+const { initDb } = await import('../../../db');
+const { providerRoutes } = await import('../providers');
+const { setContext } = await import('../../../context');
+const { localAuth } = await import('../../../auth/local-auth');
+const { buildLocalBearerToken } = await import('../../../auth/local-route-auth');
+
+type ProviderStatus = {
+  name: string;
+  enabled: boolean;
+  authenticated: boolean;
+  models: string[];
+  allAvailableModels: string[];
+  selectedModels: string[];
+  hideModelSelector: boolean;
+  authMode: string;
+  supportsApiKey: boolean;
+  supportsAuthToken: boolean;
+  requiresBaseUrl: boolean;
+  circuitOpen: boolean;
+};
+
+let providerStatus: ProviderStatus[];
+let lastSetCredentials: { name: string; body: Record<string, unknown> } | null;
+
+function authHeader(): Record<string, string> {
+  return {
+    Authorization: buildLocalBearerToken(localAuth.createSession(['*'])),
+  };
+}
+
+async function request(
+  path: string,
+  init: RequestInit = {},
+): Promise<{ response: Response; body: any }> {
+  const response = await providerRoutes.handle(
+    new Request(`http://localhost${path}`, {
+      ...init,
+      headers: {
+        ...authHeader(),
+        ...(init.headers ?? {}),
+      },
+    }),
+  );
+  const text = await response.text();
+  return {
+    response,
+    body: text.trim() ? JSON.parse(text) : null,
+  };
+}
+
+beforeAll(async () => {
+  await initDb(dbPath);
+
+  providerStatus = [
+    {
+      name: 'openai',
+      enabled: false,
+      authenticated: false,
+      models: [],
+      allAvailableModels: ['gpt-4.1', 'gpt-4.1-mini'],
+      selectedModels: [],
+      hideModelSelector: false,
+      authMode: 'api_key',
+      supportsApiKey: true,
+      supportsAuthToken: false,
+      requiresBaseUrl: false,
+      circuitOpen: false,
+    },
+  ];
+  lastSetCredentials = null;
+
+  const providers = {
+    getStatus: () => providerStatus,
+    getAvailableProviderTypes: () => [{ name: 'openai', authMode: 'api_key' }],
+    async setCredentials(name: string, body: Record<string, unknown>) {
+      lastSetCredentials = { name, body };
+      providerStatus = providerStatus.map((status) =>
+        status.name === name
+          ? {
+              ...status,
+              authenticated: true,
+              enabled: true,
+              selectedModels: Array.isArray(body.selectedModels)
+                ? (body.selectedModels as string[])
+                : status.selectedModels,
+              hideModelSelector:
+                typeof body.hideModelSelector === 'boolean'
+                  ? body.hideModelSelector
+                  : status.hideModelSelector,
+            }
+          : status,
+      );
+      return { success: true };
+    },
+    get: () => ({ refreshModels: async () => {} }),
+    getConfigs: () => ({}),
+    removeApiKey(name: string) {
+      providerStatus = providerStatus.map((status) =>
+        status.name === name ? { ...status, authenticated: false, enabled: false } : status,
+      );
+    },
+  };
+
+  setContext({
+    config: {} as any,
+    providers: providers as any,
+    tools: {} as any,
+    mcpManager: undefined as any,
+    sessions: {} as any,
+    messages: {} as any,
+    tasks: {} as any,
+    kory: {} as any,
+    wsManager: {} as any,
+  });
+});
+
+afterAll(() => {
+  if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+  // Undo the process-wide module mocks so other test files (copilot-models,
+  // provider-conformance) see the REAL codex/copilot/auth-utils modules.
+  mock.restore();
+});
+
+describe('provider routes', () => {
+  test('GET /api/providers returns provider status payload', async () => {
+    const { response, body } = await request('/api/providers');
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.data).toEqual(providerStatus);
+  });
+
+  test('PUT /api/providers/:name accepts model selection fields', async () => {
+    const { response, body } = await request('/api/providers/openai', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiKey: 'sk-live',
+        selectedModels: ['gpt-4.1-mini'],
+        hideModelSelector: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ ok: true });
+    expect(lastSetCredentials).toEqual({
+      name: 'openai',
+      body: {
+        apiKey: 'sk-live',
+        selectedModels: ['gpt-4.1-mini'],
+        hideModelSelector: true,
+      },
+    });
+  });
+
+  test('saved provider accounts can be created, listed, activated, and deleted', async () => {
+    const create = await request('/api/providers/openai/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: 'Backup OpenAI',
+        apiKey: 'sk-backup',
+        baseUrl: 'https://api.openai.com/v1',
+      }),
+    });
+
+    expect(create.response.status).toBe(200);
+    expect(create.body.ok).toBe(true);
+    expect(create.body.data.account.label).toBe('Backup OpenAI');
+    expect(create.body.data.account.hasApiKey).toBe(true);
+    expect(create.body.data.account.hasBaseUrl).toBe(true);
+
+    const accountId = create.body.data.account.id as string;
+
+    const list = await request('/api/providers/openai/accounts');
+    expect(list.response.status).toBe(200);
+    expect(list.body.ok).toBe(true);
+    expect(list.body.data.some((account: any) => account.id === accountId)).toBe(true);
+
+    const activate = await request(`/api/providers/openai/accounts/${accountId}/activate`, {
+      method: 'POST',
+    });
+    expect(activate.response.status).toBe(200);
+    expect(activate.body.ok).toBe(true);
+    expect(lastSetCredentials).toEqual({
+      name: 'openai',
+      body: {
+        apiKey: 'sk-backup',
+        baseUrl: 'https://api.openai.com/v1',
+      },
+    });
+
+    const remove = await request(`/api/providers/openai/accounts/${accountId}`, {
+      method: 'DELETE',
+    });
+    expect(remove.response.status).toBe(200);
+    expect(remove.body).toEqual({ ok: true });
+
+    const finalList = await request('/api/providers/openai/accounts');
+    expect(finalList.body.data.some((account: any) => account.id === accountId)).toBe(false);
+  });
+
+  test('Grok Build auth auto-detects the local grok CLI without a manual token', async () => {
+    const start = await request('/api/providers/grok/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'grok',
+      body: {
+        authToken: expect.stringMatching(/^cli:grok:\d+$/),
+      },
+    });
+  });
+
+  test('Antigravity auth auto-detects the local agy CLI without a manual token', async () => {
+    const start = await request('/api/providers/antigravity/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'antigravity',
+      body: {
+        authToken: expect.stringMatching(/^cli:antigravity:\d+$/),
+      },
+    });
+  });
+
+  test('browser auth is only exposed for providers Koryphaios manages directly', async () => {
+    const start = await request('/api/providers/anthropic/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(404);
+    expect(start.body.ok).toBe(false);
+
+    // API-key providers do not expose a browser/OAuth flow. Google AI Studio
+    // uses a Gemini API key; Google Cloud is separately represented by Vertex AI.
+    const complete = await request('/api/providers/openai/auth/complete', {
+      method: 'POST',
+    });
+
+    expect(complete.response.status).toBe(404);
+    expect(complete.body.ok).toBe(false);
+
+    const google = await request('/api/providers/google/auth/start', { method: 'POST' });
+    expect(google.response.status).toBe(404);
+    expect(google.body.ok).toBe(false);
+
+    const codexStart = await request('/api/providers/codex/auth/start', {
+      method: 'POST',
+    });
+
+    expect(codexStart.response.status).toBe(404);
+    expect(codexStart.body.ok).toBe(false);
+
+    const codexComplete = await request('/api/providers/codex/auth/complete', {
+      method: 'POST',
+    });
+
+    expect(codexComplete.response.status).toBe(404);
+    expect(codexComplete.body.ok).toBe(false);
+  });
+
+  test('OpenAI Codex uses the managed ChatGPT device-code flow without accepting an API key', async () => {
+    const start = await request('/api/providers/codex-auth/auth/start', { method: 'POST' });
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.verificationUri).toBe('https://auth.openai.com/codex/device');
+    expect(start.body.data.userCode).toBe('CODEX-1234');
+    expect(startCodexChatgptDeviceCodeLoginMock).toHaveBeenCalledTimes(1);
+
+    const complete = await request('/api/providers/codex-auth/auth/complete', { method: 'POST' });
+    expect(complete.response.status).toBe(200);
+    expect(complete.body.ok).toBe(true);
+    expect(codexAccountMock).toHaveBeenCalledWith(true);
+    expect(lastSetCredentials).toEqual({
+      name: 'codex-auth',
+      body: { authToken: 'codex-managed-chatgpt' },
+    });
+  });
+
+  test('OpenAI Codex activates itself after the official login completion notification', async () => {
+    lastSetCredentials = null;
+    waitForCodexLoginCompletionMock.mockResolvedValueOnce({
+      loginId: 'codex-login-123',
+      success: true,
+      error: null,
+    });
+
+    const start = await request('/api/providers/codex-auth/auth/start', { method: 'POST' });
+    expect(start.response.status).toBe(200);
+
+    // The notification handler runs independently of the HTTP request because
+    // device approval happens later in the browser.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lastSetCredentials).toEqual({
+      name: 'codex-auth',
+      body: { authToken: 'codex-managed-chatgpt' },
+    });
+  });
+
+  test('disconnecting OpenAI Codex logs out the managed app-server session', async () => {
+    const result = await request('/api/providers/codex-auth', { method: 'DELETE' });
+
+    expect(result.response.status).toBe(200);
+    expect(result.body).toEqual({ ok: true });
+    expect(logoutCodexAppServerMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('Copilot browser auth returns device flow details and activates on poll', async () => {
+    const start = await request('/api/providers/copilot/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.userCode).toBe('ABCD-EFGH');
+    expect(start.body.data.verificationUriComplete).toContain('github.com/login/device');
+
+    const poll = await request('/api/providers/copilot/auth/poll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceCode: 'device-code-123' }),
+    });
+
+    expect(poll.response.status).toBe(200);
+    expect(poll.body.ok).toBe(true);
+    expect(poll.body.data.status).toBe('connected');
+    expect(lastSetCredentials).toEqual({
+      name: 'copilot',
+      body: {
+        authToken: 'gho_device_token',
+      },
+    });
+  });
+
+  test('Kimi Code browser auth uses the official device flow and activates on poll', async () => {
+    const start = await request('/api/providers/kimicode/auth/start', {
+      method: 'POST',
+    });
+
+    expect(start.response.status).toBe(200);
+    expect(start.body.ok).toBe(true);
+    expect(start.body.data.deviceCode).toBe('kimi-device-code-123');
+    expect(start.body.data.userCode).toBe('KIMI-5678');
+    expect(start.body.data.verificationUriComplete).toContain('auth.kimi.com');
+
+    const poll = await request('/api/providers/kimicode/auth/poll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceCode: 'kimi-device-code-123' }),
+    });
+
+    expect(poll.response.status).toBe(200);
+    expect(poll.body.ok).toBe(true);
+    expect(poll.body.data.status).toBe('connected');
+    expect(saveKimiCodeAuthStateMock).toHaveBeenCalled();
+    expect(lastSetCredentials).toEqual({
+      name: 'kimicode',
+      body: {
+        authToken: 'oauth:kimicode:test-marker',
+      },
+    });
+  });
+});

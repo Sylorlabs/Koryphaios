@@ -20,6 +20,7 @@
     "test": "bun run --filter '*' test",
     "test:backend:isolated": "bun run scripts/test-backend-isolated.ts",
     "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
+    "test:coverage": "bun run --filter backend test:coverage:check && bun run --filter frontend test:coverage:check",
     "test:e2e": "playwright test",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",

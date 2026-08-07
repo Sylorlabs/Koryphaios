@@ -263,4 +263,65 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     ]);
     expect(client.pendingTerminalEvents).toHaveLength(0);
   });
+
+  test('agent.status with terminal status is queued under backpressure', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sent: string[] = [];
+    const bufferedAmount = { value: BACKPRESSURE_THRESHOLD + 1 };
+    const socket = createOverloadedSocket(sent, bufferedAmount);
+    manager.add(socket);
+
+    // A worker finishes via agent.status: done — this is the real terminal
+    // path runAgentThread emits. It must be queued, not dropped.
+    manager.broadcast({
+      type: 'agent.status',
+      timestamp: 1,
+      sessionId: 'session-1',
+      payload: { agentId: 'worker-1', status: 'done' },
+    });
+
+    expect(sent).toEqual([]);
+    const client = (manager as any).clients.get('client-1');
+    expect(client.pendingTerminalEvents).toHaveLength(1);
+    expect(client.pendingTerminalEvents[0].type).toBe('agent.status');
+
+    // Backpressure clears — the terminal status must be delivered.
+    bufferedAmount.value = 0;
+    (manager as any).retryTerminalEvents('client-1', client);
+    const delivered = sent.map((value) => JSON.parse(value));
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].type).toBe('agent.status');
+    expect(delivered[0].payload.status).toBe('done');
+  });
+
+  test('agent.status with active status is NOT queued under backpressure', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sent: string[] = [];
+    const bufferedAmount = { value: BACKPRESSURE_THRESHOLD + 1 };
+    const socket = createOverloadedSocket(sent, bufferedAmount);
+    manager.add(socket);
+
+    // An active status is NOT terminal — it must be dropped, not queued,
+    // so the retry queue doesn't fill with stale intermediate statuses.
+    manager.broadcast({
+      type: 'agent.status',
+      timestamp: 1,
+      sessionId: 'session-1',
+      payload: { agentId: 'worker-1', status: 'thinking' },
+    });
+
+    expect(sent).toEqual([]);
+    const client = (manager as any).clients.get('client-1');
+    expect(client.pendingTerminalEvents).toHaveLength(0);
+  });
 });

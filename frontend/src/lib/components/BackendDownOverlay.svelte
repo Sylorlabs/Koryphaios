@@ -190,7 +190,7 @@
 </script>
 
 {#if visible}
-	<div class="backend-down-overlay" role="alertdialog" aria-labelledby="bdo-title" aria-describedby="bdo-sub" data-tauri-drag-region>
+	<div class="backend-down-overlay" role="alertdialog" aria-labelledby="bdo-title" aria-describedby="bdo-sub" data-tauri-drag-region data-testid="backend-down-overlay">
 		<div class="card" data-tauri-drag-region="false">
 			<div class="icon" aria-hidden="true">
 				{#if status === 'mismatch'}

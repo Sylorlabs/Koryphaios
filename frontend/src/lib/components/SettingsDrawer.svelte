@@ -733,7 +733,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 <svelte:window onkeydown={(e) => { if (editingShortcutId) handleShortcutKeydown(e); else handleKeydown(e); }} />
 
 {#if open}
-  <div class="fixed inset-0 z-50 flex min-h-0 flex-col" style="background: var(--color-surface-1);" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+  <div class="fixed inset-0 z-50 flex min-h-0 flex-col" style="background: var(--color-surface-1);" role="dialog" aria-modal="true" aria-labelledby="settings-title" data-testid="settings-drawer">
     <!-- Header -->
     <div class="flex items-center justify-between px-6 py-4 shrink-0 border-b" style="border-color: var(--color-border); background: var(--color-surface-0);">
       <h2 id="settings-title" class="text-base font-semibold" style="color: var(--color-text-primary);">Settings</h2>

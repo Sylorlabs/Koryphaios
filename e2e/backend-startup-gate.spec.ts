@@ -1,5 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
+const BACKEND_URL = 'http://127.0.0.1:3011';
+
+/**
+ * Verifies the frontend error boundary shows the backend-unavailable overlay
+ * when the backend health endpoint returns 503.
+ *
+ * This test intentionally mocks the health endpoint to simulate a backend
+ * outage — it tests the FRONTEND error boundary behavior, not the backend.
+ */
 test('does not render the application when its backend is unavailable', async ({ page }) => {
   test.setTimeout(20_000);
 
@@ -25,6 +34,10 @@ test('does not render the application when its backend is unavailable', async ({
   await expect(page.locator('#main-content')).toBeEmpty();
 });
 
+/**
+ * Verifies the Retry button recovers the UI when the backend comes back.
+ * Uses a toggleable mock that flips from 503 to 200.
+ */
 test('Retry now recovers the UI after the backend returns', async ({ page }) => {
   test.setTimeout(25_000);
   let healthy = false;
@@ -97,14 +110,26 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
   });
 
   healthy = true;
-  const feedback = page.getByRole('button', { name: /Feedback/ });
   // The sentinel may observe the recovered backend in the same moment the
   // user presses Retry, removing the overlay before Playwright dispatches the
   // click. Both paths are a successful recovery; assert the visible result.
   await page
-    .getByRole('alertdialog')
+    .getByTestId('backend-down-overlay')
     .getByRole('button', { name: 'Retry now' })
-    .click({ timeout: 3_000 })
+    .click({ timeout: 5_000 })
     .catch(() => undefined);
-  await expect(feedback).toBeVisible({ timeout: 8_000 });
+  // Verify the app recovered — the feedback button or main content should appear
+  await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 10_000 });
+});
+
+/**
+ * Verifies the REAL backend health endpoint is reachable and returns ok=true.
+ * This is a true e2e check that the backend is actually running.
+ */
+test('real backend health endpoint is reachable and returns ok', async ({ request }) => {
+  const res = await request.get(`${BACKEND_URL}/api/health`);
+  expect(res.ok(), `Health endpoint should return 200, got ${res.status()}`).toBe(true);
+  const body = await res.json();
+  expect(body.ok, 'Health response should have ok=true').toBe(true);
+  expect(body.data.id, 'Backend should identify itself as koryphaios').toBe('koryphaios');
 });

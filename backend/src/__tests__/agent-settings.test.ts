@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import {
   assembleAgentContext,
   DEFAULT_AGENT_SETTINGS,
+  DEFAULT_SANDBOX_SETTINGS,
   mergeAgentSettings,
+  mergeSandboxSettings,
   readPreferences,
   rememberExplicitPreference,
 } from '../agent-settings';
@@ -79,6 +81,56 @@ describe('autonomy limits', () => {
   });
 });
 
+describe('sandbox settings', () => {
+  it('defaults to auto mode with all granular checks on', () => {
+    expect(DEFAULT_AGENT_SETTINGS.sandbox).toEqual(DEFAULT_SANDBOX_SETTINGS);
+    expect(DEFAULT_AGENT_SETTINGS.sandbox.mode).toBe('auto');
+    expect(DEFAULT_AGENT_SETTINGS.sandbox.metacharacters).toBe(true);
+  });
+
+  it('deep-merges a partial sandbox patch so omitted toggles keep defaults', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      sandbox: { mode: 'always', metacharacters: false },
+    });
+    expect(merged.sandbox.mode).toBe('always');
+    expect(merged.sandbox.metacharacters).toBe(false);
+    // Omitted toggles retain defaults
+    expect(merged.sandbox.commandWhitelist).toBe(true);
+    expect(merged.sandbox.pathConfinement).toBe(true);
+    expect(merged.sandbox.network).toBe(true);
+    expect(merged.sandbox.containerTools).toBe(true);
+  });
+
+  it('rejects an invalid sandbox mode and falls back to auto', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      sandbox: { mode: 'unsafe-value' },
+    });
+    expect(merged.sandbox.mode).toBe('auto');
+  });
+
+  it('mergeSandboxSettings layers later overrides over earlier ones', () => {
+    const merged = mergeSandboxSettings(
+      DEFAULT_SANDBOX_SETTINGS,
+      { mode: 'always', network: false },
+      { network: true, metacharacters: false },
+    );
+    expect(merged.mode).toBe('always');
+    expect(merged.network).toBe(true);
+    expect(merged.metacharacters).toBe(false);
+  });
+
+  it('subAgentApproval defaults to manager and accepts valid values', () => {
+    expect(DEFAULT_AGENT_SETTINGS.subAgentApproval).toBe('manager');
+    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'user' }).subAgentApproval).toBe('user');
+    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'auto' }).subAgentApproval).toBe('auto');
+  });
+
+  it('rejects an invalid subAgentApproval value and keeps the default', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'yolo' });
+    expect(merged.subAgentApproval).toBe('manager');
+  });
+});
+
 describe('explicit preference memory', () => {
   it('persists explicit remember requests but ignores ordinary statements and secrets', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-preferences-'));
@@ -93,5 +145,47 @@ describe('explicit preference memory', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('tool allowlist and blocklist merging', () => {
+  it('defaults to empty arrays', () => {
+    expect(DEFAULT_AGENT_SETTINGS.toolAllowlist).toEqual([]);
+    expect(DEFAULT_AGENT_SETTINGS.toolBlocklist).toEqual([]);
+  });
+
+  it('merges string arrays from a patch', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      toolAllowlist: ['bash', 'grep'],
+      toolBlocklist: ['delete_file'],
+    });
+    expect(merged.toolAllowlist).toEqual(['bash', 'grep']);
+    expect(merged.toolBlocklist).toEqual(['delete_file']);
+  });
+
+  it('replaces the array on subsequent patches (no concatenation)', () => {
+    let merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { toolAllowlist: ['bash'] });
+    merged = mergeAgentSettings(merged, { toolAllowlist: ['grep', 'ls'] });
+    expect(merged.toolAllowlist).toEqual(['grep', 'ls']);
+  });
+
+  it('filters non-string entries from the array', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      toolAllowlist: ['bash', 42, null, 'grep'] as unknown as string[],
+    });
+    expect(merged.toolAllowlist).toEqual(['bash', 'grep']);
+  });
+
+  it('ignores non-array values for list fields', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      toolAllowlist: 'bash' as unknown as string[],
+    });
+    expect(merged.toolAllowlist).toEqual([]);
+  });
+
+  it('clears a list by sending an empty array', () => {
+    let merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { toolAllowlist: ['bash'] });
+    merged = mergeAgentSettings(merged, { toolAllowlist: [] });
+    expect(merged.toolAllowlist).toEqual([]);
   });
 });

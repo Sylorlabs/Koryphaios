@@ -8,7 +8,9 @@
     "typecheck": "tsc --noEmit",
     "test": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test",
     "test:all": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test",
-    "test:watch": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test --watch"
+    "test:watch": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test --watch",
+    "test:coverage": "SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-test_only_not_for_production_aaaaaaaaaa} NODE_ENV=test bun test --coverage --coverage-reporter=text,lcov --coverage-dir=./coverage",
+    "test:coverage:check": "bun run scripts/coverage-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.30.2",
