@@ -44,6 +44,14 @@ use error::{log_error, AppError, AppResult};
 fn resolve_bundled_backend(
     app_handle: &tauri::AppHandle,
 ) -> Result<Option<std::path::PathBuf>, String> {
+    // Dev mode: the launch-desktop.ts script sets KORYPHAIOS_PORT before
+    // spawning Tauri, meaning the dev backend is already running on that
+    // port. Skip the bundled backend entirely to avoid a port conflict.
+    if std::env::var("KORYPHAIOS_PORT").is_ok() {
+        println!("[Koryphaios] Dev mode: launcher owns the backend (KORYPHAIOS_PORT set)");
+        return Ok(None);
+    }
+
     // Look for `backend/` in the resource directory.
     let backend_dir = app_handle
         .path()
