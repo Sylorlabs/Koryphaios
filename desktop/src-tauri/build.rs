@@ -21,51 +21,31 @@ fn resolve_bundle_hash() -> String {
     "dev".to_string()
 }
 
+/// The backend payload is no longer embedded in the Rust binary via
+/// `include_bytes!`. Instead it ships as a Tauri resource (see
+/// `tauri.conf.json` → `bundle.resources`) and is read from disk at
+/// runtime by `resolve_bundled_backend` in `lib.rs`.
+///
+/// This decouples the Rust compilation from the backend build: most
+/// releases only swap the backend binary in the resources directory
+/// without recompiling the Tauri shell, eliminating the need for
+/// Windows/macOS runners on every release.
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set by Cargo"));
     let generated = out_dir.join("embedded_backend.rs");
-    let profile = env::var("PROFILE").unwrap_or_default();
     let bundle_hash = resolve_bundle_hash();
 
-    if profile == "release" {
-        let target = env::var("TARGET").expect("TARGET is set by Cargo");
-        let suffix = if target.contains("windows") {
-            ".exe"
-        } else {
-            ""
-        };
-        let source = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
-            .join("embedded-backend")
-            .join(format!("koryphaios-backend-{target}{suffix}"));
-        println!("cargo:rerun-if-changed={}", source.display());
-        println!("cargo:rerun-if-changed=../../compat-hash.json");
-        if !source.is_file() {
-            panic!(
-                "compiled backend payload missing: {}. Build it for {target} before the release app",
-                source.display()
-            );
-        }
-        let payload = fs::read(&source).expect("read compiled backend payload");
-        let payload_id = payload.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-        });
-        fs::write(
-            &generated,
-            format!(
-                "pub static EMBEDDED_BACKEND: Option<&[u8]> = Some(include_bytes!(r#\"{}\"#));\npub const EMBEDDED_BACKEND_ID: &str = \"{payload_id:016x}\";\npub const EMBEDDED_BUNDLE_HASH: &str = \"{bundle_hash}\";",
-                source.display(),
-            ),
-        )
-        .expect("write embedded backend source");
-    } else {
-        fs::write(
-            &generated,
-            format!(
-                "pub static EMBEDDED_BACKEND: Option<&[u8]> = None;\npub const EMBEDDED_BACKEND_ID: &str = \"dev\";\npub const EMBEDDED_BUNDLE_HASH: &str = \"{bundle_hash}\";",
-            ),
-        )
-        .expect("write development backend source");
-    }
+    // The generated file no longer contains the backend bytes — only the
+    // bundle hash constant used by the compat sentinel. EMBEDDED_BACKEND
+    // is kept as None for backwards compatibility with any code that
+    // references it; the runtime path uses resolve_bundled_backend instead.
+    fs::write(
+        &generated,
+        format!(
+            "pub static EMBEDDED_BACKEND: Option<&[u8]> = None;\npub const EMBEDDED_BACKEND_ID: &str = \"resource\";\npub const EMBEDDED_BUNDLE_HASH: &str = \"{bundle_hash}\";",
+        ),
+    )
+    .expect("write embedded backend manifest");
 
     tauri_build::build()
 }

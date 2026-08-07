@@ -31,12 +31,80 @@ mod indexer;
 use config::{browser_host, AppConfig};
 use error::{log_error, AppError, AppResult};
 
-fn materialize_embedded_backend(
+/// Resolve the bundled backend binary from the app's resource directory.
+///
+/// The backend ships as a Tauri resource (`bundle.resources` → `backend/`)
+/// rather than being embedded in the Rust binary via `include_bytes!`.
+/// This decouples Rust compilation from backend builds: most releases
+/// swap the backend binary in the resources directory without recompiling
+/// the Tauri shell.
+///
+/// In dev mode (no resource directory), returns None so the launcher
+/// owns the backend separately.
+fn resolve_bundled_backend(
     app_handle: &tauri::AppHandle,
 ) -> Result<Option<std::path::PathBuf>, String> {
-    let Some(payload) = EMBEDDED_BACKEND else {
+    // Look for `backend/` in the resource directory.
+    let backend_dir = app_handle
+        .path()
+        .resolve("backend", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| format!("Failed to resolve backend resource directory: {e}"))?;
+
+    if !backend_dir.exists() {
+        // Dev mode: no bundled backend, launcher owns the process.
         return Ok(None);
+    }
+
+    // The backend binary is named `koryphaios-backend-{target_triple}{suffix}`.
+    // Fall back to any executable in the directory if the exact name isn't found.
+    let target = std::env::consts::ARCH;
+    let os_suffix = if cfg!(target_os = "windows") {
+        ".exe"
+    } else {
+        ""
     };
+
+    // Try exact target match first (e.g. koryphaios-backend-x86_64-pc-windows-msvc.exe)
+    let target_triple = if cfg!(target_os = "windows") {
+        format!("{}-pc-windows-msvc", target)
+    } else if cfg!(target_os = "macos") {
+        format!("{}-apple-darwin", target)
+    } else {
+        format!("{}-unknown-linux-gnu", target)
+    };
+
+    let exact_name = format!("koryphaios-backend-{}{}", target_triple, os_suffix);
+    let exact_path = backend_dir.join(&exact_name);
+    if exact_path.is_file() {
+        return copy_backend_to_cache(app_handle, &exact_path);
+    }
+
+    // Fall back: look for any koryphaios-backend-* executable in the directory
+    if let Ok(entries) = std::fs::read_dir(&backend_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.starts_with("koryphaios-backend-") {
+                if cfg!(target_os = "windows") && !name.ends_with(".exe") {
+                    continue;
+                }
+                return copy_backend_to_cache(app_handle, &path);
+            }
+        }
+    }
+
+    // No backend found in resources — dev mode.
+    Ok(None)
+}
+
+/// Copy the backend binary from the resource directory to the cache/runtime
+/// directory with executable permissions. This avoids permission issues on
+/// macOS where the .app bundle's Resources directory may be read-only after
+/// signing, and ensures a consistent executable path across platforms.
+fn copy_backend_to_cache(
+    app_handle: &tauri::AppHandle,
+    source: &std::path::Path,
+) -> Result<Option<std::path::PathBuf>, String> {
     let runtime_dir = app_handle
         .path()
         .app_cache_dir()
@@ -44,6 +112,11 @@ fn materialize_embedded_backend(
         .join("runtime");
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("Failed to create backend runtime directory: {e}"))?;
+
+    let source_size = std::fs::metadata(source)
+        .map(|m| m.len())
+        .unwrap_or(0);
+
     let destination = runtime_dir.join(format!(
         "koryphaios-service-{}-{}{}",
         env!("CARGO_PKG_VERSION"),
@@ -54,19 +127,22 @@ fn materialize_embedded_backend(
             ""
         }
     ));
+
+    // Only copy if the destination doesn't exist or size differs (avoids
+    // redundant file I/O on every startup when the backend hasn't changed).
     let current_size = std::fs::metadata(&destination).map(|m| m.len()).ok();
-    if current_size != Some(payload.len() as u64) {
+    if current_size != Some(source_size) {
         let temporary = destination.with_extension("new");
-        std::fs::write(&temporary, payload)
-            .map_err(|e| format!("Failed to materialize embedded backend: {e}"))?;
+        std::fs::copy(source, &temporary)
+            .map_err(|e| format!("Failed to copy bundled backend: {e}"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o700))
-                .map_err(|e| format!("Failed to make embedded backend executable: {e}"))?;
+                .map_err(|e| format!("Failed to make backend executable: {e}"))?;
         }
         std::fs::rename(&temporary, &destination)
-            .map_err(|e| format!("Failed to activate embedded backend: {e}"))?;
+            .map_err(|e| format!("Failed to activate backend: {e}"))?;
     }
     Ok(Some(destination))
 }
@@ -99,11 +175,11 @@ fn emit_backend_ready(app: &tauri::AppHandle, pid: Option<u32>, host: String, po
     let _ = app.emit("backend://ready", BackendReadyEvent { pid, host, port });
 }
 
-/// Start the backend embedded in the desktop executable.
-fn spawn_embedded_backend(
+/// Start the bundled backend service.
+fn spawn_bundled_backend(
     app_handle: &tauri::AppHandle,
 ) -> Result<Option<Arc<std::sync::Mutex<std::process::Child>>>, String> {
-    let backend_path = match materialize_embedded_backend(app_handle)? {
+    let backend_path = match resolve_bundled_backend(app_handle)? {
         Some(path) => path,
         None => {
             println!("[Koryphaios] Dev mode: launcher owns the backend");
@@ -111,7 +187,7 @@ fn spawn_embedded_backend(
         }
     };
 
-    println!("[Koryphaios] Starting embedded backend service");
+    println!("[Koryphaios] Starting bundled backend service");
 
     let mut cmd = std::process::Command::new(&backend_path);
     // The backend is a console-subsystem .exe on Windows; without CREATE_NO_WINDOW
@@ -177,7 +253,7 @@ fn spawn_embedded_backend(
         }
     }
 
-    // Pin the build-coherent bundle hash so the embedded backend reports it on
+    // Pin the build-coherent bundle hash so the bundled backend reports it on
     // /api/health (compat.bundleHash). The frontend sentinel compares this to
     // its own compile-time hash and halts if they differ — production builds
     // cannot run a stale frontend against a fresh backend (or vice versa).
@@ -208,7 +284,7 @@ fn spawn_embedded_backend(
         .map_err(|e| format!("Failed to spawn backend: {}", e))?;
 
     println!(
-        "[Koryphaios] Embedded backend started with PID {}",
+        "[Koryphaios] Bundled backend started with PID {}",
         child.id()
     );
 
@@ -241,7 +317,7 @@ async fn wait_for_backend_ready(
             if let Ok(mut child) = process.lock() {
                 if let Ok(Some(status)) = child.try_wait() {
                     return Err(format!(
-                        "Embedded backend exited before becoming ready ({status})"
+                        "Bundled backend exited before becoming ready ({status})"
                     ));
                 }
             }
@@ -292,7 +368,7 @@ fn kill_backend() {
     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
         if let Some(process_arc) = guard.take() {
             if let Ok(mut process) = process_arc.lock() {
-                println!("[Koryphaios] Stopping embedded backend...");
+                println!("[Koryphaios] Stopping bundled backend...");
                 let _ = process.kill();
             }
         }
@@ -1011,11 +1087,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            // Start the backend payload embedded in production builds.
+            // Start the bundled backend service (resource-based, not embedded).
             let config = AppConfig::get();
             let app_handle = app.handle().clone();
 
-            match spawn_embedded_backend(&app_handle) {
+            match spawn_bundled_backend(&app_handle) {
                 Ok(Some(process)) => {
                     let process_pid = process.lock().ok().map(|child| child.id());
                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
@@ -1102,7 +1178,7 @@ pub fn run() {
                                 "Backend process exited; supervisor is restarting it.".to_string(),
                                 dead_pid,
                             );
-                            match spawn_embedded_backend(&watch_handle) {
+                            match spawn_bundled_backend(&watch_handle) {
                                 Ok(Some(new_proc)) => {
                                     let new_pid = new_proc.lock().ok().map(|child| child.id());
                                     if let Ok(mut guard) = BACKEND_PROCESS.lock() {
@@ -1163,7 +1239,7 @@ pub fn run() {
                     // Fail startup instead of showing a frontend that can
                     // never authenticate, load data, or recover.
                     return Err(std::io::Error::other(format!(
-                        "Failed to start embedded backend: {e}"
+                        "Failed to start bundled backend: {e}"
                     ))
                     .into());
                 }

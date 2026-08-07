@@ -3,11 +3,11 @@ name: Auto Release
 # Trigger a release by including "/update" in a commit message pushed to main/master.
 # This workflow bumps the patch version (sourced from tauri.conf.json — the version
 # the Tauri updater compares against), commits the bump, and pushes a v* tag.
-# It then dispatches build-desktop.yml on that tag, which builds, signs, and
+# It then dispatches release-desktop.yml on that tag, which assembles, signs, and
 # publishes the release with latest.json (the Tauri updater manifest).
 #
 # NOTE: Pushes made with GITHUB_TOKEN do not trigger other workflow runs, so we
-# explicitly dispatch build-desktop.yml via workflow_dispatch after tagging.
+# explicitly dispatch release-desktop.yml via workflow_dispatch after tagging.
 
 on:
   push:
@@ -97,9 +97,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # GITHUB_TOKEN pushes don't trigger other workflows, so dispatch explicitly.
-          # build-desktop.yml has workflow_dispatch in its triggers and will build,
-          # sign, upload to the release, and generate latest.json.
-          echo "Dispatching build-desktop.yml on tag v${NEW_VERSION}..."
-          gh workflow run build-desktop.yml --ref "v${NEW_VERSION}"
-          echo "Build workflow dispatched. Monitor at:"
-          echo "https://github.com/Sylorlabs/Koryphaios/actions/workflows/build-desktop.yml"
+          # release-desktop.yml has workflow_dispatch in its triggers and will
+          # assemble, sign, upload to the release, and generate latest.json.
+          echo "Dispatching release-desktop.yml on tag v${NEW_VERSION}..."
+          gh workflow run release-desktop.yml --ref "v${NEW_VERSION}"
+          echo "Release workflow dispatched. Monitor at:"
+          echo "https://github.com/Sylorlabs/Koryphaios/actions/workflows/release-desktop.yml"
