@@ -477,7 +477,6 @@
 
   let parsedHtml = $derived.by(() => {
     if (!debouncedText) return '';
-    if (isStreaming) return '';
     try {
       const withoutRenderDirectives = debouncedText
         .replace(/\{\{render_note:[^}\s]+\}\}/g, '')
@@ -1171,6 +1170,8 @@
                       <span class="whitespace-pre-wrap stream-chunk">{seg.text}</span>
                     {/if}
                   {/each}
+                {:else if parsedHtml}
+                  {@html parsedHtml}
                 {:else}
                   <span class="whitespace-pre-wrap"
                     >{#each streamChunks as c (c.id)}<span class="stream-chunk">{c.text}</span
