@@ -5,7 +5,7 @@ import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { serverLog } from '../../logger';
 import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
-import { AuthenticationError, NotFoundError, ValidationError } from '../../errors/types';
+import { AuthenticationError, NotFoundError } from '../../errors/types';
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request }) => {
@@ -176,19 +176,19 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       })),
     };
   })
-  .post('/:id/context/model-preview', async ({ request, params: { id }, body }) => {
-    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    // Model switched in the composer: re-baseline the context bar from the
-    // backend's trusted window data (never a frontend guess).
-    const { kory } = getContext();
-    // Body has no t.Object schema so it is untyped — cast to the expected shape.
-    const b = body as { model?: string; provider?: string } | undefined;
-    if (!b?.model || !b?.provider) throw new ValidationError('model and provider required');
-    // previewModelContext types provider as `never` to force literal callers;
-    // the runtime value is a valid provider string from the client request.
-    const usage = await kory.previewModelContext(id, b.model, b.provider as never);
-    return { ok: true, usage };
-  })
+  .post('/:id/context/model-preview',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      // Model switched in the composer: re-baseline the context bar from the
+      // backend's trusted window data (never a frontend guess).
+      const { kory } = getContext();
+      // previewModelContext types provider as `never` to force literal callers;
+      // the runtime value is a valid provider string from the client request.
+      const usage = await kory.previewModelContext(id, body.model, body.provider as never);
+      return { ok: true, usage };
+    },
+    { body: t.Object({ model: t.String(), provider: t.String() }) },
+  )
   .post(
     '/:id/context/:archiveId/visibility',
     async ({ request, params: { id, archiveId }, body }) => {
