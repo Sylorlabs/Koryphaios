@@ -1,6 +1,6 @@
 {
   "name": "@koryphaios/mcp-server",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Koryphaios MCP Server — Model Context Protocol server for AI agent error detection, debugging, and console log monitoring",
   "main": "dist/index.js",
   "exports": {

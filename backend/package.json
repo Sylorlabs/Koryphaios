@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/server.ts",
@@ -14,6 +14,7 @@
     "@anthropic-ai/bedrock-sdk": "^0.30.2",
     "@anthropic-ai/sdk": "^0.39.0",
     "@aws-sdk/client-kms": "^3.1020.0",
+    "@codebuff/sdk": "0.10.7",
     "@elysiajs/cors": "^1.4.2",
     "@google/genai": "^1.0.0",
     "@koryphaios/shared": "workspace:*",
