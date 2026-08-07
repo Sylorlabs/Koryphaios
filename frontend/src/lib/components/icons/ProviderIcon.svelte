@@ -264,6 +264,32 @@
       fill="currentColor"
     />
   </svg>
+{:else if provider.toLowerCase() === 'freebuff'}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    class={`provider-icon freebuff-icon ${className}`}
+    role="img"
+    aria-label="Freebuff logo"
+  >
+    <path
+      d="M12 2.5c-1.3 0-2.4.6-3.2 1.5-.3-.2-.7-.3-1.1-.3-1.1 0-2 .9-2 2 0 .4.1.8.3 1.1-.9.8-1.5 1.9-1.5 3.2 0 .5.1 1 .2 1.4L3 14.5c-.3.5-.4 1.1-.2 1.7.2.6.6 1 1.2 1.2l1.2.5c.2.8.7 1.5 1.4 2 .4.3.9.4 1.4.4.3 0 .6 0 .9-.1l1.5-.5c.4.1.8.1 1.2.1h.4c.4 0 .8 0 1.2-.1l1.5.5c.3.1.6.1.9.1.5 0 1-.1 1.4-.4.7-.5 1.2-1.2 1.4-2l1.2-.5c.6-.2 1-.6 1.2-1.2.2-.6.1-1.2-.2-1.7l-1.7-3.1c.1-.4.2-.9.2-1.4 0-1.3-.6-2.4-1.5-3.2.2-.3.3-.7.3-1.1 0-1.1-.9-2-2-2-.4 0-.8.1-1.1.3-.8-.9-1.9-1.5-3.2-1.5z"
+      fill="url(#freebuff-gradient)"
+    />
+    <path
+      d="M9 10.5c.3-.2.6-.3 1-.3s.7.1 1 .3c.2.1.3.3.3.5 0 .3-.2.5-.5.5-.1 0-.2 0-.3-.1-.2-.1-.4-.2-.5-.2-.2 0-.3.1-.5.2-.1.1-.2.1-.3.1-.3 0-.5-.2-.5-.5 0-.2.1-.4.3-.5zm4 0c.3-.2.6-.3 1-.3s.7.1 1 .3c.2.1.3.3.3.5 0 .3-.2.5-.5.5-.1 0-.2 0-.3-.1-.2-.1-.4-.2-.5-.2-.2 0-.3.1-.5.2-.1.1-.2.1-.3.1-.3 0-.5-.2-.5-.5 0-.2.1-.4.3-.5z"
+      fill="#fff"
+      opacity="0.95"
+    />
+    <defs>
+      <linearGradient id="freebuff-gradient" x1="12" x2="12" y1="2.5" y2="21.5" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#f97316" />
+        <stop offset=".5" stop-color="#ef4444" />
+        <stop offset="1" stop-color="#dc2626" />
+      </linearGradient>
+    </defs>
+  </svg>
 {:else if provider.toLowerCase() === 'digitalocean'}
   <svg width={size} height={size} viewBox="0 0 24 24" class={`provider-icon ${className}`} role="img" aria-label="DigitalOcean logo">
     <circle cx="12" cy="12" r="10" fill="#0080ff" />
