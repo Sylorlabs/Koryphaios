@@ -240,9 +240,9 @@
     animation: bulb-fill 1.2s ease-in-out infinite;
   }
   @keyframes lightbulb-bounce {
-    0%, 100% { transform: translateY(6px); }
-    30% { transform: translateY(3px) rotate(-5deg); }
-    60% { transform: translateY(5px) rotate(3deg); }
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-3px) rotate(-5deg); }
+    60% { transform: translateY(-1px) rotate(3deg); }
   }
   @keyframes ray-appear {
     0%, 100% { opacity: 0; transform: scale(0.5); }

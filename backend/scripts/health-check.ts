@@ -51,6 +51,7 @@ const MODEL_LABELS: Record<string, string> = {
   groq: 'Groq',
   openrouter: 'OpenRouter',
   xai: 'xAI',
+  jules: 'Jules (Google, cloud)',
 };
 
 const ENV_VARS: Record<string, string> = {
@@ -60,6 +61,7 @@ const ENV_VARS: Record<string, string> = {
   groq: 'GROQ_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   xai: 'XAI_API_KEY',
+  jules: 'JULES_API_KEY',
 };
 
 async function main(): Promise<void> {

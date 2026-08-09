@@ -1,67 +1,27 @@
 <script lang="ts">
   import { wsStore } from "$lib/stores/websocket.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
-  import { toastStore } from "$lib/stores/toast.svelte";
-  import { FileCode, Check, X, ChevronRight, Plus, Minus, Pencil, CheckCheck, Trash2 } from "lucide-svelte";
+  import { FileCode, Check, X, ChevronRight, Plus, Minus, Pencil } from "lucide-svelte";
   import { slide } from "svelte/transition";
 
   let expanded = $state(false);
   let changes = $derived(wsStore.sessionChanges.get(sessionStore.activeSessionId ?? "") ?? []);
-  let selected = $state<Set<string>>(new Set());
   let applying = $state(false);
 
-  async function applyChanges(payload: { acceptAll?: boolean; rejectAll?: boolean; acceptPaths?: string[]; rejectPaths?: string[] }) {
+  function keepAll() {
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId || applying) return;
     applying = true;
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/changes/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const body = await res.json();
-      if (!res.ok || !body?.ok) {
-        throw new Error(body?.error ?? "Failed to apply changes");
-      }
-      selected = new Set();
-    } catch (err: any) {
-      toastStore.error(err?.message ?? "Failed to apply changes");
-    } finally {
-      applying = false;
-    }
+    wsStore.respondToChanges(sessionId, true);
+    applying = false;
   }
 
-  async function keepAll() {
-    await applyChanges({ acceptAll: true });
-  }
-
-  async function rejectAll() {
-    await applyChanges({ rejectAll: true });
-  }
-
-  async function keepFile(path: string) {
-    await applyChanges({ acceptPaths: [path] });
-  }
-
-  async function rejectFile(path: string) {
-    await applyChanges({ rejectPaths: [path] });
-  }
-
-  async function keepSelected() {
-    if (selected.size === 0) return;
-    await applyChanges({ acceptPaths: [...selected] });
-  }
-
-  async function rejectSelected() {
-    if (selected.size === 0) return;
-    await applyChanges({ rejectPaths: [...selected] });
-  }
-
-  function toggleSelect(path: string) {
-    if (selected.has(path)) selected.delete(path);
-    else selected.add(path);
-    selected = new Set(selected);
+  function rejectAll() {
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId || applying) return;
+    applying = true;
+    wsStore.respondToChanges(sessionId, false);
+    applying = false;
   }
 
   function getFileName(path: string): string {
@@ -110,39 +70,8 @@
       <!-- Change list -->
       {#if expanded}
         <div transition:slide={{ duration: 200 }} class="max-h-60 overflow-y-auto border-t border-[var(--color-border)] p-2 space-y-1 bg-[var(--color-surface-1)]">
-          {#if selected.size > 0}
-            <div class="sticky top-0 z-10 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 mb-2 flex items-center justify-between">
-              <span class="text-[11px] text-[var(--color-text-secondary)]">{selected.size} selected</span>
-              <div class="flex items-center gap-2">
-                <button
-                  class="flex items-center gap-1 px-2.5 py-1 text-[10px] rounded-md bg-emerald-500 text-black font-semibold disabled:opacity-60"
-                  onclick={keepSelected}
-                  disabled={applying}
-                >
-                  <CheckCheck size={11} />
-                  Keep Selected
-                </button>
-                <button
-                  class="flex items-center gap-1 px-2.5 py-1 text-[10px] rounded-md bg-red-500/20 text-red-400 border border-red-500/30 font-semibold disabled:opacity-60"
-                  onclick={rejectSelected}
-                  disabled={applying}
-                >
-                  <Trash2 size={11} />
-                  Reject Selected
-                </button>
-              </div>
-            </div>
-          {/if}
-
           {#each changes as change}
-            <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--color-surface-2)] transition-colors group">
-              <input
-                type="checkbox"
-                class="accent-[var(--color-accent)]"
-                checked={selected.has(change.path)}
-                onchange={() => toggleSelect(change.path)}
-                disabled={applying}
-              />
+            <div class="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">
               {#if change.operation === 'create'}
                 <Plus size={12} class="text-emerald-400" />
               {:else if change.operation === 'delete'}
@@ -163,23 +92,6 @@
                 {#if change.linesDeleted > 0}
                   <span class="text-red-400">-{change.linesDeleted}</span>
                 {/if}
-              </div>
-
-              <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  class="px-2 py-1 text-[10px] rounded-md bg-emerald-500 text-black font-semibold disabled:opacity-60"
-                  onclick={() => keepFile(change.path)}
-                  disabled={applying}
-                >
-                  Keep
-                </button>
-                <button
-                  class="px-2 py-1 text-[10px] rounded-md bg-red-500/20 text-red-400 border border-red-500/30 font-semibold disabled:opacity-60"
-                  onclick={() => rejectFile(change.path)}
-                  disabled={applying}
-                >
-                  Reject
-                </button>
               </div>
             </div>
           {/each}

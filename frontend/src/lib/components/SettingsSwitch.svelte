@@ -5,11 +5,12 @@
     description: string;
     onchange: () => void | Promise<void>;
     compact?: boolean;
+    flat?: boolean;
     large?: boolean;
     disabled?: boolean;
   }
 
-  let { checked, label, description, onchange, compact = false, large = false, disabled = false }: Props = $props();
+  let { checked, label, description, onchange, compact = false, flat = false, large = false, disabled = false }: Props = $props();
 </script>
 
 <button
@@ -19,8 +20,8 @@
   aria-label={label}
   disabled={disabled}
   onclick={onchange}
-  class="group flex w-full items-start justify-between gap-4 rounded-xl border text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {compact ? 'p-3' : 'p-4'}"
-  style="border-color: {checked ? 'color-mix(in srgb, var(--color-accent) 42%, var(--color-border))' : 'var(--color-border)'}; background: {checked ? 'color-mix(in srgb, var(--color-accent) 7%, var(--color-surface-2))' : 'var(--color-surface-2)'};"
+  class="group flex w-full items-start justify-between gap-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {flat ? 'py-3' : `rounded-xl border ${compact ? 'p-3' : 'p-4'}`}"
+  style="border-color: {flat ? 'transparent' : checked ? 'color-mix(in srgb, var(--color-accent) 42%, var(--color-border))' : 'var(--color-border)'}; background: {flat ? 'transparent' : checked ? 'color-mix(in srgb, var(--color-accent) 7%, var(--color-surface-2))' : 'var(--color-surface-2)'};"
 >
   <span class="min-w-0">
     <span class="block text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
