@@ -65,6 +65,7 @@ describe('detectAgentClis', () => {
       'devin',
       'freebuff',
       'grok',
+      'kilo',
       'kimi',
     ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
@@ -76,6 +77,7 @@ describe('detectAgentClis', () => {
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
     expect(byId.cline.provider).toBe('cline'); // Cline CLI harness provider
+    expect(byId.kilo.provider).toBe('kilocode'); // Kilo Code CLI harness provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {

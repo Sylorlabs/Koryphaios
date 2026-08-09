@@ -33,13 +33,15 @@ import {
   detectKimiCodeCLILogin,
   detectFreebuffCLILogin,
   createFreebuffCLIAuthMarker,
+  detectKiloCLILogin,
+  createKiloCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi' | 'freebuff';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi' | 'freebuff' | 'kilo';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -140,6 +142,11 @@ export function canAutoEnable(provider: ProviderName): boolean {
       // is enough — but its presence is the strongest intent signal.
       return detectFreebuffCLILogin()
         || (!!whichBinary('freebuff') && detectFreebuffCLILogin());
+    case 'kilocode':
+      // Kilo Code CLI (fork of OpenCode). The CLI owns its own auth
+      // (~/.local/share/kilo/auth.json). Koryphaios drives it as a
+      // headless harness, so both the binary and a login signal are required.
+      return !!whichBinary('kilo') && detectKiloCLILogin();
     default:
       return false;
   }
@@ -184,6 +191,9 @@ export function cliAutoEnableCreds(
       // ~/.config/manicode/credentials.json); the marker just signals
       // "use the Freebuff/Codebuff SDK harness".
       return { authToken: createFreebuffCLIAuthMarker() };
+    case 'kilocode':
+      // The CLI owns the real token; the marker just signals "use the CLI harness".
+      return { authToken: createKiloCLIAuthMarker() };
     default:
       return null;
   }
@@ -334,7 +344,22 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff];
+  // ── Kilo Code → `kilocode` provider. The official `kilo` CLI (a fork of
+  // OpenCode) owns its own auth at ~/.local/share/kilo/auth.json. Koryphaios
+  // drives it as a headless harness (kilo run --format json). ──
+  const kiloLogin = detectKiloCLILogin();
+  const kilo = mk('kilo', 'Kilo Code CLI', ['kilo'], 'kilocode', {
+    loggedIn: kiloLogin,
+    authSource: kiloLogin ? '~/.local/share/kilo/auth.json' : null,
+    autoEnabled: canAutoEnable('kilocode'),
+    workingNote:
+      'Kilo Code CLI detected and logged in — chats through the kilo CLI harness (kilo owns its own auth).',
+    loggedOutNote:
+      'Kilo Code CLI is installed but not logged in — run "kilo" and use /connect to sign in.',
+    docsUrl: 'https://kilo.ai/cli',
+  });
+
+  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff, kilo];
 }
 
 function mk(

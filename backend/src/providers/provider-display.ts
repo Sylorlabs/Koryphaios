@@ -57,7 +57,7 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
   kimicode: {
     label: 'Kimi Code',
     iconPath: '/provider-icons/lobehub/kimi-color.svg',
-    deployment: 'local',
+    deployment: 'api',
     description:
       'Sign in with your Kimi account via the official OAuth device flow. Koryphaios stores only a local session marker and refreshes tokens automatically — no API key entry.',
   },
@@ -123,6 +123,13 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'local',
     description:
       'Free, ad-supported Codebuff build. Koryphaios reads your freebuff CLI login and calls the Codebuff backend via @codebuff/sdk — no subprocess, no ads, no API key needed.',
+  },
+  kilocode: {
+    label: 'Kilo Code',
+    iconPath: '/provider-icons/lobehub/kilocode.svg',
+    deployment: 'local',
+    description:
+      'CLI only. Runs the official kilo CLI (a fork of OpenCode) on your machine. Install kilo, run "kilo" and use /connect to sign in — no API key needed.',
   },
   jules: {
     label: 'Google Jules',

@@ -325,12 +325,19 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
   // ─── Private Helpers ──────────────────────────────────────────────────────
 
   private buildRequestBody(request: StreamRequest): unknown {
-    return {
-      model: request.model,
-      messages: request.messages.map((m) => ({
+    const messages: unknown[] = [];
+    if (request.systemPrompt?.trim()) {
+      messages.push({ role: 'system', content: request.systemPrompt });
+    }
+    for (const m of request.messages) {
+      messages.push({
         role: m.role,
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      })),
+      });
+    }
+    return {
+      model: request.model,
+      messages,
       stream: true,
       max_tokens: request.maxTokens,
       temperature: request.temperature,

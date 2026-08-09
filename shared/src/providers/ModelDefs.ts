@@ -8,6 +8,18 @@ export type { ProviderName } from './ProviderNames';
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
 
+/** Live quota info for a model from the provider's quota API (e.g. Antigravity's
+ *  RetrieveUserQuota gRPC). `remainingFraction` is 0–1 (0% – 100%); `resetTime`
+ *  is a Unix-ms timestamp when the quota window resets. */
+export interface ModelQuota {
+  /** 0–1 fraction of quota remaining for the current window. */
+  remainingFraction: number;
+  /** Unix-ms timestamp when the quota window resets (0 if unknown). */
+  resetTime: number;
+  /** Quota tier label (e.g. "free", "paid") if reported by the provider. */
+  tier?: string;
+}
+
 export interface ModelDef {
   id: string;
   name: string;
@@ -45,6 +57,9 @@ export interface ModelDef {
   /** True when contextWindow came from (or was confirmed against) a live provider/CLI
    *  response rather than a hand-maintained catalog entry. Trusted for UI telemetry. */
   contextVerified?: boolean;
+  /** Live quota info from the provider's quota API (e.g. Antigravity's
+   *  RetrieveUserQuota). Present only when the provider exposes per-model quota. */
+  quota?: ModelQuota;
 }
 
 export interface ProviderConfig {

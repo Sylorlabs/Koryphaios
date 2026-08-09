@@ -8,12 +8,13 @@
 //   step_start  { part.type: 'step-start' }
 //   text        { part.text: string }  ← content delta
 //   step_finish { part.tokens: { input, output, total, reasoning }, part.reason }
+//   error       { error: { name, data: { message } } }
 //
 // Usage: single-turn completion; continuation via --continue/--session is left
 // for future work.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   type Provider,
   type ProviderEvent,
@@ -23,23 +24,36 @@ import {
   type CliCommand,
 } from './types';
 import { whichBinary } from './cli-detection';
+import { detectKiloCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
 
 const KILO_CLI_TIMEOUT_MS = 300_000;
-const KILO_CLI_AUTH_MARKER = 'cli:kilo:connected';
+const KILO_MODELS_CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
-function detectKiloLogin(): boolean {
-  const bin = whichBinary('kilo');
-  if (!bin) return false;
-  try {
-    const result = spawnSync(bin, ['profile', '--json'], { timeout: 5_000, encoding: 'utf8' });
-    if (result.status !== 0 || !result.stdout) return false;
-    const profile = JSON.parse(result.stdout);
-    return !!(profile.email || profile.name);
-  } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI login detection failed');
-    return false;
+// ─── Model list parsing ────────────────────────────────────────────────────
+//
+// `kilo models` prints one model per line in `kilo/<provider>/<model>` format.
+// Lines starting with `kilo/~` are alias/latest shortcuts — included.
+
+function parseKiloModelList(output: string): ModelDef[] {
+  const models: ModelDef[] = [];
+  for (const raw of output.split('\n')) {
+    const line = raw.trim();
+    if (!line || !line.startsWith('kilo/')) continue;
+    const apiModelId = line;
+    const id = `kilocode/${line}`;
+    const shortName = line.split('/').pop() ?? line;
+    models.push({
+      id,
+      name: shortName,
+      provider: 'kilocode',
+      apiModelId,
+      contextWindow: 200_000, // conservative default; kilo doesn't report per-model
+      maxOutputTokens: 16_384,
+      supportsStreaming: true,
+    });
   }
+  return models;
 }
 
 // Kilo CLI slash commands (TUI commands runnable in Koryphaios via "/" palette).
@@ -58,9 +72,13 @@ export class KiloCodeCLIProvider implements Provider {
 
   constructor(readonly config: ProviderConfig) {}
 
+  private cachedModels: ModelDef[] | null = null;
+  private modelsFetchedAt = 0;
+  private modelsInFlight = false;
+
   isAvailable(): boolean {
     if (this.config.disabled) return false;
-    return !!this.config.authToken || detectKiloLogin();
+    return !!this.config.authToken || detectKiloCLILogin();
   }
 
   getCliCommands(): CliCommand[] {
@@ -68,10 +86,42 @@ export class KiloCodeCLIProvider implements Provider {
   }
 
   listModels(): ModelDef[] {
-    // The CLI currently has no documented machine-readable model listing.
-    // Keeping this empty is preferable to claiming account availability from
-    // an embedded list.
-    return [];
+    if (!this.cachedModels || Date.now() - this.modelsFetchedAt > KILO_MODELS_CACHE_TTL_MS) {
+      this.refreshModels();
+    }
+    return this.cachedModels ?? [];
+  }
+
+  refreshModels(): void {
+    // Non-blocking: spawn kilo models asynchronously so the event loop is
+    // never blocked (spawnSync would stall the server for ~3s on every call).
+    if (this.modelsInFlight) return;
+    const bin = whichBinary('kilo');
+    if (!bin) {
+      providerLog.debug({ provider: 'kilocode' }, 'Kilo CLI not found — skipping model refresh');
+      return;
+    }
+    this.modelsInFlight = true;
+    const child = spawn(bin, ['models'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    child.stderr.on('data', (c: Buffer) => (out += c.toString()));
+    const finish = () => {
+      this.modelsInFlight = false;
+      const models = parseKiloModelList(out);
+      if (models.length > 0) {
+        this.cachedModels = models;
+        this.modelsFetchedAt = Date.now();
+        providerLog.info({ provider: 'kilocode', count: models.length }, 'Kilo CLI model list refreshed');
+      } else {
+        providerLog.debug({ provider: 'kilocode' }, 'Kilo CLI model list empty');
+      }
+    };
+    child.on('close', finish);
+    child.on('error', (err) => {
+      this.modelsInFlight = false;
+      providerLog.debug({ err: err.message }, 'Kilo CLI model refresh failed');
+    });
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -90,7 +140,8 @@ export class KiloCodeCLIProvider implements Provider {
       return;
     }
 
-    // Resolve the model arg — use the apiModelId if defined (e.g. "kilo-auto/frontier")
+    // Resolve the model arg — strip the "kilocode/" prefix Koryphaios adds
+    // e.g. "kilocode/kilo/kilo-auto/free" → "kilo/kilo-auto/free"
     const modelArg = resolveKiloModel(request.model);
 
     const args = ['run', prompt, '--format', 'json'];
@@ -130,7 +181,13 @@ export class KiloCodeCLIProvider implements Provider {
           try { ev = JSON.parse(line); } catch (err: unknown) { providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Kilo CLI skipping non-JSON line'); continue; }
 
           const part = ev.part as Record<string, unknown> | undefined;
-          if (ev.type === 'text' && part && typeof part.text === 'string' && part.text) {
+          if (ev.type === 'error') {
+            const error = ev.error as Record<string, unknown> | undefined;
+            const message = (error?.data as Record<string, unknown> | undefined)?.message
+              ?? error?.name
+              ?? 'Kilo CLI error';
+            yield { type: 'error', error: String(message) };
+          } else if (ev.type === 'text' && part && typeof part.text === 'string' && part.text) {
             yield { type: 'content_delta', content: part.text };
           } else if (ev.type === 'step_finish' && part) {
             const tokens = part.tokens as Record<string, unknown> | undefined;
@@ -168,7 +225,7 @@ export class KiloCodeCLIProvider implements Provider {
 
 function resolveKiloModel(modelId: string): string | undefined {
   // Strip the "kilocode/" prefix from model IDs stored in Koryphaios
-  // e.g. "kilocode/kilo-auto/frontier" → "kilo-auto/frontier"
+  // e.g. "kilocode/kilo/kilo-auto/free" → "kilo/kilo-auto/free"
   if (modelId.startsWith('kilocode/')) return modelId.slice('kilocode/'.length);
   return modelId || undefined;
 }
@@ -181,9 +238,17 @@ function buildKiloPrompt(systemPrompt: string | undefined, messages: ProviderMes
     const content = flattenContent(m.content);
     if (content.trim()) turns.push(`${m.role === 'assistant' ? 'Assistant' : 'User'}: ${content}`);
   }
-  // For single-turn, just return the last user message
+  // For single-turn, prepend the system prompt (if any) to the last user
+  // message. Without this, compaction drops its system prompt and the model
+  // doesn't know to produce JSON.
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-  if (lastUser) return flattenContent(lastUser.content);
+  if (lastUser) {
+    const userContent = flattenContent(lastUser.content);
+    if (systemPrompt?.trim()) {
+      return `[System: ${systemPrompt.trim()}]\n\n${userContent}`;
+    }
+    return userContent;
+  }
   return turns.join('\n\n');
 }
 

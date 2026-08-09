@@ -17,7 +17,7 @@
 // Model discovery: `agy models` → one model name per line, refreshed with a 5-min TTL.
 // Antigravity exposes Gemini, Claude, and GPT models under a single Google subscription.
 
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
+import type { ProviderConfig, ModelDef, ModelQuota } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import {
   readFileSync,
@@ -48,6 +48,7 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
+import { fetchAntigravityQuota, fetchAntigravityQuotaGroups, type AntigravityQuotaGroup } from './antigravity-quota';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -103,6 +104,11 @@ function detectNewConversation(before: Set<string>): string | null {
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let modelsFetchInProgress = false;
+/** Live per-group quota from the agy CLI's `/usage` command, keyed by group
+ *  name. Refreshed alongside the model list and merged into ModelDef.quota. */
+let cachedQuota: Map<string, ModelQuota> | null = null;
+/** Full quota group detail (weekly + 5h buckets) for the API endpoint. */
+let cachedQuotaGroups: AntigravityQuotaGroup[] | null = null;
 
 function refreshModelsInBackground(): void {
   if (modelsFetchInProgress) return;
@@ -110,10 +116,31 @@ function refreshModelsInBackground(): void {
   if (!bin) return;
 
   modelsFetchInProgress = true;
-  fetchAgyModels(bin)
-    .then((models) => {
+  Promise.all([
+    fetchAgyModels(bin),
+    fetchAntigravityQuotaGroups(),
+  ])
+    .then(([models, groups]) => {
       if (models.length > 0) {
-        cachedModels = models;
+        cachedQuotaGroups = groups;
+        // Build a group-name → ModelQuota map from the groups
+        const quotaMap = new Map<string, ModelQuota>();
+        if (groups) {
+          for (const g of groups) {
+            const buckets = g.buckets;
+            if (buckets.length === 0) continue;
+            // Use the more restrictive (lower) remaining fraction
+            const binding = buckets.reduce((min, b) =>
+              b.remainingFraction < min.remainingFraction ? b : min,
+            );
+            quotaMap.set(g.name, {
+              remainingFraction: binding.remainingFraction,
+              resetTime: binding.resetTime ? Date.parse(binding.resetTime) : 0,
+            });
+          }
+        }
+        cachedQuota = quotaMap;
+        cachedModels = mergeQuotaIntoModels(models, quotaMap);
         cachedModelsAt = Date.now();
       }
     })
@@ -123,6 +150,26 @@ function refreshModelsInBackground(): void {
     .finally(() => {
       modelsFetchInProgress = false;
     });
+}
+
+/** Merge live quota info into the model list. The quota map is keyed by
+ *  group name (e.g. "Gemini Models", "Claude and GPT models") because the
+ *  agy CLI reports quota per-group, not per-model. We map each model to its
+ *  group based on the CLI model ID prefix. */
+function mergeQuotaIntoModels(
+  models: ModelDef[],
+  quota: Map<string, ModelQuota> | null,
+): ModelDef[] {
+  if (!quota || quota.size === 0) return models;
+  return models.map((m) => {
+    const apiId = m.apiModelId ?? m.id;
+    // Map model ID to quota group
+    let groupName: string | null = null;
+    if (/^gemini-/i.test(apiId)) groupName = 'Gemini Models';
+    else if (/^(claude-|gpt-)/i.test(apiId)) groupName = 'Claude and GPT models';
+    const q = groupName ? quota.get(groupName) : undefined;
+    return q ? { ...m, quota: q } : m;
+  });
 }
 
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
@@ -341,6 +388,29 @@ export class AntigravityProvider implements Provider {
     }
     refreshModelsInBackground();
     return cachedModels ?? [];
+  }
+
+  /** Force-refresh the model list and quota from the live sources. */
+  refreshModels(): void {
+    cachedModelsAt = 0;
+    refreshModelsInBackground();
+  }
+
+  /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
+   *  name (e.g. "Gemini Models", "Claude and GPT models"). Returns the cached
+   *  quota if fresh, or triggers a background refresh. */
+  getQuota(): Map<string, ModelQuota> | null {
+    if (cachedQuota && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
+      return cachedQuota;
+    }
+    refreshModelsInBackground();
+    return cachedQuota;
+  }
+
+  /** Live quota groups with full bucket detail (weekly + 5h limits).
+   *  Returns the cached groups if fresh, or triggers a background refresh. */
+  getQuotaGroups(): AntigravityQuotaGroup[] | null {
+    return cachedQuotaGroups;
   }
 
   private resolveCliModel(modelId: string): string | undefined {

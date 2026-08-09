@@ -50,7 +50,8 @@ import { z } from 'zod';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { providerLog } from '../logger';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { providerLog, serverLog } from '../logger';
 import { isModelListCacheFresh, enrichFromRemoteMetadata } from './model-list-cache';
 import { createGenericModel } from './models';
 import type { Provider, ProviderEvent, StreamRequest, ProviderMessage, ProviderContentBlock } from './types';
@@ -239,89 +240,151 @@ Current date: {CODEBUFF_CURRENT_DATE}.
 - **Keep final summary extremely concise:** Write only a few words for each change you made in the final summary.
 `;
 
-// ─── Shared freebuff session cache ───────────────────────────────────────────
-// The backend allows one active session per account. Multiple concurrent
-// Koryphaios runs reuse the same session (instanceId) — the backend checks
-// that the instance is active but doesn't enforce single-in-flight-request.
-// Sessions are keyed by `${authToken}:${model}` and cached module-level so
-// concurrent runs share them. Sessions expire on the backend side after a
-// TTL; if a request fails with 428, we invalidate the cache and re-claim.
+// ─── Per-session freebuff session cache ──────────────────────────────────────
+// Each Koryphaios session (including compaction runs) gets its own freebuff
+// instanceId so conversations are not interleaved on the backend. Sessions
+// are keyed by `${authToken}:${model}:${sessionId}` and cached module-level.
+// The instanceId for the current async context is tracked via
+// AsyncLocalStorage so the fetch wrapper injects the correct one without
+// searching a shared cache. Sessions expire on the backend side after a TTL;
+// if a request fails with 428, we invalidate the cache and re-claim.
 
 interface CachedSession {
   instanceId: string;
   model: string;
+  sessionId: string;
   claimedAt: number;
 }
 
 const sessionCache = new Map<string, CachedSession>();
 const SESSION_TTL_MS = 55 * 60 * 1000; // 55 min — backend sessions last ~1h
+const sessionClaimLocks = new Map<string, Promise<string | null>>();
+
+// Tracks the freebuff instanceId for the current async context so the
+// fetch wrapper can inject the correct one per Koryphaios session.
+const freebuffContext = new AsyncLocalStorage<{ instanceId: string }>();
 
 const CODEBUFF_BASE_URL = 'https://www.codebuff.com';
 
-function sessionCacheKey(authToken: string, model: string): string {
-  return `${authToken.slice(0, 8)}:${model}`;
+function sessionCacheKey(authToken: string, model: string, sessionId: string): string {
+  return `${authToken.slice(0, 8)}:${model}:${sessionId}`;
 }
 
 async function claimFreebuffSession(
   authToken: string,
   model: string,
+  sessionId: string,
 ): Promise<string | null> {
-  const key = sessionCacheKey(authToken, model);
+  const key = sessionCacheKey(authToken, model, sessionId);
 
   // Check cache for a valid (non-expired) session.
   const cached = sessionCache.get(key);
   if (cached && Date.now() - cached.claimedAt < SESSION_TTL_MS) {
+    providerLog.debug({ key, instanceId: cached.instanceId, age: Date.now() - cached.claimedAt }, 'Freebuff: reusing cached session');
     return cached.instanceId;
   }
 
-  // Delete any existing session on the backend (best effort).
-  try {
-    await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-  } catch {
-    // Ignore — no session may exist.
+  // Mutex: if another call is already claiming this same key, wait for it
+  // and reuse its result.
+  const inFlight = sessionClaimLocks.get(key);
+  if (inFlight) {
+    providerLog.debug({ key }, 'Freebuff: waiting for in-flight claim');
+    const result = await inFlight;
+    if (result) return result;
+    // If the in-flight claim failed, fall through and try again ourselves.
   }
 
-  // Claim a new session.
-  try {
-    const res = await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-        'x-freebuff-model': model,
-        'Content-Length': '0',
-      },
-    });
-    const session = await res.json();
-    if (session.instanceId) {
-      sessionCache.set(key, {
-        instanceId: session.instanceId,
-        model,
-        claimedAt: Date.now(),
+  const claimPromise = (async (): Promise<string | null> => {
+    providerLog.debug({ key, model, sessionId }, 'Freebuff: claiming new session (cache miss)');
+
+    // Try to claim a new session WITHOUT deleting first. The backend may
+    // allow multiple sessions per account — if so, each Koryphaios session
+    // gets its own isolated instanceId.
+    try {
+      const res = await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'x-freebuff-model': model,
+          'Content-Length': '0',
+        },
       });
-      return session.instanceId;
+      const session = await res.json();
+      if (session.instanceId) {
+        sessionCache.set(key, {
+          instanceId: session.instanceId,
+          model,
+          sessionId,
+          claimedAt: Date.now(),
+        });
+        providerLog.debug({ key, instanceId: session.instanceId }, 'Freebuff: session claimed successfully (no delete needed)');
+        return session.instanceId;
+      }
+      // If the POST failed (e.g. "session already exists"), fall through to
+      // the DELETE + POST path.
+      providerLog.debug({ key, session }, 'Freebuff: claim without delete failed, trying with delete');
+    } catch (err) {
+      providerLog.debug({ err, key }, 'Freebuff: claim without delete errored, trying with delete');
     }
-    providerLog.warn(
-      { session, model },
-      'Freebuff: failed to claim session — rate limited or error',
-    );
-  } catch (err) {
-    providerLog.warn({ err }, 'Freebuff: error claiming session');
+
+    // Fallback: delete the existing session and claim a new one.
+    try {
+      await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+    } catch {
+      // Ignore — no session may exist.
+    }
+
+    try {
+      const res = await fetch(`${CODEBUFF_BASE_URL}/api/v1/freebuff/session`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          'x-freebuff-model': model,
+          'Content-Length': '0',
+        },
+      });
+      const session = await res.json();
+      if (session.instanceId) {
+        sessionCache.set(key, {
+          instanceId: session.instanceId,
+          model,
+          sessionId,
+          claimedAt: Date.now(),
+        });
+        providerLog.debug({ key, instanceId: session.instanceId }, 'Freebuff: session claimed successfully (after delete)');
+        return session.instanceId;
+      }
+      providerLog.warn(
+        { session, model },
+        'Freebuff: failed to claim session — rate limited or error',
+      );
+    } catch (err) {
+      providerLog.warn({ err }, 'Freebuff: error claiming session');
+    }
+    return null;
+  })();
+
+  sessionClaimLocks.set(key, claimPromise);
+  try {
+    return await claimPromise;
+  } finally {
+    sessionClaimLocks.delete(key);
   }
-  return null;
 }
 
-function invalidateSession(authToken: string, model: string): void {
-  sessionCache.delete(sessionCacheKey(authToken, model));
+function invalidateSession(authToken: string, model: string, sessionId: string): void {
+  sessionCache.delete(sessionCacheKey(authToken, model, sessionId));
 }
 
 // ─── Fetch interception for freebuff_instance_id ─────────────────────────────
 // The SDK doesn't know about freebuff sessions, so we patch globalThis.fetch
 // once at module load to inject freebuff_instance_id into the
 // codebuff_metadata of every chat completions request. The wrapper reads
-// from the session cache, so concurrent runs all get the right instanceId.
+// the instanceId from AsyncLocalStorage, so each Koryphaios session gets
+// its own instanceId injected even when multiple sessions run concurrently.
 // We install the wrapper lazily (on first use) to avoid patching fetch in
 // tests or when freebuff is never used.
 
@@ -331,37 +394,52 @@ let originalFetch: typeof globalThis.fetch | null = null;
 function installFetchWrapper(): void {
   if (fetchWrapperInstalled) return;
   originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: any, init?: any) => {
-    const urlStr = typeof url === 'string' ? url : url?.url || url?.toString();
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const urlStr = typeof url === 'string' ? url : (url as Request & { url?: string })?.url || (url as { toString(): string }).toString();
     if (urlStr?.includes('chat/completions') && init?.body) {
       try {
         const body = JSON.parse(init.body);
-        if (body.codebuff_metadata && !body.codebuff_metadata.freebuff_instance_id) {
-          // Find the session for this request's model.
-          const model = body.model as string | undefined;
-          if (model) {
-            // Try all cached sessions for this model (there should be only
-            // one per account, but we might have multiple accounts).
-            for (const [, session] of sessionCache) {
-              if (session.model === model) {
-                body.codebuff_metadata.freebuff_instance_id = session.instanceId;
-                if (!body.codebuff_metadata.trace_session_id) {
-                  body.codebuff_metadata.trace_session_id = crypto.randomUUID();
-                }
-                if (!body.codebuff_metadata.llm_step_number) {
-                  body.codebuff_metadata.llm_step_number = '1';
-                }
-                init.body = JSON.stringify(body);
-                break;
-              }
+        // Ensure codebuff_metadata exists — the SDK may not always include it.
+        if (!body.codebuff_metadata) {
+          body.codebuff_metadata = {};
+        }
+        if (!body.codebuff_metadata.freebuff_instance_id) {
+          // Read the instanceId from AsyncLocalStorage — this is set by
+          // streamResponse when it enters the freebuff context for this
+          // specific Koryphaios session.
+          const ctx = freebuffContext.getStore();
+          if (ctx?.instanceId) {
+            body.codebuff_metadata.freebuff_instance_id = ctx.instanceId;
+            if (!body.codebuff_metadata.trace_session_id) {
+              body.codebuff_metadata.trace_session_id = crypto.randomUUID();
             }
+            if (!body.codebuff_metadata.llm_step_number) {
+              body.codebuff_metadata.llm_step_number = '1';
+            }
+            init.body = JSON.stringify(body);
           }
         }
       } catch {
         // Body isn't JSON or already consumed — skip.
       }
     }
-    return originalFetch!(url, init);
+    const response = await originalFetch!(url, init);
+    // Handle 428 (waiting_room_required): the session expired or was
+    // invalidated. Invalidate the cache so the next request re-claims.
+    if (response.status === 428 && urlStr?.includes('chat/completions')) {
+      providerLog.warn({ url: urlStr?.slice(0, 80) }, 'Freebuff: 428 waiting_room_required — invalidating session cache');
+      // Invalidate the cached session for this async context (if any).
+      const ctx = freebuffContext.getStore();
+      if (ctx?.instanceId) {
+        for (const [key, session] of sessionCache) {
+          if (session.instanceId === ctx.instanceId) {
+            sessionCache.delete(key);
+            break;
+          }
+        }
+      }
+    }
+    return response;
   }) as typeof globalThis.fetch;
   fetchWrapperInstalled = true;
 }
@@ -392,6 +470,7 @@ function buildAgentDefinition(
     // Include all the tools the base agent has, so we don't lose any
     // capabilities by switching to a custom agent.
     toolNames: [
+      // ── File operations (overridden → Kory ToolRegistry) ──
       'write_file',
       'str_replace',
       'apply_patch',
@@ -400,34 +479,45 @@ function buildAgentDefinition(
       'glob',
       'code_search',
       'run_terminal_command',
+      // ── SDK native tools (kept server-side) ──
       'web_search',
-      'read_subtree',
-      'ask_user',
-      'set_messages',
-      'set_output',
       'end_turn',
-      'task_completed',
+      // NOTE: 'task_completed' is intentionally omitted — see comment above.
+      // ── SDK utility tools ──
       'think_deeply',
       'write_todos',
-      'spawn_agent_inline',
-      'spawn_agents',
-      'suggest_followups',
       'skill',
-      'find_files',
-      'lookup_agent_info',
-      'read_docs',
-      'create_plan',
-      'add_subgoal',
-      'update_subgoal',
-      'add_message',
-      // Custom tools (bridged from Kory)
+      // ── Custom tools (bridged from Kory) ──
+      // Notes — core CRUD
       'kory_create_note',
       'kory_search_notes',
       'kory_list_notes',
       'kory_read_note',
+      'kory_update_note',
+      'kory_delete_note',
+      'kory_link_notes',
+      'kory_recall_notes',
+      // Delegation & interaction
       'kory_delegate_to_worker',
       'kory_get_resource_budget',
       'kory_ask_user',
+      // Goals
+      'kory_create_goal',
+      'kory_update_goal',
+      // Workflows
+      'kory_list_workflows',
+      'kory_start_workflow',
+      'kory_update_workflow',
+      'kory_create_workflow_draft',
+      // Context & git
+      'kory_fetch_context',
+      'kory_commit_and_create_pr',
+      // Error analysis
+      'kory_detect_errors',
+      'kory_analyze_error',
+      'kory_suggest_fixes',
+      // Skills
+      'kory_load_skill_detail',
     ],
     mcpServers: {},
     // The systemPrompt MUST start with the Buffy opening text — the backend
@@ -590,12 +680,13 @@ export class FreebuffProvider implements Provider {
     };
 
     // ─── Claim or reuse a freebuff session ────────────────────────────────
-    // The backend requires an active session for free-mode. We cache sessions
-    // module-level so concurrent runs share the same instanceId — the backend
-    // doesn't enforce single-in-flight-request per instance.
+    // Each Koryphaios session gets its own freebuff instanceId so
+    // conversations are not interleaved on the backend. The instanceId is
+    // tracked via AsyncLocalStorage so the fetch wrapper injects the
+    // correct one per session.
     const resolvedModelForSession = modelId || readFreebuffDefaultModel() || 'openai/gpt-5.6-luna';
     installFetchWrapper();
-    const instanceId = await claimFreebuffSession(creds.authToken, resolvedModelForSession);
+    const instanceId = await claimFreebuffSession(creds.authToken, resolvedModelForSession, sessionId);
     if (!instanceId) {
       yield {
         type: 'error',
@@ -622,81 +713,95 @@ export class FreebuffProvider implements Provider {
     // a valid free-mode agent template ID.
     const agentDef = buildAgentDefinition(modelId, request.reasoningLevel);
 
-    const runPromise = client
-      .run({
-        agent: agentDef,
-        prompt: fullPrompt,
-        // fingerprintId is required at runtime (RunExecutionOptions) but
-        // not exposed in the public run() type signature. Cast to inject.
-        fingerprintId: creds.fingerprintId,
-        // costMode controls which agent template the backend uses. For
-        // freebuff (free tier), we use "free" which maps to base2-free-luna
-        // (gpt-5.6-luna with high reasoning by default). When we pass a
-        // custom AgentDefinition with reasoningOptions, it overrides the
-        // template's reasoning settings.
-        costMode: 'free',
-        // Pass empty projectFiles to skip the SDK's tree-sitter WASM
-        // initialization (computeProjectIndex), which hangs/crashes under
-        // Bun due to an Emscripten/WebAssembly incompatibility. The SDK
-        // only uses tree-sitter for its built-in code_search tool, which
-        // we override with kory__grep anyway. Code context is provided by
-        // Koryphaios via the system prompt and tool results.
-        projectFiles: {},
-        // Pass the custom agent definition in agentDefinitions so the SDK
-        // can resolve the agent id.
-        agentDefinitions: [agentDef],
-        ...(request.signal ? { signal: request.signal } : {}),
-      } as Parameters<typeof client.run>[0])
-      .then((result: RunState) => {
-        // If the run produced a lastMessage output, emit it as a final
-        // content delta (the SDK may not emit a text event for the very
-        // last message in some agent configurations).
-        if (result.output?.type === 'lastMessage' && Array.isArray(result.output.value)) {
-          const lastText = result.output.value
-            .filter((part: unknown): part is { type: string; text?: string } =>
-              typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text')
-            .map((part: { type: string; text?: string }) => part.text ?? '')
-            .join('');
-          if (lastText.trim()) {
-            eventQueue.push({ type: 'content_delta', content: lastText });
+    // Run the SDK inside an AsyncLocalStorage context so the fetch wrapper
+    // can inject the correct freebuff_instance_id for this Koryphaios session.
+    // This ensures concurrent sessions (including compaction) each get their
+    // own isolated freebuff session on the backend.
+    //
+    // We use enterWith()/disable() instead of run() because run() doesn't
+    // support async generators (it expects a callback that returns a value,
+    // not a generator that yields). enterWith sets the context synchronously
+    // for the current async execution path, and disable() cleans it up after.
+    freebuffContext.enterWith({ instanceId });
+    try {
+      const runPromise = client
+        .run({
+          agent: agentDef,
+          prompt: fullPrompt,
+          // fingerprintId is required at runtime (RunExecutionOptions) but
+          // not exposed in the public run() type signature. Cast to inject.
+          fingerprintId: creds.fingerprintId,
+          // costMode controls which agent template the backend uses. For
+          // freebuff (free tier), we use "free" which maps to base2-free-luna
+          // (gpt-5.6-luna with high reasoning by default). When we pass a
+          // custom AgentDefinition with reasoningOptions, it overrides the
+          // template's reasoning settings.
+          costMode: 'free',
+          // Pass empty projectFiles to skip the SDK's tree-sitter WASM
+          // initialization (computeProjectIndex), which hangs/crashes under
+          // Bun due to an Emscripten/WebAssembly incompatibility. The SDK
+          // only uses tree-sitter for its built-in code_search tool, which
+          // we override with kory__grep anyway. Code context is provided by
+          // Koryphaios via the system prompt and tool results.
+          projectFiles: {},
+          // Pass the custom agent definition in agentDefinitions so the SDK
+          // can resolve the agent id.
+          agentDefinitions: [agentDef],
+          ...(request.signal ? { signal: request.signal } : {}),
+        } as Parameters<typeof client.run>[0])
+        .then((result: RunState) => {
+          // If the run produced a lastMessage output, emit it as a final
+          // content delta (the SDK may not emit a text event for the very
+          // last message in some agent configurations).
+          if (result.output?.type === 'lastMessage' && Array.isArray(result.output.value)) {
+            const lastText = result.output.value
+              .filter((part: unknown): part is { type: string; text?: string } =>
+                typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text')
+              .map((part: { type: string; text?: string }) => part.text ?? '')
+              .join('');
+            if (lastText.trim()) {
+              eventQueue.push({ type: 'content_delta', content: lastText });
+            }
           }
-        }
-      })
-      .catch((err: unknown) => {
-        runError = err instanceof Error ? err : new Error(String(err));
-        resolveEvent?.();
-      })
-      .finally(() => {
-        runFinished = true;
-        resolveEvent?.();
-      });
-
-    // Drain the event queue as events arrive.
-    while (!runFinished || eventQueue.length > 0) {
-      if (eventQueue.length === 0) {
-        // Wait for the next event or run completion.
-        await new Promise<void>((resolve) => {
-          resolveEvent = resolve;
+        })
+        .catch((err: unknown) => {
+          runError = err instanceof Error ? err : new Error(String(err));
+          resolveEvent?.();
+        })
+        .finally(() => {
+          runFinished = true;
+          resolveEvent?.();
         });
-        resolveEvent = null;
-        if (runError) break;
-        continue;
+
+      // Drain the event queue as events arrive.
+      while (!runFinished || eventQueue.length > 0) {
+        if (eventQueue.length === 0) {
+          // Wait for the next event or run completion.
+          await new Promise<void>((resolve) => {
+            resolveEvent = resolve;
+          });
+          resolveEvent = null;
+          if (runError) break;
+          continue;
+        }
+        yield eventQueue.shift()!;
       }
-      yield eventQueue.shift()!;
+
+      await runPromise;
+
+      const finalRunError = runError as Error | null;
+      if (finalRunError) {
+        yield {
+          type: 'error',
+          error: `Freebuff SDK run failed: ${finalRunError.message}`,
+        };
+        return;
+      }
+
+      yield { type: 'complete', finishReason: 'end_turn' };
+    } finally {
+      freebuffContext.disable();
     }
-
-    await runPromise;
-
-    const finalRunError = runError as Error | null;
-    if (finalRunError) {
-      yield {
-        type: 'error',
-        error: `Freebuff SDK run failed: ${finalRunError.message}`,
-      };
-      return;
-    }
-
-    yield { type: 'complete', finishReason: 'end_turn' };
   }
 }
 
@@ -745,8 +850,8 @@ async function buildKoryToolContext(
     permissionPolicy,
     approvedToolCallIds: new Set(),
     signal: request.signal,
-    waitForUserInput: (question: string, options: string[]) =>
-      ctx.kory.requestToolApproval(sessionId, question, options),
+    waitForUserInput: (question: string, options: string[], opts?: { allowOther?: boolean; allowKeepChatting?: boolean }) =>
+      ctx.kory.requestToolApproval(sessionId, question, options, opts),
     recordChange: (change) => {
       ctx.kory.recordChange?.(sessionId, change);
     },
@@ -771,6 +876,42 @@ async function buildKoryToolContext(
     delegateToWorker: (task: string, domainHint?: string) =>
       ctx.kory.runWorkerPipeline(sessionId, task, undefined, request.reasoningLevel, domainHint),
   };
+}
+
+// ─── Diff parsing helper ─────────────────────────────────────────────────────
+// Strips unified diff formatting to extract the NEW file content.
+// Handles three cases:
+// 1. Pure addition (new file) — all lines start with '+'
+// 2. Modification with "File not found" old content — the SDK generates a
+//    diff comparing against "File not found: /path" when the file doesn't
+//    exist yet. We extract just the '+' lines.
+// 3. Real modification — extract '+' lines as the new content (best effort).
+function stripDiffToContent(diff: string): string {
+  const lines = diff.split('\n');
+  const contentLines = lines.filter(l =>
+    l.startsWith('+') && !l.startsWith('+++') && !l.startsWith('\\')
+  );
+  if (contentLines.length === 0) return diff;
+
+  // Extract the new content from '+' lines.
+  const newContent = contentLines.map(l => l.slice(1)).join('\n');
+
+  // Check if the old content is "File not found" — this means the file
+  // doesn't exist yet, so the diff is effectively a creation.
+  const deletionLines = lines.filter(l =>
+    l.startsWith('-') && !l.startsWith('---')
+  );
+  const isFileNotFound = deletionLines.length > 0 &&
+    deletionLines.every(l => l.includes('File not found') || l.includes('No newline'));
+
+  if (isFileNotFound || deletionLines.length === 0) {
+    return newContent;
+  }
+
+  // For real modifications, return the new content (best effort — the
+  // agent should use str_replace for precise edits, but this handles
+  // cases where the agent uses write_file with a full diff).
+  return newContent;
 }
 
 // ─── overrideTools: route native SDK tools through Kory ─────────────────────
@@ -805,12 +946,23 @@ function buildOverrideTools(toolCtx: ToolContext): OverrideMap {
 
   return {
     // ── File writes ──
-    write_file: async (input: { path: string; content: string; instructions?: string }) => {
+    // The SDK passes two input formats:
+    //   { type: "file", path, content }       — raw file content
+    //   { type: "patch", path, content: patch } — unified diff to apply
+    write_file: async (input: { path: string; content: string; type?: string; instructions?: string }) => {
+      const filePath = input.path;
+      if (input.type === 'patch') {
+        // The SDK sends a unified diff. Strip it to get raw content.
+        const rawContent = stripDiffToContent(input.content);
+        const output = await dispatch('write_file', { path: filePath, content: rawContent });
+        return [{ type: 'json' as const, value: { file: filePath, message: output, unifiedDiff: input.content } }];
+      }
+      // Normal case: raw file content
       const output = await dispatch('write_file', {
-        path: input.path,
+        path: filePath,
         content: input.content,
       });
-      return [{ type: 'json' as const, value: { file: input.path, message: output, unifiedDiff: '' } }];
+      return [{ type: 'json' as const, value: { file: filePath, message: output, unifiedDiff: '' } }];
     },
 
     // ── File edits (str_replace → kory edit_file) ──
@@ -843,22 +995,26 @@ function buildOverrideTools(toolCtx: ToolContext): OverrideMap {
         return [{ type: 'json' as const, value: { message: output, applied: [{ file: op.path, action: 'delete' as const }] } }];
       }
       if (op.type === 'create_file') {
-        // For create_file, the diff IS the file content.
-        const output = await dispatch('write_file', { path: op.path, content: op.diff });
+        // The diff for create_file is a unified diff, not raw content.
+        // Strip the diff formatting to get the raw file content.
+        const rawContent = stripDiffToContent(op.diff);
+        const output = await dispatch('write_file', { path: op.path, content: rawContent });
         return [{ type: 'json' as const, value: { message: output, applied: [{ file: op.path, action: 'add' as const }] } }];
       }
-      // update_file: the SDK passes a unified diff. Kory's edit_file/patch
-      // tools work with old/new string pairs, not raw diffs. Rather than
-      // parse the diff (fragile), instruct the agent to use str_replace —
-      // the SDK's other edit tool that IS routed through Kory with explicit
-      // old/new strings.
-      return [{
-        type: 'json' as const,
-        value: {
-          errorMessage:
-            'apply_patch update_file is not supported through Kory. Use str_replace with explicit old/new strings instead — str_replace is routed through kory__edit_file with full permission gating.',
-        },
-      }];
+      // update_file: try Kory's patch tool with the unified diff.
+      try {
+        const output = await dispatch('patch', { path: op.path, diff: op.diff });
+        return [{ type: 'json' as const, value: { message: output, applied: [{ file: op.path, action: 'update' as const }] } }];
+      } catch {
+        // If patch fails, instruct the agent to use str_replace.
+        return [{
+          type: 'json' as const,
+          value: {
+            errorMessage:
+              'apply_patch update_file failed. Use str_replace with explicit old/new strings instead.',
+          },
+        }];
+      }
     },
 
     // ── Terminal commands → kory__bash ──
@@ -1075,6 +1231,304 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
       execute: async (input) => {
         const output = await dispatch('ask_user', { question: input.question });
         return [{ type: 'json', value: { answer: output } }];
+      },
+    }),
+  );
+
+  // ── Notes: update ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_update_note',
+      inputSchema: z.object({
+        id: z.string().optional().describe('Note ID'),
+        title: z.string().optional().describe('Note title to look up if no ID, or new title'),
+        newTitle: z.string().optional().describe('Rename note to this title'),
+        content: z.string().optional().describe('New markdown content'),
+        tags: z.array(z.string()).optional(),
+        folderPath: z.string().optional(),
+        pinned: z.boolean().optional(),
+        includeInContext: z.boolean().optional(),
+      }),
+      description: 'Update a note in the knowledge network by ID or title.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('update_note', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Notes: delete ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_delete_note',
+      inputSchema: z.object({
+        id: z.string().optional().describe('Note ID'),
+        title: z.string().optional().describe('Note title if ID unknown'),
+      }),
+      description: 'Delete a note from the knowledge network.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('delete_note', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Notes: link ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_link_notes',
+      inputSchema: z.object({
+        fromId: z.string().optional(),
+        fromTitle: z.string().optional().describe('Source note title'),
+        toId: z.string().optional(),
+        toTitle: z.string().optional().describe('Target note title'),
+        syncContent: z.boolean().optional().describe('Append [[wikilink]] to source note (default true)'),
+      }),
+      description: 'Create a directed link between two notes in the knowledge network.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('link_notes', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Notes: recall ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_recall_notes',
+      inputSchema: z.object({
+        query: z.string().optional().describe('Search title/content/tags'),
+        titles: z.array(z.string()).optional().describe('Exact note titles'),
+        ids: z.array(z.string()).optional().describe('Note IDs'),
+        limit: z.number().optional().describe('Max notes to return (default 10)'),
+      }),
+      description: 'Recall notes by query, titles, or IDs from the knowledge network.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('recall_notes', input);
+        return [{ type: 'json', value: { results: output } }];
+      },
+    }),
+  );
+
+  // ── Goals: create ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_create_goal',
+      inputSchema: z.object({
+        objective: z.string().describe('Concrete objective the user explicitly requested as a goal'),
+        scope: z.enum(['workspace', 'project', 'session']).optional(),
+        planningDepth: z.enum(['minimal', 'adaptive', 'structured']).optional(),
+      }),
+      description:
+        'Create a durable Goal Mode goal only when the user explicitly asks to create, track, or turn work into a goal.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('create_goal', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Goals: update ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_update_goal',
+      inputSchema: z.object({
+        status: z.enum(['evidence', 'blocked']),
+        message: z.string().describe('Concrete check/artifact result, or the exact blocker'),
+      }),
+      description:
+        'For an active Goal Mode turn: report concrete completion evidence or a genuine blocker.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('update_goal', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Workflows: list ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_list_workflows',
+      inputSchema: z.object({}),
+      description: 'List registered host-owned workflows available in this workspace.',
+      endsAgentStep: false,
+      execute: async () => {
+        const output = await dispatch('list_workflows', {});
+        return [{ type: 'json', value: { workflows: output } }];
+      },
+    }),
+  );
+
+  // ── Workflows: start ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_start_workflow',
+      inputSchema: z.object({
+        workflowId: z.string().optional(),
+        workflow: z.string().optional().describe('Registered workflow ID or exact display name'),
+        name: z.string().optional().describe('Exact registered workflow display name'),
+        task: z.string().describe('The concrete user task this workflow should carry out'),
+        goalId: z.string().optional(),
+      }),
+      description:
+        'Start a registered, host-owned task workflow when the user explicitly asks for it.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('start_workflow', input);
+        return [{ type: 'json', value: { result: output } }];
+      },
+    }),
+  );
+
+  // ── Workflows: update ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_update_workflow',
+      inputSchema: z.object({
+        runId: z.string(),
+        evidence: z.string(),
+        status: z.enum(['evidence', 'blocked']),
+      }),
+      description: 'Record evidence for a workflow stage.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('update_workflow', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Workflows: create draft ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_create_workflow_draft',
+      inputSchema: z.object({
+        name: z.string(),
+        description: z.string(),
+        stages: z.array(z.object({
+          label: z.string(),
+          description: z.string(),
+        })).min(2).max(12),
+      }),
+      description: 'Create a workflow draft in Goal Mode.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('create_workflow_draft', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
+  // ── Context: fetch ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_fetch_context',
+      inputSchema: z.object({
+        id: z.string().optional().describe('Archive id from a pruned stub, e.g. "cx_12"'),
+        query: z.string().optional().describe('Search past activity by keyword'),
+      }),
+      description:
+        'Recall past session activity (file reads, terminal runs, etc.) by archive ID or keyword search.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('fetch_context', input);
+        return [{ type: 'json', value: { context: output } }];
+      },
+    }),
+  );
+
+  // ── Git: commit and create PR ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_commit_and_create_pr',
+      inputSchema: z.object({
+        taskDescription: z.string().describe('Brief description of the completed task'),
+      }),
+      description:
+        'Auto-commit all changes, create a branch, push it, and open a Pull Request. Use only when a task is complete.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('commit_and_create_pr', input);
+        return [{ type: 'json', value: { result: output } }];
+      },
+    }),
+  );
+
+  // ── Error analysis: detect ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_detect_errors',
+      inputSchema: z.object({
+        source: z.enum(['console', 'runtime', 'build', 'test', 'all']).optional(),
+        language: z.string().optional(),
+        files: z.array(z.string()).optional(),
+        projectRoot: z.string().optional(),
+      }),
+      description: 'Detect errors from various sources (console, runtime, build, test).',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('detect-errors', input);
+        return [{ type: 'json', value: { errors: output } }];
+      },
+    }),
+  );
+
+  // ── Error analysis: analyze ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_analyze_error',
+      inputSchema: z.object({
+        errorId: z.string().describe('ID of the error to analyze'),
+        includeContext: z.boolean().optional(),
+        includeSuggestions: z.boolean().optional(),
+        includeHistory: z.boolean().optional(),
+      }),
+      description: 'Perform deep analysis of a specific error.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('analyze-error', input);
+        return [{ type: 'json', value: { analysis: output } }];
+      },
+    }),
+  );
+
+  // ── Error analysis: suggest fixes ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_suggest_fixes',
+      inputSchema: z.object({
+        errorId: z.string().describe('ID of the error to suggest fixes for'),
+        maxSuggestions: z.number().optional(),
+      }),
+      description: 'Suggest fixes for a specific error.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('suggest-fixes', input);
+        return [{ type: 'json', value: { suggestions: output } }];
+      },
+    }),
+  );
+
+  // ── Skills: load detail ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_load_skill_detail',
+      inputSchema: z.object({
+        name: z.string().describe('Exact active skill name from the prompt manifest'),
+        source: z.enum(['personal', 'project']).optional(),
+      }),
+      description:
+        'Load the full instructions for an active local Koryphaios skill.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('load_skill_detail', input);
+        return [{ type: 'json', value: { skill: output } }];
       },
     }),
   );

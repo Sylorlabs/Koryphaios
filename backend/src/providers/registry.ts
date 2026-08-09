@@ -37,6 +37,7 @@ import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
 import { ClineProvider } from './cline';
+import { KiloCodeCLIProvider } from './kilo-cli';
 import { JulesProvider } from './jules';
 import { BedrockProvider } from './bedrock';
 import { GitLabProvider } from './gitlab';
@@ -52,6 +53,7 @@ import {
   detectClineCLILogin,
   detectFreebuffCLILogin,
   readFreebuffAuthToken,
+  detectKiloCLILogin,
 } from './auth-utils';
 import { cliAutoEnableCreds, whichBinary } from './cli-detection';
 import { discoverCliAccounts } from './cli-accounts';
@@ -91,7 +93,13 @@ const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'devin',
   'cline',
   'freebuff',
+  'kilocode',
 ]);
+
+// CLI harness providers that use a managed app-server instead of a CLI binary
+// on PATH. They get the 'local' deployment but don't go through the standard
+// cliAutoEnableCreds flow.
+const MANAGED_CLI_PROVIDERS = new Set<ProviderName>(['codex-auth']);
 
 const LOCAL_PROVIDER_KEYS = new Set<ProviderName>([
   'local',
@@ -107,7 +115,7 @@ function inferProviderDeployment(
   hasDisplayDeployment?: ProviderDeployment,
 ): ProviderDeployment {
   if (hasDisplayDeployment) return hasDisplayDeployment;
-  if (LOCAL_PROVIDER_KEYS.has(name) || CLI_HARNESS_PROVIDERS.has(name)) return 'local';
+  if (LOCAL_PROVIDER_KEYS.has(name) || CLI_HARNESS_PROVIDERS.has(name) || MANAGED_CLI_PROVIDERS.has(name)) return 'local';
   if (String(name).startsWith('remote-')) return 'cloud';
   if (isCustom) return 'api';
   if (authMode === 'base_url_only') return 'local';
@@ -278,6 +286,9 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   // CodebuffClient (no subprocess, no TUI, no ads). Reads credentials from
   // ~/.config/manicode/credentials.json.
   freebuff: (c) => new FreebuffProvider(c),
+  // Kilo Code CLI — runs the official `kilo` CLI (fork of OpenCode) as a
+  // headless harness (kilo run --format json). The CLI owns auth.
+  kilocode: (c) => new KiloCodeCLIProvider(c),
   // Google Jules — cloud async agent (REST API only, remote VMs + GitHub PRs).
   jules: (c) => (c.disabled || !c.apiKey ? null : new JulesProvider(c)),
   kimicode: (c) => new KimiCodeProvider(c),
@@ -924,6 +935,20 @@ class ProviderRegistry {
             success: false,
             error:
               'Freebuff CLI is not logged in. Run "freebuff login" in your terminal, then reconnect.',
+          };
+        }
+        case 'kilocode': {
+          if (!whichBinary('kilo')) {
+            return {
+              success: false,
+              error: 'Kilo Code CLI (kilo) was not found on PATH. Install it with: npm install -g @kilocode/cli',
+            };
+          }
+          if (detectKiloCLILogin()) return { success: true };
+          return {
+            success: false,
+            error:
+              'Kilo Code CLI is not logged in. Run "kilo" and use /connect to sign in, then reconnect.',
           };
         }
         case 'kimicode': {
@@ -1620,8 +1645,8 @@ class ProviderRegistry {
   }
 
   /** Identify if an error is a quota/rate limit error that should trigger a reroute. */
-  isQuotaError(error: any): boolean {
-    const msg = String(error?.message || error || '').toLowerCase();
+  isQuotaError(error: unknown): boolean {
+    const msg = String((error as { message?: string } | undefined)?.message || error || '').toLowerCase();
     const isQuota =
       msg.includes('quota') ||
       msg.includes('rate limit') ||

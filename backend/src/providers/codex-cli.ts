@@ -203,12 +203,12 @@ export function extractKoryToolEnvelope(
  * not expose private chain-of-thought; with model_reasoning_summary enabled it
  * emits a safe textual summary as a reasoning item, which we can show. */
 export function codexJsonEvents(
-  event: Record<string, any>,
+  event: Record<string, unknown>,
   allowedToolNames: readonly string[],
   accountId?: string,
 ): { events: ProviderEvent[]; completed: boolean } {
   const events: ProviderEvent[] = [];
-  const item = event.item as Record<string, any> | undefined;
+  const item = event.item as Record<string, unknown> | undefined;
   if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
     const extracted = extractKoryToolEnvelope(String(item.text), allowedToolNames);
     if (extracted.content) events.push({ type: 'content_delta', content: extracted.content });
@@ -250,6 +250,20 @@ export function codexJsonEvents(
       });
     }
     return { events, completed: true };
+  } else if (event.type === 'turn.failed') {
+    // Codex CLI emits turn.failed when the model request fails (e.g. usage
+    // limit, auth error, rate limit). Extract the real error message —
+    // it's far more useful than the stderr noise.
+    const msg = (event.error as { message?: string } | undefined)?.message
+      ?? (event.message as string | undefined)
+      ?? 'Codex turn failed (no error message provided)';
+    events.push({ type: 'error', error: msg });
+    return { events, completed: true };
+  } else if (event.type === 'error') {
+    // Codex CLI emits top-level error events for connection / auth issues.
+    const msg = (event as { message?: string }).message
+      ?? 'Codex CLI error (no message provided)';
+    events.push({ type: 'error', error: msg });
   }
   return { events, completed: false };
 }
@@ -539,7 +553,7 @@ export class CodexCliProvider implements Provider {
     const consumeLine = (line: string) => {
       if (!line.trim()) return;
       try {
-        const event = JSON.parse(line) as Record<string, any>;
+        const event = JSON.parse(line) as Record<string, unknown>;
         const translated = codexJsonEvents(event, allowedToolNames, account.id);
         queue.push(...translated.events);
         if (translated.completed) completed = true;
@@ -567,9 +581,24 @@ export class CodexCliProvider implements Provider {
     while (queue.length) yield queue.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {
+      // Filter out Codex CLI's informational stderr noise that isn't the
+      // actual error. "Reading additional input from stdin..." is printed
+      // on every exec invocation, not just failures.
+      const cleanStderr = stderr
+        .trim()
+        .split('\n')
+        .filter((line) => !line.includes('Reading additional input from stdin'))
+        .join('\n')
+        .trim();
+      // If we already emitted an error event from turn.failed, don't
+      // duplicate it — the real error was in stdout, not stderr.
+      const alreadyErrored = queue.some((e) => e.type === 'error');
+      if (alreadyErrored && !cleanStderr) {
+        return;
+      }
       yield {
         type: 'error',
-        error: `Codex CLI failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}`,
+        error: `Codex CLI failed: ${(cleanStderr || `exit status ${exitCode}`).slice(0, 500)}`,
       };
       return;
     }

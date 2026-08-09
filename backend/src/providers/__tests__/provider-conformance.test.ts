@@ -36,6 +36,7 @@ import {
   detectDevinCLILogin,
   detectClineCLILogin,
   detectFreebuffCLILogin,
+  detectKiloCLILogin,
 } from '../auth-utils';
 import type { Provider, ProviderEvent } from '../types';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
@@ -490,6 +491,19 @@ describe('Provider conformance (contract + optional live)', () => {
         result.liveDetail = loggedIn
           ? 'freebuff CLI logged in (~/.config/manicode/credentials.json)'
           : 'no freebuff login';
+        results.push(result);
+        continue;
+      }
+
+      if (name === 'kilocode') {
+        // Kilo Code — `kilo` CLI harness (subprocess, not fetch).
+        // Contract is verified by the on-disk login check, not a mocked fetch.
+        const loggedIn = detectKiloCLILogin();
+        result.evidence = 'CLI harness (kilocode provider via kilo CLI)';
+        result.live = loggedIn ? 'LIVE_PASS' : 'SKIP';
+        result.liveDetail = loggedIn
+          ? 'kilo CLI logged in (~/.local/share/kilo/auth.json)'
+          : 'no kilo login';
         results.push(result);
         continue;
       }

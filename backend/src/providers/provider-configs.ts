@@ -75,26 +75,18 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: [],
     envAuthTokenKey: 'GITHUB_COPILOT_TOKEN',
   },
-  {
-      name: 'codex',
-      baseUrl: '',
-      authMode: 'auth_only',
-      envKeys: [],
-      envAuthTokenKey: 'CODEX_AUTH_TOKEN',
-    },
-    {
-      name: 'codex-auth',
-      baseUrl: '',
-      authMode: 'auth_only',
-      envKeys: [],
-    },
   // CLI harness providers — authenticated via their own CLI login, no API key.
+  { name: 'codex', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CODEX_AUTH_TOKEN' },
+  { name: 'codex-auth', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'claude', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CLAUDE_CODE_OAUTH_TOKEN' },
   { name: 'grok', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'GROK_CODE_XAI_API_KEY' },
   { name: 'antigravity', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'kilocode', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  // Cloud async agent (API key, not a CLI harness)
   {
     name: 'jules',
     baseUrl: 'https://jules.googleapis.com/v1alpha',
@@ -358,15 +350,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.302.ai',
     authMode: 'api_key',
     envKeys: ['A302AI_API_KEY'],
-  },
-
-  // CLI-based Auth Providers
-  {
-    name: 'claude',
-    baseUrl: '',
-    authMode: 'auth_only',
-    envKeys: [],
-    envAuthTokenKey: 'CLAUDE_CODE_OAUTH_TOKEN',
   },
 
   // Specialized

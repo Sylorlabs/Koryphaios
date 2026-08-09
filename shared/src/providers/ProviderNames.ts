@@ -27,6 +27,7 @@ export const ProviderName = {
   Freebuff: 'freebuff',
   Grok: 'grok',
   Jules: 'jules',
+  KiloCode: 'kilocode',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',
@@ -79,7 +80,7 @@ export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | st
 
 // Helper to validate provider names
 export function isValidProvider(name: string): boolean {
-  return Object.values(ProviderName).includes(name as any);
+  return (Object.values(ProviderName) as readonly string[]).includes(name);
 }
 
 // Get all provider names as array
