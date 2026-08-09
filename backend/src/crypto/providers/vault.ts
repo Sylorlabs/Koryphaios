@@ -29,7 +29,7 @@ export interface VaultKMSConfig {
   caCert?: string;
 }
 
-type VaultAuthConfig =
+export type VaultAuthConfig =
   | { token: string }
   | { roleId: string; secretId: string }
   | { role: string; jwt?: string } // Kubernetes

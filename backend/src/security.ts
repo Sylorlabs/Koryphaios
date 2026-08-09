@@ -108,8 +108,34 @@ export function validateBashCommand(command: string): { safe: boolean; reason?: 
 
 // Cache for validated URLs to prevent DNS rebinding attacks
 // Maps hostname -> { ips: string[], timestamp: number }
+// Bounded with LRU eviction so a long-running process doesn't grow the
+// map indefinitely. Entries are evicted on access when expired, and the
+// oldest entries are evicted when the cap is reached.
 const validatedHostCache = new Map<string, { ips: string[]; timestamp: number }>();
 const DNS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const DNS_CACHE_MAX_ENTRIES = 1000;
+
+/** Evict expired entries and trim to the max size. Called on cache writes. */
+function trimValidatedHostCache(): void {
+  const now = Date.now();
+  // First pass: drop expired entries.
+  for (const [key, entry] of validatedHostCache) {
+    if (now - entry.timestamp >= DNS_CACHE_TTL_MS) {
+      validatedHostCache.delete(key);
+    }
+  }
+  // Second pass: if still over cap, evict oldest. Map iteration order is
+  // insertion order, so the first entries are the oldest (LRU).
+  if (validatedHostCache.size > DNS_CACHE_MAX_ENTRIES) {
+    const toRemove = validatedHostCache.size - DNS_CACHE_MAX_ENTRIES;
+    let removed = 0;
+    for (const key of validatedHostCache.keys()) {
+      if (removed >= toRemove) break;
+      validatedHostCache.delete(key);
+      removed++;
+    }
+  }
+}
 
 /**
  * Validate a URL is safe to fetch — blocks SSRF, file://, and private network access.
@@ -223,12 +249,21 @@ export async function validateUrl(url: string): Promise<{
   const cached = validatedHostCache.get(hostname);
   const now = Date.now();
   if (cached && now - cached.timestamp < DNS_CACHE_TTL_MS) {
+    // LRU touch: delete and re-insert so this entry moves to the end of
+    // the iteration order (most recently used). This keeps frequently
+    // accessed hostnames from being evicted by the cap.
+    validatedHostCache.delete(hostname);
+    validatedHostCache.set(hostname, cached);
     // Return cached validated IPs to ensure consistency
     return {
       safe: true,
       validatedHostname: hostname,
       validatedIps: cached.ips,
     };
+  }
+  if (cached) {
+    // Expired — drop it so a stale entry doesn't get LRU-touched.
+    validatedHostCache.delete(hostname);
   }
 
   // Resolve hostname and check the resulting IPs
@@ -269,6 +304,7 @@ export async function validateUrl(url: string): Promise<{
     // Cache the validated IPs
     const allIps = [...addresses, ...addresses6];
     validatedHostCache.set(hostname, { ips: allIps, timestamp: now });
+    trimValidatedHostCache();
 
     return {
       safe: true,
@@ -314,41 +350,30 @@ function isPrivateIPv4(ip: string): boolean {
   );
 }
 
-function isPrivateIPv6(ip: string): boolean {
+export function isPrivateIPv6(ip: string): boolean {
   const lower = ip.toLowerCase();
 
   return (
     lower === '::1' || // loopback
     lower === '::' || // unspecified
-    lower.startsWith('fc') || // fc00::/7 (unique local)
-    lower.startsWith('fd') || // fd00::/8 (unique local)
-    lower.startsWith('fe8') || // fe80::/10 (link-local)
-    lower.startsWith('fe9') || // fe90::/10 (link-local)
-    lower.startsWith('fea') || // fea0::/10 (link-local)
-    lower.startsWith('feb') || // feb0::/10 (link-local)
+    // fc00::/7 — Unique Local Addresses. Covers both fc00::/8 (currently
+    // unallocated) and fd00::/8 (locally assigned). The old code listed
+    // fd00…fd0f, fd1, fd2, fd3 individually — all redundant with fd.
+    lower.startsWith('fc') ||
+    lower.startsWith('fd') ||
+    // fe80::/10 — link-local. The prefix is fe8x, fe9x, feax, febx.
+    // The old code also matched `fe` broadly, which swept in fec0::/10
+    // (deprecated site-local, now reserved) and fe00:: — not link-local.
+    // We now match only the actual /10.
+    lower.startsWith('fe8') ||
+    lower.startsWith('fe9') ||
+    lower.startsWith('fea') ||
+    lower.startsWith('feb') ||
     lower.startsWith('::ffff:') || // IPv4-mapped IPv6 (::ffff:0:0/96)
     lower.startsWith('64:ff9b:') || // IPv4-IPv6 translation (64:ff9b::/96)
-    lower.startsWith('fd00') || // ULA
-    lower.startsWith('fd01') || // ULA
-    lower.startsWith('fd02') || // ULA
-    lower.startsWith('fd03') || // ULA
-    lower.startsWith('fd04') || // ULA
-    lower.startsWith('fd05') || // ULA
-    lower.startsWith('fd06') || // ULA
-    lower.startsWith('fd07') || // ULA
-    lower.startsWith('fd08') || // ULA
-    lower.startsWith('fd09') || // ULA
-    lower.startsWith('fd0a') || // ULA
-    lower.startsWith('fd0b') || // ULA
-    lower.startsWith('fd0c') || // ULA
-    lower.startsWith('fd0d') || // ULA
-    lower.startsWith('fd0e') || // ULA
-    lower.startsWith('fd0f') || // ULA
-    lower.startsWith('fd1') ||
-    lower.startsWith('fd2') ||
-    lower.startsWith('fd3') || // More ULA
-    lower.startsWith('fe') || // Reserved for IETF
-    lower.startsWith('ff') // Multicast
+    lower.startsWith('100::') || // discard prefix (100::/64)
+    lower.startsWith('2001:db8:') || // documentation prefix (2001:db8::/32)
+    lower.startsWith('ff') // multicast (ff00::/8)
   );
 }
 

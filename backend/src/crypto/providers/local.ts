@@ -12,6 +12,13 @@ import type { KMSProvider } from '../types';
 const KEY_FILE = '.master-key';
 const KEY_SIZE = 32;
 const SALT_SIZE = 32;
+const GCM_IV_SIZE = 12; // 96 bits — the recommended IV size for AES-GCM
+const GCM_TAG_SIZE = 16; // 128-bit auth tag
+
+/** Key file format version. v2 uses AES-256-GCM for the DEK wrap; v1 used
+ *  AES-256-CBC (unauthenticated). The loader detects v1 and re-wraps under
+ *  GCM on next save. */
+const KEY_FILE_VERSION = 2;
 
 interface LocalKeyData {
   /** Salt for key derivation */
@@ -22,6 +29,8 @@ interface LocalKeyData {
   keyId: string;
   /** Version for rotation tracking */
   version: number;
+  /** Key file format version. v1 = AES-256-CBC (legacy), v2 = AES-256-GCM. */
+  formatVersion?: number;
 }
 
 export interface LocalKMSConfig {
@@ -79,6 +88,22 @@ export class LocalKMSProvider implements KMSProvider {
       );
     }
 
+    // SECURITY: Require a passphrase. The empty-passphrase fallback stored
+    // the master key "encrypted" with scryptSync('', salt) — anyone with
+    // file read access had both the ciphertext and the key. Now we fail
+    // closed unless KORYPHAIOS_KMS_PASSPHRASE is set OR the user explicitly
+    // opts into the insecure mode with KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS=1
+    // (documented as "your keys are plaintext on disk").
+    if (!this.config.passphrase && process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS !== '1') {
+      throw new Error(
+        'Local KMS requires a passphrase. Set KORYPHAIOS_KMS_PASSPHRASE in your ' +
+          'environment (e.g. in ~/.config/koryphaios/secrets.env), or set ' +
+          'KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS=1 to acknowledge that the master ' +
+          'key will be stored with weak protection. For production, use an ' +
+          'external KMS provider (KORYPHAIOS_KMS_PROVIDER=aws-kms|vault|...).',
+      );
+    }
+
     // Ensure data directory exists and is tightened to 0o700 (heals existing
     // dirs created by older builds with a looser umask).
     ensureSecureDir(this.config.dataDir);
@@ -90,7 +115,7 @@ export class LocalKMSProvider implements KMSProvider {
     }
 
     serverLog.info(
-      { keyId: this.keyData?.keyId, version: this.keyData?.version },
+      { keyId: this.keyData?.keyId, version: this.keyData?.version, formatVersion: this.keyData?.formatVersion ?? 1 },
       'Local KMS initialized',
     );
   }
@@ -107,13 +132,17 @@ export class LocalKMSProvider implements KMSProvider {
     // Generate random DEK
     const dek = randomBytes(KEY_SIZE);
 
-    // Encrypt DEK with master key
-    const iv = randomBytes(16);
-    const cipher = createCipheriv('aes-256-cbc', masterKey, iv);
+    // Encrypt DEK with master key using AES-256-GCM (authenticated).
+    // The auth tag protects against tampering — CBC had no integrity
+    // guarantee, so a modified encrypted-DEK blob would fail on decrypt
+    // but with no way to detect corruption vs. attack.
+    const iv = randomBytes(GCM_IV_SIZE);
+    const cipher = createCipheriv('aes-256-gcm', masterKey, iv);
     const encrypted = Buffer.concat([cipher.update(dek), cipher.final()]);
+    const authTag = cipher.getAuthTag();
 
-    // Combine IV + encrypted DEK
-    const combined = Buffer.concat([iv, encrypted]);
+    // Combine IV + authTag + encrypted DEK
+    const combined = Buffer.concat([iv, authTag, encrypted]);
 
     return {
       plaintext: dek,
@@ -128,14 +157,35 @@ export class LocalKMSProvider implements KMSProvider {
 
     const combined = Buffer.from(encryptedDek, 'base64');
 
-    // Extract IV and encrypted data
+    // GCM format: IV (12) + authTag (16) + ciphertext
+    // Legacy CBC format: IV (16) + ciphertext (no auth tag)
+    // Detect by length: GCM has at least 12+16=28 bytes of header; CBC has 16.
+    // We try GCM first; if the auth tag verification fails AND the blob looks
+    // like legacy CBC, fall back to CBC for backward compatibility.
+    if (combined.length >= GCM_IV_SIZE + GCM_TAG_SIZE) {
+      try {
+        const iv = combined.subarray(0, GCM_IV_SIZE);
+        const authTag = combined.subarray(GCM_IV_SIZE, GCM_IV_SIZE + GCM_TAG_SIZE);
+        const encrypted = combined.subarray(GCM_IV_SIZE + GCM_TAG_SIZE);
+        const decipher = createDecipheriv('aes-256-gcm', this.masterKey, iv);
+        decipher.setAuthTag(authTag);
+        return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+      } catch (gcmErr) {
+        // Fall through to legacy CBC attempt for old envelopes.
+        serverLog.debug(
+          { err: gcmErr instanceof Error ? gcmErr.message : String(gcmErr) },
+          'GCM DEK decrypt failed; trying legacy CBC format',
+        );
+      }
+    }
+
+    // Legacy CBC format (v1 key files and old envelopes).
     const iv = combined.subarray(0, 16);
     const encrypted = combined.subarray(16);
-
-    // Decrypt DEK
     const decipher = createDecipheriv('aes-256-cbc', this.masterKey, iv);
     const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
 
+    serverLog.warn('Decrypted DEK using legacy CBC format — re-encrypt to migrate to GCM.');
     return decrypted;
   }
 
@@ -199,11 +249,14 @@ export class LocalKMSProvider implements KMSProvider {
     const { createHmac, randomBytes, createCipheriv } = await import('node:crypto');
     // Derive a deterministic user key from master key + derivationInput
     const userKey = createHmac('sha256', masterKey).update(derivationInput).digest();
-    // Encrypt the derived key for storage (using master key as KEK)
-    const iv = randomBytes(16);
-    const cipher = createCipheriv('aes-256-cbc', masterKey, iv);
+    // Encrypt the derived key for storage using AES-256-GCM (authenticated).
+    // The auth tag protects against tampering — the old CBC path had no
+    // integrity guarantee.
+    const iv = randomBytes(GCM_IV_SIZE);
+    const cipher = createCipheriv('aes-256-gcm', masterKey, iv);
     const enc = Buffer.concat([cipher.update(userKey), cipher.final()]);
-    const encrypted = Buffer.concat([iv, enc]).toString('base64');
+    const authTag = cipher.getAuthTag();
+    const encrypted = Buffer.concat([iv, authTag, enc]).toString('base64');
     return { plaintext: userKey, encrypted };
   }
 
@@ -228,6 +281,7 @@ export class LocalKMSProvider implements KMSProvider {
       encryptedKey: '', // Will be set by saveMasterKey
       keyId,
       version: 1,
+      formatVersion: KEY_FILE_VERSION,
     };
 
     await this.saveMasterKey(masterKey);
@@ -250,42 +304,40 @@ export class LocalKMSProvider implements KMSProvider {
       this.keyData = JSON.parse(content) as LocalKeyData;
 
       const encryptedKey = Buffer.from(this.keyData.encryptedKey, 'base64');
+      const formatVersion = this.keyData.formatVersion ?? 1;
 
-      if (this.config.passphrase) {
-        // Decrypt with passphrase
-        const salt = Buffer.from(this.keyData.salt, 'base64');
-        const key = scryptSync(this.config.passphrase, salt, KEY_SIZE);
+      // Derive the key-encryption key from the passphrase (or empty string
+      // in insecure mode, which is now gated by KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS).
+      const passphrase = this.config.passphrase ?? '';
+      const salt = Buffer.from(this.keyData.salt, 'base64');
+      const kek = scryptSync(passphrase, salt, KEY_SIZE);
 
-        const iv = encryptedKey.subarray(0, 16);
-        const encrypted = encryptedKey.subarray(16);
-
-        const decipher = createDecipheriv('aes-256-cbc', key, iv);
+      if (formatVersion >= 2) {
+        // GCM format: IV (12) + authTag (16) + ciphertext
+        const iv = encryptedKey.subarray(0, GCM_IV_SIZE);
+        const authTag = encryptedKey.subarray(GCM_IV_SIZE, GCM_IV_SIZE + GCM_TAG_SIZE);
+        const encrypted = encryptedKey.subarray(GCM_IV_SIZE + GCM_TAG_SIZE);
+        const decipher = createDecipheriv('aes-256-gcm', kek, iv);
+        decipher.setAuthTag(authTag);
         this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-
-        // Clear derived key
-        key.fill(0);
       } else {
-        // No passphrase - assume direct storage (legacy/insecure mode)
+        // Legacy v1 CBC format — decrypt, then re-save under GCM.
         const iv = encryptedKey.subarray(0, 16);
         const encrypted = encryptedKey.subarray(16);
-
-        // For backward compatibility, try to decrypt with empty key
-        const key = scryptSync('', Buffer.from(this.keyData.salt, 'base64'), KEY_SIZE);
-
-        try {
-          const decipher = createDecipheriv('aes-256-cbc', key, iv);
-          this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-        } catch (err: unknown) {
-          // Try plaintext (very old format)
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Legacy key decryption failed, trying plaintext format');
-          this.masterKey = encryptedKey;
-        }
-
-        key.fill(0);
+        const decipher = createDecipheriv('aes-256-cbc', kek, iv);
+        this.masterKey = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+        serverLog.warn(
+          'Loaded master key from v1 (CBC) key file — re-saving under GCM (v2).',
+        );
+        // Re-wrap under GCM and bump formatVersion.
+        this.keyData.formatVersion = KEY_FILE_VERSION;
+        await this.saveMasterKey(this.masterKey);
       }
 
+      kek.fill(0);
+
       serverLog.info(
-        { keyId: this.keyData.keyId, version: this.keyData.version },
+        { keyId: this.keyData.keyId, version: this.keyData.version, formatVersion: this.keyData.formatVersion },
         'Master key loaded',
       );
     } catch (error: unknown) {
@@ -298,36 +350,25 @@ export class LocalKMSProvider implements KMSProvider {
       throw new Error('Key data not initialized');
     }
 
-    let encryptedKey: Buffer;
+    // Derive the key-encryption key from the passphrase (or empty string
+    // in insecure mode).
+    const passphrase = this.config.passphrase ?? '';
+    const salt = Buffer.from(this.keyData.salt, 'base64');
+    const kek = scryptSync(passphrase, salt, KEY_SIZE);
 
-    if (this.config.passphrase) {
-      // Encrypt with passphrase
-      const salt = Buffer.from(this.keyData.salt, 'base64');
-      const key = scryptSync(this.config.passphrase, salt, KEY_SIZE);
+    // Encrypt the master key with AES-256-GCM (authenticated).
+    const iv = randomBytes(GCM_IV_SIZE);
+    const cipher = createCipheriv('aes-256-gcm', kek, iv);
+    const encrypted = Buffer.concat([cipher.update(masterKey), cipher.final()]);
+    const authTag = cipher.getAuthTag();
 
-      const iv = randomBytes(16);
-      const cipher = createCipheriv('aes-256-cbc', key, iv);
-      const encrypted = Buffer.concat([cipher.update(masterKey), cipher.final()]);
+    // Combine IV + authTag + encrypted master key
+    const encryptedKey = Buffer.concat([iv, authTag, encrypted]);
 
-      encryptedKey = Buffer.concat([iv, encrypted]);
-
-      // Clear derived key
-      key.fill(0);
-    } else {
-      // Store with empty encryption (insecure but functional)
-      const salt = Buffer.from(this.keyData.salt, 'base64');
-      const key = scryptSync('', salt, KEY_SIZE);
-
-      const iv = randomBytes(16);
-      const cipher = createCipheriv('aes-256-cbc', key, iv);
-      const encrypted = Buffer.concat([cipher.update(masterKey), cipher.final()]);
-
-      encryptedKey = Buffer.concat([iv, encrypted]);
-
-      key.fill(0);
-    }
+    kek.fill(0);
 
     this.keyData.encryptedKey = encryptedKey.toString('base64');
+    this.keyData.formatVersion = KEY_FILE_VERSION;
 
     // Write with strict permissions
     writeFileSync(this.keyFilePath, JSON.stringify(this.keyData, null, 2), { mode: 0o600 });

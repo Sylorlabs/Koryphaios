@@ -26,6 +26,10 @@ compat-hash.json
 .env
 .env.local
 .env.*.local
+.env.pre-rotation.bak
+
+# Test coverage output
+frontend/coverage/
 
 # Logs
 *.log
