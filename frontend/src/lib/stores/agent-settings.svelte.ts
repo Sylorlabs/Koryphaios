@@ -13,6 +13,31 @@ import { apiFetch } from '$lib/api.svelte';
 // Types
 // ============================================================================
 
+export interface SandboxSettings {
+  /** Master sandbox toggle. 'auto' = sandbox plan/critic/worker only;
+   *  'always' = sandbox all agent bash execution; 'off' = no sandbox. */
+  mode: 'auto' | 'always' | 'off';
+  /** When sandboxed, enforce the static command whitelist. */
+  commandWhitelist: boolean;
+  /** When sandboxed, block shell metacharacters (pipes, substitution, etc.). */
+  metacharacters: boolean;
+  /** When sandboxed, confine execution to the project working directory. */
+  pathConfinement: boolean;
+  /** When sandboxed, block network commands (curl, wget, ssh, etc.). */
+  network: boolean;
+  /** When sandboxed, block container tools (docker, podman, etc.). */
+  containerTools: boolean;
+}
+
+export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
+  mode: 'auto',
+  commandWhitelist: true,
+  metacharacters: true,
+  pathConfinement: true,
+  network: true,
+  containerTools: true,
+};
+
 export interface AgentSettings {
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
@@ -43,6 +68,18 @@ export interface AgentSettings {
   approvalThresholdLines: number;
   /** Apply the configured file/line approval thresholds. Off by default. */
   autonomyLimitsEnabled: boolean;
+  /** Bash execution sandbox controls. */
+  sandbox: SandboxSettings;
+  /** Sub-agent (worker) approval policy: 'manager' | 'user' | 'auto'. */
+  subAgentApproval: 'manager' | 'user' | 'auto';
+  /** Tool names that always bypass approval prompts. */
+  toolAllowlist: string[];
+  /** Tool names that are always denied. */
+  toolBlocklist: string[];
+  /** Bash base-command patterns that bypass the sandbox safety prompt. */
+  bashCommandAllowlist: string[];
+  /** Bash base-command patterns that are always blocked without prompting. */
+  bashCommandBlocklist: string[];
   /** Experimental: Local Web Search (DuckDuckGo) */
   localWebSearch: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
@@ -241,6 +278,12 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
   autonomyLimitsEnabled: false,
+  sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
+  subAgentApproval: 'manager',
+  toolAllowlist: [],
+  toolBlocklist: [],
+  bashCommandAllowlist: [],
+  bashCommandBlocklist: [],
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,

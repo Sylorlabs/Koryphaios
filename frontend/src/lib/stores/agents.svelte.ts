@@ -13,6 +13,7 @@ import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { feedStore, getGroupedEntries } from './feed.svelte';
 import { runStateStore } from './run-state.svelte';
+import { TERMINAL_AGENT_STATUSES } from './run-state-core';
 
 // ─── Agent State ────────────────────────────────────────────────────────────
 
@@ -169,7 +170,15 @@ export function appendAgentContent(agentId: string, content: string, sessionId?:
   const agent = agents.get(agentId);
   if (agent) {
     agent.content += content;
-    agent.status = 'streaming';
+    // Terminal statuses are sticky — a late stream.delta arriving after
+    // agent.status: done (reordering, replay, or a trailing provider chunk)
+    // must NOT flip the WorkerCard back to "Streaming". The content is still
+    // appended (harmless for the thread feed), but the status stays put.
+    // Explicit re-activation goes through updateAgentStatus / spawnAgent,
+    // which are not guarded.
+    if (!TERMINAL_AGENT_STATUSES.has(agent.status)) {
+      agent.status = 'streaming';
+    }
     if (sessionId) agent.sessionId = sessionId;
     commitAgents();
   }
@@ -188,7 +197,11 @@ export function addToolCall(agentId: string, name: string, sessionId?: string) {
   const agent = agents.get(agentId);
   if (agent) {
     agent.toolCalls.push({ name, status: 'running' });
-    agent.status = 'tool_calling';
+    // Same stickiness guard as appendAgentContent — a late stream.tool_call
+    // after the agent is done must not resurrect it as "tool_calling".
+    if (!TERMINAL_AGENT_STATUSES.has(agent.status)) {
+      agent.status = 'tool_calling';
+    }
     if (sessionId) agent.sessionId = sessionId;
     commitAgents();
   }

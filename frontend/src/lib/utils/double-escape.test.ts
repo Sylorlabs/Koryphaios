@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { registerEligibleEscape } from './double-escape';
 
 describe('double Escape Time Travel gesture', () => {

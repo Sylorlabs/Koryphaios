@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import type { ProviderInfo } from '@koryphaios/shared';
 import { getModelConfigurationWarning, isEnabledModelSelection } from './model-config';
 

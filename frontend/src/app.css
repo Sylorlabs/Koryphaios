@@ -512,6 +512,19 @@ pre {
   cursor: pointer;
 }
 
+/* Feed content is always fully selectable — the virtual list uses
+   position:absolute which can fragment native selection; ensure no
+   inherited user-select:none ever suppresses text highlighting inside
+   messages, tool output, thoughts, or errors. */
+.markdown-content,
+.feed-assistant-message,
+.virtual-list-item pre,
+.virtual-list-item code {
+  user-select: text;
+  -webkit-user-select: text;
+  -ms-user-select: text;
+}
+
 /* Active session highlight fallback for environments where Tailwind arbitrary classes are not applied */
 .active-session {
   background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.14), rgba(var(--color-accent-rgb), 0.08));

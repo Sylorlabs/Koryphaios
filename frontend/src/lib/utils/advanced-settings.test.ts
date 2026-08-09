@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { filterAdvancedSettings, type SearchableAdvancedSetting } from './advanced-settings';
 
 const settings: SearchableAdvancedSetting[] = [

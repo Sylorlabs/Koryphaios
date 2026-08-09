@@ -285,13 +285,22 @@
     if (typeof window === 'undefined' || !entryElement) return null;
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || !selection.toString().trim()) return null;
+    // Prefer the actual highlighted text if any part of the selection is
+    // inside this entry. Previously we required BOTH endpoints inside the
+    // entry, which dropped cross-entry selections entirely.
     const range = selection.getRangeAt(0);
-    return entryElement.contains(range.startContainer) && entryElement.contains(range.endContainer)
-      ? selection.toString()
-      : null;
+    if (
+      entryElement.contains(range.startContainer) ||
+      entryElement.contains(range.endContainer)
+    ) {
+      return selection.toString();
+    }
+    return null;
   }
 
   async function copyEntryText() {
+    // Use the live selection if any part of it is within this entry;
+    // otherwise fall back to the full entry text.
     await navigator.clipboard.writeText(selectedEntryText() ?? currentText);
     copied = true;
     contextMenu = null;
@@ -1514,7 +1523,6 @@
 {#if toolDetailsOpen && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
   <div
     class="mt-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
-    transition:fade={{ duration: 120 }}
   >
     <header
       class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2"

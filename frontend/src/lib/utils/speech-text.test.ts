@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'vitest';
 import { chunkSpeech, markdownToSpeech } from './speech-text';
 describe('speech-safe text', () => {
   it('removes code and URLs while preserving readable structure', () =>

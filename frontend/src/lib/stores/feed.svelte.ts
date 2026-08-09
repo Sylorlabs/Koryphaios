@@ -46,6 +46,11 @@ let loadingSessionId = $state('');
 let feedTransitionGeneration = 0;
 let feedTransitionBaseLength = 0;
 const sessionFeedCache = new Map<string, FeedEntry[]>();
+// Message IDs deleted client-side but possibly still present in an in-flight
+// fetch response. loadSessionMessages filters these out so a reload that was
+// already underway when the user deleted a message can't bring it back.
+// The backend deletion is permanent, so this only guards the race window.
+const deletedMessageIds = new Set<string>();
 
 // Cache for grouped feed — rebuild only on structural changes, not per token
 let lastGroupedFeed = $state<FeedEntry[]>([]);
@@ -95,6 +100,7 @@ function activateSessionFeed(sessionId: string): number {
   streamingRevision = 0;
   analyzingThoughtId = null;
   activeThinkingStartedAt.clear();
+  deletedMessageIds.clear();
   feedVersion++;
   rebuildGroupedFeedCache();
   return feedTransitionGeneration;
@@ -412,6 +418,30 @@ function removeEntries(ids: Set<string>) {
   rebuildGroupedFeedCache();
 }
 
+/** Delete a feed entry: persist the underlying message deletion to the backend
+ *  (so it can't reappear on reload), track the deleted message ID against
+ *  in-flight fetches, and remove the entry from the in-memory feed.
+ *
+ *  Entries without a `messageId` (ephemeral thinking blocks, live tool calls
+ *  that haven't been archived, etc.) are removed from the UI only — they were
+ *  never persisted, so there's nothing to delete server-side. */
+async function deleteEntry(entry: FeedEntry): Promise<void> {
+  const messageId = entry.metadata?.messageId as string | undefined;
+  const sessionId = (entry.metadata?.sessionId as string | undefined) ?? feedSessionId;
+  if (messageId && sessionId) {
+    deletedMessageIds.add(messageId);
+    try {
+      await apiFetch(apiUrl(`/api/messages/${sessionId}/${messageId}`), {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('Failed to delete message on backend:', err);
+      // Still remove from UI — the user explicitly asked to delete it.
+    }
+  }
+  removeEntries(new Set([entry.id]));
+}
+
 function removeContentEntriesForAgent(agentId: string) {
   const entriesToRemove = new Set<string>();
   for (let i = feed.length - 1; i >= 0; i--) {
@@ -453,10 +483,17 @@ function getToolName(entry: FeedEntry): string {
 
 export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
   const result: FeedEntry[] = [];
+  const seenIds = new Set<string>();
   let currentGroup: FeedEntry | null = null;
   let agentGroup: FeedEntry | null = null;
 
   for (const entry of entries) {
+    // Defensive dedup: if the feed array somehow contains two entries
+    // with the same id (e.g. a reload race that bypasses the merge
+    // dedup), skip the duplicate instead of crashing Svelte's keyed
+    // each block with `each_key_duplicate`.
+    if (seenIds.has(entry.id)) continue;
+    seenIds.add(entry.id);
     // Only an actual `agent.spawned` worker may be rendered as a sub-agent.
     // Provider names, stale IDs, and ordinary manager errors must never gain
     // worker UI merely because their id differs from `kory-manager`.
@@ -552,6 +589,12 @@ async function loadSessionMessages(
   // whole round trip below. Instead remember where "new" entries begin and
   // swap everything in atomically once the fetched history is ready.
   const liveTailAtLoad = feed.slice(feedTransitionBaseLength);
+
+  // Filter out messages deleted client-side whose deletion may not yet be
+  // reflected in this fetch response (race with an in-flight reload).
+  if (deletedMessageIds.size > 0) {
+    messages = messages.filter((m) => !deletedMessageIds.has(m.id));
+  }
 
   let timeline: Array<{ messageId?: string; hash?: string }> = [];
   let contextData: {
@@ -760,7 +803,14 @@ async function loadSessionMessages(
   // switch, or this same session's now-persisted turn) and gets replaced.
   // Preserve only events that arrived after the immediate text-history commit.
   // Cached pre-switch rows were replaced above and can never leak back in.
-  feed = [...merged, ...feed.slice(feedTransitionBaseLength)];
+  //
+  // `merged` already includes `liveOperational` (a subset of the tail), so
+  // drop those IDs from the tail before concatenating — otherwise the same
+  // entry appears twice and Svelte's keyed each block crashes with
+  // `each_key_duplicate`.
+  const mergedIds = new Set(merged.map((e) => e.id));
+  const tailAfterMerged = feed.slice(feedTransitionBaseLength).filter((e) => !mergedIds.has(e.id));
+  feed = [...merged, ...tailAfterMerged];
   feedTransitionBaseLength = merged.length;
   sessionFeedCache.set(sessionId, cloneEntries(feed));
   feedVersion++;
@@ -799,6 +849,7 @@ export const feedStore = {
   upsertCompaction,
   hasPersistedAssistantContaining,
   removeEntries,
+  deleteEntry,
   setEntryVisibility,
   finalizeThinking,
   beginThinking,

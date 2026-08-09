@@ -117,10 +117,30 @@
 
 		window.addEventListener('click', handleExternalLinks);
 
+		// Global copy handler: the feed uses a virtual list with position:absolute
+		// items, which can fragment the browser's native selection → copy pipeline.
+		// Intercept every copy event, read the full live selection via
+		// getSelection().toString(), and write that to the clipboard so the user
+		// always gets exactly what they highlighted — never a partial fragment.
+		const handleCopy = (e: ClipboardEvent) => {
+			const selection = window.getSelection();
+			const text = selection?.toString() ?? '';
+			if (!text) return; // Let the default handle empty selections
+			e.preventDefault();
+			e.clipboardData?.setData('text/plain', text);
+			// Best-effort HTML copy for rich-text targets (notes editors, docs)
+			try {
+				const html = selection?.getRangeAt(0)?.cloneContents()?.textContent ?? text;
+				e.clipboardData?.setData('text/html', html);
+			} catch { /* range extraction can throw on cross-shadow selections */ }
+		};
+		document.addEventListener('copy', handleCopy);
+
 		return () => {
 			window.removeEventListener('offline', goOffline);
 			window.removeEventListener('online', goOnline);
 			window.removeEventListener('click', handleExternalLinks);
+			document.removeEventListener('copy', handleCopy);
 		};
 	});
 

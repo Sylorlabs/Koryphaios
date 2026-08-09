@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { OrderedEventBuffer } from './ordered-event-buffer';
 
 interface Event {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { agentSettingsStore, DEFAULT_AGENT_SETTINGS } from '$lib/stores/agent-settings.svelte';
+  import { agentSettingsStore, DEFAULT_AGENT_SETTINGS, DEFAULT_SANDBOX_SETTINGS } from '$lib/stores/agent-settings.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
@@ -30,6 +30,8 @@
     Brain,
     Route,
     Search,
+    Boxes,
+    Users,
   } from 'lucide-svelte';
 
   // Props
@@ -294,6 +296,142 @@
   async function toggleSetting(key: keyof typeof DEFAULT_AGENT_SETTINGS) {
     const current = agentSettingsStore.settings[key];
     await agentSettingsStore.saveSettings({ [key]: !current });
+  }
+
+  async function toggleSandboxFlag(
+    key: 'commandWhitelist' | 'metacharacters' | 'pathConfinement' | 'network' | 'containerTools',
+  ) {
+    const current = agentSettingsStore.settings.sandbox ?? DEFAULT_SANDBOX_SETTINGS;
+    await agentSettingsStore.saveSettings(
+      { sandbox: { ...current, [key]: !current[key] } },
+      { quietSuccess: true },
+    );
+  }
+
+  async function setSandboxMode(mode: 'auto' | 'always' | 'off') {
+    const current = agentSettingsStore.settings.sandbox ?? DEFAULT_SANDBOX_SETTINGS;
+    await agentSettingsStore.saveSettings(
+      { sandbox: { ...current, mode } },
+      { quietSuccess: true },
+    );
+  }
+
+  async function setSubAgentApproval(mode: 'manager' | 'user' | 'auto') {
+    await agentSettingsStore.saveSettings(
+      { subAgentApproval: mode },
+      { quietSuccess: true },
+    );
+  }
+
+  // Tool catalog grouped by category for the allowlist/blocklist UI.
+  // Interaction tools (ask_user, ask_manager) are excluded — they're always
+  // allowed and cannot be blocked.
+  const TOOL_CATALOG: { category: string; tools: { name: string; label: string }[] }[] = [
+    {
+      category: 'Read & search',
+      tools: [
+        { name: 'read_file', label: 'Read file' },
+        { name: 'grep', label: 'Grep' },
+        { name: 'glob', label: 'Glob' },
+        { name: 'ls', label: 'List directory' },
+        { name: 'diff', label: 'Diff' },
+        { name: 'web_search', label: 'Web search' },
+        { name: 'web_fetch', label: 'Web fetch' },
+        { name: 'view_image', label: 'View image' },
+        { name: 'fetch_context', label: 'Fetch context' },
+        { name: 'get_resource_budget', label: 'Resource budget' },
+        { name: 'load_skill_detail', label: 'Load skill detail' },
+      ],
+    },
+    {
+      category: 'Notes & knowledge',
+      tools: [
+        { name: 'list_notes', label: 'List notes' },
+        { name: 'search_notes', label: 'Search notes' },
+        { name: 'read_note', label: 'Read note' },
+        { name: 'recall_notes', label: 'Recall notes' },
+        { name: 'render_note', label: 'Render note' },
+        { name: 'get_note_backlinks', label: 'Note backlinks' },
+        { name: 'get_note_graph_summary', label: 'Note graph summary' },
+        { name: 'create_note', label: 'Create note' },
+        { name: 'update_note', label: 'Update note' },
+        { name: 'link_notes', label: 'Link notes' },
+        { name: 'unlink_notes', label: 'Unlink notes' },
+        { name: 'delete_note', label: 'Delete note' },
+      ],
+    },
+    {
+      category: 'File edits',
+      tools: [
+        { name: 'write_file', label: 'Write file' },
+        { name: 'edit_file', label: 'Edit file' },
+        { name: 'batch_edit', label: 'Batch edit' },
+        { name: 'patch', label: 'Patch' },
+        { name: 'move_file', label: 'Move file' },
+      ],
+    },
+    {
+      category: 'Shell & execution',
+      tools: [
+        { name: 'bash', label: 'Bash' },
+        { name: 'shell_manage', label: 'Shell manage' },
+      ],
+    },
+    {
+      category: 'Risky & destructive',
+      tools: [
+        { name: 'delete_file', label: 'Delete file' },
+        { name: 'delegate_to_jules', label: 'Delegate to Jules' },
+        { name: 'commit_and_create_pr', label: 'Commit & create PR' },
+      ],
+    },
+    {
+      category: 'Goals & workflows',
+      tools: [
+        { name: 'create_goal', label: 'Create goal' },
+        { name: 'update_goal', label: 'Update goal' },
+        { name: 'list_workflows', label: 'List workflows' },
+        { name: 'start_workflow', label: 'Start workflow' },
+        { name: 'update_workflow', label: 'Update workflow' },
+        { name: 'create_workflow_draft', label: 'Create workflow draft' },
+        { name: 'prune_context', label: 'Prune context' },
+      ],
+    },
+    {
+      category: 'MCP diagnostics',
+      tools: [
+        { name: 'detect-errors', label: 'Detect errors' },
+        { name: 'analyze-error', label: 'Analyze error' },
+        { name: 'suggest-fixes', label: 'Suggest fixes' },
+      ],
+    },
+  ];
+
+  type ToolAccessState = 'allow' | 'default' | 'block';
+
+  function getToolAccessState(toolName: string): ToolAccessState {
+    const allowlist = agentSettingsStore.settings.toolAllowlist ?? [];
+    const blocklist = agentSettingsStore.settings.toolBlocklist ?? [];
+    if (blocklist.includes(toolName)) return 'block';
+    if (allowlist.includes(toolName)) return 'allow';
+    return 'default';
+  }
+
+  async function setToolAccessState(toolName: string, state: ToolAccessState) {
+    const allowlist = [...(agentSettingsStore.settings.toolAllowlist ?? [])];
+    const blocklist = [...(agentSettingsStore.settings.toolBlocklist ?? [])];
+    // Remove from both lists first
+    const allowIdx = allowlist.indexOf(toolName);
+    if (allowIdx >= 0) allowlist.splice(allowIdx, 1);
+    const blockIdx = blocklist.indexOf(toolName);
+    if (blockIdx >= 0) blocklist.splice(blockIdx, 1);
+    // Add to the appropriate list
+    if (state === 'allow') allowlist.push(toolName);
+    else if (state === 'block') blocklist.push(toolName);
+    await agentSettingsStore.saveSettings(
+      { toolAllowlist: allowlist, toolBlocklist: blocklist },
+      { quietSuccess: true },
+    );
   }
 
   async function handleSavePreferences() {
@@ -768,6 +906,206 @@
                   </p>
                 </div>
               </div>
+            </section>
+            {/if}
+
+            {#if selectedControlSection === 'permissions'}
+            <section
+              class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+            >
+              <div class="space-y-1">
+                <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                  <Boxes size={16} class="text-sky-400" />
+                  Execution sandbox
+                </h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Control how strictly agent shell commands are confined. Granular toggles only apply while the sandbox is active.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {#each [
+                  { value: 'auto', label: 'Auto', description: 'Sandbox plan, critic, and worker execution only.' },
+                  { value: 'always', label: 'Always', description: 'Sandbox every agent bash call, including the direct manager.' },
+                  { value: 'off', label: 'Off', description: 'No sandbox. Catastrophic-command and approval prompts still apply.' },
+                ] as mode (mode.value)}
+                  {@const active = (agentSettingsStore.settings.sandbox?.mode ?? 'auto') === mode.value}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onclick={() => setSandboxMode(mode.value as 'auto' | 'always' | 'off')}
+                    class="min-h-20 rounded-xl border p-3 text-left transition-colors {active ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]' : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                  >
+                    <span class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                      {mode.label}
+                      {#if active}<CheckCircle size={14} class="text-[var(--color-accent)]" />{/if}
+                    </span>
+                    <span class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]">{mode.description}</span>
+                  </button>
+                {/each}
+              </div>
+
+              {#if (agentSettingsStore.settings.sandbox?.mode ?? 'auto') !== 'off'}
+                <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
+                  <div>
+                    <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">Sandbox enforces</h5>
+                    <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">Turn a toggle off to relax that specific check while sandboxed.</p>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.sandbox?.commandWhitelist ?? true}
+                      label="Command whitelist"
+                      description="Only allow safe development commands (git, npm, bun, cargo, etc.)."
+                      onchange={() => toggleSandboxFlag('commandWhitelist')}
+                    />
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.sandbox?.metacharacters ?? true}
+                      label="Block shell metacharacters"
+                      description="Block pipes, command substitution, and chaining. Disabling lets commands like `git add && git commit` run."
+                      onchange={() => toggleSandboxFlag('metacharacters')}
+                    />
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.sandbox?.pathConfinement ?? true}
+                      label="Project path confinement"
+                      description="Block commands whose working directory is outside the project root."
+                      onchange={() => toggleSandboxFlag('pathConfinement')}
+                    />
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.sandbox?.network ?? true}
+                      label="Block network commands"
+                      description="Block curl, wget, and other network tools while sandboxed."
+                      onchange={() => toggleSandboxFlag('network')}
+                    />
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.sandbox?.containerTools ?? true}
+                      label="Block container tools"
+                      description="Block docker, podman, and similar container tools while sandboxed."
+                      onchange={() => toggleSandboxFlag('containerTools')}
+                    />
+                  </div>
+                </div>
+              {/if}
+            </section>
+            {/if}
+
+            {#if selectedControlSection === 'permissions'}
+            <section
+              class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+            >
+              <div class="space-y-1">
+                <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                  <Users size={16} class="text-indigo-400" />
+                  Sub-agent approval
+                </h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Control how worker sub-agents (specialist workers spawned by the manager) are gated when they run tools.
+                </p>
+              </div>
+
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {#each [
+                  { value: 'manager', label: 'Manager decides', description: 'Workers inherit the manager\'s permission preset. No extra prompts beyond what the preset already requires.' },
+                  { value: 'user', label: 'I decide', description: 'Workers can read and search freely, but every file edit, bash command, and risky action prompts you before running.' },
+                  { value: 'auto', label: 'Auto-approve', description: 'Workers run with no approval prompts and no sandbox. Catastrophic-command hard floors still apply.' },
+                ] as mode (mode.value)}
+                  {@const active = (agentSettingsStore.settings.subAgentApproval ?? 'manager') === mode.value}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onclick={() => setSubAgentApproval(mode.value as 'manager' | 'user' | 'auto')}
+                    class="min-h-24 rounded-xl border p-3 text-left transition-colors {active ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]' : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                  >
+                    <span class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]">
+                      {mode.label}
+                      {#if active}<CheckCircle size={14} class="text-[var(--color-accent)]" />{/if}
+                    </span>
+                    <span class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]">{mode.description}</span>
+                  </button>
+                {/each}
+              </div>
+
+              {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'auto'}
+                <div class="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-300">
+                  <AlertTriangle size={16} class="shrink-0" />
+                  <span>Auto-approve lets workers run unconstrained — no approval prompts and no sandbox. Only enable this for trusted, isolated work. Catastrophic commands (rm -rf /, mkfs, etc.) are still blocked by the hard floor.</span>
+                </div>
+              {/if}
+              {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'user'}
+                <div class="flex gap-2 rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-[11px] text-sky-300">
+                  <Eye size={16} class="shrink-0" />
+                  <span>Workers can read files and search without prompting. Every file edit, bash command, and risky action will pause for your approval. This gives you control over mutations without slowing down exploration.</span>
+                </div>
+              {/if}
+            </section>
+            {/if}
+
+            {#if selectedControlSection === 'permissions'}
+            <section
+              class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+            >
+              <div class="space-y-1">
+                <h4 class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                  <Shield size={16} class="text-emerald-400" />
+                  Tool access
+                </h4>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Override the permission preset for individual tools. <strong>Allow</strong> always runs without prompting.
+                  <strong>Block</strong> denies the tool entirely. <strong>Default</strong> follows the preset.
+                </p>
+              </div>
+
+              <div class="space-y-3">
+                {#each TOOL_CATALOG as group}
+                  <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                    <h5 class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                      {group.category}
+                    </h5>
+                    <div class="grid gap-1.5 sm:grid-cols-2">
+                      {#each group.tools as tool (tool.name)}
+                        {@const state = getToolAccessState(tool.name)}
+                        <div class="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5">
+                          <span class="text-xs text-[var(--color-text-primary)]">{tool.label}</span>
+                          <div class="flex shrink-0 gap-0.5 rounded-lg bg-[var(--color-surface-3)] p-0.5">
+                            {#each ['allow', 'default', 'block'] as opt (opt)}
+                              {@const isActive = state === opt}
+                              <button
+                                type="button"
+                                onclick={() => setToolAccessState(tool.name, opt as ToolAccessState)}
+                                class="rounded-md px-2 py-1 text-[10px] font-medium transition-colors {isActive
+                                  ? opt === 'allow'
+                                    ? 'bg-emerald-500/30 text-emerald-300'
+                                    : opt === 'block'
+                                      ? 'bg-red-500/30 text-red-300'
+                                      : 'bg-[var(--color-surface-1)] text-[var(--color-text-primary)]'
+                                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+                              >
+                                {opt === 'allow' ? 'Allow' : opt === 'block' ? 'Block' : 'Default'}
+                              </button>
+                            {/each}
+                          </div>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+
+              {#if (agentSettingsStore.settings.toolAllowlist ?? []).length > 0 || (agentSettingsStore.settings.toolBlocklist ?? []).length > 0}
+                <div class="flex items-center justify-between border-t border-[var(--color-border)] pt-3">
+                  <span class="text-[10px] text-[var(--color-text-muted)]">
+                    {(agentSettingsStore.settings.toolAllowlist ?? []).length} allowed · {(agentSettingsStore.settings.toolBlocklist ?? []).length} blocked
+                  </span>
+                  <button
+                    type="button"
+                    class="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-secondary)]"
+                    onclick={() => agentSettingsStore.saveSettings({ toolAllowlist: [], toolBlocklist: [] }, { quietSuccess: true })}
+                  >
+                    Reset all to default
+                  </button>
+                </div>
+              {/if}
             </section>
             {/if}
 

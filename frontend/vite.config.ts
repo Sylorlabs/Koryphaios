@@ -159,6 +159,10 @@ export default defineConfig({
     target: 'es2020',
   },
   optimizeDeps: {
+    // lucide-svelte ships raw .svelte files that esbuild's pre-bundler cannot
+    // parse (no loader configured for .svelte). Excluding it routes the
+    // package through the Svelte plugin pipeline instead.
+    exclude: ['lucide-svelte'],
     esbuildOptions: {
       target: 'es2020',
     },

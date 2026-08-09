@@ -1,5 +1,6 @@
 import { wsStore } from '$lib/stores/websocket.svelte';
 import { sessionStore } from '$lib/stores/sessions.svelte';
+import { ACTIVE_AGENT_STATUSES } from '$lib/stores/run-state-core';
 
 export function useAgentRail() {
   let selectedAgentId = $state('');
@@ -30,8 +31,17 @@ export function useAgentRail() {
     return wsStore.getAgentThreadFeed(sessionId, selectedAgentId);
   });
 
+  // Agent-scoped running predicate using the canonical ACTIVE_AGENT_STATUSES
+  // set from the run-state reducer — one definition, no drift. The session-
+  // level runStateStore.isRunning answers "is the manager loop alive?" and
+  // stays true while the manager synthesizes results AFTER a worker finishes.
+  // Using it here made the AgentThreadFeed composer show Stop for a completed
+  // worker while its WorkerCard showed it as inactive. This predicate answers
+  // "is THIS agent still producing?" from the agent's own status.
+  // Note: waiting/waiting_user are NOT active — a parked worker shows Send,
+  // not Stop, matching the session-level Waiting behavior.
   let selectedAgentIsRunning = $derived(
-    !!selectedAgent && !['done', 'idle', 'error'].includes(selectedAgent.status),
+    !!selectedAgent && ACTIVE_AGENT_STATUSES.has(selectedAgent.status),
   );
 
   let inputPlaceholder = $derived(

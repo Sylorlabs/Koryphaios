@@ -251,7 +251,7 @@
         class="virtual-list-content"
         style="padding-top: {paddingTop}px; padding-bottom: {paddingBottom}px;"
     >
-        {#each visibleItems as { item, index, position } (`${item.id}:${index}`)}
+        {#each visibleItems as { item, index, position } (item.id)}
             <div 
                 class="virtual-list-item"
                 style="position: absolute; top: {position?.top ?? 0}px; left: 0; right: 0;"

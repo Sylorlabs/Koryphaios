@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import type { Goal } from '@koryphaios/shared';
 import { formatGoalRuntime, goalRuntimeMs, groupGoals, parseGoalSlashCommand, pickGoalForAction } from './goal-actions';
 
