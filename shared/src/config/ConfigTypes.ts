@@ -38,6 +38,8 @@ export interface WorkspaceConfig {
   worktreeDir?: string;
   /** Whether to copy .env files into worktrees. @default false */
   copyEnvFiles?: boolean;
+  /** Skip pre-commit hooks on AI-generated commits during reconcile. @default true */
+  skipHooks?: boolean;
 }
 
 export interface ServerConfig {

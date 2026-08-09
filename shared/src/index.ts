@@ -53,7 +53,7 @@ export type { WorkerTask } from './types/TaskTypes';
 // ============== Provider & Model Definitions ==============
 export { ProviderName } from './providers/ProviderNames';
 
-export type { ModelTier, ModelDef, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
+export type { ModelTier, ModelDef, ModelQuota, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
 export type {
   CollaborationRole,
   CollaborationJoinMode,
@@ -101,6 +101,7 @@ export type { WSEventType, WSMessage, WSMessagePayload } from './websocket/WSEve
 export type {
   AgentSpawnedPayload,
   AgentStatusPayload,
+  AgentHeartbeatPayload,
   AgentThreadMessagePayload,
   ThinkingPayload,
   StreamThinkingPayload,

@@ -9,10 +9,22 @@ import {
 
 describe('voice settings', () => {
   test('validates defaults and speed limits', () => {
+    // Valid settings pass through unchanged
     expect(validateVoiceSettings(DEFAULT_VOICE_SETTINGS)).toEqual(DEFAULT_VOICE_SETTINGS);
+    // Speed above the maximum is rejected
     expect(() => validateVoiceSettings({
       ...DEFAULT_VOICE_SETTINGS,
       output: { ...DEFAULT_VOICE_SETTINGS.output, speed: 3 },
+    })).toThrow();
+    // Speed below the minimum is rejected
+    expect(() => validateVoiceSettings({
+      ...DEFAULT_VOICE_SETTINGS,
+      output: { ...DEFAULT_VOICE_SETTINGS.output, speed: 0.1 },
+    })).toThrow();
+    // Missing output section is rejected (not silently defaulted)
+    expect(() => validateVoiceSettings({
+      ...DEFAULT_VOICE_SETTINGS,
+      output: undefined as any,
     })).toThrow();
   });
 

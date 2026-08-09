@@ -8,6 +8,7 @@ export type WSEventType =
   | 'agent.completed'
   | 'agent.error'
   | 'agent.thread_message'
+  | 'agent.heartbeat'
   // Streaming content
   | 'stream.delta'
   | 'stream.thinking'
@@ -94,6 +95,7 @@ export type WSMessagePayload =
   // Agent payloads
   | AgentSpawnedPayload
   | AgentStatusPayload
+  | AgentHeartbeatPayload
   | AgentThreadMessagePayload
   | ThinkingPayload
   | ToolCallPayload
@@ -120,6 +122,7 @@ import type {
   MessageCompletePayload,
   AgentSpawnedPayload,
   AgentStatusPayload,
+  AgentHeartbeatPayload,
   AgentThreadMessagePayload,
   ThinkingPayload,
   ToolCallPayload,

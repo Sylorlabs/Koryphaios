@@ -746,6 +746,35 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       }),
     },
   )
+  .get('/:name/quota', async ({ request, params: { name }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    if (name !== 'antigravity') {
+      set.status = 404;
+      return { ok: false, error: 'Quota API is only available for the antigravity provider' };
+    }
+    const { providers } = getContext();
+    const provider = providers.get(name as ProviderName) as
+      | {
+          getQuota?: () => Map<string, unknown> | null;
+          getQuotaGroups?: () => Array<{
+            name: string;
+            description: string;
+            buckets: Array<{
+              id: string;
+              name: string;
+              window: string;
+              remainingFraction: number;
+              resetTime: string;
+            }>;
+          }> | null;
+        }
+      | undefined;
+    const groups = provider?.getQuotaGroups?.();
+    if (!groups) {
+      return { ok: true, data: { groups: [], available: false } };
+    }
+    return { ok: true, data: { groups, available: true } };
+  })
   .delete('/:name', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();

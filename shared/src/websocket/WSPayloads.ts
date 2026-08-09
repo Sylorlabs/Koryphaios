@@ -62,6 +62,17 @@ export interface AgentStatusPayload {
   detail?: string;
 }
 
+/** agent.heartbeat — periodic "the run is still alive" signal emitted by the
+ *  backend while a turn is active. Lets the client watchdog distinguish
+ *  "alive but quiet" (e.g. a long tool call) from "dead — terminal event
+ *  was dropped". */
+export interface AgentHeartbeatPayload {
+  agentId: string;
+  sessionId: string;
+  /** Coarse phase the backend believes it's in, mirroring AgentStatus. */
+  phase: AgentStatus;
+}
+
 export interface AgentThreadMessagePayload {
   agentId: string;
   entry: {
@@ -298,6 +309,8 @@ export interface ProviderInfo {
   deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */
   description?: string;
+  /** Official page where this provider issues the expected credential. */
+  credentialUrl?: string;
   /** True for a REMOTE provider served by another machine (id `remote-*`). */
   remote?: boolean;
   /** Remote CLI harness: using it copies the client's project to the host and
