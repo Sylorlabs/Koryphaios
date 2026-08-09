@@ -90,6 +90,19 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
       }),
     },
   )
+  .delete(
+    '/:sessionId/:messageId',
+    async ({ request, params: { sessionId, messageId }, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { messages } = getContext();
+      const deleted = await messages.deleteMessage(sessionId, messageId);
+      if (!deleted) {
+        set.status = 404;
+        return { ok: false, error: 'Message not found' };
+      }
+      return { ok: true };
+    },
+  )
   .post(
     '/regenerate',
     async ({ request, body, set }) => {

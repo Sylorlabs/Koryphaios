@@ -1,13 +1,17 @@
-import { readFileSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { serverLog } from '../logger';
 
-/** Load .env from project root into process.env (only set if not already set). Call at startup so persisted provider keys are available after restart. */
-export function loadEnvFromProject(projectRoot: string): void {
-  const envPath = join(projectRoot, '.env');
-  if (!existsSync(envPath)) return;
+/**
+ * Load a .env file into process.env (only sets keys that are not already set).
+ * Returns the set of keys that were loaded.
+ */
+function loadEnvFile(envPath: string, label: string): Set<string> {
+  if (!existsSync(envPath)) return new Set();
   try {
     const content = readFileSync(envPath, 'utf-8');
+    const loaded = new Set<string>();
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
@@ -18,12 +22,44 @@ export function loadEnvFromProject(projectRoot: string): void {
         .slice(eq + 1)
         .trim()
         .replace(/^["']|["']$/g, '');
-      if (!process.env[key]) process.env[key] = value;
+      if (!process.env[key]) {
+        process.env[key] = value;
+        loaded.add(key);
+      }
     }
-    serverLog.debug('Loaded .env from project root');
+    serverLog.debug({ path: envPath, count: loaded.size }, `Loaded ${label}`);
+    return loaded;
   } catch (err) {
-    serverLog.warn({ path: envPath, error: String(err) }, 'Could not load .env');
+    serverLog.warn({ path: envPath, error: String(err) }, `Could not load ${label}`);
+    return new Set();
   }
+}
+
+/**
+ * Load environment variables into process.env with the following precedence
+ * (highest first):
+ *
+ *   1. Existing process.env (caller-set, e.g. systemd, launch-desktop.ts)
+ *   2. ~/.config/koryphaios/secrets.env  — user-owned secrets, OUTSIDE the
+ *      repo tree. This is the preferred location for JWT_SECRET,
+ *      SESSION_TOKEN_SECRET, RELAY_HOST_SECRET, etc.
+ *   3. <projectRoot>/.env                — repo-local dev overrides.
+ *      SHOULD NOT contain production secrets. Kept for backwards compat
+ *      and dev convenience.
+ *
+ * Only keys not already in process.env are set, so a caller that exports
+ * a secret before spawning the backend always wins.
+ */
+export function loadEnvFromProject(projectRoot: string): void {
+  // User secrets dir (outside the repo tree) — loaded first so it wins
+  // over the repo .env. Only the repo .env used to hold secrets; the
+  // rotation script moves them here.
+  const userSecretsDir = join(homedir(), '.config', 'koryphaios');
+  const userSecretsPath = join(userSecretsDir, 'secrets.env');
+  loadEnvFile(userSecretsPath, 'user secrets');
+
+  // Repo-local .env — dev overrides, provider API keys for local dev.
+  loadEnvFile(join(projectRoot, '.env'), 'project .env');
 }
 
 /** Validate essential environment variables. */

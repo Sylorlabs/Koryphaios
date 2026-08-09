@@ -18,7 +18,14 @@ import {
   AGENT_RESOURCE_LIMITS,
 } from '../security/resource-limits';
 import { requireBash } from '../runtime/shell';
+import { tokenizeCommand, resolveCommandPath } from '../runtime/shell-argv';
+import {
+  spawnSandboxed as spawnOsSandboxed,
+  osSandboxEnabled,
+  defaultAllowedRoots,
+} from '../security/os-sandbox';
 import { bypassLocalRiskPrompts } from './permission-policy';
+import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -95,6 +102,153 @@ function commandPatternMatches(command: string, pattern: string): boolean {
   const escaped = normalized.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
   const re = new RegExp(`^${escaped}$`);
   return re.test(command) || re.test(base);
+}
+
+// ─── Sandboxed execution helpers ───────────────────────────────────────
+//
+// Sandboxed commands route through the OS sandbox (bwrap on Linux,
+// sandbox-exec on macOS) when enabled, otherwise argv-only execution
+// (no shell). The old `bash -c <string>` path is only used for
+// unsandboxed (manager) commands that legitimately need shell features.
+
+interface SpawnedProc {
+  kill(signal?: string): void;
+  exited: Promise<number>;
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  pid: number;
+}
+
+function spawnSandboxedCommand(
+  command: string,
+  cwd: string,
+  ctx: ToolContext,
+  _isSandboxed: boolean,
+): SpawnedProc {
+  const { argv, needsShell, shellFeatures } = tokenizeCommand(command);
+
+  if (needsShell) {
+    // The command uses shell features (pipes, redirects, &&). Route through
+    // the OS sandbox which confines the shell and its children. If the OS
+    // sandbox is not enabled, REJECT — running shell-feature commands
+    // without confinement is exactly the bypass the old path allowed.
+    if (!osSandboxEnabled()) {
+      throw new Error(
+        `Sandboxed command uses shell features (${shellFeatures?.join(', ')}) ` +
+          'but OS sandbox is not enabled. Set KORYPHAIOS_OS_SANDBOX=1 to enable ' +
+          'kernel-level confinement, or run the command without shell operators.',
+      );
+    }
+    // OS sandbox enabled: run the command through a confined shell.
+    const shell = requireBash();
+    const roots = defaultAllowedRoots(cwd);
+    const { proc, cleanup } = spawnOsSandboxed(
+      [shell.command, ...shell.args, command],
+      {
+        allowedRoots: roots,
+        cwd,
+        blockNetwork: true,
+        blockSubprocesses: false,
+      },
+    );
+    return wrapChildProcess(proc, cleanup);
+  }
+
+  // Argv-only: no shell. Resolve the command on PATH and spawn directly.
+  if (argv.length === 0) {
+    throw new Error('Empty command after tokenization');
+  }
+  const resolved = resolveCommandPath(argv[0]);
+  if (!resolved) {
+    throw new Error(`Command not found: ${argv[0]}`);
+  }
+
+  if (osSandboxEnabled()) {
+    const roots = defaultAllowedRoots(cwd);
+    const { proc, cleanup } = spawnOsSandboxed([resolved, ...argv.slice(1)], {
+      allowedRoots: roots,
+      cwd,
+      blockNetwork: true,
+      blockSubprocesses: false,
+    });
+    return wrapChildProcess(proc, cleanup);
+  }
+
+  // No OS sandbox: argv-only with shell:false. This is still a major
+  // improvement over `bash -c` because no shell interprets the string.
+  const proc = Bun.spawn([resolved, ...argv.slice(1)], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, PATH: process.env.PATH },
+  });
+  return proc as unknown as SpawnedProc;
+}
+
+function spawnUnsandboxedCommand(command: string, cwd: string): SpawnedProc {
+  const shell = requireBash();
+  const proc = Bun.spawn([shell.command, ...shell.args, command], {
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, PATH: process.env.PATH },
+  });
+  return proc as unknown as SpawnedProc;
+}
+
+// Wrap a node:child_process spawn result into the same shape Bun.spawn
+// returns, so the rest of the bash tool can treat both uniformly.
+function wrapChildProcess(
+  proc: import('node:child_process').ChildProcess,
+  cleanup: () => void,
+): SpawnedProc {
+  // Convert node streams to Web ReadableStreams.
+  const stdout = nodeStreamToWebStream(proc.stdout);
+  const stderr = nodeStreamToWebStream(proc.stderr);
+  const exited = new Promise<number>((resolve) => {
+    proc.on('exit', (code) => {
+      cleanup();
+      resolve(code ?? 1);
+    });
+    proc.on('error', (err) => {
+      cleanup();
+      toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'child process error');
+      resolve(1);
+    });
+  });
+  return {
+    kill: (signal?: string) => {
+      try {
+        proc.kill(signal ? (signal as NodeJS.Signals) : 'SIGTERM');
+      } catch {
+        /* ignore */
+      }
+    },
+    exited,
+    stdout,
+    stderr,
+    pid: proc.pid ?? -1,
+  };
+}
+
+function nodeStreamToWebStream(
+  stream: import('node:stream').Readable | null,
+): ReadableStream<Uint8Array> {
+  if (!stream) return new ReadableStream({ start(c) { c.close(); } });
+  const reader = stream[Symbol.asyncIterator]();
+  return new ReadableStream({
+    async pull(controller) {
+      const { value, done } = await reader.next();
+      if (done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(value as Uint8Array);
+    },
+    cancel() {
+      stream.destroy();
+    },
+  });
 }
 
 export class BashTool implements Tool {
@@ -181,7 +335,27 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const bypassRiskPrompts = bypassLocalRiskPrompts(ctx.permissionPolicy);
     const catastrophic = isCatastrophicBashCommand(command);
     if (catastrophic && !approvedByPreset && !bypassRiskPrompts) {
-      if (!ctx.waitForUserInput) {
+      // Check persisted bash command allowlist/blocklist first.
+      const baseCmds = parseBaseCommands(command);
+      const settings = loadAgentSettings(ctx.workingDirectory);
+      const onBlocklist = baseCmds.some((cmd) =>
+        settings.bashCommandBlocklist.some((pattern) => commandPatternMatches(cmd, pattern)),
+      );
+      if (onBlocklist) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'Catastrophic command blocked by user-configured blocklist.',
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const onAllowlist = baseCmds.length > 0 && baseCmds.every((cmd) =>
+        settings.bashCommandAllowlist.some((pattern) => commandPatternMatches(cmd, pattern)),
+      );
+      if (onAllowlist) {
+        // User previously allowed this command pattern — skip the prompt.
+      } else if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
           name: this.name,
@@ -189,27 +363,62 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           isError: true,
           durationMs: 0,
         };
-      }
-      const selection = await ctx.waitForUserInput(
-        `This command can destroy broad system or home-directory data:\n\n${command}\n\nRun it anyway?`,
-        ['Cancel (Recommended)', 'Run catastrophic command'],
-      );
-      if (selection !== 'Run catastrophic command') {
-        return {
-          callId: call.id,
-          name: this.name,
-          output: 'Catastrophic command cancelled by the user.',
-          isError: true,
-          durationMs: 0,
-        };
+      } else {
+        const selection = await ctx.waitForUserInput(
+          `This command can destroy broad system or home-directory data:\n\n${command}\n\nRun it anyway?`,
+          ['Allow and add command to allowlist', 'Block and add command to blocklist', 'Run catastrophic command'],
+          { allowOther: false, allowKeepChatting: false },
+        );
+        if (selection === 'Block and add command to blocklist') {
+          // Persist the blocklist decision.
+          const updated = loadAgentSettings(ctx.workingDirectory);
+          for (const cmd of baseCmds) {
+            if (!updated.bashCommandBlocklist.includes(cmd)) {
+              updated.bashCommandBlocklist.push(cmd);
+            }
+          }
+          saveAgentSettings(ctx.workingDirectory, updated);
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'Catastrophic command blocked by the user. Command added to blocklist.',
+            isError: true,
+            durationMs: 0,
+          };
+        }
+        if (selection === 'Allow and add command to allowlist') {
+          // Persist the allowlist decision and continue.
+          const updated = loadAgentSettings(ctx.workingDirectory);
+          for (const cmd of baseCmds) {
+            if (!updated.bashCommandAllowlist.includes(cmd)) {
+              updated.bashCommandAllowlist.push(cmd);
+            }
+          }
+          saveAgentSettings(ctx.workingDirectory, updated);
+        } else if (selection !== 'Run catastrophic command') {
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'Catastrophic command cancelled by the user.',
+            isError: true,
+            durationMs: 0,
+          };
+        }
       }
     }
 
     // Check if requested path is inside project
     const isInsideProject = isWithinRoot(ctx.workingDirectory, requestedCwd);
 
-    // Only enforce project root check if sandboxed
-    if (ctx.isSandboxed && !isInsideProject) {
+    // Resolve effective sandbox flags. Prefer the granular sandboxOptions
+    // populated from agent settings; fall back to the legacy boolean for
+    // callers that haven't been wired through the resolver yet.
+    const sandbox = ctx.sandboxOptions;
+    const effectiveSandboxed = sandbox ? sandbox.isSandboxed : ctx.isSandboxed;
+    const enforcePathConfinement = sandbox ? sandbox.pathConfinement && sandbox.isSandboxed : ctx.isSandboxed;
+
+    // Only enforce project root check if sandboxed (and path confinement enabled)
+    if (enforcePathConfinement && !isInsideProject) {
       return {
         callId: call.id,
         name: this.name,
@@ -220,23 +429,52 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     }
 
     // 2. Validate Command Content (comprehensive security check)
-    const validation = validateBashCommand(command, {
-      isSandboxed: ctx.isSandboxed,
-      allowNetwork: !ctx.isSandboxed, // Only allow network in unsandboxed mode
-    });
+    const validation = validateBashCommand(command, sandbox
+      ? {
+          isSandboxed: sandbox.isSandboxed,
+          allowNetwork: !sandbox.isSandboxed,
+          commandWhitelist: sandbox.commandWhitelist,
+          metacharacters: sandbox.metacharacters,
+          network: sandbox.network,
+          containerTools: sandbox.containerTools,
+        }
+      : {
+          isSandboxed: ctx.isSandboxed,
+          allowNetwork: !ctx.isSandboxed, // Only allow network in unsandboxed mode
+        });
 
     // Audit log the attempt
     auditBashCommand(command, {
       sessionId: ctx.sessionId,
       agentId: ctx.agentId,
       userId: 'system', // TODO: Get from auth context
-      isSandboxed: ctx.isSandboxed ?? true,
+      isSandboxed: effectiveSandboxed ?? true,
       allowed: validation.safe ?? false,
       reason: validation.reason,
     });
 
     if (!validation.safe && !catastrophic && !approvedByPreset && !bypassRiskPrompts) {
-      if (!ctx.waitForUserInput) {
+      // Check persisted bash command allowlist/blocklist first.
+      const baseCmds = parseBaseCommands(command);
+      const settings = loadAgentSettings(ctx.workingDirectory);
+      const onBlocklist = baseCmds.some((cmd) =>
+        settings.bashCommandBlocklist.some((pattern) => commandPatternMatches(cmd, pattern)),
+      );
+      if (onBlocklist) {
+        return {
+          callId: call.id,
+          name: this.name,
+          output: `Command blocked by user-configured blocklist: ${validation.reason}`,
+          isError: true,
+          durationMs: 0,
+        };
+      }
+      const onAllowlist = baseCmds.length > 0 && baseCmds.every((cmd) =>
+        settings.bashCommandAllowlist.some((pattern) => commandPatternMatches(cmd, pattern)),
+      );
+      if (onAllowlist) {
+        // User previously allowed this command pattern — skip the prompt.
+      } else if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
           name: this.name,
@@ -244,19 +482,45 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           isError: true,
           durationMs: 0,
         };
-      }
-      const selection = await ctx.waitForUserInput(
-        `This command triggered a safety check (${validation.reason}):\n\n${command}\n\nRun it anyway?`,
-        ['Cancel (Recommended)', 'Run risky command'],
-      );
-      if (selection !== 'Run risky command') {
-        return {
-          callId: call.id,
-          name: this.name,
-          output: 'Risky command cancelled by the user.',
-          isError: true,
-          durationMs: 0,
-        };
+      } else {
+        const selection = await ctx.waitForUserInput(
+          `This command triggered a safety check (${validation.reason}):\n\n${command}\n\nRun it anyway?`,
+          ['Allow and add command to allowlist', 'Block and add command to blocklist', 'Run risky command'],
+          { allowOther: false, allowKeepChatting: false },
+        );
+        if (selection === 'Block and add command to blocklist') {
+          const updated = loadAgentSettings(ctx.workingDirectory);
+          for (const cmd of baseCmds) {
+            if (!updated.bashCommandBlocklist.includes(cmd)) {
+              updated.bashCommandBlocklist.push(cmd);
+            }
+          }
+          saveAgentSettings(ctx.workingDirectory, updated);
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'Risky command blocked by the user. Command added to blocklist.',
+            isError: true,
+            durationMs: 0,
+          };
+        }
+        if (selection === 'Allow and add command to allowlist') {
+          const updated = loadAgentSettings(ctx.workingDirectory);
+          for (const cmd of baseCmds) {
+            if (!updated.bashCommandAllowlist.includes(cmd)) {
+              updated.bashCommandAllowlist.push(cmd);
+            }
+          }
+          saveAgentSettings(ctx.workingDirectory, updated);
+        } else if (selection !== 'Run risky command') {
+          return {
+            callId: call.id,
+            name: this.name,
+            output: 'Risky command cancelled by the user.',
+            isError: true,
+            durationMs: 0,
+          };
+        }
       }
     }
 
@@ -272,18 +536,23 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         command,
         cwd: requestedCwd,
         sessionId: ctx.sessionId,
-        restartPolicy: 'on-failure',
-        maxRestarts: 3,
+        // Sandboxed agents can't plant persistent background processes.
+        // When isSandboxed, force restartPolicy to 'never' and maxRestarts
+        // to 0 so a dying process stays dead. The unsandboxed manager
+        // keeps the auto-restart capability for legitimate long-running
+        // services (dev servers, watchers, etc.).
+        restartPolicy: effectiveSandboxed ? 'never' : 'on-failure',
+        maxRestarts: effectiveSandboxed ? 0 : 3,
         metadata: {
           toolCallId: call.id,
-          isSandboxed: ctx.isSandboxed,
+          isSandboxed: effectiveSandboxed,
         },
       });
 
       return {
         callId: call.id,
         name: this.name,
-        output: `Supervised background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nRestart Policy: ${bgProc.restartPolicy} (max ${bgProc.maxRestarts} restarts)\nUse shell_manage or Process Supervisor to view logs or kill the process.`,
+        output: `Supervised background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nRestart Policy: ${bgProc.restartPolicy} (max ${bgProc.maxRestarts} restarts)\n${effectiveSandboxed ? 'Note: sandboxed agents cannot auto-restart background processes.\n' : ''}Use shell_manage or Process Supervisor to view logs or kill the process.`,
         isError: false,
         durationMs: 0,
       };
@@ -292,7 +561,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const timeoutMs = (timeout ?? 120) * 1000;
 
     toolLog.info(
-      { command: command.slice(0, 200), cwd: requestedCwd, sandboxed: ctx.isSandboxed },
+      { command: command.slice(0, 200), cwd: requestedCwd, sandboxed: effectiveSandboxed },
       'Executing bash command',
     );
 
@@ -300,13 +569,13 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
 
     try {
-      const shell = requireBash();
-      const proc = Bun.spawn([shell.command, ...shell.args, limitedCommand], {
-        cwd: requestedCwd,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: { ...process.env, PATH: process.env.PATH },
-      });
+      // Sandboxed execution path: route through the OS sandbox when enabled,
+      // otherwise argv-only (no shell). The old `bash -c <string>` path is
+      // only used for unsandboxed (manager) commands that legitimately need
+      // shell features (pipes, redirects, &&).
+      const proc = effectiveSandboxed
+        ? spawnSandboxedCommand(limitedCommand, requestedCwd, ctx, effectiveSandboxed)
+        : spawnUnsandboxedCommand(limitedCommand, requestedCwd);
 
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => {

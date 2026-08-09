@@ -177,6 +177,13 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     ) {
       errors.push('workspace.copyEnvFiles must be a boolean');
     }
+
+    if (
+      config.workspace.skipHooks !== undefined &&
+      typeof config.workspace.skipHooks !== 'boolean'
+    ) {
+      errors.push('workspace.skipHooks must be a boolean');
+    }
   }
 
   if (config.safety) {

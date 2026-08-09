@@ -8,11 +8,16 @@ export {
 export {
   decideToolPermission,
   resolveToolPermissionPolicy,
+  resolveSandboxOptions,
+  resolveSubAgentPermissionPolicy,
+  resolveSubAgentSandboxOptions,
   bypassLocalRiskPrompts,
   READ_ONLY_TOOLS,
   FILE_EDIT_TOOLS,
   type ToolPermissionPolicy,
   type ToolPermissionDecision,
+  type ResolvedSandboxOptions,
+  type SubAgentApprovalMode,
 } from './permission-policy';
 export { BashTool } from './bash';
 export { ShellManageTool } from './shell-manage';

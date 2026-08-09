@@ -4,6 +4,62 @@ import { eq } from 'drizzle-orm';
 import { MessageStore } from './message-store';
 
 describe('MessageStore history editing', () => {
+  it('deletes a single message and decrements session counters', async () => {
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const sessionId = `del-${suffix}`;
+    const userId = `del-u-${suffix}`;
+    const assistantId = `del-a-${suffix}`;
+    await db.insert(sessions).values({
+      id: sessionId,
+      title: 'Delete test',
+      createdAt: new Date(1_000),
+      updatedAt: new Date(1_000),
+    });
+    const store = new MessageStore();
+    await store.add(sessionId, {
+      id: userId,
+      sessionId,
+      role: 'user',
+      content: 'hello',
+      tokensIn: 10,
+      tokensOut: 0,
+      cost: 0.01,
+      createdAt: 2_000,
+    });
+    await store.add(sessionId, {
+      id: assistantId,
+      sessionId,
+      role: 'assistant',
+      content: 'hi there',
+      tokensIn: 20,
+      tokensOut: 30,
+      cost: 0.02,
+      createdAt: 3_000,
+    });
+
+    // Sanity: two messages, counters reflect both
+    expect(await store.getAll(sessionId)).toHaveLength(2);
+
+    // Delete the assistant message
+    const deleted = await store.deleteMessage(sessionId, assistantId);
+    expect(deleted).toBe(true);
+
+    // Only the user message remains
+    const remaining = await store.getAll(sessionId);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].id).toBe(userId);
+
+    // Deleting a non-existent message returns false
+    const again = await store.deleteMessage(sessionId, assistantId);
+    expect(again).toBe(false);
+
+    // Deleting from the wrong session returns false (no cross-session deletion)
+    const cross = await store.deleteMessage('wrong-session', userId);
+    expect(cross).toBe(false);
+
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
+  });
+
   it('replaces the selected user message and atomically removes later turns', async () => {
     const suffix = `${Date.now()}-${Math.random()}`;
     const sessionId = `edit-${suffix}`;

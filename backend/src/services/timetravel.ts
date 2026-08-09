@@ -5,15 +5,15 @@
  * allowing users to see a history of AI-generated states and instantly
  * revert to any previous state.
  *
- * Built on top of ShadowLogger (git reflog recorder).
+ * Built on top of CheckpointStore (git-based checkpoint system).
  */
 
 import {
-  ShadowLogger,
+  CheckpointStore,
   type TimelineEntry,
   type GhostCommit,
   type CheckpointFileChange,
-} from '../kory/shadow-logger';
+} from '../kory/checkpoint-store';
 import { GitManager } from '../kory/git-manager';
 import { serverLog } from '../logger';
 import type { IMessageStore } from '../stores/message-store';
@@ -46,7 +46,7 @@ export interface TimeTravelOptions {
 }
 
 export class TimeTravelService {
-  private shadowLogger: ShadowLogger;
+  private shadowLogger: CheckpointStore;
   private gitManager: GitManager;
   private messageStore: IMessageStore;
   private options: Required<TimeTravelOptions>;
@@ -56,7 +56,7 @@ export class TimeTravelService {
     messageStore: IMessageStore,
     options: TimeTravelOptions = {},
   ) {
-    this.shadowLogger = new ShadowLogger(workingDirectory);
+    this.shadowLogger = new CheckpointStore(workingDirectory);
     this.gitManager = new GitManager(workingDirectory);
     this.messageStore = messageStore;
     this.options = {
@@ -446,7 +446,7 @@ export class TimeTravelService {
   async exportTimeline(): Promise<{
     exportedAt: string;
     timeline: TimelineEntry[];
-    stats: Awaited<ReturnType<ShadowLogger['getStats']>>;
+    stats: Awaited<ReturnType<CheckpointStore['getStats']>>;
   }> {
     return {
       exportedAt: new Date().toISOString(),

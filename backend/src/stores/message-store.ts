@@ -15,6 +15,7 @@ export interface IMessageStore {
   truncateAfter(sessionId: string, messageId: string): Promise<void>;
   assignVariantGroup(messageId: string, groupId: string, index: number): Promise<void>;
   replaceAndTruncate(sessionId: string, messageId: string, content: string): Promise<number>;
+  deleteMessage(sessionId: string, messageId: string): Promise<boolean>;
 }
 
 export interface CompactionCommit {
@@ -288,6 +289,37 @@ export class MessageStore implements IMessageStore {
           .where(eq(sessions.id, sessionId));
       }
       return removed.length;
+    });
+  }
+
+  /** Permanently delete a single message and decrement session aggregates.
+   *  Returns true if a row was deleted, false if the message was not found. */
+  async deleteMessage(sessionId: string, messageId: string): Promise<boolean> {
+    return db.transaction(async (tx) => {
+      const removed = await tx
+        .delete(messages)
+        .where(and(eq(messages.id, messageId), eq(messages.sessionId, sessionId)))
+        .returning({
+          id: messages.id,
+          tokensIn: messages.tokensIn,
+          tokensOut: messages.tokensOut,
+          cost: messages.cost,
+        });
+      if (removed.length === 0) return false;
+      const removedTokensIn = removed.reduce((s, m) => s + (m.tokensIn ?? 0), 0);
+      const removedTokensOut = removed.reduce((s, m) => s + (m.tokensOut ?? 0), 0);
+      const removedCost = removed.reduce((s, m) => s + (m.cost ?? 0), 0);
+      await tx
+        .update(sessions)
+        .set({
+          messageCount: sql`max(${sessions.messageCount} - 1, 0)`,
+          tokensIn: sql`max(${sessions.tokensIn} - ${removedTokensIn}, 0)`,
+          tokensOut: sql`max(${sessions.tokensOut} - ${removedTokensOut}, 0)`,
+          totalCost: sql`max(${sessions.totalCost} - ${removedCost}, 0)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(sessions.id, sessionId));
+      return true;
     });
   }
 }

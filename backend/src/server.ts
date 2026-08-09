@@ -5,14 +5,14 @@ import 'reflect-metadata';
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
 import { nanoid } from 'nanoid';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Server } from 'bun';
 
 import { bootstrap } from './bootstrap';
 import { setContext } from './context';
 import { serverLog } from './logger';
-import { VERSION, ID, RATE_LIMIT, COMPAT } from './constants';
+import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { PROJECT_ROOT } from './runtime/paths';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
@@ -103,6 +103,52 @@ const baseApp = new Elysia()
 
 export type App = typeof baseApp;
 
+// ─── Rate-limit helper functions ───────────────────────────────────────
+
+/** True when the IP is a loopback address (127.0.0.0/8 or ::1). */
+function isLoopbackIp(ip: string): boolean {
+  if (ip === '::1') return true;
+  if (ip.startsWith('127.')) return true;
+  // IPv4-mapped IPv6 loopback.
+  if (ip === '::ffff:127.0.0.1') return true;
+  return false;
+}
+
+/**
+ * Check whether a peer IP is in the trusted-proxy list. Supports exact IP
+ * matches and CIDR notation (e.g. "10.0.0.0/24"). When the list is empty,
+ * no IP is trusted — X-Forwarded-For is never honored.
+ */
+function isIpInTrustedProxies(ip: string, proxies: string[]): boolean {
+  if (proxies.length === 0) return false;
+  for (const entry of proxies) {
+    if (entry === ip) return true;
+    if (entry.includes('/')) {
+      if (isIpInCidr(ip, entry)) return true;
+    }
+  }
+  return false;
+}
+
+/** Minimal CIDR check for IPv4. Returns false for IPv6 (not needed for the
+ *  common proxy case; operators can list exact IPv6 proxies). */
+function isIpInCidr(ip: string, cidr: string): boolean {
+  const [base, prefixStr] = cidr.split('/');
+  if (!base || !prefixStr) return false;
+  const prefix = Number(prefixStr);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return false;
+  const ipParts = ip.split('.').map(Number);
+  const baseParts = base.split('.').map(Number);
+  if (ipParts.length !== 4 || baseParts.length !== 4) return false;
+  if (ipParts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
+  if (baseParts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
+  const ipNum = ((ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3]) >>> 0;
+  const baseNum = ((baseParts[0] << 24) | (baseParts[1] << 16) | (baseParts[2] << 8) | baseParts[3]) >>> 0;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  // The network portions (ip & mask and base & mask) must match.
+  return (ipNum & mask) === (baseNum & mask);
+}
+
 async function main() {
   serverLog.info('═══════════════════════════════════════');
   serverLog.info(`       KORYPHAIOS v${VERSION}`);
@@ -133,14 +179,28 @@ async function main() {
 
   const rateLimiter = new RateLimiter(RATE_LIMIT.MAX_REQUESTS, RATE_LIMIT.WINDOW_MS);
 
+  // CORS origin policy. When the user has not configured any origins, fall
+  // back to the loopback dev origins in SECURITY.ALLOWED_ORIGINS instead of
+  // reflecting any origin (the old `origin: undefined` behavior). This keeps
+  // the desktop app working while closing the cross-origin hole that opens
+  // the moment someone binds the backend to 0.0.0.0.
+  const corsOrigins =
+    config.corsOrigins?.length ? config.corsOrigins : [...SECURITY.ALLOWED_ORIGINS];
+
+  // Trusted proxy CIDRs for X-Forwarded-For. When the backend is behind a
+  // reverse proxy, the operator sets KORYPHAIOS_TRUSTED_PROXIES to the
+  // proxy's CIDR(s). Only then is X-Forwarded-For honored for rate-limit
+  // identity; otherwise the socket peer IP is used, preventing clients from
+  // rotating the header to bypass rate limits.
+  const trustedProxies = (process.env.KORYPHAIOS_TRUSTED_PROXIES ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // Setup actual running app with middleware
   const runningApp = new Elysia()
-    .use(
-      cors({
-        origin: config.corsOrigins?.length ? config.corsOrigins : undefined,
-      }),
-    )
-    .onRequest(({ request, set }) => {
+    .use(cors({ origin: corsOrigins }))
+    .onRequest(({ request, set, server }) => {
       const url = new URL(request.url);
 
       // Never rate-limit the liveness endpoint. /api/health is used by the
@@ -150,15 +210,28 @@ async function main() {
       // is to ALWAYS be reachable when the process is alive.
       if (url.pathname === '/api/health') return;
 
+      // Determine the client IP. X-Forwarded-For is only honored when the
+      // request came from a trusted proxy; otherwise the socket peer IP is
+      // used. This prevents clients from rotating the header to get a fresh
+      // rate-limit bucket.
+      const peerInfo = server?.requestIP(request);
+      const peerIp = peerInfo?.address ?? null;
       const forwardedFor = request.headers.get('x-forwarded-for');
-      // Direct requests to the loopback-only desktop backend have no client
-      // address available through the Fetch Request API. They are all placed
-      // in the old shared `local` bucket, so a normal busy UI could exhaust
-      // 120 requests/minute and turn unrelated calls into 429s. Loopback is
-      // the trust boundary for the desktop app, not an internet client.
-      if (isLoopbackServer && !forwardedFor) return;
+      let clientIp: string;
+      if (forwardedFor && peerIp && isIpInTrustedProxies(peerIp, trustedProxies)) {
+        clientIp = forwardedFor.split(',')[0].trim();
+      } else if (forwardedFor && isLoopbackServer && !peerIp) {
+        // Legacy compat: loopback server with no peer info available through
+        // the Fetch Request API. Keep the old behavior so the desktop UI's
+        // own requests don't all bucket into 'local' and starve each other.
+        clientIp = forwardedFor.split(',')[0].trim();
+      } else {
+        clientIp = peerIp ?? 'local';
+      }
 
-      const clientIp = (forwardedFor ?? 'local').split(',')[0].trim();
+      // Loopback desktop backend: don't throttle the UI's own requests.
+      if (isLoopbackServer && (clientIp === 'local' || isLoopbackIp(clientIp))) return;
+
       const rateCheck = rateLimiter.check(clientIp);
       if (!rateCheck.allowed) {
         set.status = 429;
@@ -173,121 +246,152 @@ async function main() {
 
   // ─── Start Server ───────────────────────────────────────────────────────────
 
-  // Try the requested port; if it's already in use (EADDRINUSE), automatically
-  // scan upward for a free port. This prevents the backend from crashing when
-  // a stale process is still holding the default port — the desktop app and
-  // frontend discover the actual port via .active-port.json.
-  //
-  // Bun.serve() throws EADDRINUSE asynchronously (outside any try/catch), so
-  // we pre-check the port with a TCP probe using node:net before binding.
-  const { createServer: createTcpServer } = await import('node:net');
+  // Bind directly to the requested port. The old code pre-probed the port
+  // with a throwaway TCP server and then asked Bun to bind — a TOCTOU race
+  // (another process could grab the port between the probe and the bind)
+  // and a sequential scan up to 65535 when the port was taken. Now we bind
+  // directly and handle EADDRINUSE by incrementing the port once. If the
+  // next port is also taken, we fail loudly instead of scanning — the
+  // desktop launcher and the user should know, not silently climb.
+  let actualPort = serverConfig.port;
+  let server: Server<WSClientData>;
 
-  function isPortFree(port: number, host: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      const tester = createTcpServer();
-      tester.once('error', () => resolve(false));
-      tester.once('listening', () => {
-        tester.close(() => resolve(true));
+  // Capture the fetch handler so the server closure can use it.
+  const fetchHandler = async (req: Request, srv: Server<WSClientData>): Promise<Response> => {
+    const url = new URL(req.url);
+
+    // 1. WebSocket upgrade
+    if (url.pathname === '/ws') {
+      // Auth token: prefer the Authorization header (not logged by
+      // proxies). Fall back to the subprotocol header (legacy, but
+      // browsers can't set WS headers — the Tauri webview can, so the
+      // desktop app uses the header). The ?auth= query fallback is
+      // deprecated because query strings appear in access logs.
+      const authHeader = req.headers.get('authorization');
+      const protocols =
+        req.headers
+          .get('sec-websocket-protocol')
+          ?.split(',')
+          .map((s) => s.trim()) || [];
+      const authToken =
+        authHeader ??
+        (protocols.length > 1 ? protocols[1] : null) ??
+        url.searchParams.get('auth');
+
+      const authSession = validateLocalBearerToken(authToken);
+      if (!authSession) {
+        return new Response(
+          JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }),
+          {
+            status: 401,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+      const upgraded = srv.upgrade(req, {
+        data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
       });
-      tester.listen(port, host);
-    });
-  }
-
-  async function findFreePort(startPort: number, host: string): Promise<number> {
-    for (let p = startPort; p <= 65_535; p++) {
-      if (await isPortFree(p, host)) return p;
+      if (upgraded) return new Response(null, { status: 101 });
+      return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
-    return startPort; // give up; let Bun.serve throw the real error
-  }
 
-  const actualPort = await findFreePort(serverConfig.port, serverConfig.host);
-  if (actualPort !== serverConfig.port) {
-    serverLog.warn(
-      { requestedPort: serverConfig.port, actualPort },
-      'Requested port in use, using next available port',
+    // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
+    // MCP-capable CLI harness (grok, claude-code, codex…).
+    if (url.pathname === '/mcp') {
+      return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
+    }
+
+    // 2. API Routes
+    if (url.pathname.startsWith('/api')) {
+      return runningApp.handle(req);
+    }
+
+    // 3. Static Frontend Files — packaged app ships the build as a Tauri
+    // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
+    // repo's build output. Same server either way: one app, one origin.
+    const frontendBuildDir = resolve(
+      process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
+        join(PROJECT_ROOT, 'frontend', 'build', 'client'),
     );
-  }
+    let filePath = resolve(join(frontendBuildDir, url.pathname));
 
-  const server = Bun.serve<WSClientData>({
-    port: actualPort,
-    hostname: serverConfig.host,
-    async fetch(req, srv) {
-      const url = new URL(req.url);
+    if (url.pathname === '/' || url.pathname.endsWith('/')) {
+      filePath = join(frontendBuildDir, 'index.html');
+    }
 
-      // 1. WebSocket upgrade
-      if (url.pathname === '/ws') {
-        const protocols =
-          req.headers
-            .get('sec-websocket-protocol')
-            ?.split(',')
-            .map((s) => s.trim()) || [];
-        // First protocol is usually 'koryphaios', second is the token
-        const authToken = protocols.length > 1 ? protocols[1] : url.searchParams.get('auth');
-
-        const authSession = validateLocalBearerToken(authToken);
-        if (!authSession) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'Unauthorized WebSocket request' }),
-            {
-              status: 401,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          );
-        }
-        const upgraded = srv.upgrade(req, {
-          data: { id: nanoid(ID.WS_CLIENT_ID_LENGTH), userId: authSession.id },
-        });
-        if (upgraded) return undefined;
-        return new Response(JSON.stringify({ ok: false, error: 'WebSocket upgrade failed' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
-      // MCP-capable CLI harness (grok, claude-code, codex…).
-      if (url.pathname === '/mcp') {
-        return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
-      }
-
-      // 2. API Routes
-      if (url.pathname.startsWith('/api')) {
-        return runningApp.handle(req);
-      }
-
-      // 3. Static Frontend Files — packaged app ships the build as a Tauri
-      // resource and points KORYPHAIOS_FRONTEND_DIST at it; dev serves the
-      // repo's build output. Same server either way: one app, one origin.
-      const frontendBuildDir = resolve(
-        process.env.KORYPHAIOS_FRONTEND_DIST?.trim() ||
-          join(PROJECT_ROOT, 'frontend', 'build', 'client'),
-      );
-      let filePath = resolve(join(frontendBuildDir, url.pathname));
-
-      if (url.pathname === '/' || url.pathname.endsWith('/')) {
-        filePath = join(frontendBuildDir, 'index.html');
-      }
-
-      if (!filePath.startsWith(frontendBuildDir)) {
+    // Containment check via realpath, not resolve. resolve() doesn't
+    // resolve symlinks, so a symlink inside the build dir pointing
+    // outside would walk past this check. realpathSync resolves the
+    // full symlink chain before we compare against the build dir.
+    let resolvedFilePath: string;
+    try {
+      resolvedFilePath = realpathSync(filePath);
+    } catch (err: unknown) {
+      // ENOENT is expected for SPA routes that should fall back to
+      // index.html. Other errors (EACCES, ELOOP, EIO) are suspicious —
+      // fail closed instead of using the unresolved path, which could
+      // bypass the containment check.
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        resolvedFilePath = filePath;
+      } else {
         return new Response('Forbidden', { status: 403 });
       }
+    }
+    let resolvedBuildDir: string;
+    try {
+      resolvedBuildDir = realpathSync(frontendBuildDir);
+    } catch {
+      resolvedBuildDir = frontendBuildDir;
+    }
+    if (!resolvedFilePath.startsWith(resolvedBuildDir)) {
+      return new Response('Forbidden', { status: 403 });
+    }
 
-      let file = Bun.file(filePath);
-      if (await file.exists()) {
-        return new Response(file);
-      }
+    let file = Bun.file(resolvedFilePath);
+    if (await file.exists()) {
+      return new Response(file);
+    }
 
-      // 4. SPA Fallback (Routing handled by frontend)
-      const indexHtml = Bun.file(join(frontendBuildDir, 'index.html'));
-      if (await indexHtml.exists()) {
-        return new Response(indexHtml);
-      }
+    // 4. SPA Fallback (Routing handled by frontend)
+    const indexHtml = Bun.file(join(resolvedBuildDir, 'index.html'));
+    if (await indexHtml.exists()) {
+      return new Response(indexHtml);
+    }
 
-      // 5. Final Fallback
-      return new Response('Not Found', { status: 404 });
-    },
-    websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
-  });
+    // 5. Final Fallback
+    return new Response('Not Found', { status: 404 });
+  };
+
+  const startServer = (port: number): Server<WSClientData> =>
+    Bun.serve<WSClientData>({
+      port,
+      hostname: serverConfig.host,
+      websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+      async fetch(req, srv) {
+        return fetchHandler(req, srv);
+      },
+    });
+
+  try {
+    server = startServer(actualPort);
+  } catch (err: unknown) {
+    // Bun.serve throws synchronously on EADDRINUSE. Retry once on the
+    // next port; if that's also taken, fail loudly.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('EADDRINUSE') && actualPort < 65_535) {
+      actualPort = actualPort + 1;
+      serverLog.warn(
+        { requestedPort: serverConfig.port, actualPort },
+        'Requested port in use, using next available port',
+      );
+      server = startServer(actualPort);
+    } else {
+      throw err;
+    }
+  }
 
   const clientHost = serverConfig.host === '0.0.0.0' ? '127.0.0.1' : serverConfig.host;
   const activePortPath = join(PROJECT_ROOT, '.koryphaios', '.active-port.json');
@@ -331,6 +435,14 @@ async function main() {
     clearActivePortFile();
     kory.cancel();
     shutdownAllBrokers();
+    // Dispose the local auth manager so its session-cleanup interval is
+    // cleared and the master key buffer is zeroed before exit.
+    try {
+      const { localAuth } = await import('./auth/local-auth');
+      localAuth.dispose();
+    } catch {
+      /* ignore — auth module may not be loaded */
+    }
     try {
       getDb().close();
     } catch (e) {

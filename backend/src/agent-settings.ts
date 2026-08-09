@@ -143,9 +143,65 @@ export interface AgentSettings {
    *  destructive tool calls. When false, the agent is unconstrained. */
   autonomyLimitsEnabled: boolean;
 
+  /** Bash execution sandbox controls. 'auto' preserves the default behavior
+   *  (sandbox plan/critic/worker execution, leave the direct manager
+   *  unsandboxed). 'always' sandboxes every agent bash call. 'off' disables
+   *  the sandbox entirely. The granular toggles only suppress checks while
+   *  the sandbox is active — they never enable checks when the sandbox is off. */
+  sandbox: SandboxSettings;
+
+  /** Sub-agent (worker) approval policy.
+   *  - 'manager' → workers inherit the manager's permission preset (default)
+   *  - 'user'    → every worker tool action prompts the user before running
+   *  - 'auto'    → workers run with no approval prompts or sandbox (YOLO-equivalent) */
+  subAgentApproval: 'manager' | 'user' | 'auto';
+
+  /** Tool names that always bypass approval prompts, regardless of
+   *  permissionMode. Checked after the blocklist. Interaction tools
+   *  (ask_user, ask_manager) are always allowed and don't need to be listed. */
+  toolAllowlist: string[];
+  /** Tool names that are always denied, regardless of permissionMode.
+   *  Checked first — before any mode-based logic. Interaction tools
+   *  (ask_user, ask_manager) cannot be blocked. */
+  toolBlocklist: string[];
+
+  /** Bash base-command patterns that bypass the sandbox safety prompt.
+   *  Populated when the user chooses "Allow and add to allowlist" in the
+   *  safety-check dialog. Supports glob patterns (e.g. "git*"). */
+  bashCommandAllowlist: string[];
+  /** Bash base-command patterns that are always blocked without prompting.
+   *  Populated when the user chooses "Block and add to blocklist" in the
+   *  safety-check dialog. Supports glob patterns (e.g. "rm*"). */
+  bashCommandBlocklist: string[];
+
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }
+
+export interface SandboxSettings {
+  /** Master sandbox toggle. 'auto' = sandbox plan/critic/worker only;
+   *  'always' = sandbox all agent bash execution; 'off' = no sandbox. */
+  mode: 'auto' | 'always' | 'off';
+  /** When sandboxed, enforce the static command whitelist. */
+  commandWhitelist: boolean;
+  /** When sandboxed, block shell metacharacters (pipes, substitution, etc.). */
+  metacharacters: boolean;
+  /** When sandboxed, confine execution to the project working directory. */
+  pathConfinement: boolean;
+  /** When sandboxed, block network commands (curl, wget, ssh, etc.). */
+  network: boolean;
+  /** When sandboxed, block container tools (docker, podman, etc.). */
+  containerTools: boolean;
+}
+
+export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
+  mode: 'auto',
+  commandWhitelist: true,
+  metacharacters: true,
+  pathConfinement: true,
+  network: true,
+  containerTools: true,
+};
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   ruleEnforcementLevel: 'strict',
@@ -167,7 +223,11 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
-  autoRunTools: true,
+  // Default to false for fresh installs. Existing koryphaios.json files that
+  // explicitly set autoRunTools keep their value via the merge at the bottom
+  // of loadAgentSettings ({ ...DEFAULT_AGENT_SETTINGS, ...userSettings }).
+  // Only fresh installs (no existing config) get this safer default.
+  autoRunTools: false,
   agentMemoryEnabled: true,
   agentCanUpdatePreferences: false,
   maxCriticIterations: 3,
@@ -184,6 +244,12 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   skillCollisionChoices: {},
   permissionMode: 'guarded',
   autonomyLimitsEnabled: false,
+  sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
+  subAgentApproval: 'manager',
+  toolAllowlist: [],
+  toolBlocklist: [],
+  bashCommandAllowlist: [],
+  bashCommandBlocklist: [],
 };
 
 // Helper to load koryphaios.json
@@ -215,7 +281,7 @@ function saveKoryphaiosConfig(projectRoot: string, config: Record<string, unknow
 
     // Broadcast update via WebSocket broker
     wsBroker.publish('custom', {
-      type: 'system.config_updated' as any,
+      type: 'system.config_updated',
       payload: { source: 'agent-settings', updatedAt: config.updatedAt },
       timestamp: config.updatedAt as number,
       sessionId: 'global',
@@ -408,6 +474,10 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...DEFAULT_AGENT_SETTINGS,
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
+    sandbox: mergeSandboxSettings(
+      DEFAULT_AGENT_SETTINGS.sandbox,
+      persistedSettings?.sandbox,
+    ),
   };
 }
 
@@ -434,7 +504,45 @@ export function resolveAgentSettingsLayers(
       ...workspaceSettings?.managerNotes,
       ...sessionOverride?.managerNotes,
     },
+    sandbox: mergeSandboxSettings(
+      DEFAULT_AGENT_SETTINGS.sandbox,
+      globalSettings?.sandbox,
+      workspaceSettings?.sandbox,
+      sessionOverride?.sandbox,
+    ),
   };
+}
+
+/** Deep-merge sandbox settings so persisted configs missing new granular keys
+ *  still receive defaults. Invalid `mode` values fall back to 'auto'. */
+export function mergeSandboxSettings(
+  base: SandboxSettings,
+  ...layers: (SandboxSettings | Partial<SandboxSettings> | undefined)[]
+): SandboxSettings {
+  const merged: SandboxSettings = { ...base };
+  for (const layer of layers) {
+    if (!layer || typeof layer !== 'object') continue;
+    const candidate = layer as Partial<SandboxSettings>;
+    if (
+      candidate.mode === 'auto' ||
+      candidate.mode === 'always' ||
+      candidate.mode === 'off'
+    ) {
+      merged.mode = candidate.mode;
+    }
+    for (const key of [
+      'commandWhitelist',
+      'metacharacters',
+      'pathConfinement',
+      'network',
+      'containerTools',
+    ] as const) {
+      if (typeof candidate[key] === 'boolean') {
+        merged[key] = candidate[key] as boolean;
+      }
+    }
+  }
+  return merged;
 }
 
 const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
@@ -449,6 +557,7 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
   permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
+  subAgentApproval: ['manager', 'user', 'auto'],
 };
 
 /** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */
@@ -458,12 +567,26 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
   for (const [key, value] of Object.entries(patch)) {
     if (!(key in DEFAULT_AGENT_SETTINGS) || key === 'updatedAt') continue;
     const typedKey = key as keyof AgentSettings;
+    // Deep-merge the nested sandbox object so partial patches keep defaults
+    // for any granular toggle the client did not send.
+    if (typedKey === 'sandbox' && value && typeof value === 'object' && !Array.isArray(value)) {
+      next.sandbox = mergeSandboxSettings(
+        (next.sandbox as SandboxSettings) ?? DEFAULT_AGENT_SETTINGS.sandbox,
+        value as Partial<SandboxSettings>,
+      );
+      continue;
+    }
     const allowed = SETTING_ENUMS[typedKey];
     if (allowed) {
       if (typeof value === 'string' && allowed.includes(value)) next[key] = value;
       continue;
     }
     const expected = DEFAULT_AGENT_SETTINGS[typedKey];
+    // String arrays (toolAllowlist, toolBlocklist): validate each entry is a string.
+    if (Array.isArray(expected) && Array.isArray(value)) {
+      next[key] = value.filter((v): v is string => typeof v === 'string');
+      continue;
+    }
     if (typeof value === typeof expected) next[key] = value;
   }
   return next as unknown as AgentSettings;

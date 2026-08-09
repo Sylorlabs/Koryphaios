@@ -21,7 +21,7 @@ import { getContext } from '../../context';
 import { providerLog, serverLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
 import { loadAgentSettings } from '../../agent-settings';
-import { resolveToolPermissionPolicy } from '../../tools/permission-policy';
+import { resolveToolPermissionPolicy, resolveSandboxOptions } from '../../tools/permission-policy';
 import { AuthenticationError, AuthorizationError, SessionNotFoundError, ValidationError } from '../../errors/types';
 
 const NATIVE_TO_KORY: Record<string, string> = {
@@ -89,20 +89,23 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
     const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
     // The authenticated session owns the workspace and its saved policy.
     const root = session.workingDirectory || workingDirectory || process.cwd();
+    const mcpSettings = loadAgentSettings(root);
     const permissionPolicy = resolveToolPermissionPolicy(
-      loadAgentSettings(root),
+      mcpSettings,
       normalizedRole === 'critic' ? 'plan' : 'act',
     );
+    const mcpNaturalSandboxed = normalizedRole === 'critic' || permissionPolicy.mode !== 'yolo';
     const ctx: ToolContext = {
       sessionId,
       ...(activeGoal ? { goalId: activeGoal.id } : {}),
       ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
       workingDirectory: root,
       signal: undefined,
-      isSandboxed: normalizedRole === 'critic' || permissionPolicy.mode !== 'yolo',
+      isSandboxed: mcpNaturalSandboxed,
+      sandboxOptions: resolveSandboxOptions(mcpSettings, mcpNaturalSandboxed),
       permissionPolicy,
       approvedToolCallIds: new Set(),
-      waitForUserInput: (question, options) => kory.requestToolApproval(sessionId, question, options),
+      waitForUserInput: (question, options, opts) => kory.requestToolApproval(sessionId, question, options, opts),
       recordChange: (change) => {
         kory.recordChange?.(sessionId, change);
       },

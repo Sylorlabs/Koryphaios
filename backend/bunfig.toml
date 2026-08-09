@@ -1,0 +1,5 @@
+[test]
+# Koryphaios backend tests involve git operations serialized by a global
+# mutex, so they need a generous timeout (default 5s is too short for
+# tests that create multiple checkpoints or worktrees).
+timeout = 30

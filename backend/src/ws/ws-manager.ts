@@ -16,14 +16,41 @@ const BACKPRESSURE_THRESHOLD = 64 * 1024;
 
 // Terminal events must be delivered. If they are dropped (e.g. because the
 // client was overloaded at broadcast time), the frontend's busy/Stop state
-// gets stuck. These types are always queued per-client and retried on a
+// gets stuck. These events are always queued per-client and retried on a
 // separate timer until they can be sent.
+//
+// `agent.status` is terminal ONLY when the payload status is one of the
+// terminal statuses (done/error/idle). Workers finish via `agent.status:
+// done` (runAgentThread emits it directly), so without this rule a worker's
+// completion event is dropped under backpressure and the WorkerCard stays
+// pinned on "Thinking…" until the 15s watchdog fires. The watchdog is a
+// fallback, not a substitute for delivering the event reliably.
+// Non-terminal statuses (thinking, streaming, tool_calling) must NOT be
+// queued — delivering a stale "thinking" after "done" would resurrect a
+// dead run in the frontend reducer.
 const TERMINAL_EVENT_TYPES = new Set<string>([
   'stream.complete',
   'agent.completed',
   'agent.error',
   'process.exited',
+  'system.error',
 ]);
+
+const TERMINAL_AGENT_STATUSES = new Set<string>(['done', 'error', 'idle']);
+
+/**
+ * Whether a message is a terminal event that must be queued for retry under
+ * backpressure. Pure type/payload inspection — no side effects, safe to call
+ * on every broadcast.
+ */
+function isTerminalEvent(message: WSMessage): boolean {
+  if (TERMINAL_EVENT_TYPES.has(message.type)) return true;
+  if (message.type === 'agent.status') {
+    const status = (message.payload as { status?: string }).status;
+    return !!status && TERMINAL_AGENT_STATUSES.has(status);
+  }
+  return false;
+}
 
 // Retry interval for queued terminal events. This is a separate timer from the
 // heartbeat — the heartbeat checks for stale connections; this timer drains
@@ -186,7 +213,7 @@ export class WSManager {
     const overloaded = this.isClientOverloaded(client);
     client.overloaded = overloaded;
     if (overloaded) {
-      if (TERMINAL_EVENT_TYPES.has(message.type)) {
+      if (isTerminalEvent(message)) {
         client.pendingTerminalEvents.push(message);
       }
       // Non-terminal events are intentionally dropped for overloaded clients.

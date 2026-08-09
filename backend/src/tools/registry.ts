@@ -6,6 +6,7 @@ import { toolLog } from '../logger';
 import {
   decideToolPermission,
   type ToolPermissionPolicy,
+  type ResolvedSandboxOptions,
 } from './permission-policy';
 
 export interface ToolContext {
@@ -23,6 +24,10 @@ export interface ToolContext {
   allowedPaths?: string[];
   /** Whether the tool execution should be strictly sandboxed */
   isSandboxed?: boolean;
+  /** Resolved granular sandbox flags. When present, bash validation and path
+   *  confinement honor these per-toggle overrides. Falls back to the legacy
+   *  `isSandboxed` boolean behavior when absent. */
+  sandboxOptions?: ResolvedSandboxOptions;
   /** Optional callback for streaming file edit deltas to the UI */
   emitFileEdit?: (event: {
     path: string;
@@ -37,8 +42,15 @@ export interface ToolContext {
     totalLines: number;
     operation: 'create' | 'edit';
   }) => void;
-  /** Optional callback to request user input (blocking) */
-  waitForUserInput?: (question: string, options: string[]) => Promise<string>;
+  /** Optional callback to request user input (blocking). The optional opts
+   *  bag controls whether the UI offers a custom-response text input and a
+   *  "keep chatting" defer button. Tool approvals pass `false` for both so
+   *  the dialog is a binary approve/reject with no free-text escape hatch. */
+  waitForUserInput?: (
+    question: string,
+    options: string[],
+    opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
+  ) => Promise<string>;
   /** Host-owned approval policy. Every Kory tool execution, including worker
    *  tools, passes through this policy before the tool can run. */
   permissionPolicy?: ToolPermissionPolicy;
@@ -218,13 +230,14 @@ export class ToolRegistry {
       }
       const selection = await ctx.waitForUserInput(
         `${permission.reason}. Allow ${call.name} once?`,
-        ['Allow once', 'Deny'],
+        ['Allow once', 'Reject'],
+        { allowOther: false, allowKeepChatting: false },
       );
       if (selection !== 'Allow once') {
         return {
           callId: call.id,
           name: call.name,
-          output: selection === '__timeout__' ? 'Approval timed out; tool was not run.' : 'Tool denied by user.',
+          output: selection === '__timeout__' ? 'Approval timed out; tool was not run.' : 'Tool rejected by user.',
           isError: true,
           durationMs: performance.now() - start,
         };

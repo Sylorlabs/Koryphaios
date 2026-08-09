@@ -40,6 +40,9 @@ sqlite.exec('PRAGMA journal_mode = WAL;');
 // PRAGMA does not survive process restart, so enable it for every live DB
 // connection before Drizzle performs any writes.
 sqlite.exec('PRAGMA foreign_keys = ON;');
+// Set a busy timeout so concurrent writers wait instead of immediately
+// throwing "database is locked". 5 seconds is generous for a local DB.
+sqlite.exec('PRAGMA busy_timeout = 5000;');
 
 // Harden the WAL/SHM sidecars that WAL mode just created.
 hardenFilePermissions(`${dbPath}-wal`);
