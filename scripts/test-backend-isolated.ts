@@ -71,7 +71,7 @@ function main() {
 
       const result = spawnSync(
         process.execPath,
-        ['test', '--preload', './backend/test/setup-db.ts', testFile],
+        ['test', '--preload', './backend/src/__tests__/setup-db.ts', testFile],
         {
           cwd: PROJECT_ROOT,
           env: { ...env, DATABASE_URL: dbUrl },

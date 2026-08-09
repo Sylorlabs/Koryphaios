@@ -398,7 +398,7 @@ function installFetchWrapper(): void {
     const urlStr = typeof url === 'string' ? url : (url as Request & { url?: string })?.url || (url as { toString(): string }).toString();
     if (urlStr?.includes('chat/completions') && init?.body) {
       try {
-        const body = JSON.parse(init.body);
+        const body = JSON.parse(typeof init.body === 'string' ? init.body : await new Response(init.body).text());
         // Ensure codebuff_metadata exists — the SDK may not always include it.
         if (!body.codebuff_metadata) {
           body.codebuff_metadata = {};

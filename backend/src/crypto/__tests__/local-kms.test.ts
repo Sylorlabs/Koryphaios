@@ -23,6 +23,19 @@ describe('LocalKMSProvider hardening', () => {
   });
 
   describe('passphrase requirement', () => {
+    let savedInsecure: string | undefined;
+    beforeEach(() => {
+      // Bun auto-loads .env, which may set KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS=1
+      // in dev. Save and clear it so the "rejects without passphrase" test
+      // actually exercises the fail-closed path.
+      savedInsecure = process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS;
+      delete process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS;
+    });
+    afterEach(() => {
+      if (savedInsecure === undefined) delete process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS;
+      else process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS = savedInsecure;
+    });
+
     it('rejects initialization without a passphrase when insecure mode is not set', async () => {
       const provider = new LocalKMSProvider({
         dataDir: tempDir,
@@ -32,20 +45,14 @@ describe('LocalKMSProvider hardening', () => {
     });
 
     it('allows initialization with KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS=1', async () => {
-      const oldVal = process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS;
       process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS = '1';
-      try {
-        const provider = new LocalKMSProvider({
-          dataDir: tempDir,
-          passphrase: undefined,
-          suppressWarning: true,
-        });
-        await provider.initialize();
-        expect(existsSync(join(tempDir, '.master-key'))).toBe(true);
-      } finally {
-        if (oldVal === undefined) delete process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS;
-        else process.env.KORYPHAIOS_ALLOW_INSECURE_LOCAL_KMS = oldVal;
-      }
+      const provider = new LocalKMSProvider({
+        dataDir: tempDir,
+        passphrase: undefined,
+        suppressWarning: true,
+      });
+      await provider.initialize();
+      expect(existsSync(join(tempDir, '.master-key'))).toBe(true);
     });
 
     it('initializes with a passphrase', async () => {
