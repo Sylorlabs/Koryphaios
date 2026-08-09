@@ -14,6 +14,7 @@ import type {
   StreamUsagePayload,
   ContextBreakdown,
   KoryAskUserPayload,
+  AgentIdentity,
 } from '@koryphaios/shared';
 import { resolveTrustedContextWindow } from '../../providers';
 import { wsBroker } from '../../pubsub';
@@ -109,18 +110,8 @@ export class EventEmitterService {
     this.emit(sessionId, 'agent.status', { agentId, status, detail });
   }
 
-  emitAgentSpawned(
-    sessionId: string,
-    agent: {
-      id: string;
-      name: string;
-      role: string;
-      model: string;
-      provider: string;
-      domain: string;
-    },
-  ): void {
-    this.emit(sessionId, 'agent.spawned', { agent });
+  emitAgentSpawned(sessionId: string, agent: AgentIdentity, task: string): void {
+    this.emit(sessionId, 'agent.spawned', { agent, task });
   }
 
   // ─── Stream Events ───────────────────────────────────────────────────────────

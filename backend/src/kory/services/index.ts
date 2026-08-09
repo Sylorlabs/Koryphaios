@@ -3,6 +3,7 @@
 
 export { ClarificationService } from './ClarificationService';
 export { RoutingServiceEnhanced } from './RoutingServiceEnhanced';
+export { SmartRouterService, type SmartRoutingDecision, type TaskType as SmartRouterTaskType } from './SmartRouterService';
 export { SessionStateService } from './SessionStateService';
 export {
   CriticGateService,
@@ -28,16 +29,6 @@ export {
 export { type SessionState } from './SessionStateService';
 
 // New services for improved functionality
-export {
-  ConflictResolutionService,
-  type Conflict,
-  type FileChange,
-  type ResolutionStrategy,
-  type ResolutionResult,
-  type ResolutionConfig,
-  DEFAULT_RESOLUTION_CONFIG,
-} from './ConflictResolutionService';
-
 export {
   HumanInTheLoopService,
   type Operation,

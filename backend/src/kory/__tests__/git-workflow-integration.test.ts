@@ -5,7 +5,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { WorkspaceManager } from '../workspace-manager';
 import { GitManager } from '../git-manager';
 import { AutoCommitService } from '../auto-commit-service';
-import { CheckpointStore as ShadowLogger } from '../checkpoint-store';
+import { CheckpointStore } from '../checkpoint-store';
 import { TimeTravelService } from '../../services/timetravel';
 import type { IMessageStore } from '../../stores/message-store';
 import { SnapshotManager } from '../snapshot-manager';
@@ -291,11 +291,11 @@ describe('Git Workflow Integration Tests', () => {
     });
   });
 
-  describe('ShadowLogger', () => {
-    let shadowLogger: ShadowLogger;
+  describe('CheckpointStore', () => {
+    let checkpointStore: CheckpointStore;
 
     beforeAll(() => {
-      shadowLogger = new ShadowLogger(TEST_DIR);
+      checkpointStore = new CheckpointStore(TEST_DIR);
     });
 
     test('should create ghost commit', async () => {
@@ -307,7 +307,7 @@ describe('Git Workflow Integration Tests', () => {
       const indexBefore = gitOutput('diff', '--cached', '--binary');
       const normalLogBefore = gitOutput('log', '--format=%H');
 
-      const hash = await shadowLogger.createGhostCommit('Test ghost commit', {
+      const hash = await checkpointStore.createGhostCommit('Test ghost commit', {
         model: 'gpt-4',
         prompt: 'Test prompt',
         cost: 0.02,
@@ -324,21 +324,21 @@ describe('Git Workflow Integration Tests', () => {
       expect(gitOutput('for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints')).toContain(
         'refs/kory/checkpoints/test-agent/',
       );
-      const metadata = await shadowLogger.getMetadata(hash!);
+      const metadata = await checkpointStore.getMetadata(hash!);
       expect(metadata?.prompt).toBeUndefined();
       expect(metadata?.promptHash).toHaveLength(64);
-      expect(await shadowLogger.getCursor('test-agent')).toBe(hash);
+      expect(await checkpointStore.getCursor('test-agent')).toBe(hash);
     });
 
     test('should get timeline', async () => {
-      const timeline = await shadowLogger.getTimeline(10);
+      const timeline = await checkpointStore.getTimeline(10);
       expect(timeline.length).toBeGreaterThan(0);
       expect(timeline[0].hash).toBeDefined();
       expect(timeline[0].recoverable).toBe(true);
     });
 
     test('should recover to ghost state', async () => {
-      const timeline = await shadowLogger.getTimeline(1);
+      const timeline = await checkpointStore.getTimeline(1);
       expect(timeline.length).toBeGreaterThan(0);
 
       const targetHash = timeline[0].hash;
@@ -349,7 +349,7 @@ describe('Git Workflow Integration Tests', () => {
       writeFileSync(join(TEST_DIR, 'post-ghost.txt'), 'Unrelated user content');
       expect(existsSync(join(TEST_DIR, 'post-ghost.txt'))).toBe(true);
 
-      const result = await shadowLogger.recover(targetHash, {
+      const result = await checkpointStore.recover(targetHash, {
         agentId: 'test-agent',
         changedFiles: [{ path: 'ghost-test.txt', operation: 'create' }],
       });
@@ -360,7 +360,7 @@ describe('Git Workflow Integration Tests', () => {
       expect(readFileSync(join(TEST_DIR, 'ghost-test.txt'), 'utf8')).toBe('Ghost content');
       expect(readFileSync(join(TEST_DIR, 'post-ghost.txt'), 'utf8')).toBe('Unrelated user content');
 
-      const otherSession = await shadowLogger.recover(targetHash, {
+      const otherSession = await checkpointStore.recover(targetHash, {
         agentId: 'different-session',
         changedFiles: [{ path: 'ghost-test.txt', operation: 'edit' }],
       });

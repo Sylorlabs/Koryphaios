@@ -36,6 +36,9 @@ import {
   ToolRegistry,
   decideToolPermission,
   resolveToolPermissionPolicy,
+  resolveSandboxOptions,
+  resolveSubAgentPermissionPolicy,
+  resolveSubAgentSandboxOptions,
   type ToolCallInput,
   type ToolContext,
   type ToolCallOutput,
@@ -104,6 +107,7 @@ import {
   loadAgentSettings,
   rememberExplicitPreference,
   saveAgentSettings,
+  type AgentSettings,
 } from '../agent-settings';
 import { assembleMemoryContext, formatMemoryForContext } from '../memory/unified-memory';
 import { readSessionMemory, writeSessionMemory } from '../memory/unified-memory';
@@ -242,6 +246,14 @@ export class KoryManager implements WorkerPipelineHost {
   private workspaceManager: WorkspaceManager | null = null;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
+  /** Heartbeat timers per session — emit agent.heartbeat every 5s while a
+   *  run is active so the client watchdog can distinguish "alive but quiet"
+   *  (long tool call) from "dead — terminal event was dropped". */
+  private heartbeatBySession = new Map<string, ReturnType<typeof setInterval>>();
+  /** Latest manager phase per session, used to populate agent.heartbeat.
+   *  Updated at every agent.status emit for kory-manager and at stream/tool
+   *  transitions. */
+  private heartbeatPhaseBySession = new Map<string, AgentStatus>();
   /** In-memory worker/critic chat threads keyed by agentId. */
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
@@ -294,17 +306,6 @@ export class KoryManager implements WorkerPipelineHost {
     this.git = new GitManager(workingDirectory);
     initContextArchive(workingDirectory);
 
-    // Initialize WorkspaceManager if git is available
-    try {
-      if (this.git.isGitRepo()) {
-        this.workspaceManager = new WorkspaceManager(workingDirectory, config.workspace);
-        koryLog.info('WorkspaceManager initialized for parallel agent isolation');
-      }
-    } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager initialization failed');
-      koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
-    }
-
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
     this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
@@ -342,6 +343,7 @@ export class KoryManager implements WorkerPipelineHost {
           agentId: KORY_IDENTITY.id,
           status: 'thinking',
         });
+        this.setHeartbeatPhase(e.sessionId, 'thinking');
         void this.handleDirectly(e.sessionId, summary, undefined, undefined).catch((err) =>
           koryLog.warn({ err, sessionId: e.sessionId }, 'Background-process wake-up failed'),
         );
@@ -360,6 +362,27 @@ export class KoryManager implements WorkerPipelineHost {
       tasks: this.tasks,
       host: this,
     });
+
+    // Initialize WorkspaceManager if git is available.
+    // init() is async (git repo check, worktree recovery) so we fire-and-forget
+    // it the same way recoverState() is launched below. Until init completes,
+    // workspaceManager stays null and workers fall back to the main directory.
+    try {
+      if (this.git.isGitRepo()) {
+        const wm = new WorkspaceManager(workingDirectory, config.workspace);
+        void wm.init().then(() => {
+          this.workspaceManager = wm;
+          this.workerPipeline.workspaceManager = wm;
+          koryLog.info('WorkspaceManager initialized for parallel agent isolation');
+        }).catch((err: unknown) => {
+          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager init failed');
+          koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
+        });
+      }
+    } catch (err: unknown) {
+      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager initialization failed');
+      koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
+    }
 
     // Recover state from persistent stores
     this.recoverState();
@@ -762,20 +785,26 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   /** Public WorkerPipelineHost entry point — delegates to the internal impl. */
-  waitForUserInput(sessionId: string, question: string, options: string[]): Promise<string> {
-    return this.waitForUserInputInternal(sessionId, question, options);
+  waitForUserInput(
+    sessionId: string,
+    question: string,
+    options: string[],
+    opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
+  ): Promise<string> {
+    return this.waitForUserInputInternal(sessionId, question, options, opts);
   }
 
   private async waitForUserInputInternal(
     sessionId: string,
     question: string,
     options: string[],
+    opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
   ): Promise<string> {
     const payload = await createPendingQuestion(sessionId, {
       question,
       options,
-      allowOther: true,
-      allowKeepChatting: true,
+      allowOther: opts?.allowOther ?? true,
+      allowKeepChatting: opts?.allowKeepChatting ?? true,
     });
     this.emitWSMessage(sessionId, 'kory.ask_user', payload satisfies KoryAskUserPayload);
     // The global task timeout may end the suspended provider run, but the DB
@@ -784,13 +813,19 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   /** Surface an authenticated CLI bridge approval through the same durable UI
-   *  question and resume path used by first-party manager and worker tools. */
+   *  question and resume path used by first-party manager and worker tools.
+   *  Tool approvals are binary (approve/reject) — no custom response or
+   *  keep-chatting option is offered unless explicitly requested via opts. */
   requestToolApproval(
     sessionId: string,
     question: string,
     options: string[],
+    opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
   ): Promise<string> {
-    return this.waitForUserInputInternal(sessionId, question, options);
+    return this.waitForUserInputInternal(sessionId, question, options, {
+      allowOther: opts?.allowOther ?? false,
+      allowKeepChatting: opts?.allowKeepChatting ?? false,
+    });
   }
 
   private async resolveSkillCollisionsForTask(
@@ -845,6 +880,7 @@ export class KoryManager implements WorkerPipelineHost {
     const session = await this.sessions?.get(sessionId);
     interactionMode = interactionMode ?? session?.interactionMode ?? 'act';
     this.isProcessing = true;
+    this.startHeartbeat(sessionId);
     this.state.clearChanges(sessionId);
     userMessage = sanitizeForPrompt(userMessage);
 
@@ -967,12 +1003,15 @@ export class KoryManager implements WorkerPipelineHost {
           ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
           : { raw: String(err), typeof: typeof err };
       koryLog.error({ sessionId, err, errDetail }, 'Error in processTask');
+      // Stop the heartbeat before emitting the error — the run is over.
+      this.stopHeartbeat(sessionId);
       await this.updateWorkflowState(sessionId, 'error');
       this.emitError(sessionId, `Error: ${String(err)}`);
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.skillCollisionChoicesBySession.delete(sessionId);
       this.goalContextBySession.delete(sessionId);
+      this.stopHeartbeat(sessionId);
       this.isProcessing = false;
     }
   }
@@ -1345,6 +1384,7 @@ export class KoryManager implements WorkerPipelineHost {
         thinking: event.thinking,
       } satisfies StreamThinkingPayload);
     } else if (event.type === 'content_delta' && event.content) {
+      this.setHeartbeatPhase(sessionId, 'streaming');
       this.emitWSMessage(sessionId, 'stream.delta', {
         agentId: KORY_IDENTITY.id,
         content: event.content,
@@ -1352,6 +1392,7 @@ export class KoryManager implements WorkerPipelineHost {
       });
     } else if (event.type === 'tool_executed') {
       const callId = `jules-${nanoid(8)}`;
+      this.setHeartbeatPhase(sessionId, 'tool_calling');
       this.emitWSMessage(sessionId, 'stream.tool_call', {
         agentId: KORY_IDENTITY.id,
         toolCall: {
@@ -1483,10 +1524,7 @@ export class KoryManager implements WorkerPipelineHost {
       domain: 'critic',
       glowColor: DOMAIN.GLOW_COLORS.critic,
     };
-    this.emitWSMessage(sessionId, 'agent.spawned', {
-      agent: identity,
-      task: 'Review delegated work',
-    });
+    this.events.emitAgentSpawned(sessionId, identity, 'Review delegated work');
     const criticAbort = new AbortController();
     let criticSessionWd: string;
     try {
@@ -1513,11 +1551,16 @@ export class KoryManager implements WorkerPipelineHost {
         feedback: `Could not create the critic's disposable filesystem mirror: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
+    // The critic runs in plan mode (read-only) and is intentionally NOT wired
+    // through resolveSubAgent{Permission,Sandbox}Options. The sub-agent approval
+    // policy governs workers that make changes; the critic cannot make edits,
+    // so approval gating and sandbox bypass are moot for it.
     const criticCtx: ToolContext = {
       sessionId,
       workingDirectory: criticSessionWd,
       allowedPaths: [criticSessionWd],
       isSandboxed: true,
+      sandboxOptions: resolveSandboxOptions(loadAgentSettings(criticSessionWd), true),
       permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(criticSessionWd), 'plan'),
       signal: criticAbort.signal,
     };
@@ -1692,6 +1735,7 @@ export class KoryManager implements WorkerPipelineHost {
         agentId: KORY_IDENTITY.id,
         status: 'thinking',
       });
+      this.setHeartbeatPhase(sessionId, 'thinking');
       let tokensIn = 0;
       let tokensOut = 0;
       let usageKnown = false;
@@ -1707,6 +1751,7 @@ export class KoryManager implements WorkerPipelineHost {
 
       const directWorkingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
       const directSettings = loadAgentSettings(directWorkingDirectory);
+      const directNaturalSandboxed = interactionMode === 'plan';
       const managerCtx: ToolContext = {
         sessionId,
         activeProvider: providerName,
@@ -1716,12 +1761,13 @@ export class KoryManager implements WorkerPipelineHost {
         goalItemId: this.goalContextBySession.get(sessionId)?.itemId,
         workingDirectory: directWorkingDirectory,
         allowedPaths: [],
-        isSandboxed: interactionMode === 'plan',
+        isSandboxed: directNaturalSandboxed,
+        sandboxOptions: resolveSandboxOptions(directSettings, directNaturalSandboxed),
         permissionPolicy: resolveToolPermissionPolicy(directSettings, interactionMode),
         approvedToolCallIds: new Set(),
         signal: abort.signal,
-        waitForUserInput: (question: string, options: string[]) =>
-          this.waitForUserInputInternal(sessionId, question, options),
+        waitForUserInput: (question: string, options: string[], opts?: { allowOther?: boolean; allowKeepChatting?: boolean }) =>
+          this.waitForUserInputInternal(sessionId, question, options, opts),
         emitFileEdit: (e) =>
           this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: KORY_IDENTITY.id, ...e }),
         emitFileComplete: (e) =>
@@ -2076,13 +2122,21 @@ export class KoryManager implements WorkerPipelineHost {
           createdAt: Date.now(),
         });
       }
+      const terminalStatus = processSupervisor.hasRunningForSession(sessionId) ? 'waiting' : 'done';
+      // Stop the heartbeat BEFORE emitting the terminal event. If we stop
+      // it after (in the finally block), the await in createRewindCheckpoint
+      // creates a window where a heartbeat can fire and arrive at the client
+      // after agent.status: done — resurrecting the session to streaming.
+      // For 'waiting' (background terminals), keep the heartbeat alive: the
+      // run is parked, not over, and the exit event will wake it back up.
+      if (terminalStatus === 'done') {
+        this.stopHeartbeat(sessionId);
+      }
       this.emitWSMessage(sessionId, 'agent.status', {
         agentId: KORY_IDENTITY.id,
-        // Background terminals still running → the agent is waiting on them,
-        // not done; the composer button shows "Waiting…" and the exit event
-        // wakes the agent back up.
-        status: processSupervisor.hasRunningForSession(sessionId) ? 'waiting' : 'done',
+        status: terminalStatus,
       });
+      this.setHeartbeatPhase(sessionId, terminalStatus);
 
       // Create rewind point after final response
       if (finalMessageId) {
@@ -2159,8 +2213,8 @@ export class KoryManager implements WorkerPipelineHost {
       if (this.timeTravel) {
         await this.timeTravel.checkpoint(prompt.slice(0, 72), metadata);
       } else {
-        const { ShadowLogger } = await import('./shadow-logger');
-        await new ShadowLogger(this.workingDirectory).createGhostCommit(
+        const { CheckpointStore } = await import('./checkpoint-store');
+        await new CheckpointStore(this.workingDirectory).createGhostCommit(
           prompt.slice(0, 72),
           metadata,
         );
@@ -2440,7 +2494,7 @@ export class KoryManager implements WorkerPipelineHost {
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
         harnessRole: 'manager',
-        permissionMode: permissionPolicy.mode,
+        permissionMode: permissionPolicy.mode as AgentSettings['permissionMode'],
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
         sandbox: SANDBOX_PRESETS.readonly,
@@ -2471,6 +2525,7 @@ export class KoryManager implements WorkerPipelineHost {
           // Stream live, token-by-token — so the user sees text appear immediately (no
           // "thinks then dumps" pause) and partial output survives a mid-stream error.
           if (delta) {
+            this.setHeartbeatPhase(sessionId, 'streaming');
             this.emitWSMessage(sessionId, 'stream.delta', {
               agentId: KORY_IDENTITY.id,
               content: delta,
@@ -2552,6 +2607,7 @@ export class KoryManager implements WorkerPipelineHost {
               input: safeParseJson(event.toolInput),
             },
           });
+          this.setHeartbeatPhase(sessionId, 'tool_calling');
           this.emitWSMessage(sessionId, 'stream.tool_result', {
             agentId: KORY_IDENTITY.id,
             sourceProvider: provider.name,
@@ -2583,6 +2639,7 @@ export class KoryManager implements WorkerPipelineHost {
         } else if (event.type === 'tool_use_start') {
           hasToolCalls = true;
           pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
+          this.setHeartbeatPhase(sessionId, 'tool_calling');
           this.emitWSMessage(sessionId, 'stream.tool_call', {
             agentId: KORY_IDENTITY.id,
             toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
@@ -2738,11 +2795,12 @@ export class KoryManager implements WorkerPipelineHost {
       const selection = await this.waitForUserInputInternal(
         sessionId,
         `Allow agent to ${summary}?`,
-        ['Allow', 'Deny'],
+        ['Allow', 'Reject'],
+        { allowOther: false, allowKeepChatting: false },
       );
       if (
         selection === '__timeout__' ||
-        selection.includes('Deny') ||
+        selection.includes('Reject') ||
         selection.includes('Cancel')
       ) {
         return {
@@ -2750,8 +2808,8 @@ export class KoryManager implements WorkerPipelineHost {
           name: tc.name,
           output:
             selection === '__timeout__'
-              ? 'Note action denied: timed out waiting for approval'
-              : 'Note action denied by user',
+              ? 'Note action rejected: timed out waiting for approval'
+              : 'Note action rejected by user',
           isError: true,
           durationMs: 0,
         };
@@ -2921,7 +2979,7 @@ export class KoryManager implements WorkerPipelineHost {
       domain,
       glowColor: DOMAIN.GLOW_COLORS[domain],
     };
-    this.emitWSMessage(sessionId, 'agent.spawned', { agent: identity, task: userMessage });
+    this.events.emitAgentSpawned(sessionId, identity, userMessage);
     let tokensIn = 0;
     let tokensOut = 0;
     let usageKnown = false;
@@ -2960,8 +3018,8 @@ export class KoryManager implements WorkerPipelineHost {
       emitFileComplete: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_complete', { agentId: workerId, ...e }),
       recordChange: (c) => this.state.recordChange(sessionId, c),
-      waitForUserInput: (question, options) =>
-        this.waitForUserInputInternal(sessionId, question, options),
+      waitForUserInput: (question, options, opts) =>
+        this.waitForUserInputInternal(sessionId, question, options, opts),
     };
     const history = await this.loadHistory(sessionId);
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
@@ -2987,7 +3045,8 @@ export class KoryManager implements WorkerPipelineHost {
     });
     let workerSystemPrompt = workerCompilation.systemPrompt;
     const workerSettings = loadAgentSettings(workerWorkingDirectory);
-    ctx.permissionPolicy = resolveToolPermissionPolicy(workerSettings, 'act');
+    ctx.permissionPolicy = resolveSubAgentPermissionPolicy(workerSettings, workerSettings.subAgentApproval);
+    ctx.sandboxOptions = resolveSubAgentSandboxOptions(workerSettings, workerSettings.subAgentApproval, isSandboxed);
     ctx.approvedToolCallIds = new Set();
     const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
     if (workerGuidance.preferences.trim()) {
@@ -3210,7 +3269,9 @@ export class KoryManager implements WorkerPipelineHost {
     });
     this.managerAbortBySession.clear();
     for (const sid of sessionIds) {
+      this.stopHeartbeat(sid);
       this.emitWSMessage(sid, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
+      this.setHeartbeatPhase(sid, 'done');
     }
     this.isProcessing = false;
     koryLog.info('All workers cancelled via global cancel');
@@ -3428,7 +3489,7 @@ export class KoryManager implements WorkerPipelineHost {
         sessionId: thread.sessionId,
         sandbox: SANDBOX_PRESETS.readonly,
         harnessRole: thread.toolRole,
-        permissionMode: thread.toolRole === 'critic' ? 'plan' : thread.ctx.permissionPolicy?.mode,
+        permissionMode: (thread.toolRole === 'critic' ? 'plan' : thread.ctx.permissionPolicy?.mode) as AgentSettings['permissionMode'] | undefined,
         promptManifestHash: thread.promptManifestHash,
         taskContractHash: thread.taskContractHash,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
@@ -3723,6 +3784,32 @@ export class KoryManager implements WorkerPipelineHost {
     );
   }
 
+  /**
+   * Prune stale git-managed resources: orphaned worktree refs and old checkpoints.
+   * Called periodically by BackgroundCleanupService to prevent unbounded accumulation.
+   */
+  async pruneResources(checkpointRetentionDays = 30): Promise<void> {
+    const tasks: Promise<void>[] = [];
+
+    if (this.workspaceManager) {
+      tasks.push(
+        this.workspaceManager.prune().then((r) => {
+          if (!r.success) koryLog.warn({ msg: r.message }, 'Worktree prune failed');
+        }),
+      );
+    }
+
+    if (this.timeTravel) {
+      tasks.push(
+        this.timeTravel.prune(checkpointRetentionDays).then((r) => {
+          if (!r.success) koryLog.warn({ msg: r.message }, 'Checkpoint prune failed');
+        }),
+      );
+    }
+
+    await Promise.allSettled(tasks);
+  }
+
   /** Keep the live agent-feed cache bounded even during a very active session. */
   private enforceCompletedAgentThreadLimit(sessionId: string): void {
     const completed = [...this.agentThreads.entries()]
@@ -3759,6 +3846,13 @@ export class KoryManager implements WorkerPipelineHost {
     // Clear all session state
     this.state.cleanupAll();
     this.agentThreads.clear();
+
+    // Drain all active worktrees to prevent leaks across restarts.
+    // Fire-and-forget since shutdown() is sync — the event loop will wait
+    // for pending promises during graceful shutdown.
+    if (this.workspaceManager) {
+      void this.workspaceManager.shutdown();
+    }
 
     koryLog.info('KoryManager shutdown complete');
   }
@@ -3839,7 +3933,7 @@ export class KoryManager implements WorkerPipelineHost {
 
   /** Record a file change from a CLI tool execution. Called by the MCP bridge
    *  execute endpoint so changes made via kory__ tools are tracked. */
-  recordChange(sessionId: string, change: any): void {
+  recordChange(sessionId: string, change: ChangeSummary): void {
     try {
       this.state.recordChange(sessionId, change);
     } catch (err: unknown) {
@@ -3903,6 +3997,43 @@ export class KoryManager implements WorkerPipelineHost {
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {
     this.events.emit(sessionId, type, payload);
+  }
+
+  /** Update the phase reported by the next heartbeat for this session.
+   *  Called at every manager status transition. */
+  private setHeartbeatPhase(sessionId: string, phase: AgentStatus): void {
+    this.heartbeatPhaseBySession.set(sessionId, phase);
+  }
+
+  /** Start emitting agent.heartbeat every 5s for this session. The client
+   *  watchdog resets on each heartbeat, so a quiet-but-alive run (e.g. a
+   *  long bash tool) won't be falsely declared dead.
+   *
+   *  Jitter: ±500ms so concurrent sessions don't thunder-herd on the same
+   *  tick. unref(): the timer doesn't keep the Node process alive. */
+  private startHeartbeat(sessionId: string): void {
+    this.stopHeartbeat(sessionId);
+    const interval = 5_000 + (Math.random() * 1_000 - 500);
+    const timer = setInterval(() => {
+      const phase = this.heartbeatPhaseBySession.get(sessionId) ?? 'streaming';
+      this.emitWSMessage(sessionId, 'agent.heartbeat', {
+        agentId: KORY_IDENTITY.id,
+        sessionId,
+        phase,
+      });
+    }, interval);
+    timer.unref?.();
+    this.heartbeatBySession.set(sessionId, timer);
+  }
+
+  /** Stop the heartbeat for a session. Called when the run terminates. */
+  private stopHeartbeat(sessionId: string): void {
+    const timer = this.heartbeatBySession.get(sessionId);
+    if (timer) {
+      clearInterval(timer);
+      this.heartbeatBySession.delete(sessionId);
+    }
+    this.heartbeatPhaseBySession.delete(sessionId);
   }
 }
 

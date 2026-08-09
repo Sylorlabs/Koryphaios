@@ -79,7 +79,12 @@ export interface WorkerPipelineHost {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   };
-  waitForUserInput(sessionId: string, question: string, options: string[]): Promise<string>;
+  waitForUserInput(
+    sessionId: string,
+    question: string,
+    options: string[],
+    opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
+  ): Promise<string>;
   emitThought(sessionId: string, phase: string, thought: string): void;
   updateWorkflowState(sessionId: string, state: string): Promise<void>;
   resolveActiveRouting(
@@ -192,7 +197,7 @@ export class WorkerPipelineService {
     let worktreeSpawned = false;
     if (this.workspaceManager) {
       try {
-        const worktree = this.workspaceManager.spawn(taskId, task.slice(0, 60));
+        const worktree = await this.workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
         if (worktree) {
           workerDir = worktree.path;
           worktreeSpawned = true;
@@ -202,6 +207,14 @@ export class WorkerPipelineService {
         const message = err instanceof Error ? err.message : String(err);
         koryLog.warn({ err: message }, 'Worktree spawn failed — using main directory');
       }
+    } else {
+      // WorkspaceManager is null — either git is unavailable, or init() hasn't
+      // completed yet (async init in sync constructor). Warn so the user knows
+      // parallel workers will share the main directory and may clobber each other.
+      koryLog.warn(
+        { taskId },
+        'WorkspaceManager not ready — worker shares main directory (no isolation)',
+      );
     }
 
     let result = await this.routeToWorker(
@@ -217,7 +230,7 @@ export class WorkerPipelineService {
     if (worktreeSpawned && this.workspaceManager) {
       try {
         if (result.success) {
-          const reconcileResult = this.workspaceManager.reconcile(taskId);
+          const reconcileResult = await this.workspaceManager.reconcile(taskId);
           if (!reconcileResult.success) {
             koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
             result = {
@@ -240,8 +253,8 @@ export class WorkerPipelineService {
               return await this.finishPipeline(sessionId, taskId, result);
             }
             try {
-              const { ShadowLogger } = await import('../shadow-logger');
-              const shadowLogger = new ShadowLogger(this.host.getWorkingDirectory());
+              const { CheckpointStore } = await import('../checkpoint-store');
+              const shadowLogger = new CheckpointStore(this.host.getWorkingDirectory());
               await shadowLogger.createGhostCommit(task.slice(0, 72), {
                 agentId: sessionId,
                 model: result.model ?? preferredModel ?? 'unknown',
@@ -265,7 +278,7 @@ export class WorkerPipelineService {
             }
           }
         } else {
-          this.workspaceManager.cleanup(taskId);
+          await this.workspaceManager.cleanup(taskId);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);

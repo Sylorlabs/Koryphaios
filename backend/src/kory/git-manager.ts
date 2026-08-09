@@ -2,7 +2,7 @@ import { spawnSync } from 'bun';
 import { readFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { koryLog, serverLog } from '../logger';
-import { gitMutex } from './git-mutex';
+import { GitExecutor } from './git-executor';
 
 /** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
 const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9/_.-]{1,255}$/;
@@ -16,30 +16,19 @@ export interface GitFileStatus {
 }
 
 export class GitManager {
-  constructor(private workingDirectory: string) {}
+  private git: GitExecutor;
 
-  /** Async git execution — does NOT block the event loop. Use for all runtime operations. */
-  async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
-    const release = await gitMutex.acquire();
-    try {
-      const proc = Bun.spawn(['git', ...args], {
-        cwd: this.workingDirectory,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-
-      const [stdout, stderr] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      const exitCode = await proc.exited;
-      return { success: exitCode === 0, output: (stdout + stderr).trim() };
-    } finally {
-      release();
-    }
+  constructor(private workingDirectory: string) {
+    this.git = new GitExecutor(workingDirectory);
   }
 
-  /** Sync git execution — ONLY for constructor/startup checks (isGitRepo). */
+  /** Async git execution via the unified GitExecutor (mutex, timeout, retry). */
+  async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
+    return this.git.execCombined(args);
+  }
+
+  /** Sync git execution — ONLY for constructor/startup checks (isGitRepo).
+   *  All runtime operations must use the async runGit() via GitExecutor. */
   private runGitSync(args: string[]): { success: boolean; output: string } {
     const proc = spawnSync(['git', ...args], {
       cwd: this.workingDirectory,
