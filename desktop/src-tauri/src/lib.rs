@@ -383,6 +383,292 @@ fn kill_backend() {
     }
 }
 
+// ─── Dev-mode backend supervisor ─────────────────────────────────────────────
+//
+// In dev mode the launcher (scripts/launch-desktop.ts) owns the backend: it
+// spawns `bun run src/server.ts` and sets KORYPHAIOS_PORT before launching
+// `tauri dev`. The Tauri app therefore skips spawn_bundled_backend (returns
+// Ok(None)) and starts no supervisor.
+//
+// The problem: the Tauri app process detaches from the launcher (it reparents
+// to init/systemd when the terminal that ran `bun run dev` closes). When the
+// launcher dies its cleanup SIGTERMs the backend, but the orphaned Tauri app
+// keeps running — with KORYPHAIOS_PORT set, no backend, and no way to start
+// one. The UI is left polling a dead port indefinitely.
+//
+// This supervisor closes that gap. It polls /api/health; if the backend stays
+// unreachable (the launcher's backend is gone) it spawns `bun run src/server.ts`
+// from the source tree and supervises it with restart-on-exit, mirroring the
+// bundled-backend supervisor. While the launcher's backend is healthy it does
+// nothing, so there is no conflict with a live launcher.
+
+/// Locate the backend source directory in dev mode so the app can spawn
+/// `bun run src/server.ts` itself. Returns None in release builds or when the
+/// source tree isn't reachable.
+fn resolve_dev_backend_dir() -> Option<std::path::PathBuf> {
+    // CARGO_MANIFEST_DIR is present in debug builds run via `tauri dev` and
+    // points at desktop/src-tauri; the backend lives at <project>/backend.
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let candidate = std::path::Path::new(&manifest_dir)
+            .join("..")
+            .join("..")
+            .join("backend");
+        if candidate.join("src").join("server.ts").is_file() {
+            return Some(candidate);
+        }
+    }
+    // Fall back: walk up from the current working directory looking for a
+    // `backend/src/server.ts` tree (covers running the binary from the
+    // project root after a `cargo build`).
+    let mut cwd = std::env::current_dir().ok()?;
+    for _ in 0..6 {
+        let candidate = cwd.join("backend");
+        if candidate.join("src").join("server.ts").is_file() {
+            return Some(candidate);
+        }
+        cwd = cwd.parent()?.to_path_buf();
+    }
+    None
+}
+
+/// Spawn the dev backend (`bun run src/server.ts`) from the source tree.
+/// Used only when the app is running in dev mode without a bundled backend
+/// and the launcher's backend has disappeared. The resulting child is stored
+/// in BACKEND_PROCESS so kill_backend()/window-destroy cleans it up.
+fn spawn_dev_backend(
+    app_handle: &tauri::AppHandle,
+    backend_dir: &std::path::Path,
+) -> Result<Arc<std::sync::Mutex<std::process::Child>>, String> {
+    let config = AppConfig::get();
+    let mut cmd = std::process::Command::new("bun");
+    cmd.args(["run", "src/server.ts"]);
+    cmd.current_dir(backend_dir);
+
+    // The dev environment (KORYPHAIOS_* vars) was inherited from the launcher
+    // that originally spawned `tauri dev`. Pin the host/port explicitly so the
+    // child binds where the UI expects it.
+    cmd.env("KORYPHAIOS_HOST", &config.server.host);
+    cmd.env("KORYPHAIOS_PORT", config.server.port.to_string());
+    if let Ok(v) = std::env::var("KORYPHAIOS_FRONTEND_HOST") {
+        cmd.env("KORYPHAIOS_FRONTEND_HOST", v);
+    }
+    if let Ok(v) = std::env::var("KORYPHAIOS_FRONTEND_PORT") {
+        cmd.env("KORYPHAIOS_FRONTEND_PORT", v);
+    }
+    cmd.env("KORYPHAIOS_DESKTOP_DEV", "1");
+    if let Ok(hash) = std::env::var("KORYPHAIOS_FRONTEND_BUNDLE_HASH") {
+        cmd.env("KORYPHAIOS_FRONTEND_BUNDLE_HASH", hash);
+    }
+
+    // NEVER pipe without a reader: the backend logs heavily and a full 64KB
+    // pipe buffer blocks its writes (same rationale as spawn_bundled_backend).
+    // Log to the app data dir so a crash leaves a trail.
+    if let Ok(data_dir) = app_handle.path().app_data_dir() {
+        let logs = data_dir.join("logs");
+        let _ = std::fs::create_dir_all(&logs);
+        let open = |name: &str| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(logs.join(name))
+        };
+        match (open("backend-dev-supervised.log"), open("backend-dev-supervised.err.log")) {
+            (Ok(out), Ok(err)) => {
+                cmd.stdout(Stdio::from(out));
+                cmd.stderr(Stdio::from(err));
+            }
+            _ => {
+                cmd.stdout(Stdio::null());
+                cmd.stderr(Stdio::null());
+            }
+        }
+    } else {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn dev backend: {e}"))?;
+    println!("[Koryphaios] Dev backend started with PID {}", child.id());
+    Ok(Arc::new(std::sync::Mutex::new(child)))
+}
+
+fn is_port_listening(host: &str, port: u16) -> bool {
+    std::net::TcpStream::connect((host, port)).is_ok()
+}
+
+async fn check_health(client: &reqwest::Client, url: &str) -> bool {
+    match client.get(url).send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Spawn the dev backend, store it in BACKEND_PROCESS, and wait for readiness.
+/// On failure the killed child is dropped and BACKEND_PROCESS is left None so
+/// the supervisor loop retries.
+async fn spawn_and_wait_dev_backend(
+    app_handle: &tauri::AppHandle,
+    backend_dir: &std::path::Path,
+    host: &str,
+    port: u16,
+) {
+    match spawn_dev_backend(app_handle, backend_dir) {
+        Ok(proc) => {
+            let pid = proc.lock().ok().map(|c| c.id());
+            if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+                *guard = Some(proc.clone());
+            }
+            match wait_for_backend_ready(host, port, 60_000, pid, Some(proc.clone())).await {
+                Ok(actual_port) => {
+                    emit_backend_ready(app_handle, pid, host.to_string(), actual_port);
+                }
+                Err(e) => {
+                    eprintln!("[Koryphaios] Dev supervisor: backend did not become ready: {e}");
+                    emit_backend_down(
+                        app_handle,
+                        "restart-timeout",
+                        format!("Dev backend did not become ready: {e}"),
+                        pid,
+                    );
+                    if let Ok(mut child) = proc.lock() {
+                        let _ = child.kill();
+                    }
+                    if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+                        *guard = None;
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[Koryphaios] Dev supervisor: spawn failed: {e}");
+            emit_backend_down(
+                app_handle,
+                "restart-failed",
+                format!("Could not spawn dev backend: {e}"),
+                None,
+            );
+        }
+    }
+}
+
+/// Dev-mode backend supervisor. Polls the health endpoint; if the backend
+/// stays unreachable (the launcher's backend died) it spawns
+/// `bun run src/server.ts` and supervises it with restart-on-exit.
+async fn dev_backend_supervisor(
+    app_handle: tauri::AppHandle,
+    backend_dir: std::path::PathBuf,
+    host: String,
+    port: u16,
+) {
+    let client = match reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[Koryphaios] Dev supervisor: failed to build HTTP client: {e}");
+            return;
+        }
+    };
+    let health_url = format!("http://{host}:{port}/api/health");
+
+    const POLL_SECS: u64 = 3;
+    // ~15s of sustained unresponsiveness before taking over. This gives a live
+    // launcher time to restart its own backend (its watchdog tears down at ~15s
+    // too), so we only step in once the launcher is genuinely gone.
+    const FAIL_THRESHOLD: u32 = 5;
+
+    let mut consecutive_failures = 0u32;
+    println!("[Koryphaios] Dev backend supervisor active (health URL {health_url})");
+
+    loop {
+        tokio::time::sleep(tokio::time::Duration::from_secs(POLL_SECS)).await;
+
+        // If we own a backend, supervise it by exit status (restart-on-exit),
+        // mirroring the bundled-backend supervisor.
+        let owned_exited = {
+            let guard = BACKEND_PROCESS.lock().ok();
+            match guard.as_ref().and_then(|g| g.as_ref()) {
+                Some(proc_arc) => match proc_arc.lock() {
+                    Ok(mut child) => child.try_wait().ok().flatten().is_some(),
+                    Err(_) => false,
+                },
+                None => false,
+            }
+        };
+        if owned_exited {
+            let dead_pid = BACKEND_PROCESS
+                .lock()
+                .ok()
+                .and_then(|g| g.as_ref().and_then(|p| p.lock().ok().map(|c| c.id())));
+            eprintln!("[Koryphaios] Dev backend died — restarting...");
+            emit_backend_down(
+                &app_handle,
+                "exited",
+                "Dev backend process exited; supervisor is restarting it.".to_string(),
+                dead_pid,
+            );
+            if let Ok(mut guard) = BACKEND_PROCESS.lock() {
+                *guard = None;
+            }
+            spawn_and_wait_dev_backend(&app_handle, &backend_dir, &host, port).await;
+            consecutive_failures = 0;
+            continue;
+        }
+
+        // If we own a live backend, the exit check above handles restarts; no
+        // need to health-poll our own process.
+        let we_own = BACKEND_PROCESS
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|_| true))
+            .unwrap_or(false);
+        if we_own {
+            continue;
+        }
+
+        // We don't own a backend — poll the launcher's.
+        if check_health(&client, &health_url).await {
+            if consecutive_failures > 0 {
+                eprintln!(
+                    "[Koryphaios] Dev supervisor: launcher backend recovered after {consecutive_failures} failures"
+                );
+            }
+            consecutive_failures = 0;
+            continue;
+        }
+
+        consecutive_failures += 1;
+        if consecutive_failures < FAIL_THRESHOLD {
+            continue;
+        }
+
+        // Something is still bound to the port but not answering health. Don't
+        // spawn a conflicting backend (it would EADDRINUSE-fallback and split
+        // traffic); keep waiting for the port to free up.
+        if is_port_listening(&host, port) {
+            consecutive_failures = 0;
+            continue;
+        }
+
+        eprintln!(
+            "[Koryphaios] Dev supervisor: backend unreachable for ~{}s — spawning dev backend",
+            consecutive_failures * POLL_SECS as u32
+        );
+        emit_backend_down(
+            &app_handle,
+            "launcher-gone",
+            "Launcher backend is unreachable; the app is starting its own dev backend.".to_string(),
+            None,
+        );
+        spawn_and_wait_dev_backend(&app_handle, &backend_dir, &host, port).await;
+        consecutive_failures = 0;
+    }
+}
+
 // Window state for persistence
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct WindowState {
@@ -1241,7 +1527,32 @@ pub fn run() {
                         }
                     });
                 }
-                Ok(None) => {}
+                Ok(None) => {
+                    // Dev mode: the launcher owns the backend. But the Tauri
+                    // app can outlive the launcher — when the terminal that ran
+                    // `bun run dev` closes, the launcher dies and SIGTERMs its
+                    // backend, while this process (detached, reparented to
+                    // init/systemd) survives. Without a supervisor the app is
+                    // left showing a dead UI over a dead port with no recovery.
+                    //
+                    // Start a dev-mode supervisor that polls /api/health and
+                    // spawns `bun run src/server.ts` itself if the backend stays
+                    // unreachable. While the launcher's backend is healthy it
+                    // does nothing, so there's no conflict with a live launcher.
+                    if let Some(backend_dir) = resolve_dev_backend_dir() {
+                        let sup_handle = app_handle.clone();
+                        let sup_host = browser_host(&config.server.host).to_string();
+                        let sup_port = config.server.port;
+                        tauri::async_runtime::spawn(async move {
+                            dev_backend_supervisor(sup_handle, backend_dir, sup_host, sup_port)
+                                .await;
+                        });
+                    } else {
+                        println!(
+                            "[Koryphaios] Dev mode: no bundled backend and no source tree found — launcher owns the backend"
+                        );
+                    }
+                }
                 Err(e) => {
                     // A release without its backend is not a functioning app.
                     // Fail startup instead of showing a frontend that can
