@@ -189,14 +189,26 @@ describe('API Integration Tests', () => {
     });
 
     test('DELETE /api/sessions/:id deletes session', async () => {
-      const res = request(`/api/sessions/${sessionId}`, {
+      // Create a fresh session for this test so it is self-contained and
+      // does not depend on sessionId from a prior test that may have been
+      // deleted or left in a bad state by a previous run.
+      const createRes = request('/api/sessions', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: { title: 'Delete Test Session' },
+      });
+      expect(createRes.status).toBe(200);
+      expect(createRes.json?.data?.id).toBeTruthy();
+      const deleteSessionId = createRes.json.data.id;
+
+      const res = request(`/api/sessions/${deleteSessionId}`, {
         method: 'DELETE',
         headers: authHeaders(),
       });
       expect(res.status).toBe(200);
       expect(res.json?.ok).toBe(true);
 
-      const getRes = request(`/api/sessions/${sessionId}`, { headers: authHeaders() });
+      const getRes = request(`/api/sessions/${deleteSessionId}`, { headers: authHeaders() });
       expect(getRes.status).toBe(404);
     });
   });

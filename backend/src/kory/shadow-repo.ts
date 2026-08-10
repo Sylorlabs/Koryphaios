@@ -638,11 +638,15 @@ export class ShadowRepo {
       closeSync(fd);
       fd = undefined;
       renameSync(temporary, path);
-      const parent = openSync(dirname(path), 'r');
-      try {
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
+      // Directory fsync is not supported on Windows (EPERM) and is a
+      // best-effort durability hint, not a correctness requirement.
+      if (process.platform !== 'win32') {
+        const parent = openSync(dirname(path), 'r');
+        try {
+          fsyncSync(parent);
+        } finally {
+          closeSync(parent);
+        }
       }
     } finally {
       if (fd !== undefined) closeSync(fd);

@@ -357,6 +357,8 @@ function spawnMacSandbox(
     '(allow file-read-metadata)',
     // System reads needed for dynamic linking, locale, etc.
     '(allow file-read* (subpath "/usr"))',
+    '(allow file-read* (subpath "/bin"))',
+    '(allow file-read* (subpath "/sbin"))',
     '(allow file-read* (subpath "/System"))',
     '(allow file-read* (subpath "/Library/Fonts"))',
     '(allow file-read* (subpath "/dev"))',

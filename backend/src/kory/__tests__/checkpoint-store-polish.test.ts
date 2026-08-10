@@ -576,9 +576,17 @@ describe('CheckpointStore polish features', () => {
         `kory-wm-recover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       );
       gitInit(recoverDir);
+      // macOS symlinks /var → /private/var. git worktree list --porcelain
+      // returns realpath-resolved paths, so canonicalize recoverDir before
+      // passing it to WorkspaceManager — otherwise the recovery prefix check
+      // (absoluteWtPath.startsWith(worktreeBaseDir)) fails to match.
+      const canonicalRecoverDir = realpathSync(recoverDir);
 
       const { WorkspaceManager } = await import('../workspace-manager');
-      const wm1 = new WorkspaceManager(recoverDir, { worktreeDir: '.trees', worktreeLimit: 4 });
+      const wm1 = new WorkspaceManager(canonicalRecoverDir, {
+        worktreeDir: '.trees',
+        worktreeLimit: 4,
+      });
       await wm1.init();
 
       const worktree = await wm1.spawn('recover-test', 'Original Task Name', 'agent-recover');
@@ -587,7 +595,10 @@ describe('CheckpointStore polish features', () => {
 
       // Simulate a restart: create a new WorkspaceManager
       // (don't call shutdown on wm1 — simulate a crash)
-      const wm2 = new WorkspaceManager(recoverDir, { worktreeDir: '.trees', worktreeLimit: 4 });
+      const wm2 = new WorkspaceManager(canonicalRecoverDir, {
+        worktreeDir: '.trees',
+        worktreeLimit: 4,
+      });
       await wm2.init();
 
       // The worktree should be recovered with its original metadata

@@ -43,6 +43,19 @@ function gitInit(dir: string): void {
     stderr: 'pipe',
   });
   spawnSync(['git', 'config', 'user.name', 'Test'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git restore, and
+  // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+  spawnSync(['git', 'config', 'core.autocrlf', 'false'], {
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  spawnSync(['git', 'config', 'core.longpaths', 'true'], {
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
 }
 
 function createCommittedRepo(dir: string): void {
@@ -395,6 +408,11 @@ describe('Shadow Repo Isolation', () => {
         if (initialized.exitCode !== 0) return;
         spawnSync(['git', 'config', 'user.name', 'SHA Test'], { cwd: shaDir });
         spawnSync(['git', 'config', 'user.email', 'sha@example.com'], { cwd: shaDir });
+        // Windows defaults (core.autocrlf=true, 260-char path limit) break
+        // cross-platform tests: CRLF alters file content after git restore,
+        // and long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+        spawnSync(['git', 'config', 'core.autocrlf', 'false'], { cwd: shaDir });
+        spawnSync(['git', 'config', 'core.longpaths', 'true'], { cwd: shaDir });
         writeFileSync(join(shaDir, 'sha.txt'), 'sha256');
         spawnSync(['git', 'add', '.'], { cwd: shaDir });
         spawnSync(['git', 'commit', '-m', 'base'], { cwd: shaDir });
@@ -730,8 +748,10 @@ describe('Shadow Repo Isolation', () => {
             cwd: repo,
             env: {
               ...process.env,
-              GIT_CONFIG_GLOBAL: '/dev/null',
-              GIT_CONFIG_SYSTEM: '/dev/null',
+              // Use the platform-appropriate null device so git does not try
+              // to open a non-existent /dev/null path on Windows.
+              GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+              GIT_CONFIG_SYSTEM: process.platform === 'win32' ? 'NUL' : '/dev/null',
             },
             stdout: 'pipe',
             stderr: 'pipe',
@@ -1078,7 +1098,13 @@ describe('Shadow Repo Isolation', () => {
       );
       try {
         createCommittedRepo(repo);
-        const legacyShadow = join(repo, '.koryphaios', 'shadow-git');
+        // macOS symlinks /var → /private/var. ShadowRepo.repositoryContext
+        // resolves commonGitDir through realpathSync but uses the working
+        // directory as-is for the current-worktree legacy path. Canonicalize
+        // repo so both legacy candidates collapse to the same path instead of
+        // appearing as two stores that need manual reconciliation.
+        const canonicalRepo = realpathSync(repo);
+        const legacyShadow = join(canonicalRepo, '.koryphaios', 'shadow-git');
         mkdirSync(dirname(legacyShadow), { recursive: true });
         expect(
           spawnSync(['git', 'init', '--bare', legacyShadow], { stdout: 'pipe', stderr: 'pipe' })
@@ -1089,12 +1115,12 @@ describe('Shadow Repo Isolation', () => {
           join(legacyShadow, 'objects', 'info', 'alternates'),
           '../../../.git/objects\n',
         );
-        const head = gitOutput(repo, 'rev-parse', 'HEAD');
-        const tree = gitOutput(repo, 'rev-parse', 'HEAD^{tree}');
+        const head = gitOutput(canonicalRepo, 'rev-parse', 'HEAD');
+        const tree = gitOutput(canonicalRepo, 'rev-parse', 'HEAD^{tree}');
         const legacyEnv = {
           ...process.env,
           GIT_DIR: legacyShadow,
-          GIT_WORK_TREE: repo,
+          GIT_WORK_TREE: canonicalRepo,
           GIT_AUTHOR_NAME: 'Legacy',
           GIT_AUTHOR_EMAIL: 'legacy@example.com',
           GIT_COMMITTER_NAME: 'Legacy',
@@ -1102,13 +1128,13 @@ describe('Shadow Repo Isolation', () => {
         };
         const commit = spawnSync(
           ['git', 'commit-tree', tree, '-p', head, '-m', '[GHOST] Legacy stored checkpoint'],
-          { cwd: repo, env: legacyEnv, stdout: 'pipe', stderr: 'pipe' },
+          { cwd: canonicalRepo, env: legacyEnv, stdout: 'pipe', stderr: 'pipe' },
         );
         const hash = new TextDecoder().decode(commit.stdout).trim();
         expect(hash).toHaveLength(40);
         expect(
           spawnSync(['git', 'update-ref', 'refs/kory/checkpoints/legacy-agent/123-legacy', hash], {
-            cwd: repo,
+            cwd: canonicalRepo,
             env: legacyEnv,
             stdout: 'pipe',
             stderr: 'pipe',
@@ -1130,45 +1156,44 @@ describe('Shadow Repo Isolation', () => {
               }),
               hash,
             ],
-            { cwd: repo, env: legacyEnv, stdout: 'pipe', stderr: 'pipe' },
+            { cwd: canonicalRepo, env: legacyEnv, stdout: 'pipe', stderr: 'pipe' },
           ).exitCode,
         ).toBe(0);
         expect(
           spawnSync(['git', 'update-ref', 'refs/kory/cursors/legacy-agent', hash], {
-            cwd: repo,
+            cwd: canonicalRepo,
             env: legacyEnv,
             stdout: 'pipe',
             stderr: 'pipe',
           }).exitCode,
         ).toBe(0);
 
-        const store = new CheckpointStore(repo);
+        const store = new CheckpointStore(canonicalRepo);
         const timeline = await store.getTimeline(10, 'legacy-agent');
         expect(timeline.map((entry) => entry.hash)).toEqual([hash]);
         expect(await store.getCursor('legacy-agent')).toBe(hash);
-        // ShadowRepo.repositoryContext resolves paths through realpathSync.
-        // On macOS, tmpdir() may be under a symlinked root (e.g. /var →
-        // /private/var), so canonicalize repo before comparing.
-        const canonicalRepo = realpathSync(repo);
-        expect(ShadowRepo.shadowPath(repo)).toBe(
+        expect(ShadowRepo.shadowPath(canonicalRepo)).toBe(
           join(canonicalRepo, '.git', 'koryphaios', 'shadow-git'),
         );
         expect(existsSync(legacyShadow)).toBe(false);
         const migratedAlternate = readFileSync(
-          join(ShadowRepo.shadowObjectsPath(repo), 'info', 'alternates'),
+          join(ShadowRepo.shadowObjectsPath(canonicalRepo), 'info', 'alternates'),
           'utf-8',
         ).trim();
         expect(migratedAlternate).toBe(
-          relative(ShadowRepo.shadowObjectsPath(repo), join(canonicalRepo, '.git', 'objects')),
+          relative(
+            ShadowRepo.shadowObjectsPath(canonicalRepo),
+            join(canonicalRepo, '.git', 'objects'),
+          ),
         );
         const noWarning = spawnSync(['git', 'fsck', '--no-progress'], {
-          cwd: repo,
+          cwd: canonicalRepo,
           stdout: 'pipe',
           stderr: 'pipe',
         });
         expect(new TextDecoder().decode(noWarning.stderr)).not.toContain('alternate object path');
         expect(
-          gitOutputShadow(repo, 'for-each-ref', '--format=%(refname)', 'refs/kory/metadata'),
+          gitOutputShadow(canonicalRepo, 'for-each-ref', '--format=%(refname)', 'refs/kory/metadata'),
         ).toContain(hash);
       } finally {
         rmSync(repo, { recursive: true, force: true });

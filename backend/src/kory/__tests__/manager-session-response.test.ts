@@ -80,6 +80,11 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
     git(repoA, 'init');
     git(repoA, 'config', 'user.email', 'session-response@test.invalid');
     git(repoA, 'config', 'user.name', 'Session Response Test');
+    // Windows defaults (core.autocrlf=true, 260-char path limit) break
+    // cross-platform tests: CRLF alters file content after git operations,
+    // and long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+    git(repoA, 'config', 'core.autocrlf', 'false');
+    git(repoA, 'config', 'core.longpaths', 'true');
     writeFileSync(join(repoA, '.gitignore'), '.koryphaios/\n.trees/\n');
     writeFileSync(join(repoA, 'shared.txt'), 'baseline\n');
     git(repoA, 'add', '.');

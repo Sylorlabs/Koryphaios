@@ -1047,7 +1047,12 @@ describe('authoritative process lifecycle contract', () => {
   });
 
   test('backend restart kills and reaps a verified process group before publishing orphaned', async () => {
-    if (process.platform === 'win32') return;
+    // observeProcess() reads /proc/<pid>/cmdline to verify that a recovered
+    // PID still belongs to the original command. /proc does not exist on
+    // macOS or Windows, so ownership verification fails and the supervisor
+    // retains the process in a degraded state instead of killing it. This
+    // test asserts the Linux-only verified-kill path.
+    if (process.platform !== 'linux') return;
     const seed = fresh();
     await seed.initialize();
     const directory = mkdtempSync(join(tmpdir(), 'kory-restart-verified-group-'));
