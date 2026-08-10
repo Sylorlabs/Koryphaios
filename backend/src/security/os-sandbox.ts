@@ -346,7 +346,7 @@ function spawnMacSandbox(
   const allowFile = (root: string) =>
     `(allow file-read* (subpath "${root}"))\n` +
     `  (allow file-write* (subpath "${root}"))\n` +
-    `  (allow file-write-metadata (subpath "${root}"))\n`;
+    `  (allow file-write-meta (subpath "${root}"))\n`;
   // Use a deny-default profile with broad allows for system operations
   // and per-root file-write allows. The key insight is that `touch` and
   // similar commands need broad read and metadata access across the
@@ -371,8 +371,8 @@ function spawnMacSandbox(
     // need to read system libraries, frameworks, and config files from
     // arbitrary locations. Restricting reads breaks most commands.
     '(allow file-read*)',
-    '(allow file-read-metadata)',
-    '(allow file-write-metadata)',
+    '(allow file-read-meta)',
+    '(allow file-write-meta)',
     '(allow file-ioctl)',
     // IPC primitives needed by the C runtime and system frameworks.
     '(allow ipc-posix-sem*)',
