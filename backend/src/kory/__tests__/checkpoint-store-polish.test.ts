@@ -607,7 +607,12 @@ describe('CheckpointStore polish features', () => {
       // On macOS, git worktree list --porcelain returns realpath-resolved
       // paths (e.g. /private/var/folders/... instead of /var/folders/...),
       // so compare canonical paths instead of raw strings.
-      expect(path ? realpathSync(path) : null).toBe(realpathSync(worktree!.path));
+      // On Windows, realpathSync may return 8.3 short names (RUNNER~1) for
+      // one path and long names (runneradmin) for the other. Use
+      // realpathSync.native (GetFinalPathNameByHandleW) for consistent
+      // canonicalization on both sides.
+      const realpath = realpathSync.native ?? realpathSync;
+      expect(path ? realpath(path) : null).toBe(realpath(worktree!.path));
 
       // Clean up
       await wm2.cleanup('recover-test');

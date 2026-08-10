@@ -385,8 +385,12 @@ export class ShadowRepo {
     }
 
     try {
-      commonGitDir = realpathSync(commonGitDir);
-      gitDir = realpathSync(gitDir);
+      // Use realpathSync.native for consistent 8.3 short name resolution
+      // on Windows (GetFinalPathNameByHandleW). On other platforms,
+      // native === sync.
+      const realpath = realpathSync.native ?? realpathSync;
+      commonGitDir = realpath(commonGitDir);
+      gitDir = realpath(gitDir);
     } catch {
       return null;
     }

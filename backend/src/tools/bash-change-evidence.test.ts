@@ -11,18 +11,21 @@ const testDirectories: string[] = [];
 
 /** Normalize path separators to forward slashes for cross-platform comparison.
  *  On Windows, Node's resolve/join produce backslash paths while git reports
- *  forward-slash paths. This helper ensures comparisons are separator-agnostic.
- *  Also canonicalizes 8.3 short names (e.g. RUNNER~1 → runneradmin) via
- *  realpathSync.native on Windows for consistent path comparisons. */
+ *  forward-slash paths. This helper ensures comparisons are separator-agnostic. */
 function normalizePath(p: string): string {
+  return p.replaceAll('\\', '/');
+}
+
+/** Canonicalize a path for comparison, resolving 8.3 short names on Windows.
+ *  Use this when comparing absolute paths that may have been produced by
+ *  different tools (e.g. Node.js vs git). */
+function canonicalPath(p: string): string {
   const realpath = realpathSync.native ?? realpathSync;
-  let resolved = p;
   try {
-    resolved = realpath(resolved);
+    return normalizePath(realpath(p));
   } catch {
-    // path may not exist yet; fall back to the original
+    return normalizePath(p);
   }
-  return resolved.replaceAll('\\', '/');
 }
 
 function makeDirectory(prefix: string): string {
@@ -138,8 +141,15 @@ describe('Bash foreground changed-file evidence', () => {
       }
     }
 
+    // Canonicalize root for the slice operation: on Windows, change.path
+    // may use the long name (runneradmin) while root uses the 8.3 short
+    // name (RUNNER~1), causing the slice to cut at the wrong position.
+    const canonicalRoot = canonicalPath(root);
     const byName = new Map(
-      changes.map((change) => [normalizePath(change.path.slice(root.length + 1)), change]),
+      changes.map((change) => [
+        normalizePath(canonicalPath(change.path).slice(canonicalRoot.length + 1)),
+        change,
+      ]),
     );
     const expectedKeys = IS_WIN
       ? ['created.txt', 'delete.txt', 'edit.txt']
@@ -165,7 +175,7 @@ describe('Bash foreground changed-file evidence', () => {
 
     expect(result.isError).toBe(false);
     expect(changes).toHaveLength(1);
-    expect(normalizePath(changes[0]!.path)).toBe(normalizePath(join(root, 'edit.txt')));
+    expect(canonicalPath(changes[0]!.path)).toBe(canonicalPath(join(root, 'edit.txt')));
     expect(changes[0]!.operation).toBe('edit');
   });
 
@@ -175,9 +185,9 @@ describe('Bash foreground changed-file evidence', () => {
 
     const failed = await runBash(root, "printf 'failed\\n' > failed.txt; false");
     expect(failed.result.isError).toBe(true);
-    expect(failed.changes.map((c) => ({ ...c, path: normalizePath(c.path) }))).toContainEqual(
+    expect(failed.changes.map((c) => ({ ...c, path: canonicalPath(c.path) }))).toContainEqual(
       expect.objectContaining({
-        path: normalizePath(join(root, 'failed.txt')),
+        path: canonicalPath(join(root, 'failed.txt')),
         operation: 'create',
       }),
     );
@@ -187,9 +197,9 @@ describe('Bash foreground changed-file evidence', () => {
     });
     expect(timedOut.result.isError).toBe(true);
     expect(timedOut.result.output).toContain('timed out');
-    expect(timedOut.changes.map((c) => ({ ...c, path: normalizePath(c.path) }))).toContainEqual(
+    expect(timedOut.changes.map((c) => ({ ...c, path: canonicalPath(c.path) }))).toContainEqual(
       expect.objectContaining({
-        path: normalizePath(join(root, 'timeout.txt')),
+        path: canonicalPath(join(root, 'timeout.txt')),
         operation: 'create',
       }),
     );
