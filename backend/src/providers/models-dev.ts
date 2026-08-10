@@ -23,6 +23,9 @@ const PROVIDER_KEY: Record<string, string> = {
   google: 'google',
   gemini: 'google',
   aistudio: 'google',
+  // Antigravity is a Google CLI harness — its models are Gemini/Claude/GPT
+  // and models.dev has the real context windows under the google key.
+  antigravity: 'google',
   vertexai: 'google',
   xai: 'xai',
   deepseek: 'deepseek',
@@ -75,6 +78,7 @@ const PRICING_PROVIDER_KEY: Record<string, string> = {
   google: 'google',
   gemini: 'google',
   aistudio: 'google',
+  antigravity: 'google',
   vertexai: 'google',
   xai: 'xai',
   deepseek: 'deepseek',
@@ -140,7 +144,10 @@ function kickRefresh(): void {
       if (!res.ok) throw new Error(`models.dev ${res.status}`);
       cache = (await res.json()) as typeof cache;
       fetchedAt = Date.now();
-      providerLog.debug({ providers: Object.keys(cache ?? {}).length }, 'models.dev catalog refreshed');
+      providerLog.debug(
+        { providers: Object.keys(cache ?? {}).length },
+        'models.dev catalog refreshed',
+      );
     })
     .catch((err) => {
       providerLog.debug(
@@ -193,11 +200,18 @@ export function applyModelsDevMetadata(providerName: string, models: ModelDef[])
     const rawId = m.apiModelId ?? m.id;
     // Strip the Koryphaios provider prefix (e.g. "opencodezen.claude-sonnet-4" → "claude-sonnet-4")
     const bare = rawId.replace(new RegExp(`^${providerName}\\.`), '');
-    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids)
+    // Some CLIs (e.g. antigravity) append a reasoning-effort suffix
+    // (-high/-medium/-low) to the model name.  Strip it so the base
+    // model matches the models.dev catalog key.
+    const strippedEffort = bare.replace(/-(high|medium|low)$/i, '');
+    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids),
+    // effort-stripped, effort-stripped lowercased
     const candidates = [
       bare,
       bare.toLowerCase(),
       bare.includes('/') ? bare.split('/').pop()! : '',
+      strippedEffort,
+      strippedEffort.toLowerCase(),
       rawId,
       rawId.toLowerCase(),
     ].filter(Boolean);
@@ -219,7 +233,6 @@ export function applyModelsDevMetadata(providerName: string, models: ModelDef[])
   });
 }
 
-
 export interface ModelsDevPricing {
   /** $ per million input tokens */
   inPerM: number;
@@ -231,16 +244,22 @@ export interface ModelsDevPricing {
 /** Live per-token pricing from models.dev for any known provider/model.
  *  Synchronous against the cached catalog (kicks a refresh); null when the
  *  catalog has no verified price — callers must NOT invent one. */
-export function getModelsDevPricing(providerName: string, modelId: string): ModelsDevPricing | null {
+export function getModelsDevPricing(
+  providerName: string,
+  modelId: string,
+): ModelsDevPricing | null {
   kickRefresh();
   if (!cache) return null;
   // Gateways expose upstream ids like "anthropic/claude-sonnet-4-6".
-  const candidates = [modelId, modelId.includes('/') ? modelId.split('/').pop()! : ''].filter(Boolean);
+  const candidates = [modelId, modelId.includes('/') ? modelId.split('/').pop()! : ''].filter(
+    Boolean,
+  );
   const tryEntries = (entries?: Record<string, ModelsDevEntry>): ModelsDevPricing | null => {
     if (!entries) return null;
     for (const cand of candidates) {
       const low = cand.toLowerCase();
-      const entry = entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
+      const entry =
+        entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
       const c = entry?.cost;
       if (c && typeof c.input === 'number' && typeof c.output === 'number') {
         return { inPerM: c.input, outPerM: c.output, cacheReadPerM: c.cache_read };

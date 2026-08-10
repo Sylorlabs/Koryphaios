@@ -1048,7 +1048,25 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
         workingDirectory: root,
         taskContract: contract,
       }),
-    ).toThrow('verified context window unavailable');
+    ).not.toThrow();
+    // The warning is surfaced via the CompiledPrompt.warnings field instead
+    // of throwing — the agent proceeds with an unverified context window.
+    const warned = compilePrompt({
+      role: 'manager',
+      mode: 'advanced',
+      provider: 'openai',
+      model: 'unknown-window',
+      occupiedContextTokenUpperBound: 1,
+      reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
+      workingDirectory: root,
+      taskContract: contract,
+    });
+    expect(warned.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Context window unverified for openai/unknown-window'),
+      ]),
+    );
   });
 
   test('classifies exact fuzzing and authorization requests with proportional risk and evidence', () => {

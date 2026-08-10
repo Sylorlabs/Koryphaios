@@ -124,6 +124,9 @@ export interface IntentDecisionState {
 export interface CompiledPrompt {
   systemPrompt: string;
   manifest: PromptManifest;
+  /** Non-fatal issues encountered during compilation. Callers may surface
+   *  these to the user as warnings (e.g. via a system.warning WS event). */
+  warnings?: string[];
 }
 
 export interface SkillContextBudgetDecision {
@@ -569,9 +572,13 @@ export function compilePrompt(input: {
   const trustedWindow = input.model
     ? resolveTrustedContextWindow(input.model, input.provider as ProviderName)
     : { contextKnown: false as const };
+  const warnings: string[] = [];
   if (input.requireVerifiedContextWindow && !trustedWindow.contextKnown) {
-    throw new Error(
-      `Skill resolution blocked before work starts: verified context window unavailable for ${input.provider}/${input.model ?? 'unknown model'}`,
+    // Don't hard-block — warn instead.  Without a verified context window,
+    // skill budgeting falls back to a conservative default and compaction
+    // may be less precise, but the agent can still work.
+    warnings.push(
+      `Context window unverified for ${input.provider}/${input.model ?? 'unknown model'} — skill budgeting and compaction may be less precise.`,
     );
   }
   const renderedBasePrompt = renderForProvider(adapter, baseSections);
@@ -658,6 +665,7 @@ export function compilePrompt(input: {
   return {
     systemPrompt,
     manifest: { ...manifestBase, hash: sha256(JSON.stringify(manifestBase) + systemPrompt) },
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
 

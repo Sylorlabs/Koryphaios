@@ -44,7 +44,12 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
-import { fetchAntigravityQuota, fetchAntigravityQuotaGroups, type AntigravityQuotaGroup } from './antigravity-quota';
+import {
+  fetchAntigravityQuota,
+  fetchAntigravityQuotaGroups,
+  type AntigravityQuotaGroup,
+} from './antigravity-quota';
+import { applyModelsDevMetadata, warmModelsDevCache } from './models-dev';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
 import {
@@ -104,7 +109,10 @@ function listConversationIds(): Set<string> {
         .map((f) => f.slice(0, -3)),
     );
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to list agy conversation ids');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'failed to list agy conversation ids',
+    );
     return new Set();
   }
 }
@@ -125,7 +133,10 @@ function detectNewConversation(before: Set<string>): string | null {
         best = id;
       }
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'raced away reading conversation mtime');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'raced away reading conversation mtime',
+      );
       /* raced away */
     }
   }
@@ -152,6 +163,9 @@ function refreshModelsInBackground(): void {
   Promise.all([
     fetchAgyModels(bin),
     fetchAntigravityQuotaGroups(),
+    // Warm the models.dev cache so enrichment is available synchronously
+    // when we merge the model list below.
+    warmModelsDevCache(),
   ])
     .then(([models, groups]) => {
       if (models.length > 0) {
@@ -173,7 +187,10 @@ function refreshModelsInBackground(): void {
           }
         }
         cachedQuota = quotaMap;
-        cachedModels = mergeQuotaIntoModels(models, quotaMap);
+        // Enrich with real context windows and reasoning tiers from models.dev
+        // (agy models only reports cliName + displayName, not token limits).
+        const enriched = applyModelsDevMetadata('antigravity', models);
+        cachedModels = mergeQuotaIntoModels(enriched, quotaMap);
         cachedModelsAt = Date.now();
       }
     })
@@ -325,12 +342,18 @@ export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
         });
       }
       if (envelope.result?.status && envelope.result.status !== 'SUCCESS') {
-        events.push({ type: 'error', error: `Antigravity ended with status ${envelope.result.status}` });
+        events.push({
+          type: 'error',
+          error: `Antigravity ended with status ${envelope.result.status}`,
+        });
       }
       return events;
     }
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'non-JSON line in stream-json mode');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'non-JSON line in stream-json mode',
+    );
     // A non-JSON line is not response content in stream-json mode. Keep it out
     // of chat; stderr/exit status below provides the actionable failure.
   }
@@ -391,7 +414,10 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
         }
       }
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'malformed SSE log line — skip');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'malformed SSE log line — skip',
+      );
       // malformed SSE line — skip
     }
   }
@@ -474,7 +500,8 @@ export class AntigravityProvider implements Provider {
     // Resume the agy conversation tied to this Koryphaios session when we have
     // one — then only the NEW turn is sent (agy holds the prior history), which
     // avoids a fresh agentic session re-exploring the workspace every message.
-    let convId = !researchOnly && request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
+    let convId =
+      !researchOnly && request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
     if (convId && !existsSync(join(AGY_CONV_DIR, `${convId}.db`))) {
       // agy pruned it — start a fresh conversation with full history.
       if (request.sessionId) sessionConversations.delete(request.sessionId);
@@ -495,7 +522,10 @@ export class AntigravityProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (!cliModel) {
       attachmentScope.cleanup();
-      yield { type: 'error', error: 'Antigravity did not report an available model for this account.' };
+      yield {
+        type: 'error',
+        error: 'Antigravity did not report an available model for this account.',
+      };
       return;
     }
     const promptArtifact = createPrivateCliTextArtifact('antigravity-prompt', prompt);
@@ -527,51 +557,54 @@ export class AntigravityProvider implements Provider {
       : getKoryphaiosAntigravityHome();
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
-        ? bridgeGrantLease!.grant([
-            'mcp:catalog',
-            'mcp:execute',
-          ]).directory
+        ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
     ensureManagedCliDirectory(agyHome);
-    if (!researchOnly) try {
-      // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
-      const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
-      if (mcpConfigs && mcpConfigs.length > 0) {
-        const mcpConfigPath = join(agyHome, '.claude.json');
-        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-        const existing = existsSync(mcpConfigPath)
-          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-          : {};
-        existing.mcpServers = existing.mcpServers ?? {};
-        for (const srv of mcpConfigs) {
-          existing.mcpServers[srv.name] = {
-            command: srv.command,
-            args: srv.args,
-            env: srv.env,
-          };
+    if (!researchOnly)
+      try {
+        // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
+        const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          const mcpConfigPath = join(agyHome, '.claude.json');
+          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+          const existing = existsSync(mcpConfigPath)
+            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+            : {};
+          existing.mcpServers = existing.mcpServers ?? {};
+          for (const srv of mcpConfigs) {
+            existing.mcpServers[srv.name] = {
+              command: srv.command,
+              args: srv.args,
+              env: srv.env,
+            };
+          }
+          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
         }
-        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
-      }
-      // Hooks: write .claude/hooks.json for PreToolUse enforcement.
-      const hookConfigs = agyBridge?.buildHooks(bridgeCtx);
-      if (hookConfigs && hookConfigs.length > 0 && agyBridge) {
-        const hooksJson = agyBridge.serializeHooks(hookConfigs);
-        const hooksDir = join(agyHome, '.claude');
-        ensureManagedCliDirectory(hooksDir);
-        writeManagedCliFile(join(hooksDir, 'hooks.json'), hooksJson);
-      }
-      // Rules: write AGENTS.md with the Kory session rules.
-      const ruleFiles = agyBridge?.buildRules(bridgeCtx);
-      if (ruleFiles) {
-        for (const rule of ruleFiles) {
-          writeManagedCliFile(rule.path, rule.content);
+        // Hooks: write .claude/hooks.json for PreToolUse enforcement.
+        const hookConfigs = agyBridge?.buildHooks(bridgeCtx);
+        if (hookConfigs && hookConfigs.length > 0 && agyBridge) {
+          const hooksJson = agyBridge.serializeHooks(hookConfigs);
+          const hooksDir = join(agyHome, '.claude');
+          ensureManagedCliDirectory(hooksDir);
+          writeManagedCliFile(join(hooksDir, 'hooks.json'), hooksJson);
         }
+        // Rules: write AGENTS.md with the Kory session rules.
+        const ruleFiles = agyBridge?.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            writeManagedCliFile(rule.path, rule.content);
+          }
+        }
+      } catch (wiringErr) {
+        providerLog.warn(
+          { err: wiringErr, provider: 'antigravity' },
+          'Failed to wire kory MCP/hooks/rules for Antigravity',
+        );
       }
-    } catch (wiringErr) {
-      providerLog.warn({ err: wiringErr, provider: 'antigravity' }, 'Failed to wire kory MCP/hooks/rules for Antigravity');
-    }
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-'))
+      : null;
     const cwd = researchRoot ?? request.workingDirectory?.trim();
     // Mode selection: only the critic role uses planning (read-only) mode.
     // The manager and worker roles always get accept-edits — never guess
@@ -642,7 +675,10 @@ export class AntigravityProvider implements Provider {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'child already gone on abort');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'child already gone on abort',
+        );
         /* already gone */
       }
     };
@@ -722,7 +758,10 @@ export class AntigravityProvider implements Provider {
         sseThinkingEvents += events.filter((e) => e.type === 'thinking_delta').length;
         return events;
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to read/drain agy log file');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'failed to read/drain agy log file',
+        );
         return [];
       }
     };
@@ -866,7 +905,10 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
     try {
       key = readVarint();
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf varint eof');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'protobuf varint eof',
+      );
       break;
     }
     const field = Math.floor(key / 8);
@@ -888,7 +930,10 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
             const head = t.slice(0, 80);
             if (/^[\x20-\x7e\n\t\r]*$/.test(head)) asText = t;
           } catch (err: unknown) {
-            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf field not utf-8');
+            providerLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'protobuf field not utf-8',
+            );
             /* not utf-8 */
           }
         }
@@ -898,7 +943,10 @@ function protoStrings(buf: Uint8Array, prefix = ''): Array<[string, string]> {
       else if (wire === 1) i += 8;
       else break;
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'protobuf wire parse error');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'protobuf wire parse error',
+      );
       break;
     }
   }
@@ -939,7 +987,10 @@ function newTrajectoryTail(convId?: string): TrajectoryTailState {
         db.close();
       }
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'db missing/locked seeding trajectory tail');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'db missing/locked seeding trajectory tail',
+      );
       /* db missing/locked — worst case we re-emit prior-turn thinking once */
     }
   }
@@ -975,12 +1026,18 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
           try {
             return statSync(f).mtimeMs >= state.spawnedAt - 2_000;
           } catch (err: unknown) {
-            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'stat failed for conversation db');
+            providerLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'stat failed for conversation db',
+            );
             return false;
           }
         });
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'failed to list conversation dbs');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'failed to list conversation dbs',
+      );
       return events;
     }
   }
@@ -1014,7 +1071,10 @@ function drainTrajectoryThinking(state: TrajectoryTailState): ProviderEvent[] {
         db.close();
       }
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'db busy/locked this tick — retry next poll');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'db busy/locked this tick — retry next poll',
+      );
       /* db busy/locked this tick — retry next poll */
     }
   }
@@ -1064,7 +1124,10 @@ function newTranscriptTail(stdoutSoFar: () => string, convId?: string): Transcri
     try {
       state.offsets.set(f, statSync(f).size);
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'transcript not created yet');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'transcript not created yet',
+      );
       /* transcript not created yet */
     }
   }
@@ -1084,12 +1147,18 @@ function findLiveTranscripts(state: TranscriptTailState): string[] {
       try {
         if (state.offsets.has(f) || statSync(f).mtimeMs >= state.spawnedAt - 2_000) out.push(f);
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'no transcript in this brain dir');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'no transcript in this brain dir',
+        );
         /* no transcript in this brain dir */
       }
     }
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'brain dir absent — older agy or different install');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'brain dir absent — older agy or different install',
+    );
     /* brain dir absent — older agy or different install */
   }
   return out;
@@ -1157,12 +1226,18 @@ function drainTranscript(state: TranscriptTailState): ProviderEvent[] {
           // USER_INPUT / EPHEMERAL_MESSAGE / SYSTEM_MESSAGE / CHECKPOINT /
           // CONVERSATION_HISTORY are prompt plumbing — not surfaced.
         } catch (err: unknown) {
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'partial or non-JSON transcript line');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'partial or non-JSON transcript line',
+          );
           /* partial or non-JSON line */
         }
       }
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'transcript file rotated/unreadable this tick');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'transcript file rotated/unreadable this tick',
+      );
       /* file rotated/unreadable this tick — retry next poll */
     }
   }
@@ -1195,10 +1270,7 @@ function buildPrompt(
     tools: [],
   });
   const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(
-    systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote,
-    '',
-  );
+  lines.push(systemPrompt?.trim() ? `${systemPrompt.trim()}\n\n${harnessNote}` : harnessNote, '');
   const turns = messages.filter((m) => m.role !== 'system');
 
   if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {

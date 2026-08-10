@@ -1806,6 +1806,11 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
+    if (criticCompilation.warnings?.length) {
+      for (const w of criticCompilation.warnings) {
+        this.emitWSMessage(sessionId, 'system.info', { message: w });
+      }
+    }
     const criticSystemPrompt = criticCompilation.systemPrompt + criticSupplementalContext;
     // The critic is a FRESH-context agent — it never shares the manager's
     // conversation. The manager briefs it here: the original objective plus
@@ -2763,6 +2768,11 @@ export class KoryManager implements WorkerPipelineHost {
         ...(interactionMode === 'plan' ? { pins: ['plan-mode'] } : {}),
       },
     });
+    if (managerCompilation.warnings?.length) {
+      for (const w of managerCompilation.warnings) {
+        this.emitWSMessage(sessionId, 'system.info', { message: w });
+      }
+    }
     let systemPrompt =
       managerCompilation.systemPrompt + memorySupplementalContext + researchSupplementalContext;
     if (this.promptManifestHashBySession.get(sessionId) !== managerCompilation.manifest.hash) {
@@ -3576,6 +3586,11 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
+    if (workerCompilation.warnings?.length) {
+      for (const w of workerCompilation.warnings) {
+        this.emitWSMessage(sessionId, 'system.info', { message: w });
+      }
+    }
     const workerSystemPrompt = workerCompilation.systemPrompt + workerSupplementalContext;
 
     const thread: AgentThreadState = {
@@ -4268,6 +4283,11 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
+    if (fallbackCompilation.warnings?.length) {
+      for (const w of fallbackCompilation.warnings) {
+        this.emitWSMessage(sessionId, 'system.info', { message: w });
+      }
+    }
     const fallbackThread: AgentThreadState = {
       sessionId,
       identity: {
