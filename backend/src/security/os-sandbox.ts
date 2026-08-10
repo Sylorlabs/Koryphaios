@@ -357,14 +357,13 @@ function spawnMacSandbox(
     // process model is per-line. When blockSubprocesses is true we omit
     // this allow, which causes the default-deny to block fork/exec.
     ...(opts.blockSubprocesses ? [] : ['(allow process*)']),
-    // Mach IPC, IOKit, signals, sysctl, and IPC primitives are required
-    // for many macOS system calls. Without these, even simple commands
-    // like `touch` fail with "Operation not permitted".
+    // Mach IPC, IOKit, signals, and sysctl are required for many macOS
+    // system calls. Without these, even simple commands like `touch`
+    // fail with "Operation not permitted".
     '(allow mach*)',
     '(allow iokit*)',
     '(allow signal)',
     '(allow sysctl-read)',
-    '(allow sysctl-write)',
     // Allow ALL file reads system-wide. Commands need to read system
     // libraries, frameworks, and config files from arbitrary locations.
     // file-read* includes metadata reads.
@@ -373,7 +372,6 @@ function spawnMacSandbox(
     // IPC primitives needed by the C runtime and system frameworks.
     '(allow ipc-posix-sem*)',
     '(allow ipc-posix-shm*)',
-    '(allow ipc-posix-set)',
     // Note: file-write* is NOT in the broad allows above. It's denied by
     // `(deny default)` and only re-allowed per-root below.
   ];
