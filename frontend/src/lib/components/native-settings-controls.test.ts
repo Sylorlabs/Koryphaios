@@ -31,7 +31,7 @@ describe('Koryphaios settings controls', () => {
   it('keeps product controls on the shared Kory contracts', () => {
     const sourceRoot = join(process.cwd(), 'src');
     const sources = listSvelteFiles(sourceRoot).map((path) => ({
-      path: relative(sourceRoot, path),
+      path: relative(sourceRoot, path).replaceAll('\\', '/'),
       source: readFileSync(path, 'utf8'),
     }));
     const forbiddenNativeControl =
