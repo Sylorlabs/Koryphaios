@@ -367,23 +367,18 @@ function spawnMacSandbox(
     '(allow signal)',
     '(allow sysctl-read)',
     '(allow sysctl-write)',
-    // Allow ALL file operations system-wide. Commands need broad file
-    // access for dynamic linking, reading system frameworks, etc.
-    // Content writes are later denied globally and re-allowed per-root.
+    // Allow ALL file reads and metadata operations system-wide. Commands
+    // need to read system libraries, frameworks, and config files from
+    // arbitrary locations. Restricting reads breaks most commands.
     '(allow file-read*)',
     '(allow file-read-metadata)',
     '(allow file-write-metadata)',
     '(allow file-ioctl)',
-    '(allow file-map-executable)',
     // IPC primitives needed by the C runtime and system frameworks.
     '(allow ipc-posix-sem*)',
     '(allow ipc-posix-shm*)',
     '(allow ipc-posix-set)',
-    // Allow vnode operations, extended attributes, and system calls.
-    '(allow vnode*)',
-    '(allow system*)',
     // TEMPORARY: Allow ALL file writes to diagnose sandbox issue.
-    // TODO: Restrict to per-root once the issue is identified.
     '(allow file-write*)',
   ];
 

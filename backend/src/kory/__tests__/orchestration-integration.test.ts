@@ -67,12 +67,18 @@ afterAll(() => {
   if (existsSync(TEST_DIR)) {
     // On Windows, file handles (e.g. SQLite) may still be held briefly
     // after cancel. Retry with backoff to avoid EBUSY.
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
       try {
-        rmSync(TEST_DIR, { recursive: true });
+        rmSync(TEST_DIR, { recursive: true, force: true });
         break;
       } catch {
-        if (attempt === 4) throw new Error(`Failed to clean up ${TEST_DIR}`);
+        if (attempt === 9) throw new Error(`Failed to clean up ${TEST_DIR}`);
+        // Wait before retrying: 100ms, 200ms, 400ms, ...
+        const delay = 100 * Math.pow(2, attempt);
+        const start = Date.now();
+        while (Date.now() - start < delay) {
+          // busy wait — synchronous sleep
+        }
       }
     }
   }
