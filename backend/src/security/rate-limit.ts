@@ -1243,7 +1243,7 @@ export function rateLimit(options: ExpressRateLimitOptions = {}) {
 
       let effectiveConfig: RateLimitConfig = config;
       if (!options.config && req.authenticatedUser) {
-        const tier = getTierConfig(req.authenticatedUser.rateLimitTier);
+        const tier = getTierConfig(req.authenticatedUser.rateLimitTier ?? 'default');
         effectiveConfig = tier.limits.user || config;
       }
 

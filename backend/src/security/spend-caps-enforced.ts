@@ -466,7 +466,7 @@ export async function getPauseHistory(
       .orderBy(desc(spendCapPauses.pausedAt))
       .limit(limit);
     return rows.map((r) => ({
-      id: r.id,
+      id: String(r.id),
       sessionId: r.sessionId,
       pausedAt: r.pausedAt.getTime(),
       resumedAt: r.resumedAt ? r.resumedAt.getTime() : undefined,

@@ -51,6 +51,7 @@ interface DevinTrajectoryJson {
     version?: string;
     model_name?: string;
     tool_definitions?: Array<{ name?: string } | string>;
+    extra?: Record<string, unknown>;
   };
   steps?: Array<{
     source?: string;

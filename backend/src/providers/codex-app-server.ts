@@ -13,6 +13,9 @@ export interface CodexAppServerModel {
   displayName?: string;
   hidden?: boolean;
   supportedReasoningEfforts?: Array<{ reasoningEffort?: string } | null>;
+  supportedServiceTiers?: string[];
+  inputModalities?: string[];
+  isDefault?: boolean;
 }
 
 type JsonRpcResponse = {
@@ -92,7 +95,10 @@ export class CodexAppServer {
   ) {}
 
   async account(refreshToken = false): Promise<CodexManagedAuthStatus> {
-    const result = await this.request('account/read', { refreshToken });
+    const result = (await this.request('account/read', { refreshToken })) as {
+      account?: CodexAccount | null;
+      requiresOpenaiAuth?: boolean;
+    } | null;
     return {
       account: result?.account ?? null,
       requiresOpenaiAuth: result?.requiresOpenaiAuth === true,
@@ -101,20 +107,24 @@ export class CodexAppServer {
 
   /** Read the official CLI's account-wide usage surface without creating a turn. */
   async usage(): Promise<CodexAccountUsage> {
-    return await this.request('account/usage/read', {});
+    return (await this.request('account/usage/read', {})) as CodexAccountUsage;
   }
 
   /** Read the official CLI's live quota/credit snapshot without spending a credit. */
   async rateLimits(): Promise<CodexRateLimits> {
-    return await this.request('account/rateLimits/read', {});
+    return (await this.request('account/rateLimits/read', {})) as CodexRateLimits;
   }
 
   async startChatgptLogin(): Promise<{ loginId: string; authUrl: string }> {
-    const result = await this.request('account/login/start', {
+    const result = (await this.request('account/login/start', {
       type: 'chatgpt',
       useHostedLoginSuccessPage: true,
       appBrand: 'chatgpt',
-    });
+    })) as {
+      type?: string;
+      loginId?: string;
+      authUrl?: string;
+    } | null;
     if (
       result?.type !== 'chatgpt' ||
       typeof result.loginId !== 'string' ||
@@ -131,7 +141,14 @@ export class CodexAppServer {
     verificationUrl: string;
     userCode: string;
   }> {
-    const result = await this.request('account/login/start', { type: 'chatgptDeviceCode' });
+    const result = (await this.request('account/login/start', {
+      type: 'chatgptDeviceCode',
+    })) as {
+      type?: string;
+      loginId?: string;
+      verificationUrl?: string;
+      userCode?: string;
+    } | null;
     if (
       result?.type !== 'chatgptDeviceCode' ||
       typeof result.loginId !== 'string' ||

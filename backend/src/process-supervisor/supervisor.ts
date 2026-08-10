@@ -36,6 +36,7 @@ export interface SubprocessLike {
   pid: number;
   exited: Promise<number>;
   kill?(signal?: string | number): void | boolean;
+  stdin: unknown;
   stdout: ReadableStream<Uint8Array>;
   stderr: ReadableStream<Uint8Array>;
 }
@@ -931,10 +932,14 @@ export class ProcessSupervisor {
 
   async writeInput(id: string, input: string): Promise<boolean> {
     const supervised = this.processes.get(id);
-    if (!supervised?.proc?.stdin || supervised.status !== 'running') return false;
+    const stdin = supervised?.proc?.stdin as
+      | { write(data: string): unknown; flush?(): Promise<void> }
+      | null
+      | undefined;
+    if (!stdin || !supervised || supervised.status !== 'running') return false;
     try {
-      supervised.proc.stdin.write(input);
-      await supervised.proc.stdin.flush?.();
+      stdin.write(input);
+      await stdin.flush?.();
       await logProcessEvent(id, 'stdin_written', { bytes: Buffer.byteLength(input) });
       return true;
     } catch (err: unknown) {

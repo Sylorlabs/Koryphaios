@@ -672,7 +672,7 @@ export async function initMCP(config: MCPInitConfig, tools: ToolRegistry): Promi
         name,
         ...cfg,
         // Normalize "type" field to "transport" (config files use "type")
-        transport: cfg.transport ?? cfg.type ?? 'stdio',
+        transport: (cfg.transport ?? cfg.type ?? 'stdio') as 'stdio' | 'sse',
       });
     } catch (err: unknown) {
       mcpLog.error(

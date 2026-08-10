@@ -340,20 +340,20 @@ function normalizeProcess(row: typeof supervisedProcesses.$inferSelect): Persist
     cwd: row.cwd,
     pid: row.pid,
     sessionId: row.sessionId,
-    status: row.status,
-    provenance: row.provenance ?? 'legacy-unknown',
-    supervision: row.supervision ?? 'legacy-unknown',
+    status: row.status as ProcessStatus,
+    provenance: (row.provenance ?? 'legacy-unknown') as ProcessProvenance,
+    supervision: (row.supervision ?? 'legacy-unknown') as ProcessSupervision,
     isBackground: row.isBackground === 1,
     exitCode: row.exitCode ?? undefined,
     signal: row.signal ?? undefined,
-    terminalReason: row.terminalReason ?? undefined,
+    terminalReason: (row.terminalReason ?? undefined) as ProcessTerminalReason | undefined,
     terminalError: row.terminalError ?? undefined,
     stdoutSnapshot: row.stdoutSnapshot ?? undefined,
     stderrSnapshot: row.stderrSnapshot ?? undefined,
     restartCount: row.restartCount ?? 0,
     lastRestartAt: toTimestamp(row.lastRestartAt),
     maxRestarts: row.maxRestarts ?? 0,
-    restartPolicy: row.restartPolicy,
+    restartPolicy: (row.restartPolicy ?? 'on-failure') as 'never' | 'on-failure' | 'always',
     createdAt: toTimestamp(row.createdAt) ?? 0,
     updatedAt: toTimestamp(row.updatedAt) ?? 0,
     endedAt: toTimestamp(row.endedAt),
@@ -621,7 +621,7 @@ export async function cleanupOldProcesses(daysToKeep: number = 7): Promise<numbe
       );
 
     serverLog.info({ daysToKeep }, 'Cleaned up old processes');
-    return sqlite?.changes ?? 0;
+    return (sqlite as { changes?: number } | null)?.changes ?? 0;
   } catch (err) {
     serverLog.error({ err }, 'Failed to cleanup old processes');
     return 0;

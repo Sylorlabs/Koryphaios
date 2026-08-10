@@ -248,7 +248,7 @@ export class OpenAIProvider implements Provider {
     // ChatGPT-credit feature; API projects use the documented `priority`
     // service tier when the customer has enabled it for their project.
     if (this.name === 'openai' && request.fastMode) {
-      params.service_tier = 'priority';
+      (params as unknown as Record<string, unknown>).service_tier = 'priority';
     }
 
     // Only send reasoning_effort if model + selected level supports it.
@@ -260,7 +260,8 @@ export class OpenAIProvider implements Provider {
         };
         // Use reasoning_effort string directly (low, medium, high, max)
         if (reasoningEffort !== 'none') {
-          params.reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
+          (params as unknown as Record<string, unknown>).reasoning_effort =
+            reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
         }
       } else if (this.name === 'zai' || this.name === 'moonshot') {
         // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
@@ -276,7 +277,7 @@ export class OpenAIProvider implements Provider {
           params.chat_template_kwargs = { enable_thinking: false };
         }
       } else {
-        params.reasoning_effort = reasoningEffort;
+        (params as unknown as Record<string, unknown>).reasoning_effort = reasoningEffort;
       }
     }
 
