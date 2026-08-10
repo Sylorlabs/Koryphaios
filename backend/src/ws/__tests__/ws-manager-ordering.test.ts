@@ -163,4 +163,90 @@ describe('WSManager canonical ordering', () => {
     expect(replay[2].parentSequence).toBe(replay[0].sequence);
     expect(replay.every((message) => message.replayed === true)).toBe(true);
   });
+
+  test('does not replay events for an erased session on reconnect', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    // Persist events for session-1 (including a session.updated that would
+    // resurrect the chat in the sidebar if replayed after deletion).
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 10,
+      payload: { agentId: 'kory-manager', content: 'hello' },
+    });
+    manager.broadcastToSession('session-1', {
+      type: 'session.updated',
+      timestamp: 20,
+      payload: { session: { id: 'session-1', title: 'Test' } },
+    });
+
+    // Erase the session — forgetSession adds it to erasedSessions and
+    // drops all existing subscriptions.
+    manager.forgetSession('session-1');
+
+    // A client reconnects and tries to subscribe to the deleted session.
+    const sent: string[] = [];
+    const socket = {
+      data: { id: 'client-reconnect' },
+      readyState: 1,
+      send: (value: string) => sent.push(value),
+      close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>;
+    manager.add(socket);
+    manager.subscribeClientToSession('client-reconnect', 'session-1');
+
+    // No events should be replayed — the session was erased.
+    expect(sent).toEqual([]);
+
+    // The session should NOT be in the client's subscribed set.
+    // (subscribeClientToSession returns early before adding it.)
+    // Verify by broadcasting a new event — it should not be delivered.
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 30,
+      payload: { agentId: 'kory-manager', content: 'post-delete' },
+    });
+    expect(sent).toEqual([]);
+  });
+
+  test('does not deliver new broadcasts to an erased session', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sent: string[] = [];
+    const socket = {
+      data: { id: 'client-1' },
+      readyState: 1,
+      send: (value: string) => sent.push(value),
+      close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>;
+    manager.add(socket);
+    manager.subscribeClientToSession('client-1', 'session-1');
+
+    // Client receives events before erasure.
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 10,
+      payload: { agentId: 'kory-manager', content: 'before' },
+    });
+    expect(sent.length).toBe(1);
+
+    // Erase the session.
+    manager.forgetSession('session-1');
+
+    // Post-erasure broadcast should NOT be delivered.
+    manager.broadcastToSession('session-1', {
+      type: 'session.updated',
+      timestamp: 20,
+      payload: { session: { id: 'session-1', title: 'should not appear' } },
+    });
+    expect(sent.length).toBe(1); // still only the pre-erasure event
+  });
 });

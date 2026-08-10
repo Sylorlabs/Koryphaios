@@ -218,6 +218,11 @@
   let selectedVariant = $state(-1);
   let toolDetailsOpen = $state(false);
   let contextMenu = $state<{ x: number; y: number } | null>(null);
+  // Capture the live text selection at context-menu-open time.  Clicking the
+  // "Copy" button in the menu moves focus to the button and clears the
+  // selection, so reading it inside the click handler always returned null
+  // and we fell back to the full message text — copying the wrong content.
+  let contextMenuSelection: string | null = null;
   let zoomedImage = $state<string | null>(null);
   let zoomedImageMimeType = $state('image/png');
   // Zoom for backend-served images (view_image results) — a URL, not base64.
@@ -274,6 +279,9 @@
 
   function openContextMenu(event: MouseEvent) {
     event.preventDefault();
+    // Snapshot the selection BEFORE the menu opens — any subsequent click
+    // (including the Copy button) will clear it.
+    contextMenuSelection = selectedEntryText();
     contextMenu = {
       x: Math.min(event.clientX, window.innerWidth - 224),
       y: Math.min(event.clientY, window.innerHeight - 220),
@@ -298,11 +306,13 @@
   }
 
   async function copyEntryText() {
-    // Use the live selection if any part of it is within this entry;
-    // otherwise fall back to the full entry text.
-    await copyText(selectedEntryText() ?? currentText);
+    // Use the selection captured at context-menu-open time; clicking the
+    // Copy button clears the live selection, so we can't read it here.
+    // Fall back to the full entry text only if nothing was highlighted.
+    await copyText(contextMenuSelection ?? currentText);
     copied = true;
     contextMenu = null;
+    contextMenuSelection = null;
     setTimeout(() => (copied = false), 2000);
   }
 

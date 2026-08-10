@@ -103,11 +103,17 @@
             try {
               if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(report);
-              } else if ('__TAURI_INTERNALS__' in window) {
-                const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
-                await writeText(report);
               } else {
-                throw new Error('Clipboard API unavailable');
+                // Fallback for webviews without the async Clipboard API:
+                // use a hidden textarea + execCommand('copy'), which works
+                // everywhere including Tauri's WKWebView/WebKitGTK.
+                const ta = document.createElement('textarea');
+                ta.value = report;
+                ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
               }
               copy.textContent = 'Copied';
             } catch (err) {

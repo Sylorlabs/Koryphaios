@@ -1127,10 +1127,7 @@ export class KoryManager implements WorkerPipelineHost {
         this.emitWSMessage(sessionId, 'system.info', { message: 'Stopped by user.' });
       } else {
         koryLog.error({ sessionId, error }, 'Manager run failed before provider execution');
-        this.emitError(
-          sessionId,
-          `Error: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        this.emitError(sessionId, error instanceof Error ? error.message : String(error));
       }
     } finally {
       if (this.managerAbortBySession.get(sessionId) === intentAbort) {
@@ -1324,7 +1321,7 @@ export class KoryManager implements WorkerPipelineHost {
       // Stop the heartbeat before emitting the error — the run is over.
       this.stopHeartbeat(sessionId);
       await this.updateWorkflowState(sessionId, 'error');
-      this.emitError(sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
+      this.emitError(sessionId, err instanceof Error ? err.message : String(err));
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.skillCollisionChoicesBySession.delete(sessionId);
