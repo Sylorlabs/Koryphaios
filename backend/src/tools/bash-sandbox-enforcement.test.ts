@@ -103,6 +103,9 @@ describe('Bash kernel sandbox boundary', () => {
     process.env.KORY_SANDBOX_TEST_SECRET = 'must-not-cross-the-boundary';
     try {
       const inside = await runSandboxed(root, 'touch inside.txt');
+      if (inside.isError) {
+        console.error('[SANDBOX DIAG] touch inside.txt failed:', inside.output);
+      }
       expect(inside.isError).toBe(false);
       expect(existsSync(join(root, 'inside.txt'))).toBe(true);
 
