@@ -344,9 +344,7 @@ function spawnMacSandbox(
   // under each root, denies network when requested, and allows subprocess
   // execution (sandbox-exec's process model is per-line, not a hard block).
   const allowFile = (root: string) =>
-    `(allow file-read* (subpath "${root}"))\n` +
-    `  (allow file-write* (subpath "${root}"))\n` +
-    `  (allow file-write-meta (subpath "${root}"))\n`;
+    `(allow file-read* (subpath "${root}"))\n` + `  (allow file-write* (subpath "${root}"))\n`;
   // Use a deny-default profile with broad allows for system operations
   // and per-root file-write allows. The key insight is that `touch` and
   // similar commands need broad read and metadata access across the
@@ -367,12 +365,10 @@ function spawnMacSandbox(
     '(allow signal)',
     '(allow sysctl-read)',
     '(allow sysctl-write)',
-    // Allow ALL file reads and metadata operations system-wide. Commands
-    // need to read system libraries, frameworks, and config files from
-    // arbitrary locations. Restricting reads breaks most commands.
+    // Allow ALL file reads system-wide. Commands need to read system
+    // libraries, frameworks, and config files from arbitrary locations.
+    // file-read* includes metadata reads.
     '(allow file-read*)',
-    '(allow file-read-meta)',
-    '(allow file-write-meta)',
     '(allow file-ioctl)',
     // IPC primitives needed by the C runtime and system frameworks.
     '(allow ipc-posix-sem*)',
