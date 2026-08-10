@@ -8,6 +8,7 @@
 import { browser } from '$app/environment';
 import { tick } from 'svelte';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
+import { copyText } from '$lib/utils/clipboard';
 import type { ProviderInfo } from '@koryphaios/shared';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -373,7 +374,7 @@ function createProvidersStore() {
   }
 
   async function copyToClipboard(value: string, kind: 'deviceCode' | 'deviceUrl'): Promise<void> {
-    await navigator.clipboard.writeText(value);
+    await copyText(value);
     if (kind === 'deviceCode') {
       copiedDeviceCode = value;
       setTimeout(() => {

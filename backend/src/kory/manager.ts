@@ -1324,7 +1324,7 @@ export class KoryManager implements WorkerPipelineHost {
       // Stop the heartbeat before emitting the error — the run is over.
       this.stopHeartbeat(sessionId);
       await this.updateWorkflowState(sessionId, 'error');
-      this.emitError(sessionId, `Error: ${String(err)}`);
+      this.emitError(sessionId, `Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
       this.skillCollisionChoicesBySession.delete(sessionId);
@@ -3821,9 +3821,9 @@ export class KoryManager implements WorkerPipelineHost {
     }
     this.sessionMutationBarriers.add(sessionId);
     const cancellation = this.cancelSessionWorkers(sessionId);
-    this.titleGenerationBySession.get(sessionId)?.abort(
-      new DOMException('Session is being deleted', 'AbortError'),
-    );
+    this.titleGenerationBySession
+      .get(sessionId)
+      ?.abort(new DOMException('Session is being deleted', 'AbortError'));
     let settled = false;
     const hasExecution = () =>
       this.sessionRunClaims.has(sessionId) ||

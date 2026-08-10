@@ -32,6 +32,7 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { copyText } from '$lib/utils/clipboard';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
@@ -299,7 +300,7 @@
   async function copyEntryText() {
     // Use the live selection if any part of it is within this entry;
     // otherwise fall back to the full entry text.
-    await navigator.clipboard.writeText(selectedEntryText() ?? currentText);
+    await copyText(selectedEntryText() ?? currentText);
     copied = true;
     contextMenu = null;
     setTimeout(() => (copied = false), 2000);
@@ -392,7 +393,7 @@
 
   async function copyToClipboard() {
     try {
-      await navigator.clipboard.writeText(currentText);
+      await copyText(currentText);
       copied = true;
       setTimeout(() => {
         copied = false;

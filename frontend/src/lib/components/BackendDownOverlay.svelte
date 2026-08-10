@@ -7,6 +7,7 @@
 		type BackendHealthReason,
 	} from '$lib/stores/backend-health.svelte';
 	import { isDemoMode } from '$lib/demo-flags';
+	import { copyText } from '$lib/utils/clipboard';
 
 	let { } = $props();
 
@@ -128,7 +129,7 @@
 
 	async function copyDiagnostics() {
 		try {
-			await navigator.clipboard.writeText(diagnosticsText);
+			await copyText(diagnosticsText);
 			copyState = 'copied';
 		} catch (err: unknown) {
 			console.warn('Failed to copy diagnostics to clipboard:', err instanceof Error ? err.message : String(err));

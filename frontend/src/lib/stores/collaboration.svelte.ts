@@ -2,6 +2,7 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { sessionStore } from './sessions.svelte';
 import { toastStore } from './toast.svelte';
 import { apiUrl } from '$lib/utils/api-url';
+import { copyText } from '$lib/utils/clipboard';
 import type { CollaborationPolicy, CollaborationAccessTier } from '@koryphaios/shared';
 import {
   activateJoinedTeamSession,
@@ -170,7 +171,9 @@ export const collaborationStore = {
         }
       }
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Failed to respond to prompt');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) || 'Failed to respond to prompt',
+      );
     }
   },
 
@@ -180,7 +183,7 @@ export const collaborationStore = {
       toastStore.error('No invite link — relay not configured');
       return;
     }
-    navigator.clipboard.writeText(link).then(() => {
+    copyText(link).then(() => {
       toastStore.success(`${role.charAt(0).toUpperCase() + role.slice(1)} invite link copied!`);
     });
   },
@@ -188,7 +191,7 @@ export const collaborationStore = {
   copyJoinCode() {
     const code = activeCollab?.joinCode;
     if (!code) return;
-    navigator.clipboard.writeText(code).then(() => toastStore.success('Native join code copied'));
+    copyText(code).then(() => toastStore.success('Native join code copied'));
   },
 
   async updatePolicy(patch: Partial<CollaborationPolicy>, quiet = false) {
@@ -208,7 +211,10 @@ export const collaborationStore = {
         activeCollab = { ...activeCollab, policy: data.data };
     } catch (err: unknown) {
       if (revision === policyRevision) activeCollab = previous;
-      if (!quiet) toastStore.error((err instanceof Error ? err.message : String(err)) || 'Policy update failed');
+      if (!quiet)
+        toastStore.error(
+          (err instanceof Error ? err.message : String(err)) || 'Policy update failed',
+        );
     }
   },
 
@@ -241,7 +247,7 @@ export const collaborationStore = {
     if (!activeCollab) return;
     const existing = activeCollab.inviteLinks[tierId as keyof InviteLinks];
     if (existing) {
-      await navigator.clipboard.writeText(existing);
+      await copyText(existing);
       toastStore.success('Invite link copied');
       return;
     }
@@ -256,7 +262,7 @@ export const collaborationStore = {
         ...activeCollab,
         inviteLinks: { ...activeCollab.inviteLinks, [tierId]: data.data.url },
       };
-      await navigator.clipboard.writeText(data.data.url);
+      await copyText(data.data.url);
       toastStore.success('Invite link copied');
     } else toastStore.error(data.error || 'Could not create invite');
   },
