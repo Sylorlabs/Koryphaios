@@ -378,8 +378,8 @@ function spawnMacSandbox(
     '(allow ipc-posix-sem*)',
     '(allow ipc-posix-shm*)',
     '(allow ipc-posix-set)',
-    // TEMPORARY: Allow ALL file writes to diagnose sandbox issue.
-    '(allow file-write*)',
+    // Note: file-write* is NOT in the broad allows above. It's denied by
+    // `(deny default)` and only re-allowed per-root below.
   ];
 
   // Per-root file write allows. file-write* is not in the broad allows
@@ -402,7 +402,7 @@ function spawnMacSandbox(
   const profilePath = join(profileDir, 'profile.sb');
   writeFileSync(profilePath, profile, { mode: 0o600 });
 
-  const macArgs = ['-p', profilePath, ...argv];
+  const macArgs = ['-f', profilePath, ...argv];
 
   serverLog.debug(
     { sandboxExec: '/usr/bin/sandbox-exec', roots, blockNetwork: opts.blockNetwork },
