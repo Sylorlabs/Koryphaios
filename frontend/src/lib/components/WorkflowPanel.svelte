@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CheckCircle2, Circle, Play, ShieldCheck, Square, Workflow, X } from 'lucide-svelte';
+  import CheckCircle2 from 'lucide-svelte/icons/check-circle-2';
+  import Circle from 'lucide-svelte/icons/circle';
+  import Play from 'lucide-svelte/icons/play';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import Square from 'lucide-svelte/icons/square';
+  import Workflow from 'lucide-svelte/icons/workflow';
+  import X from 'lucide-svelte/icons/x';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';

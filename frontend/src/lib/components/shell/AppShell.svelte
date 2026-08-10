@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { onMount } from 'svelte';
-  import { ChevronLeft, ChevronRight, StickyNote } from 'lucide-svelte';
+  import ChevronLeft from 'lucide-svelte/icons/chevron-left';
+  import ChevronRight from 'lucide-svelte/icons/chevron-right';
+  import StickyNote from 'lucide-svelte/icons/sticky-note';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
   import NotesPanel from '$lib/components/NotesPanel.svelte';
@@ -75,7 +77,10 @@
   }
 </script>
 
-<div class="flex h-screen min-h-0 min-w-0 overflow-hidden" style="background: var(--color-surface-0);">
+<div
+  class="flex h-screen min-h-0 min-w-0 overflow-hidden"
+  style="background: var(--color-surface-0);"
+>
   {#if mobileSidebar}
     <!-- Tap-outside backdrop for the phone sidebar overlay -->
     <button
@@ -87,7 +92,9 @@
   {/if}
   {#if sidebarVisible}
     <nav
-      class="{mobileSidebar ? 'fixed inset-y-0 left-0 z-50 shadow-2xl' : 'shrink-0'} border-r flex min-h-0 flex-col"
+      class="{mobileSidebar
+        ? 'fixed inset-y-0 left-0 z-50 shadow-2xl'
+        : 'shrink-0'} border-r flex min-h-0 flex-col"
       data-testid="session-sidebar"
       style="
         width: var(--sidebar-width);
@@ -113,15 +120,21 @@
             style="width: var(--size-8); height: var(--size-8);"
           />
           <div class="flex flex-col justify-center min-w-0">
-            <h1 class="flex items-center gap-1.5 text-sm font-semibold leading-tight" style="color: var(--color-text-primary);">
+            <h1
+              class="flex items-center gap-1.5 text-sm font-semibold leading-tight"
+              style="color: var(--color-text-primary);"
+            >
               Koryphaios
               <span
                 class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
                 style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
-                title="Koryphaios is in beta — expect rapid changes"
-              >Beta</span>
+                title="Koryphaios is in beta — expect rapid changes">Beta</span
+              >
             </h1>
-            <p class="leading-tight" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+            <p
+              class="leading-tight"
+              style="font-size: var(--text-xs); color: var(--color-text-muted);"
+            >
               Agent workspace
             </p>
           </div>
@@ -147,7 +160,10 @@
         style="border-color: var(--color-border); background: var(--color-surface-2);"
       >
         <div class="flex items-center gap-2">
-          <div class="rounded-full {connectionDot}" style="width: var(--size-2); height: var(--size-2);"></div>
+          <div
+            class="rounded-full {connectionDot}"
+            style="width: var(--size-2); height: var(--size-2);"
+          ></div>
           <span
             class="leading-none"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
@@ -214,7 +230,9 @@
           >
             <div class="flex items-center gap-2">
               <StickyNote size={14} style="color: var(--color-accent);" />
-              <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Note Network</span>
+              <span class="text-sm font-semibold" style="color: var(--color-text-primary);"
+                >Note Network</span
+              >
             </div>
             <button
               type="button"
@@ -232,7 +250,11 @@
         </div>
       {/if}
 
-      <section class="flex flex-1 min-h-0 flex-col overflow-hidden" role="main" aria-label="Chat feed" data-testid="chat-feed">
+      <section
+        class="flex flex-1 min-h-0 flex-col overflow-hidden"
+        aria-label="Chat feed"
+        data-testid="chat-feed"
+      >
         {@render feed?.()}
       </section>
 
@@ -244,6 +266,5 @@
         {@render composer?.()}
       </div>
     </div>
-
   </div>
 </div>

@@ -22,6 +22,7 @@ import {
   mergeModelLists,
   modelFromRemoteId,
 } from './model-list-cache';
+import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -152,7 +153,10 @@ export class OpenAIProvider implements Provider {
           );
         }
         if (discovered.length > 0) {
-          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
+          this.cachedModels = applyModelsDevMetadata(
+            this.name,
+            mergeModelLists(fallback, discovered),
+          );
           providerLog.debug(
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',
@@ -181,9 +185,8 @@ export class OpenAIProvider implements Provider {
     // a rejection is caught below and retried once without them.
     if (messagesContainImages(messages)) {
       const liveDef =
-        this.listModels().find(
-          (m) => m.id === request.model || m.apiModelId === request.model,
-        ) ?? resolveModel(request.model);
+        this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
+        resolveModel(request.model);
       const supportsVision = liveDef?.vision === true || liveDef?.supportsAttachments === true;
       if (liveDef?.vision === false && !supportsVision) {
         messages = stripImageParts(messages);
@@ -225,7 +228,13 @@ export class OpenAIProvider implements Provider {
     // through is safe; without it the selection was silently dropped.
     const supportedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
-    const params: OpenAI.ChatCompletionCreateParamsStreaming = {
+    const params: OpenAI.ChatCompletionCreateParamsStreaming & {
+      service_tier?: string;
+      thinking?: { type: string };
+      reasoning_effort?: string;
+      enable_thinking?: boolean;
+      chat_template_kwargs?: { enable_thinking?: boolean };
+    } = {
       model: modelDef?.apiModelId ?? request.model,
       messages,
       stream: true,
@@ -239,35 +248,35 @@ export class OpenAIProvider implements Provider {
     // ChatGPT-credit feature; API projects use the documented `priority`
     // service tier when the customer has enabled it for their project.
     if (this.name === 'openai' && request.fastMode) {
-      (params as any).service_tier = 'priority';
+      params.service_tier = 'priority';
     }
 
     // Only send reasoning_effort if model + selected level supports it.
     if (canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort)) {
       if (this.name === 'deepseek') {
         // DeepSeek 2026 (V4): uses "thinking" parameter object
-        (params as any).thinking = { 
-          type: reasoningEffort === 'none' ? 'disabled' : 'enabled' 
+        params.thinking = {
+          type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
         };
         // Use reasoning_effort string directly (low, medium, high, max)
         if (reasoningEffort !== 'none') {
-          (params as any).reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
+          params.reasoning_effort = reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
         }
       } else if (this.name === 'zai' || this.name === 'moonshot') {
         // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
         // effort tiers ("none" = disabled, anything else = enabled).
-        (params as any).thinking = {
+        params.thinking = {
           type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
         };
       } else if (this.name === 'togetherai') {
         // Qwen 3.5 thinking is on by default; "none" turns it off. Together
         // reads the flag both top-level and via chat_template_kwargs.
         if (reasoningEffort === 'none') {
-          (params as any).enable_thinking = false;
-          (params as any).chat_template_kwargs = { enable_thinking: false };
+          params.enable_thinking = false;
+          params.chat_template_kwargs = { enable_thinking: false };
         }
       } else {
-        (params as any).reasoning_effort = reasoningEffort as any;
+        params.reasoning_effort = reasoningEffort;
       }
     }
 
@@ -325,8 +334,11 @@ export class OpenAIProvider implements Provider {
         }
 
         // Reasoning content (O-series models)
-        if ((delta as any)?.reasoning_content) {
-          yield { type: 'thinking_delta', thinking: (delta as any).reasoning_content };
+        const reasoningContent = (
+          delta as { reasoning_content?: string } | undefined
+        )?.reasoning_content;
+        if (reasoningContent) {
+          yield { type: 'thinking_delta', thinking: reasoningContent };
         }
 
         // Tool call streaming
@@ -373,22 +385,9 @@ export class OpenAIProvider implements Provider {
     } catch (err: unknown) {
       if (err instanceof Error && (err.name === 'AbortError' || err.name === 'AbortSignal')) return;
 
-      // OpenAI SDK errors carry status/code/type as extra own properties.
-      // Narrow via record access — no `as any` needed.
-      const extras = (err instanceof Error ? err : {}) as Record<string, unknown>;
-      const errorDetail = {
-        message: err instanceof Error ? err.message : String(err),
-        name: err instanceof Error ? err.name : undefined,
-        status: typeof extras.status === 'number' ? extras.status : undefined,
-        code: typeof extras.code === 'string' ? extras.code : undefined,
-        type: typeof extras.type === 'string' ? extras.type : undefined,
-      };
-      providerLog.error(
-        { errorDetail, model: request.model, provider: this.name },
-        'OpenAI provider stream error',
-      );
-
-      yield { type: 'error', error: errorDetail.message };
+      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+      providerLog.error({ ...diagnostic, model: request.model }, 'OpenAI provider stream error');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
     }
   }
 
@@ -446,8 +445,10 @@ export class OpenAIProvider implements Provider {
               function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
             })),
           });
+        } else if (msg.role === 'user') {
+          result.push({ role: 'user', content: msg.content });
         } else {
-          result.push({ role: msg.role as any, content: msg.content });
+          result.push({ role: 'assistant', content: msg.content });
         }
         continue;
       }
@@ -577,6 +578,56 @@ export class AzureProvider extends OpenAIProvider {
     super(config, name, config.baseUrl);
   }
 
+  override isAvailable(): boolean {
+    const hasApiKey = !!this.config.apiKey?.trim();
+    const hasAuthToken = !!this.config.authToken?.trim();
+    return (
+      !this.config.disabled &&
+      !!this.config.baseUrl?.trim() &&
+      !!this.config.deployment?.trim() &&
+      hasApiKey !== hasAuthToken
+    );
+  }
+
+  /**
+   * Azure's `/openai/models` response contains base model ids, while inference
+   * routes by the deployment name chosen by the Azure resource owner. Never
+   * expose the base-model list as runnable deployment ids. The only selectable
+   * entry is the deployment the user explicitly configured.
+   */
+  override listModels(): ModelDef[] {
+    const deployment = this.config.deployment?.trim();
+    if (!this.isAvailable() || !deployment) return [];
+    return [
+      {
+        id: deployment,
+        apiModelId: deployment,
+        name: `Azure deployment: ${deployment}`,
+        provider: this.name,
+        contextWindow: 0,
+        maxOutputTokens: 0,
+        contextVerified: false,
+        isGeneric: true,
+        supportsStreaming: true,
+      },
+    ];
+  }
+
+  override refreshModels(): Promise<void> {
+    // There is no data-plane API that maps base models to the user's chosen
+    // deployment names. Keep the explicit deployment as the source of truth.
+    return Promise.resolve();
+  }
+
+  getModelDiscoveryError(): string | undefined {
+    if (this.config.apiKey?.trim() && this.config.authToken?.trim()) {
+      return 'Azure authentication is ambiguous. Configure either an API key or a Microsoft Entra bearer token, not both.';
+    }
+    return this.config.deployment?.trim()
+      ? 'Azure deployment name is user-configured; model family and limits remain unknown until Azure returns runtime metadata.'
+      : 'Azure requires an explicit deployment name. A base model id is not a deployment.';
+  }
+
   protected override get client(): OpenAI {
     if (!this._client) {
       const endpoint = this.config.baseUrl;
@@ -585,8 +636,21 @@ export class AzureProvider extends OpenAIProvider {
           `${this.name} requires an endpoint (base URL), e.g. https://YOUR_RESOURCE.openai.azure.com`,
         );
       }
+      const apiKey = this.config.apiKey?.trim();
+      const authToken = this.config.authToken?.trim();
+      if (apiKey && authToken) {
+        throw new Error(
+          `${this.name} accepts either an Azure API key or a Microsoft Entra bearer token, not both`,
+        );
+      }
       this._client = new AzureOpenAI({
-        apiKey: this.config.apiKey || this.config.authToken || 'placeholder',
+        // AzureOpenAI sends `api-key` only for apiKey. Microsoft Entra tokens
+        // must use azureADTokenProvider so the SDK emits `Authorization:
+        // Bearer ...`; treating a bearer token as apiKey silently produces the
+        // wrong wire contract.
+        ...(authToken
+          ? { azureADTokenProvider: async () => authToken }
+          : { apiKey: apiKey || 'placeholder' }),
         endpoint,
         apiVersion: AZURE_API_VERSION,
         fetch: createUsageInterceptingFetch(globalThis.fetch),

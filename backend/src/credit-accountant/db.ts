@@ -9,12 +9,14 @@ import { serverLog } from '../logger';
 import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
 
 let db: Database | null = null;
+let databasePath: string | null = null;
 
 export function initCreditDb(dataDir: string): void {
   if (db) return;
   ensureSecureDir(dataDir);
   const dbPath = join(dataDir, 'sylorlabs.db');
   db = new Database(dbPath);
+  databasePath = dbPath;
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   // sylorlabs.db holds token-usage / cost attribution rows; tighten the DB
@@ -67,6 +69,12 @@ export function initCreditDb(dataDir: string): void {
 export function getCreditDb(): Database {
   if (!db) throw new Error('CreditAccountant DB not initialized');
   return db;
+}
+
+/** The already-initialized usage ledger path, for coordinated session erasure. */
+export function getCreditDbPath(): string {
+  if (!databasePath) throw new Error('CreditAccountant DB not initialized');
+  return databasePath;
 }
 
 export function recordUsage(

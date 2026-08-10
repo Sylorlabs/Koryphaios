@@ -16,7 +16,10 @@ async function waitForRelay() {
       if ((await fetch(`${relayUrl}/health`)).ok) return;
     } catch (err: unknown) {
       // Relay hasn't started yet; retry on next polling tick.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Relay not yet up; retrying');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Relay not yet up; retrying',
+      );
     }
     await Bun.sleep(25);
   }
@@ -162,7 +165,10 @@ describe('team collaboration boundaries', () => {
   test('team command blocklist wins over allowlist', async () => {
     const sessionId = 'team-policy-precedence';
     const bash = new BashTool();
-    const context = { sessionId, workingDirectory: process.cwd(), isSandboxed: true };
+    // This test isolates collaboration-policy precedence. Kernel sandbox
+    // availability is covered separately and correctly fails closed when the
+    // host cannot enforce it.
+    const context = { sessionId, workingDirectory: process.cwd(), isSandboxed: false };
 
     setCollaborationToolPolicy(sessionId, {
       commandAllowlist: ['echo'],

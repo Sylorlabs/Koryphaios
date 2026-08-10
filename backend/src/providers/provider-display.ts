@@ -26,13 +26,15 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     label: 'TokenRouter',
     iconPath: '/provider-icons/tokenrouter.svg',
     deployment: 'api',
-    description: 'OpenAI-compatible model gateway. Uses TOKENROUTER_API_KEY and refreshes the model list from /v1/models.',
+    description:
+      'OpenAI-compatible model gateway. Uses TOKENROUTER_API_KEY and refreshes the model list from /v1/models.',
   },
   digitalocean: {
     label: 'DigitalOcean Inference',
     iconPath: '/provider-icons/digitalocean.svg',
     deployment: 'api',
-    description: 'DigitalOcean serverless inference. Uses DIGITALOCEAN_API_KEY and refreshes the model list from /v1/models.',
+    description:
+      'DigitalOcean serverless inference. Uses DIGITALOCEAN_API_KEY and refreshes the model list from /v1/models.',
   },
   codex: {
     label: 'Codex CLI',
@@ -45,7 +47,8 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     label: 'OpenAI Codex',
     iconPath: '/provider-icons/lobehub/codex.svg',
     deployment: 'local',
-    description: 'Sign in with ChatGPT. The official local Codex app-server owns OAuth, refreshes, and subscription access.',
+    description:
+      'Sign in with ChatGPT. The official local Codex app-server owns OAuth, refreshes, and subscription access.',
   },
   google: {
     label: 'Google',
@@ -110,6 +113,48 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'Google Cloud Vertex AI. Uses GOOGLE_VERTEX_AI_API_KEY with your GCP project and location; it is not the Google or AI Studio provider.',
   },
+  azure: {
+    label: 'Azure OpenAI',
+    iconPath: '/provider-icons/lobehub/azure.svg',
+    deployment: 'api',
+    description:
+      'Azure OpenAI inference requires your resource endpoint, credential, and explicit deployment name. Base model catalog IDs are not runnable deployment names.',
+  },
+  azurecognitive: {
+    label: 'Azure Cognitive',
+    iconPath: '/provider-icons/lobehub/azure.svg',
+    deployment: 'api',
+    description:
+      'Azure-hosted OpenAI inference requires your resource endpoint, credential, and explicit deployment name. Catalog model IDs are not inferred as deployments.',
+  },
+  bedrock: {
+    label: 'AWS Bedrock',
+    iconPath: '/provider-icons/lobehub/bedrock-color.svg',
+    deployment: 'api',
+    description:
+      'Anthropic Claude models on Amazon Bedrock only. A successful regional catalog check is reported as detected catalog access; InvokeModel permission, model entitlement, quota, and runtime inference remain unverified until a request succeeds.',
+  },
+  'github-models': {
+    label: 'GitHub Models',
+    iconPath: '/provider-icons/lobehub/github.svg',
+    deployment: 'api',
+    description:
+      'GitHub Models inference. Verification queries the official models.github.ai catalog; a saved token alone is only detected, not verified.',
+  },
+  gitlab: {
+    label: 'GitLab Duo Chat',
+    iconPath: '/provider-icons/gitlab-color.svg',
+    deployment: 'api',
+    description:
+      'Unavailable in this build: GitLab Duo Chat does not expose a general public OpenAI-compatible provider contract that this adapter can safely claim.',
+  },
+  sapai: {
+    label: 'SAP AI Core',
+    iconPath: '/provider-icons/sapai-color.svg',
+    deployment: 'api',
+    description:
+      'SAP AI Core requires a service-key OAuth exchange, AI resource group, and explicit running deployment ID. Service-key JSON is never sent as a bearer token.',
+  },
   cline: {
     label: 'Cline',
     iconPath: '/provider-icons/lobehub/cline.svg',
@@ -122,7 +167,7 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/codebuff.svg',
     deployment: 'local',
     description:
-      'Free, ad-supported Codebuff build. Koryphaios reads your freebuff CLI login and calls the Codebuff backend via @codebuff/sdk — no subprocess, no ads, no API key needed.',
+      'Unavailable in this build. Local Freebuff files may be detected for recovery information, but Koryphaios does not use the undocumented Codebuff SDK/backend path.',
   },
   kilocode: {
     label: 'Kilo Code',

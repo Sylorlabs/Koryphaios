@@ -2,11 +2,13 @@
  * File system watcher for monitoring code changes
  */
 
-import { watch, FSWatcher } from 'chokidar';
 import { EventEmitter } from 'events';
 
-import type { WorkspaceEvent } from '@/types/index.js';
+import { watch, FSWatcher } from 'chokidar';
+
 import { debounce } from './helpers.js';
+
+import type { WorkspaceEvent } from '@/types/index.js';
 
 export interface FileWatcherOptions {
   ignored?: string[];
@@ -118,12 +120,16 @@ export class FileWatcher extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    if (this.watcher) {
-      await this.watcher.close();
-      this.watcher = null;
-      this.watchedPaths.clear();
-      this.createReadyPromise();
-    }
+    const watcher = this.watcher;
+    if (!watcher) return;
+
+    // Publish the closed state before awaiting chokidar. A concurrent caller
+    // can now establish a new watcher without having that new instance cleared
+    // when the old close promise settles.
+    this.watcher = null;
+    this.watchedPaths.clear();
+    this.createReadyPromise();
+    await watcher.close();
   }
 
   getWatchedPaths(): string[] {

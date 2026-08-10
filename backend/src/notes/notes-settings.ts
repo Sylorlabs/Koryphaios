@@ -8,6 +8,8 @@ import { serverLog } from '../logger';
 import {
   DEFAULT_NOTES_AGENT_PERMISSIONS,
   DEFAULT_NOTES_SETTINGS,
+  CONTEXT_BUDGET_MAX_TOKENS,
+  CONTEXT_BUDGET_MIN_TOKENS,
   NOTE_TOOL_DEFINITIONS,
   NOTE_TOOL_NAMES,
   isNoteToolName,
@@ -19,10 +21,108 @@ import {
 } from '@koryphaios/shared';
 
 export interface NoteToolPermissionCheck {
-  allowed: boolean
-  level: NotePermissionLevel
-  requiresApproval: boolean
-  reason: string
+  allowed: boolean;
+  level: NotePermissionLevel;
+  requiresApproval: boolean;
+  reason: string;
+}
+
+export const NOTES_HARD_MAX_BYTES = 5_000_000;
+export const NOTES_HARD_MAX_ATTACHMENT_BYTES = 100_000_000;
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeNotesSettings(input?: Partial<NotesSettings> | null): NotesSettings {
+  const graph = input?.graphPhysics;
+  const defaultFolder =
+    typeof input?.defaultFolderPath === 'string' && input.defaultFolderPath.trim()
+      ? input.defaultFolderPath.trim()
+      : DEFAULT_NOTES_SETTINGS.defaultFolderPath;
+  return {
+    enabled: typeof input?.enabled === 'boolean' ? input.enabled : DEFAULT_NOTES_SETTINGS.enabled,
+    autoIncludeInContext:
+      typeof input?.autoIncludeInContext === 'boolean'
+        ? input.autoIncludeInContext
+        : DEFAULT_NOTES_SETTINGS.autoIncludeInContext,
+    maxContextTokensEnabled:
+      typeof input?.maxContextTokensEnabled === 'boolean'
+        ? input.maxContextTokensEnabled
+        : DEFAULT_NOTES_SETTINGS.maxContextTokensEnabled,
+    maxContextTokens: Math.round(
+      Math.min(
+        CONTEXT_BUDGET_MAX_TOKENS,
+        Math.max(
+          CONTEXT_BUDGET_MIN_TOKENS,
+          finiteNumber(input?.maxContextTokens, DEFAULT_NOTES_SETTINGS.maxContextTokens),
+        ),
+      ),
+    ),
+    autosaveEnabled:
+      typeof input?.autosaveEnabled === 'boolean'
+        ? input.autosaveEnabled
+        : DEFAULT_NOTES_SETTINGS.autosaveEnabled,
+    autosaveDelayMs: Math.round(
+      Math.min(
+        10_000,
+        Math.max(250, finiteNumber(input?.autosaveDelayMs, DEFAULT_NOTES_SETTINGS.autosaveDelayMs)),
+      ),
+    ),
+    noteSizeLimitEnabled:
+      typeof input?.noteSizeLimitEnabled === 'boolean'
+        ? input.noteSizeLimitEnabled
+        : DEFAULT_NOTES_SETTINGS.noteSizeLimitEnabled,
+    maxNoteBytes: Math.round(
+      Math.min(
+        NOTES_HARD_MAX_BYTES,
+        Math.max(16_384, finiteNumber(input?.maxNoteBytes, DEFAULT_NOTES_SETTINGS.maxNoteBytes)),
+      ),
+    ),
+    attachmentSizeLimitEnabled:
+      typeof input?.attachmentSizeLimitEnabled === 'boolean'
+        ? input.attachmentSizeLimitEnabled
+        : DEFAULT_NOTES_SETTINGS.attachmentSizeLimitEnabled,
+    maxAttachmentBytes: Math.round(
+      Math.min(
+        NOTES_HARD_MAX_ATTACHMENT_BYTES,
+        Math.max(
+          64_000,
+          finiteNumber(input?.maxAttachmentBytes, DEFAULT_NOTES_SETTINGS.maxAttachmentBytes),
+        ),
+      ),
+    ),
+    maxAttachmentsPerNote: Math.round(
+      Math.min(
+        250,
+        Math.max(
+          1,
+          finiteNumber(input?.maxAttachmentsPerNote, DEFAULT_NOTES_SETTINGS.maxAttachmentsPerNote),
+        ),
+      ),
+    ),
+    graphPhysics: {
+      gravity: Math.min(
+        0,
+        Math.max(-500, finiteNumber(graph?.gravity, DEFAULT_NOTES_SETTINGS.graphPhysics.gravity)),
+      ),
+      linkDistance: Math.min(
+        500,
+        Math.max(
+          20,
+          finiteNumber(graph?.linkDistance, DEFAULT_NOTES_SETTINGS.graphPhysics.linkDistance),
+        ),
+      ),
+      chargeStrength: Math.min(
+        -10,
+        Math.max(
+          -1000,
+          finiteNumber(graph?.chargeStrength, DEFAULT_NOTES_SETTINGS.graphPhysics.chargeStrength),
+        ),
+      ),
+    },
+    defaultFolderPath: defaultFolder.startsWith('/') ? defaultFolder : `/${defaultFolder}`,
+  };
 }
 
 function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
@@ -31,7 +131,10 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'koryphaios.json parse failed — returning empty config');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'koryphaios.json parse failed — returning empty config',
+    );
     return {};
   }
 }
@@ -69,14 +172,7 @@ export function saveNotesAgentPermissions(
 export function loadNotesSettings(projectRoot: string): NotesSettings {
   const config = loadKoryphaiosConfig(projectRoot);
   const raw = (config.notesSettings ?? {}) as Partial<NotesSettings>;
-  return {
-    ...DEFAULT_NOTES_SETTINGS,
-    ...raw,
-    graphPhysics: {
-      ...DEFAULT_NOTES_SETTINGS.graphPhysics,
-      ...(raw.graphPhysics ?? {}),
-    },
-  };
+  return normalizeNotesSettings(raw);
 }
 
 export function saveNotesSettings(
@@ -85,21 +181,14 @@ export function saveNotesSettings(
 ): NotesSettings {
   const config = loadKoryphaiosConfig(projectRoot);
   const current = loadNotesSettings(projectRoot);
-  const merged: NotesSettings = {
+  const merged = normalizeNotesSettings({
     ...current,
     ...partial,
     graphPhysics: {
       ...current.graphPhysics,
       ...(partial.graphPhysics ?? {}),
     },
-  };
-  // Only clamp maxContextTokens when it's explicitly being set.
-  if (partial.maxContextTokens !== undefined) {
-    merged.maxContextTokens = Math.min(
-      5000,
-      Math.max(100, partial.maxContextTokens),
-    );
-  }
+  });
   config.notesSettings = merged;
   saveKoryphaiosConfig(projectRoot, config);
   return merged;
@@ -143,20 +232,55 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
   const usage = [
     ['list_notes', 'list_notes({folderPath?}) -> discover titles and IDs; never loads bodies'],
     ['search_notes', 'search_notes({query}) -> locate relevant notes and short matches'],
-    ['render_note', 'render_note({id|title, mode:"excerpt", query?|heading?, maxChars?}) -> pull only the relevant bounded context; mode:"document" -> render the whole note in chat without copying it'],
-    ['read_note', 'read_note({id|title}) -> full body; use only when the complete document is genuinely required'],
-    ['recall_notes', 'recall_notes({query?|ids?|titles?, limit?}) -> full bodies for a small selected set; keep limit low'],
-    ['get_note_backlinks', 'get_note_backlinks({id|title}) -> find documents that reference one note'],
-    ['get_note_graph_summary', 'get_note_graph_summary({}) -> graph overview without loading note bodies'],
-    ['create_note', 'create_note({title, content?, folderPath?, tags?, includeInContext?}) -> create Markdown note'],
-    ['update_note', 'update_note({id|title, content?|newTitle?|folderPath?|tags?|pinned?|includeInContext?}) -> edit note or live project file'],
-    ['delete_note', 'delete_note({id|title}) -> delete note; live project documents delete the underlying file'],
-    ['link_notes', 'link_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> connect notes and optionally add [[wikilink]]'],
-    ['unlink_notes', 'unlink_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> remove connection'],
-  ].filter(([name]) => enabled.has(name)).map(([, help]) => `  - ${help}`).join('\n');
+    [
+      'render_note',
+      'render_note({id|title, mode:"excerpt", query?|heading?, maxChars?}) -> pull only the relevant bounded context; mode:"document" -> render the whole note in chat without copying it',
+    ],
+    [
+      'read_note',
+      'read_note({id|title}) -> full body; use only when the complete document is genuinely required',
+    ],
+    [
+      'recall_notes',
+      'recall_notes({query?|ids?|titles?, limit?}) -> full bodies for a small selected set; keep limit low',
+    ],
+    [
+      'get_note_backlinks',
+      'get_note_backlinks({id|title}) -> find documents that reference one note',
+    ],
+    [
+      'get_note_graph_summary',
+      'get_note_graph_summary({}) -> graph overview without loading note bodies',
+    ],
+    [
+      'create_note',
+      'create_note({title, content?, folderPath?, tags?, includeInContext?}) -> create Markdown note',
+    ],
+    [
+      'update_note',
+      'update_note({id|title, content?|newTitle?|folderPath?|tags?|pinned?|includeInContext?}) -> edit note or live project file',
+    ],
+    [
+      'delete_note',
+      'delete_note({id|title}) -> delete note; live project documents delete the underlying file',
+    ],
+    [
+      'link_notes',
+      'link_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> connect notes and optionally add [[wikilink]]',
+    ],
+    [
+      'unlink_notes',
+      'unlink_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> remove connection',
+    ],
+  ]
+    .filter(([name]) => enabled.has(name))
+    .map(([, help]) => `  - ${help}`)
+    .join('\n');
 
-  return `• KNOWLEDGE NETWORK: Project Markdown, HTML, memories, and rules are indexed as a connected note vault.\n${usage}\n` +
-    '  Retrieval rule: start with catalog/search/graph metadata. Prefer render_note excerpt with a heading or query. Do not load, quote, or recommend an entire note when a focused excerpt answers the task. Use document rendering only when the user asks to see the artifact. Write tools may require approval according to Notes settings.';
+  return (
+    `• KNOWLEDGE NETWORK: Project Markdown, HTML, memories, and rules are indexed as a connected note vault.\n${usage}\n` +
+    '  Retrieval rule: start with catalog/search/graph metadata. Prefer render_note excerpt with a heading or query. Do not load, quote, or recommend an entire note when a focused excerpt answers the task. Use document rendering only when the user asks to see the artifact. Write tools may require approval according to Notes settings.'
+  );
 }
 
 export function checkNoteToolPermission(
@@ -207,7 +331,8 @@ export function formatNoteToolApprovalSummary(
   const parts: string[] = [];
 
   if (typeof input.title === 'string' && input.title) parts.push(`"${input.title}"`);
-  if (typeof input.fromTitle === 'string' && input.fromTitle) parts.push(`from "${input.fromTitle}"`);
+  if (typeof input.fromTitle === 'string' && input.fromTitle)
+    parts.push(`from "${input.fromTitle}"`);
   if (typeof input.toTitle === 'string' && input.toTitle) parts.push(`to "${input.toTitle}"`);
   if (typeof input.query === 'string' && input.query) parts.push(`query "${input.query}"`);
   if (typeof input.id === 'string' && input.id) parts.push(`id ${input.id.slice(0, 8)}…`);

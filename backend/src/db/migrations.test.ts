@@ -86,11 +86,13 @@ describe('database migration repairs', () => {
 
     expect(await new MigrationRunner(database).migrate()).toBe(1);
     expect(
-      (database.query('PRAGMA table_info(ordered_session_events)').all() as Array<{ name: string }>).some(
-        (column) => column.name === 'parent_sequence',
-      ),
+      (
+        database.query('PRAGMA table_info(ordered_session_events)').all() as Array<{ name: string }>
+      ).some((column) => column.name === 'parent_sequence'),
     ).toBe(true);
-    expect(database.query('SELECT event_id FROM ordered_session_events').get()).toEqual({ event_id: 'event-1' });
+    expect(database.query('SELECT event_id FROM ordered_session_events').get()).toEqual({
+      event_id: 'event-1',
+    });
   });
 
   test('repairs an early 0018 database before ordered events are initialized', async () => {
@@ -146,11 +148,175 @@ describe('database migration repairs', () => {
     expect(event.sequence).toBe(1);
     expect(
       database
-        .query<
-          { name: string },
-          []
-        >("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_event_causes'")
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_event_causes'",
+        )
         .get()?.name,
     ).toBe('session_event_causes');
+  });
+
+  test('upgrades linear conversations into retained lineage without changing their active history', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    database.exec(`
+      CREATE TABLE _migrations (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        conversation_revision INTEGER DEFAULT 0
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      INSERT INTO sessions(id, conversation_revision) VALUES
+        ('session-a', 3),
+        ('session-empty', 0);
+      INSERT INTO messages(id, session_id, created_at) VALUES
+        ('message-a', 'session-a', 100),
+        ('message-b', 'session-a', 100),
+        ('message-c', 'session-a', 200);
+    `);
+    for (const migration of MIGRATIONS.filter(({ version }) => version !== '0026')) {
+      database.run(
+        'INSERT INTO _migrations (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)',
+        [migration.version, migration.description, Date.now(), 'already-applied'],
+      );
+    }
+
+    expect(await new MigrationRunner(database).migrate()).toBe(1);
+    expect(
+      database
+        .query(
+          `SELECT id, active_message_id, provider_conversation_revision
+           FROM sessions ORDER BY id`,
+        )
+        .all(),
+    ).toEqual([
+      {
+        id: 'session-a',
+        active_message_id: 'message-c',
+        provider_conversation_revision: 3,
+      },
+      {
+        id: 'session-empty',
+        active_message_id: null,
+        provider_conversation_revision: 0,
+      },
+    ]);
+    expect(
+      database
+        .query(
+          `SELECT id, parent_message_id FROM messages
+           WHERE session_id = 'session-a' ORDER BY created_at, rowid`,
+        )
+        .all(),
+    ).toEqual([
+      { id: 'message-a', parent_message_id: null },
+      { id: 'message-b', parent_message_id: 'message-a' },
+      { id: 'message-c', parent_message_id: 'message-b' },
+    ]);
+  });
+
+  test('finishes an interrupted lineage migration without overwriting durable heads or provider generations', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    database.exec(`
+      CREATE TABLE _migrations (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        conversation_revision INTEGER DEFAULT 0,
+        active_message_id TEXT,
+        provider_conversation_revision INTEGER DEFAULT 0
+      );
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        parent_message_id TEXT
+      );
+      INSERT INTO sessions(
+        id, conversation_revision, active_message_id, provider_conversation_revision
+      ) VALUES ('session-a', 3, 'message-b', 9);
+      INSERT INTO messages(id, session_id, created_at, parent_message_id) VALUES
+        ('message-a', 'session-a', 100, NULL),
+        ('message-b', 'session-a', 200, 'message-a'),
+        ('retained-future', 'session-a', 300, 'message-b');
+    `);
+    for (const migration of MIGRATIONS.filter(({ version }) => version !== '0026')) {
+      database.run(
+        'INSERT INTO _migrations (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)',
+        [migration.version, migration.description, Date.now(), 'already-applied'],
+      );
+    }
+
+    expect(await new MigrationRunner(database).migrate()).toBe(1);
+    expect(
+      database
+        .query(
+          `SELECT active_message_id, provider_conversation_revision FROM sessions
+           WHERE id = 'session-a'`,
+        )
+        .get(),
+    ).toEqual({ active_message_id: 'message-b', provider_conversation_revision: 9 });
+    expect(
+      database.query(`SELECT parent_message_id FROM messages WHERE id = 'retained-future'`).get(),
+    ).toEqual({ parent_message_id: 'message-b' });
+  });
+
+  test('finishes an interrupted Notes scoping migration without rewriting existing notes', async () => {
+    const database = new Database(':memory:');
+    openDatabases.push(database);
+    database.exec(`
+      CREATE TABLE _migrations (
+        version TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        applied_at INTEGER NOT NULL,
+        checksum TEXT NOT NULL
+      );
+      CREATE TABLE notes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        project_root TEXT
+      );
+      INSERT INTO notes(id, title, content, project_root)
+      VALUES ('note-a', 'Existing note', 'preserve me', '/workspace/a');
+    `);
+    for (const migration of MIGRATIONS.filter(({ version }) => version !== '0027')) {
+      database.run(
+        'INSERT INTO _migrations (version, description, applied_at, checksum) VALUES (?, ?, ?, ?)',
+        [migration.version, migration.description, Date.now(), 'already-applied'],
+      );
+    }
+
+    expect(await new MigrationRunner(database).migrate()).toBe(1);
+    const columns = database.query('PRAGMA table_info(notes)').all() as Array<{ name: string }>;
+    expect(columns.some(({ name }) => name === 'project_root')).toBe(true);
+    expect(columns.some(({ name }) => name === 'revision')).toBe(true);
+    expect(
+      database.query(`SELECT id, content, revision FROM notes WHERE id = 'note-a'`).get(),
+    ).toEqual({
+      id: 'note-a',
+      content: 'preserve me',
+      revision: 1,
+    });
+    expect(
+      database
+        .query(
+          `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_notes_project_root'`,
+        )
+        .get(),
+    ).toBeTruthy();
   });
 });

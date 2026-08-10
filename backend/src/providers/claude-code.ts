@@ -20,7 +20,6 @@ import {
   readdirSync,
   existsSync,
   writeFileSync,
-  mkdirSync,
   mkdtempSync,
   rmSync,
 } from 'node:fs';
@@ -31,7 +30,6 @@ import { getCliBridge } from './cli-bridges';
 import { ClaudeCodeCliBridge } from './cli-bridges';
 import {
   type Provider,
-  type ProviderContentBlock,
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
@@ -41,6 +39,25 @@ import { detectClaudeCodeLogin } from './auth-utils';
 import { wrapCommand, buildSoftJail } from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  createPrivateCliTextArtifact,
+  spawnWithPrivateArtifactCleanup,
+  writePrivatePromptToStdin,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  ensureManagedCliDirectory,
+  healManagedCliFile,
+  writeManagedCliFile,
+} from './managed-cli-storage';
+import { appendBoundedProviderFrames } from './bounded-provider-stream';
 
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -527,9 +544,9 @@ export function getKoryphaiosClaudeConfigDir(): string {
   if (cachedClaudeConfigDir) return cachedClaudeConfigDir;
   const dir = join(homedir(), '.koryphaios', 'claude-home');
   try {
-    const { mkdirSync, symlinkSync, rmSync, lstatSync } =
+    const { symlinkSync, rmSync, lstatSync } =
       require('node:fs') as typeof import('node:fs');
-    mkdirSync(dir, { recursive: true });
+    ensureManagedCliDirectory(dir);
     // Share auth (and settings) with the user's real ~/.claude via symlinks —
     // isolation is about SESSIONS, not credentials.
     const realHome = join(homedir(), '.claude');
@@ -541,20 +558,19 @@ export function getKoryphaiosClaudeConfigDir(): string {
         // Refresh the link each boot in case the real path changed.
         try {
           if (lstatSync(dst)) rmSync(dst, { force: true });
-        } catch (err: unknown) {
+        } catch {
           /* no existing link */
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'claude-code: no existing symlink to remove');
+          providerLog.debug({ file }, 'claude-code: no existing symlink to remove');
         }
         symlinkSync(src, dst);
-      } catch (err: unknown) {
+      } catch {
         /* symlink unsupported/exists — best effort */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'claude-code: symlink unsupported or exists — best effort');
+        providerLog.debug({ file }, 'claude-code: symlink unsupported or exists — best effort');
       }
     }
-  } catch (err: unknown) {
-    /* fall back to default ~/.claude if we can't build the isolated dir */
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to build isolated config dir, falling back to default ~/.claude');
-    return join(homedir(), '.claude');
+  } catch {
+    providerLog.warn({}, 'claude-code: failed to build private isolated config directory');
+    throw new Error('Unable to create a private managed Claude Code home');
   }
   cachedClaudeConfigDir = dir;
   return dir;
@@ -707,9 +723,11 @@ export class ClaudeCodeProvider implements Provider {
       yield { type: 'error', error: 'Claude Code did not report an available model for this account.' };
       return;
     }
-    const prompt = buildPrompt(request.messages);
+    const attachmentScope = createCliAttachmentScope();
+    const prompt = buildPrompt(request.messages, attachmentScope);
 
     if (!prompt.trim()) {
+      attachmentScope.cleanup();
       yield { type: 'error', error: 'Claude Code: empty prompt' };
       return;
     }
@@ -722,6 +740,10 @@ export class ClaudeCodeProvider implements Provider {
     // the CLI's tool-name allow/deny lists (Phase 1 deep-integration).
     const sandbox = request.sandbox;
     const claudeBridge = getCliBridge('claude') as ClaudeCodeCliBridge | null;
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'claude' as const,
       role: request.harnessRole ?? 'manager',
@@ -730,9 +752,17 @@ export class ClaudeCodeProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     const bridgeScopes = claudeBridge?.buildPermissionScopes(bridgeCtx);
     const bridgeConfig = claudeBridge?.buildAgentConfig(bridgeCtx);
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
     const disallowed = researchOnly
       ? ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent']
       : bridgeScopes?.deny ?? (() => {
@@ -771,7 +801,7 @@ export class ClaudeCodeProvider implements Provider {
       // therefore prevents newly added native tools becoming a future escape.
       args.push('--tools', 'WebSearch,WebFetch');
       const emptyMcp = join(researchRoot!, 'mcp.json');
-      writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }));
+      writeFileSync(emptyMcp, JSON.stringify({ mcpServers: {} }), { mode: 0o600 });
       args.push('--strict-mcp-config', '--mcp-config', emptyMcp);
     }
     // Run in the project directory so the CLI edits the real files (falls back to cwd).
@@ -786,7 +816,7 @@ export class ClaudeCodeProvider implements Provider {
     env.CLAUDE_CONFIG_DIR = researchOnly
       ? join(getKoryphaiosClaudeConfigDir(), 'research-only')
       : getKoryphaiosClaudeConfigDir();
-    mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+    ensureManagedCliDirectory(env.CLAUDE_CONFIG_DIR);
     let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
       const cliLevels = await detectEffortLevels();
@@ -824,12 +854,14 @@ export class ClaudeCodeProvider implements Provider {
         : appliedEffort
           ? ` Your reasoning effort for this request is set to "${appliedEffort}".`
           : '';
-    args.push(
-      '--append-system-prompt',
-      request.systemPrompt?.trim()
-        ? `${request.systemPrompt}\n\n${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`
-        : `${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`,
+    const systemPrompt = request.systemPrompt?.trim()
+      ? `${request.systemPrompt}\n\n${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`
+      : `${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`;
+    const systemPromptArtifact = createPrivateCliTextArtifact(
+      'claude-system-prompt',
+      systemPrompt,
     );
+    args.push('--append-system-prompt-file', systemPromptArtifact.path);
 
     // Write the kory MCP server config to the isolated Claude home so the CLI
     // discovers it on startup. This is how the CLI gets access to kory__ tools.
@@ -837,6 +869,7 @@ export class ClaudeCodeProvider implements Provider {
     if (mcpConfigs && mcpConfigs.length > 0) {
       try {
         const mcpConfigPath = join(env.CLAUDE_CONFIG_DIR!, '.claude.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
@@ -848,9 +881,12 @@ export class ClaudeCodeProvider implements Provider {
             env: srv.env,
           };
         }
-        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
       } catch (mcpErr) {
-        providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Claude Code');
+        providerLog.warn(
+          safeProviderDiagnostic('claude', 'configuration', mcpErr),
+          'Failed to write kory MCP config for Claude Code',
+        );
       }
     }
 
@@ -861,9 +897,12 @@ export class ClaudeCodeProvider implements Provider {
       try {
         const hooksJson = claudeBridge.serializeHooks(hookConfigs);
         const hooksPath = join(env.CLAUDE_CONFIG_DIR!, 'hooks.json');
-        writeFileSync(hooksPath, hooksJson);
+        writeManagedCliFile(hooksPath, hooksJson);
       } catch (hookErr) {
-        providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Claude Code');
+        providerLog.warn(
+          safeProviderDiagnostic('claude', 'configuration', hookErr),
+          'Failed to write hooks config for Claude Code',
+        );
       }
     }
 
@@ -885,8 +924,18 @@ export class ClaudeCodeProvider implements Provider {
       isolated,
       mechanism,
     } = sandbox
-      ? wrapCommand('claude', args, { cwd, configDirs: [env.CLAUDE_CONFIG_DIR!], policy: sandbox })
+      ? wrapCommand('claude', args, {
+          cwd,
+          configDirs: [
+            env.CLAUDE_CONFIG_DIR!,
+            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+            systemPromptArtifact.directory,
+            ...attachmentScope.artifacts.map((artifact) => artifact.directory),
+          ],
+          policy: sandbox,
+        })
       : { command: 'claude', args, isolated: false, mechanism: 'none' as const };
+    assertPrivateValuesAbsentFromArgv(spawnArgs, [prompt, systemPrompt, request.systemPrompt]);
     if (sandbox) {
       providerLog.info(
         {
@@ -901,11 +950,17 @@ export class ClaudeCodeProvider implements Provider {
       );
     }
 
-    const child = spawn(spawnBin, spawnArgs, {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(spawnBin, spawnArgs, {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env,
+        }),
+      [systemPromptArtifact, ...attachmentScope.artifacts],
+      () => bridgeGrantLease?.cleanup(),
+    );
+    bridgeGrantLease?.bindToChild(child);
 
     const onAbort = () => {
       try {
@@ -929,15 +984,17 @@ export class ClaudeCodeProvider implements Provider {
 
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      stderr = appendPrivateDiagnostic(stderr, chunk);
     });
 
     // Feed the prompt via stdin (no arg-length limits, no shell escaping).
     try {
-      child.stdin.write(prompt);
-      child.stdin.end();
+      writePrivatePromptToStdin(child, prompt);
     } catch (err) {
-      providerLog.error({ provider: 'claude', err }, 'Failed to write prompt to Claude Code stdin');
+      providerLog.error(
+        safeProviderDiagnostic('claude', 'spawn', err),
+        'Failed to write prompt to Claude Code stdin',
+      );
     }
 
     const decoder = new TextDecoder();
@@ -949,18 +1006,23 @@ export class ClaudeCodeProvider implements Provider {
 
     try {
       for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        const bounded = appendBoundedProviderFrames(
+          buffer,
+          decoder.decode(chunk, { stream: true }),
+        );
+        buffer = bounded.remainder;
 
-        for (const line of lines) {
+        for (const line of bounded.frames) {
           const raw = line.trim();
           if (!raw) continue;
           let envelope: ClaudeStreamEnvelope;
           try {
             envelope = JSON.parse(raw) as ClaudeStreamEnvelope;
-          } catch (err: unknown) {
-            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: skipping non-JSON stream line');
+          } catch {
+            providerLog.debug(
+              safeProviderDiagnostic('claude', 'stdout', raw),
+              'claude-code: skipping non-JSON stream line',
+            );
             continue;
           }
           for (const event of this.mapEnvelope(envelope, pendingTools)) {
@@ -978,9 +1040,11 @@ export class ClaudeCodeProvider implements Provider {
         }
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
       if (!(err instanceof Error && err.name === 'AbortError')) {
-        yield { type: 'error', error: `Claude Code harness error: ${message}` };
+        onAbort();
+        const diagnostic = safeProviderDiagnostic('claude', 'stream', err);
+        providerLog.error(diagnostic, 'Claude Code harness stream failed');
+        yield { type: 'error', error: safeProviderFailureMessage('claude', diagnostic) };
       }
       clearTimeout(timeout);
       request.signal?.removeEventListener('abort', onAbort);
@@ -1002,11 +1066,14 @@ export class ClaudeCodeProvider implements Provider {
     if (request.signal?.aborted) return;
 
     if (exitCode !== 0 && !sawContent) {
-      const hint = stderr.trim() || 'Claude Code CLI exited with a non-zero status';
-      const loginHint = /not.*logged in|unauthorized|login|authenticate/i.test(hint)
-        ? ' — run "claude login" to sign in with your Claude subscription.'
-        : '';
-      yield { type: 'error', error: `Claude Code: ${hint.slice(0, 300)}${loginHint}` };
+      const diagnostic = safeProviderDiagnostic('claude', 'stderr', stderr, { exitCode });
+      providerLog.warn(diagnostic, 'Claude Code CLI exited unsuccessfully');
+      yield {
+        type: 'error',
+        error: safeProviderFailureMessage('claude', diagnostic, {
+          authenticationAction: 'Run "claude login", then reconnect.',
+        }),
+      };
       return;
     }
 
@@ -1103,9 +1170,11 @@ export class ClaudeCodeProvider implements Provider {
           };
         }
         if (envelope.is_error) {
+          const diagnostic = safeProviderDiagnostic('claude', 'stdout', extractError(envelope));
+          providerLog.warn(diagnostic, 'Claude Code CLI reported a request failure');
           yield {
             type: 'error',
-            error: extractError(envelope) ?? 'Claude Code request failed',
+            error: safeProviderFailureMessage('claude', diagnostic),
           };
           return;
         }
@@ -1116,7 +1185,9 @@ export class ClaudeCodeProvider implements Provider {
         return;
       }
       case 'error': {
-        yield { type: 'error', error: extractError(envelope) ?? 'Claude Code error' };
+        const diagnostic = safeProviderDiagnostic('claude', 'stdout', extractError(envelope));
+        providerLog.warn(diagnostic, 'Claude Code CLI emitted an error event');
+        yield { type: 'error', error: safeProviderFailureMessage('claude', diagnostic) };
         return;
       }
       case 'system': {
@@ -1197,61 +1268,20 @@ function extractError(envelope: ClaudeStreamEnvelope): string | undefined {
 }
 
 /** Serialize the conversation into a single prompt for the CLI's print mode. */
-function buildPrompt(messages: ProviderMessage[]): string {
+function buildPrompt(messages: ProviderMessage[], attachments: CliAttachmentScope): string {
   const turns = messages.filter((m) => m.role !== 'system');
 
   // Single user turn → send its text verbatim (most common chat case).
   if (turns.length === 1 && turns[0].role === 'user') {
-    return flattenContent(turns[0].content);
+    return attachments.renderContent(turns[0].content);
   }
 
   const lines: string[] = [];
   for (const m of turns) {
-    const text = flattenContent(m.content);
+    const text = attachments.renderContent(m.content);
     if (!text.trim()) continue;
     const label = m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
     lines.push(`${label}: ${text}`);
   }
   return lines.join('\n\n');
-}
-
-/** Persist a pasted image to a temp file so the CLI's own tools can view it —
- *  the piped prompt is text-only, but the agent has file access. */
-function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
-  if (!imageData) return '[image attachment omitted — no data]';
-  try {
-    const ext =
-      mime === 'image/jpeg'
-        ? 'jpg'
-        : mime === 'image/webp'
-          ? 'webp'
-          : mime === 'image/gif'
-            ? 'gif'
-            : 'png';
-    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
-    writeFileSync(file, Buffer.from(imageData, 'base64'));
-    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to persist image attachment to disk');
-    return '[image attachment omitted — could not persist to disk]';
-  }
-}
-
-function flattenContent(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    } else if (block.type === 'tool_use') {
-      parts.push(
-        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
-      );
-    } else if (block.type === 'tool_result') {
-      parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    } else if (block.type === 'image') {
-      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
-    }
-  }
-  return parts.join('\n');
 }

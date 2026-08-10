@@ -3,7 +3,13 @@ import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import type { Goal, GoalStatus } from '@koryphaios/shared';
 import { GoalRunner } from '../../kory/goal-runner';
-import { AuthenticationError, ConflictError, NotFoundError, ValidationError } from '../../errors/types';
+import { sanitizeGoalEvidence } from '../../stores/goal-store';
+import {
+  AuthenticationError,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from '../../errors/types';
 
 const statuses = [
   'queued',
@@ -36,6 +42,9 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
     '/',
     async ({ request, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      if (!body.objective.trim()) throw new ValidationError('Goals require an objective');
+      if (body.scope === 'project' && !body.projectPath?.trim())
+        throw new ValidationError('Project goals require a project directory');
       if (body.scope === 'session' && !(await getContext().sessions.get(body.sessionId!)))
         throw new ValidationError('Session goals require an existing owning chat');
       return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
@@ -59,10 +68,12 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const prior = await getContext().goals.get(params.id);
       if (!prior) throw new NotFoundError('Goal', params.id);
-      if (body.status || body.checklist)
+      if (body.status || body.checklist || body.linkedSessionIds)
         throw new ConflictError(
-          'Use the Goal Mode lifecycle and evidence endpoints; status and checklist state cannot be patched directly.',
+          'Use the Goal Mode lifecycle and evidence endpoints; status, checklist, and linked-chat state cannot be patched directly.',
         );
+      if (body.objective !== undefined && !body.objective.trim())
+        throw new ValidationError('Goals require an objective');
       return {
         ok: true,
         data: sendUpdate(
@@ -96,23 +107,26 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       if (!session) throw new NotFoundError('Session', body.sessionId);
       if (goal.scope === 'session' && goal.sessionId !== body.sessionId)
         throw new ConflictError('This session goal can only run in its owning chat.');
-      if (goal.scope === 'project' && session.workingDirectory !== goal.projectPath)
-        throw new ConflictError('This project goal must run in a chat scoped to its project.');
-      const started = await goalDriver.start(goal.id, {
-        sessionId: body.sessionId,
-        provider: body.provider,
-        model: body.model,
-        reasoningLevel: body.reasoningLevel,
-        instructions: body.instructions,
-        remotePlanApproved: body.remotePlanApproved,
-      });
+      let started: Goal;
+      try {
+        started = await goalDriver.start(goal.id, {
+          sessionId: body.sessionId,
+          provider: body.provider,
+          model: body.model,
+          reasoningLevel: body.reasoningLevel,
+          instructions: body.instructions,
+          remotePlanApproved: body.remotePlanApproved,
+        });
+      } catch (error) {
+        throw new ConflictError(error instanceof Error ? error.message : 'Goal could not start');
+      }
       return { ok: true, data: started };
     },
     {
       body: t.Object({
         sessionId: t.String(),
-        provider: t.String(),
-        model: t.String(),
+        provider: t.String({ minLength: 1, maxLength: 120 }),
+        model: t.String({ minLength: 1, maxLength: 240 }),
         reasoningLevel: t.Optional(t.String()),
         instructions: t.Optional(t.String({ maxLength: 4000 })),
         remotePlanApproved: t.Optional(t.Boolean()),
@@ -121,15 +135,30 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   )
   .post('/:id/pause', async ({ request, params }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    return { ok: true, data: await getContext().goalDriver.pause(params.id) };
+    if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);
+    try {
+      return { ok: true, data: await getContext().goalDriver.pause(params.id) };
+    } catch (error) {
+      throw new ConflictError(error instanceof Error ? error.message : 'Goal could not pause');
+    }
   })
   .post('/:id/resume', async ({ request, params }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    return { ok: true, data: await getContext().goalDriver.resume(params.id) };
+    if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);
+    try {
+      return { ok: true, data: await getContext().goalDriver.resume(params.id) };
+    } catch (error) {
+      throw new ConflictError(error instanceof Error ? error.message : 'Goal could not resume');
+    }
   })
   .post('/:id/stop', async ({ request, params }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    return { ok: true, data: await getContext().goalDriver.stop(params.id) };
+    if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);
+    try {
+      return { ok: true, data: await getContext().goalDriver.stop(params.id) };
+    } catch (error) {
+      throw new ConflictError(error instanceof Error ? error.message : 'Goal could not stop');
+    }
   })
   .post(
     '/:id/checklist/:itemId/complete',
@@ -139,31 +168,86 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       const current = await context.goals.get(params.id);
       const item = current?.checklist.find((entry) => entry.id === params.itemId);
       if (!current || !item) throw new NotFoundError('Checklist item', params.itemId);
+      if (current.status !== 'running' || item.status !== 'running') {
+        throw new ConflictError(
+          'Start this checklist item in a running goal before submitting completion evidence.',
+        );
+      }
+      if (
+        item.dependsOn.some(
+          (dependency) =>
+            current.checklist.find((entry) => entry.id === dependency)?.status !== 'completed',
+        )
+      ) {
+        throw new ConflictError("Complete this checklist item's dependencies first.");
+      }
       const sessionId = current.execution?.sessionId ?? current.sessionId;
       if (!sessionId)
+        throw new ConflictError('Start this goal in a chat before recording completion evidence');
+      const producerProvider = current.execution?.provider?.trim();
+      const producerModel = current.execution?.model?.trim();
+      const attemptId = current.execution?.attemptId?.trim();
+      if (!producerProvider || !producerModel || !attemptId) {
         throw new ConflictError(
-          'Start this goal in a chat before recording completion evidence',
+          'Goal producer identity or execution attempt is unavailable; restart the goal with an explicit provider and model.',
         );
-      const gate = await context.kory.verifyGoalItem(
-        sessionId,
-        current.objective,
-        item.title,
-        current.execution?.model,
+      }
+      const producerEvidence = sanitizeGoalEvidence(body.value);
+      let gate: Awaited<ReturnType<typeof context.kory.verifyGoalItem>>;
+      try {
+        gate = await context.kory.verifyGoalItem(
+          sessionId,
+          current.objective,
+          item.title,
+          producerEvidence,
+          current.execution?.model,
+          producerProvider,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        gate = {
+          passed: false,
+          feedback: sanitizeGoalEvidence(`Independent verifier failed to run: ${detail}`),
+        };
+      }
+      const goal = await context.goals.completeItem(
+        params.id,
+        params.itemId,
+        {
+          producer: {
+            kind: body.kind,
+            value: producerEvidence,
+            provider: producerProvider,
+            model: producerModel,
+          },
+          verifier: gate,
+        },
+        attemptId,
       );
-      if (!gate.passed)
-        throw new ConflictError(gate.feedback ?? 'Critic rejected the completion evidence');
-      const value = gate.skipped
-        ? `Critic disabled by user; producer evidence: ${body.value}`
-        : `${body.value}\nCritic PASS: ${gate.feedback ?? 'verified'}`;
-      const goal = await context.goals.completeItem(params.id, params.itemId, {
-        kind: body.kind,
-        value,
-      });
-      return { ok: true, data: sendUpdate(goal) };
+      if (!goal) {
+        throw new ConflictError(
+          'The Goal was paused, stopped, or restarted while evidence was being verified.',
+        );
+      }
+      sendUpdate(goal);
+      if (gate.skipped) {
+        throw new ConflictError(
+          'Evidence was saved but remains unverified because the Goal Mode critic is disabled.',
+        );
+      }
+      if (!gate.passed) {
+        throw new ConflictError('Independent verification rejected the completion evidence.');
+      }
+      if (goal.checklist.find((entry) => entry.id === params.itemId)?.status !== 'completed') {
+        throw new ConflictError(
+          'Evidence was saved but independent verifier provenance could not be established.',
+        );
+      }
+      return { ok: true, data: goal };
     },
     {
       body: t.Object({
-        value: t.String(),
+        value: t.String({ minLength: 1, maxLength: 8_000 }),
         kind: t.Union([t.Literal('check'), t.Literal('artifact'), t.Literal('note')]),
       }),
     },

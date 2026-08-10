@@ -20,6 +20,7 @@ import {
   mergeModelLists,
   modelFromRemoteId,
 } from './model-list-cache';
+import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
 export class AnthropicProvider implements Provider {
   readonly name: ProviderName;
@@ -316,17 +317,9 @@ export class AnthropicProvider implements Provider {
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') return;
 
-      // Log full error details for debugging
-      const errorDetail = {
-        message: err instanceof Error ? err.message : String(err),
-        name: err instanceof Error ? err.name : undefined,
-        status: (err as any)?.status,
-        code: (err as any)?.error?.code || (err as any)?.code,
-        type: (err as any)?.error?.type,
-      };
-      providerLog.error({ errorDetail, model: request.model }, 'Anthropic provider stream error');
-
-      yield { type: 'error', error: errorDetail.message };
+      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+      providerLog.error({ ...diagnostic, model: request.model }, 'Anthropic provider stream error');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
     }
   }
 

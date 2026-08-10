@@ -65,7 +65,7 @@ pub async fn search_codebase(
 
         Box::new(move |result| {
             if let Ok(entry) = result {
-                if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                if entry.file_type().is_some_and(|ft| ft.is_file()) {
                     let file_path = entry.path().to_path_buf();
 
                     // Simple fast read - skip binary files or unreadable files

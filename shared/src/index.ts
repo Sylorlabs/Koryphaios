@@ -50,10 +50,26 @@ export type {
 // ============== Task Types ==============
 export type { WorkerTask } from './types/TaskTypes';
 
+// ============== Process Supervision ==============
+export type {
+  ProcessClassification,
+  ProcessProvenance,
+  ProcessStatus,
+  ProcessSupervision,
+  ProcessTerminalReason,
+} from './types/ProcessTypes';
+export { isAgentBackgroundProcess } from './types/ProcessTypes';
+
 // ============== Provider & Model Definitions ==============
 export { ProviderName } from './providers/ProviderNames';
 
-export type { ModelTier, ModelDef, ModelQuota, ProviderConfig, ProviderStatus } from './providers/ModelDefs';
+export type {
+  ModelTier,
+  ModelDef,
+  ModelQuota,
+  ProviderConfig,
+  ProviderStatus,
+} from './providers/ModelDefs';
 export type {
   CollaborationRole,
   CollaborationJoinMode,
@@ -189,6 +205,7 @@ export type {
   SafetyLimits,
   WorkspaceConfig,
   ServerConfig,
+  AgentSettings,
 } from './config/ConfigTypes';
 
 // ============== App Configuration ==============

@@ -3,8 +3,9 @@
 
 import { serverLog } from '../logger';
 import { db, getDb, userCredentials, credentialAuditLog } from '../db';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { createAuditLogService } from './audit';
+import { encryptForStorage, secureDecrypt } from '../security';
 
 /** Credential record exposed without the encrypted/plaintext value (metadata view). */
 export type CredentialMetadataView = Omit<UserCredential, 'encryptedValue' | 'metadata'> & {
@@ -42,36 +43,71 @@ export interface CreateCredentialInput {
   value: string;
   type: 'apiKey' | 'authToken' | 'baseUrl';
   expiresAt?: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface CredentialWithPlaintext extends UserCredential {
   plaintext: string;
 }
 
-function encryptWithMasterKey(plaintext: string): string {
-  const masterKey = process.env.KORYPHAIOS_MASTER_KEY || 'dev-key';
-  const keyBytes = Buffer.from(masterKey.slice(0, 32), 'utf8');
-  const plaintextBytes = Buffer.from(plaintext, 'utf8');
-  const encrypted = Buffer.alloc(plaintextBytes.length);
-  for (let i = 0; i < plaintextBytes.length; i++)
-    encrypted[i] = plaintextBytes[i] ^ keyBytes[i % keyBytes.length];
-  return encrypted.toString('base64');
-}
+/**
+ * Historical credential encryption used a repeating XOR key and stored the
+ * result as unprefixed base64. It is retained only as a one-way migration
+ * reader; new writes must use authenticated envelope encryption.
+ */
+function decryptLegacyXorCredential(encrypted: string): string {
+  if (
+    encrypted.length === 0 ||
+    encrypted.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(encrypted)
+  ) {
+    throw new Error('Legacy credential is not valid canonical base64');
+  }
 
-function decryptWithMasterKey(encrypted: string): string {
   const masterKey = process.env.KORYPHAIOS_MASTER_KEY || 'dev-key';
   const keyBytes = Buffer.from(masterKey.slice(0, 32), 'utf8');
   const encryptedBytes = Buffer.from(encrypted, 'base64');
+  if (encryptedBytes.toString('base64') !== encrypted) {
+    throw new Error('Legacy credential is not canonical base64');
+  }
   const decrypted = Buffer.alloc(encryptedBytes.length);
   for (let i = 0; i < encryptedBytes.length; i++)
     decrypted[i] = encryptedBytes[i] ^ keyBytes[i % keyBytes.length];
-  return decrypted.toString('utf8');
+
+  let plaintext: string;
+  try {
+    plaintext = new TextDecoder('utf-8', { fatal: true }).decode(decrypted);
+  } catch {
+    throw new Error('Legacy credential could not be decoded with the configured migration key');
+  }
+  if (!plaintext || /[\u0000-\u001f\u007f]/.test(plaintext)) {
+    throw new Error('Legacy credential failed migration validation');
+  }
+  return plaintext;
 }
+
+export interface CredentialEncryption {
+  encrypt(plaintext: string): Promise<string>;
+  decryptEnvelope(ciphertext: string): Promise<string>;
+}
+
+const authenticatedEnvelopeEncryption: CredentialEncryption = {
+  encrypt: encryptForStorage,
+  async decryptEnvelope(ciphertext: string): Promise<string> {
+    if (!ciphertext.startsWith('env:')) {
+      throw new Error('Credential is not stored as an authenticated envelope');
+    }
+    return secureDecrypt(ciphertext);
+  },
+};
 
 export class UserCredentialsService {
   private schemaReady: Promise<void> | null = null;
   private audit = createAuditLogService();
+
+  constructor(
+    private readonly encryption: CredentialEncryption = authenticatedEnvelopeEncryption,
+  ) {}
 
   private async ensureSchema(): Promise<void> {
     if (!this.schemaReady) {
@@ -121,7 +157,10 @@ export class UserCredentialsService {
     const id = this.generateId();
     const now = new Date();
     try {
-      const encryptedValue = encryptWithMasterKey(input.value);
+      const encryptedValue = await this.encryption.encrypt(input.value);
+      if (!encryptedValue.startsWith('env:')) {
+        throw new Error('Credential encryption did not produce an authenticated envelope');
+      }
       const [row] = await db
         .insert(userCredentials)
         .values({
@@ -191,10 +230,32 @@ export class UserCredentialsService {
         });
         throw new Error('Credential expired');
       }
-      const plaintext = decryptWithMasterKey(credential.encryptedValue);
+      let plaintext: string;
+      let encryptedValue = credential.encryptedValue;
+      if (encryptedValue.startsWith('env:')) {
+        plaintext = await this.encryption.decryptEnvelope(encryptedValue);
+      } else if (encryptedValue.startsWith('enc:')) {
+        throw new Error(
+          'Unsupported legacy credential format. Re-enter this credential to store it securely.',
+        );
+      } else {
+        // Recover historical unprefixed XOR rows only long enough to replace
+        // them in-place with an authenticated envelope. If envelope encryption
+        // is unavailable, the update never occurs and plaintext is not returned.
+        plaintext = decryptLegacyXorCredential(encryptedValue);
+        const migratedValue = await this.encryption.encrypt(plaintext);
+        if (!migratedValue.startsWith('env:')) {
+          throw new Error('Legacy credential migration did not produce an authenticated envelope');
+        }
+        const verifiedPlaintext = await this.encryption.decryptEnvelope(migratedValue);
+        if (verifiedPlaintext !== plaintext) {
+          throw new Error('Legacy credential migration envelope failed round-trip verification');
+        }
+        encryptedValue = migratedValue;
+      }
       await db
         .update(userCredentials)
-        .set({ lastUsedAt: now })
+        .set({ encryptedCredential: encryptedValue, lastUsedAt: now })
         .where(eq(userCredentials.id, credentialId));
       await this.logAccess({
         id: this.generateId(),
@@ -206,7 +267,7 @@ export class UserCredentialsService {
         userAgent: context?.userAgent,
         success: true,
       });
-      return { ...credential, plaintext };
+      return { ...credential, encryptedValue, plaintext };
     } catch (error: unknown) {
       await this.logAccess({
         id: this.generateId(),
@@ -281,7 +342,7 @@ export class UserCredentialsService {
     }
   }
 
-  private rowToCredential(row: any): UserCredential {
+  private rowToCredential(row: typeof userCredentials.$inferSelect): UserCredential {
     return {
       id: row.id,
       userId: row.userId,
@@ -304,7 +365,7 @@ export class UserCredentialsService {
     userId: string;
     provider: string;
     credential: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }): Promise<string> {
     const res = await this.createCredential({
       userId: input.userId,
@@ -331,7 +392,14 @@ export class UserCredentialsService {
       })
       .catch((err: unknown) => {
         // Audit logging is non-critical — credential access still succeeds.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), credentialId, action: 'credential_access' }, 'Credential audit log failed (non-critical)');
+        serverLog.debug(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            credentialId,
+            action: 'credential_access',
+          },
+          'Credential audit log failed (non-critical)',
+        );
       });
     return res.plaintext;
   }
@@ -404,7 +472,10 @@ export class UserCredentialsService {
     });
     await this.revokeCredential(credentialId).catch((err: unknown) => {
       // Revocation best-effort — the new credential is already created.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), credentialId }, 'Credential revocation during rotation failed (non-critical, new credential already created)');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), credentialId },
+        'Credential revocation during rotation failed (non-critical, new credential already created)',
+      );
     });
     await this.audit
       .log({
@@ -417,7 +488,14 @@ export class UserCredentialsService {
       })
       .catch((err: unknown) => {
         // Audit logging is non-critical — rotation still succeeds.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), credentialId, action: 'credential_rotate' }, 'Credential rotate audit log failed (non-critical)');
+        serverLog.debug(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            credentialId,
+            action: 'credential_rotate',
+          },
+          'Credential rotate audit log failed (non-critical)',
+        );
       });
     return created.id;
   }
@@ -433,7 +511,10 @@ export class UserCredentialsService {
     if (!row || row.userId !== userId) return false;
     await this.revokeCredential(credentialId).catch((err: unknown) => {
       // Revocation best-effort — the credential is already soft-deleted in the DB.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), credentialId }, 'Credential revocation during delete failed (non-critical, already soft-deleted)');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), credentialId },
+        'Credential revocation during delete failed (non-critical, already soft-deleted)',
+      );
     });
     return true;
   }

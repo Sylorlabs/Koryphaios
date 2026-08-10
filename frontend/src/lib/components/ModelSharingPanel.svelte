@@ -4,7 +4,18 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { Share2, MonitorSmartphone, ShieldAlert, ShieldCheck, ShieldX, Loader2, Link2, HardDrive, Lock, Wifi, Terminal, FilePenLine, Globe, Search, ChevronDown, SlidersHorizontal } from 'lucide-svelte';
+  import Share2 from 'lucide-svelte/icons/share-2';
+  import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
+  import ShieldAlert from 'lucide-svelte/icons/shield-alert';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import ShieldX from 'lucide-svelte/icons/shield-x';
+  import Loader2 from 'lucide-svelte/icons/loader-2';
+  import Link2 from 'lucide-svelte/icons/link-2';
+  import HardDrive from 'lucide-svelte/icons/hard-drive';
+  import Lock from 'lucide-svelte/icons/lock';
+  import Search from 'lucide-svelte/icons/search';
+  import ChevronDown from 'lucide-svelte/icons/chevron-down';
+  import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
   import { SANDBOX_PRESETS, type ProviderShareRisk, type SandboxPolicy, type SandboxPreset } from '@koryphaios/shared';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
@@ -122,12 +133,36 @@
     void loadSandbox();
   });
 
-  const SANDBOX_TOGGLES: Array<{ key: keyof SandboxPolicy; label: string; hint: string; icon: any }> = [
-    { key: 'filesystemIsolation', label: 'Filesystem jail', hint: 'CLI can only touch the shared project — not your home, keys, or other files.', icon: Lock },
-    { key: 'allowNetwork', label: 'Network access', hint: 'Let the CLI reach the internet (package installs, API calls).', icon: Wifi },
-    { key: 'allowWebSearch', label: 'Web search', hint: "The CLI's own web search / fetch tools.", icon: Globe },
-    { key: 'allowEdits', label: 'Edit files', hint: 'CLI may write files (edits go back to the guest, not you).', icon: FilePenLine },
-    { key: 'allowShell', label: 'Run shell commands', hint: 'CLI may run commands — on YOUR machine (inside the jail).', icon: Terminal },
+  const SANDBOX_TOGGLES: Array<{
+    key: keyof SandboxPolicy;
+    label: string;
+    hint: string;
+  }> = [
+    {
+      key: 'filesystemIsolation',
+      label: 'Filesystem jail',
+      hint: 'CLI can only touch the shared project — not your home, keys, or other files.',
+    },
+    {
+      key: 'allowNetwork',
+      label: 'Network access',
+      hint: 'Let the CLI reach the internet (package installs, API calls).',
+    },
+    {
+      key: 'allowWebSearch',
+      label: 'Web search',
+      hint: "The CLI's own web search / fetch tools.",
+    },
+    {
+      key: 'allowEdits',
+      label: 'Edit files',
+      hint: 'CLI may write files (edits go back to the guest, not you).',
+    },
+    {
+      key: 'allowShell',
+      label: 'Run shell commands',
+      hint: 'CLI may run commands — on YOUR machine (inside the jail).',
+    },
   ];
 
   const PRESET_META: Array<{ id: Exclude<SandboxPreset, 'custom'>; label: string; hint: string }> = [
@@ -383,20 +418,13 @@
           <div class="space-y-1.5">
             {#each SANDBOX_TOGGLES as opt (opt.key)}
               {@const on = sandbox[opt.key] === true}
-              <button
-                type="button"
-                onclick={() => setSandbox(opt.key, !on as any)}
-                class="w-full flex items-center gap-3 rounded-xl bg-[var(--color-surface-1)] px-3 py-2.5 text-left hover:bg-[var(--color-surface-3)] transition-colors"
-              >
-                <opt.icon size={13} class="shrink-0" style="color: {on ? 'var(--color-accent)' : 'var(--color-text-muted)'};" />
-                <span class="min-w-0 flex-1">
-                  <span class="block text-[11px] font-medium text-[var(--color-text-primary)]">{opt.label}</span>
-                  <span class="block text-[10px] text-[var(--color-text-muted)]">{opt.hint}</span>
-                </span>
-                <span class="h-4 w-7 shrink-0 rounded-full p-0.5" style="background: {on ? 'var(--color-accent)' : 'var(--color-surface-4)'};">
-                  <span class="block h-3 w-3 rounded-full bg-white transition-transform" style="transform: translateX({on ? '12px' : '0'});"></span>
-                </span>
-              </button>
+              <SettingsSwitch
+                compact
+                checked={on}
+                label={opt.label}
+                description={opt.hint}
+                onchange={() => setSandbox(opt.key, !on as any)}
+              />
             {/each}
           </div>
           <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">

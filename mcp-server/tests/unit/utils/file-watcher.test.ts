@@ -2,8 +2,10 @@
  * Tests for FileWatcher utility
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
 import { FileWatcher, type FileWatcherOptions } from '../../../src/utils/file-watcher.js';
 
 // Create mock functions outside of vi.mock to avoid hoisting issues
@@ -12,6 +14,7 @@ const mockWatcher = {
   unwatch: vi.fn(),
   close: vi.fn(),
   on: vi.fn(),
+  once: vi.fn(),
 };
 
 vi.mock('chokidar', () => ({
@@ -39,6 +42,7 @@ describe('FileWatcher', () => {
     mockWatcher.unwatch.mockClear();
     mockWatcher.close.mockClear();
     mockWatcher.on.mockClear();
+    mockWatcher.once.mockClear();
     fileWatcher = new FileWatcher();
   });
 

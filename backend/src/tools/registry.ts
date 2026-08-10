@@ -3,6 +3,7 @@
 
 import type { ChangeSummary } from '@koryphaios/shared';
 import { toolLog } from '../logger';
+import { summarizeToolErrorForAudit } from '../security/bash-sandbox';
 import {
   decideToolPermission,
   type ToolPermissionPolicy,
@@ -11,6 +12,8 @@ import {
 
 export interface ToolContext {
   sessionId: string;
+  /** Authenticated actor when known. Falls back to a session-scoped audit identity locally. */
+  userId?: string;
   activeProvider?: string;
   activeModel?: string;
   reasoningLevel?: string;
@@ -180,30 +183,47 @@ export class ToolRegistry {
 
     const start = performance.now();
 
+    // Approval receipts are single-invocation capabilities. A provider may
+    // reuse a tool-call ID, so discard any stale receipt before deciding the
+    // current call. The host adds it back only after this invocation's prompt.
+    ctx.approvedToolCallIds?.delete(call.id);
+
     const input = call.input as Record<string, unknown>;
-    const files = Array.isArray(input.files) ? input.files as Array<Record<string, unknown>> : [];
-    const edits = Array.isArray(input.edits) ? input.edits as Array<Record<string, unknown>> : [];
-    const paths = [input.path, input.oldPath, input.newPath, input.source, input.destination]
-      .filter((value): value is string => typeof value === 'string' && value.length > 0);
+    const files = Array.isArray(input.files) ? (input.files as Array<Record<string, unknown>>) : [];
+    const edits = Array.isArray(input.edits) ? (input.edits as Array<Record<string, unknown>>) : [];
+    const paths = [
+      input.path,
+      input.oldPath,
+      input.newPath,
+      input.source,
+      input.destination,
+    ].filter((value): value is string => typeof value === 'string' && value.length > 0);
     for (const file of files) {
       if (typeof file.path === 'string') paths.push(file.path);
     }
-    const operations = Array.isArray(input.operations) ? input.operations as Array<Record<string, unknown>> : [];
+    const operations = Array.isArray(input.operations)
+      ? (input.operations as Array<Record<string, unknown>>)
+      : [];
     for (const operation of operations) {
       if (typeof operation.path === 'string') paths.push(operation.path);
     }
     const nestedEdits = [
       ...edits,
-      ...files.flatMap((file) => Array.isArray(file.edits) ? file.edits as Array<Record<string, unknown>> : []),
+      ...files.flatMap((file) =>
+        Array.isArray(file.edits) ? (file.edits as Array<Record<string, unknown>>) : [],
+      ),
     ];
     const lineSources = [
       input.content,
       input.newStr,
       input.new_str,
-      ...operations.flatMap((operation) => [operation.content, operation.newStr, operation.new_str]),
+      ...operations.flatMap((operation) => [
+        operation.content,
+        operation.newStr,
+        operation.new_str,
+      ]),
       ...nestedEdits.map((edit) => edit.new_str),
-    ]
-      .filter((value): value is string => typeof value === 'string');
+    ].filter((value): value is string => typeof value === 'string');
     const change = {
       fileCount: new Set(paths).size,
       linesChanged: lineSources.reduce((total, value) => total + value.split('\n').length, 0),
@@ -237,7 +257,10 @@ export class ToolRegistry {
         return {
           callId: call.id,
           name: call.name,
-          output: selection === '__timeout__' ? 'Approval timed out; tool was not run.' : 'Tool rejected by user.',
+          output:
+            selection === '__timeout__'
+              ? 'Approval timed out; tool was not run.'
+              : 'Tool rejected by user.',
           isError: true,
           durationMs: performance.now() - start,
         };
@@ -253,17 +276,36 @@ export class ToolRegistry {
       try {
         const verdict = await ctx.preflightFileChange({ paths, linesChanged });
         if (!verdict.allowed) {
+          const denialAudit = summarizeToolErrorForAudit(verdict.reason ?? 'preflight denied');
+          toolLog.warn(
+            {
+              ...denialAudit,
+              decision: 'preflight_denied',
+              toolCallId: call.id,
+              sessionId: ctx.sessionId,
+            },
+            'preflight check denied tool execution',
+          );
           return {
             callId: call.id,
             name: call.name,
-            output: verdict.reason ?? 'Approval required.',
+            output: 'Tool change blocked by the preflight safety policy.',
             isError: true,
             durationMs: performance.now() - start,
           };
         }
       } catch (err: unknown) {
         // If the preflight hook throws, fail closed (block the tool).
-        toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'preflight check threw — blocking tool for safety');
+        const errorAudit = summarizeToolErrorForAudit(err);
+        toolLog.debug(
+          {
+            ...errorAudit,
+            decision: 'preflight_blocked',
+            toolCallId: call.id,
+            sessionId: ctx.sessionId,
+          },
+          'preflight check threw — blocking tool for safety',
+        );
         return {
           callId: call.id,
           name: call.name,
@@ -279,15 +321,13 @@ export class ToolRegistry {
       result.durationMs = performance.now() - start;
       return result;
     } catch (err: unknown) {
-      // Log full error details for debugging
+      const errorAudit = summarizeToolErrorForAudit(err);
       toolLog.error(
         {
-          err:
-            err instanceof Error ? { message: err.message, stack: err.stack, name: err.name } : err,
-          toolName: call.name,
-          callId: call.id,
+          ...errorAudit,
+          decision: 'tool_execution_failed',
+          toolCallId: call.id,
           sessionId: ctx.sessionId,
-          durationMs: performance.now() - start,
         },
         'Tool execution failed',
       );
@@ -295,7 +335,7 @@ export class ToolRegistry {
       return {
         callId: call.id,
         name: call.name,
-        output: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+        output: `Tool execution failed safely (code: ${errorAudit.errorCode}; reference: ${errorAudit.errorFingerprint}).`,
         isError: true,
         durationMs: performance.now() - start,
       };

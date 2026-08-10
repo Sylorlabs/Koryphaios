@@ -1,12 +1,17 @@
 import { serverLog } from '../logger';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
-  cpSync,
+  closeSync,
   existsSync,
+  fsyncSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -31,7 +36,12 @@ export interface KorySkillMetadata {
   evidence: string[];
   contextBudget: number;
   sourceScope: 'local-only';
+  /** Compatibility breadcrumb for clients that only understand one parent. */
   parent?: string;
+  /** More-general professional concepts. The resolver follows every branch transitively. */
+  broader: string[];
+  /** Cross-cutting professional lenses. Facets are included one hop, not transitively. */
+  facets: string[];
   depth: number;
   requires: string[];
   conflicts: string[];
@@ -50,6 +60,11 @@ export interface SkillRevision {
   metadata: KorySkillMetadata;
   hash: string;
   validation: SkillValidationResult;
+  compatibility?: {
+    status: 'available' | 'unavailable';
+    reason: string;
+    supportingResources: string[];
+  };
   /** True when a newer bundled version exists and the local copy has user edits. */
   bundledUpdateAvailable?: boolean;
 }
@@ -75,13 +90,24 @@ export interface SkillCollision {
 export interface ResolvedSkill {
   skill: SkillRevision;
   reason: string;
+  representation: SkillRepresentation;
+  /** Exact prompt block injected for this skill, including any leading separator. */
+  promptText: string;
   contextCost: number;
+  fullContextCost: number;
+  omittedDetailChars: number;
 }
+
+export type SkillRepresentation = 'full' | 'compact' | 'minimal';
 
 export interface SkillEvidence {
   taskKind: TaskKind;
   declaredMedia: string[];
+  /** Media explicitly ruled out by the request (for example, "not web"). */
+  negatedMedia: string[];
   repositoryMedia: string[];
+  /** Strong task concepts derived from bounded words/phrases, never substrings. */
+  domains: string[];
   languages: string[];
   runtimes: string[];
   toolkits: string[];
@@ -95,8 +121,22 @@ export interface SkillResolverResult {
   selectionConflicts: Array<{ left: string; right: string }>;
   hierarchyErrors: string[];
   omittedByBudget: string[];
+  compressedByBudget: Array<{
+    name: string;
+    representation: Exclude<SkillRepresentation, 'full'>;
+    fullContextCost: number;
+    contextCost: number;
+    omittedDetailChars: number;
+  }>;
+  rejectedCandidates: Array<{ name: string; reason: string }>;
+  rejectedCandidateCount: number;
+  rejectedCandidatesTruncated: boolean;
   blocked: boolean;
   manifestHash: string;
+  /** Exact injected section, including heading, manifest, hash, and separators. */
+  promptText: string;
+  contextBudget: number;
+  contextOverheadCost: number;
   totalContextCost: number;
   evidence: SkillEvidence;
 }
@@ -124,10 +164,214 @@ export function enforceSkillLearningPolicy(
   }
 }
 
+/**
+ * These tracked resources describe Codex-only tools, paths, and plugin APIs.
+ * Kory keeps them inspectable but never promotes them into its active runtime
+ * until an explicit compatibility adapter exists.
+ */
+export const INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES = new Map<string, string>([
+  ['skill-installer', 'Requires Codex skill registries and CODEX_HOME installation semantics'],
+  ['skill-creator', 'Requires Codex subagent evaluation and system skill tooling'],
+  ['plugin-creator', 'Requires Codex plugin manifests, marketplace, and cache lifecycle'],
+  ['imagegen', 'Requires Codex built-in image generation tool semantics'],
+  ['review-agent', 'Requires Codex-specific delegated review tooling and instruction contract'],
+  ['openai-docs', 'Requires Codex/OpenAI documentation MCP tools not guaranteed by Kory'],
+]);
+
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 const AUTHORITY_KEYS = ['allowed-tools', 'scripts', 'binaries', 'network', 'network-requirements'];
+const TRIGGER_STOP_WORDS = new Set([
+  'and',
+  'are',
+  'for',
+  'from',
+  'into',
+  'our',
+  'please',
+  'that',
+  'the',
+  'their',
+  'this',
+  'with',
+  'your',
+]);
+const GENERIC_TRIGGER_WORDS = new Set([
+  'add',
+  'analyze',
+  'app',
+  'backend',
+  'build',
+  'check',
+  'create',
+  'design',
+  'implement',
+  'implementation',
+  'improve',
+  'interface',
+  'review',
+  'run',
+  'system',
+  'test',
+  'tests',
+  'verify',
+  'write',
+]);
+const PRIMARY_MEDIUM_SKILLS: Readonly<Record<string, string>> = {
+  web: 'web-interface',
+  native: 'native-interface',
+  mobile: 'native-interface',
+  terminal: 'terminal-interface',
+  game: 'game-spatial-interface',
+  spatial: 'game-spatial-interface',
+  embedded: 'embedded-interface',
+};
+const TASK_KIND_ROUTED_SKILLS = new Set([
+  'repository-environment-discovery',
+  'research',
+  'planning',
+  'implementation',
+  'debugging',
+  'verification',
+  'security-review',
+  'frontend-engineering',
+  'testing-engineering',
+  'human-experience',
+]);
 
 const unique = (values: string[]) => [...new Set(values)];
+
+const TOKEN_ALIASES: Readonly<Record<string, string>> = {
+  authorised: 'authorization',
+  authorise: 'authorization',
+  authorized: 'authorization',
+  authorize: 'authorization',
+  permissions: 'permission',
+  fuzzed: 'fuzz',
+  fuzzer: 'fuzz',
+  fuzzers: 'fuzz',
+  fuzzing: 'fuzz',
+  rendered: 'render',
+  renderer: 'render',
+  renderers: 'render',
+  rendering: 'render',
+  visualisation: 'visualization',
+  visualise: 'visualize',
+  visualised: 'visualize',
+  visualising: 'visualize',
+  visualized: 'visualize',
+  visualizing: 'visualize',
+  installations: 'installation',
+  installing: 'installation',
+  installed: 'installation',
+  recover: 'recovery',
+  recovered: 'recovery',
+  recovering: 'recovery',
+};
+
+/** Normalize to semantic tokens before matching; never use unrestricted substrings. */
+export function normalizeSkillTokens(value: string): string[] {
+  return (
+    value
+      .normalize('NFKC')
+      .toLowerCase()
+      .match(/[\p{L}\p{N}+#]+/gu) ?? []
+  ).map((token) => TOKEN_ALIASES[token] ?? token);
+}
+
+function containsTokenPhrase(tokens: string[], phrase: string): boolean {
+  const phraseTokens = normalizeSkillTokens(phrase);
+  if (phraseTokens.length === 0 || phraseTokens.length > tokens.length) return false;
+  return tokens.some(
+    (_token, start) =>
+      start + phraseTokens.length <= tokens.length &&
+      phraseTokens.every((token, offset) => tokens[start + offset] === token),
+  );
+}
+
+function hasAnyPhrase(tokens: string[], phrases: string[]): boolean {
+  return phrases.some((phrase) => containsTokenPhrase(tokens, phrase));
+}
+
+const NEGATION_TOKENS = new Set([
+  'avoid',
+  'excluding',
+  'exclude',
+  'never',
+  'no',
+  'non',
+  'not',
+  'without',
+]);
+
+function phraseStarts(tokens: string[], phrase: string): number[] {
+  const phraseTokens = normalizeSkillTokens(phrase);
+  if (phraseTokens.length === 0 || phraseTokens.length > tokens.length) return [];
+  const starts: number[] = [];
+  for (let start = 0; start + phraseTokens.length <= tokens.length; start += 1) {
+    if (phraseTokens.every((token, offset) => tokens[start + offset] === token)) starts.push(start);
+  }
+  return starts;
+}
+
+/**
+ * Treat a medium phrase as negated only when a nearby, bounded negative cue
+ * governs it. This deliberately prefers a false negative over importing an
+ * explicitly rejected technology branch.
+ */
+function isPhraseNegated(tokens: string[], phrase: string): boolean {
+  const phraseLength = normalizeSkillTokens(phrase).length;
+  return phraseStarts(tokens, phrase).some((start) => {
+    const preceding = tokens.slice(Math.max(0, start - 5), start);
+    if (preceding.some((token) => NEGATION_TOKENS.has(token))) return true;
+    // Common scope phrase: "do not assume/use/build with web technologies".
+    if (preceding.join(' ').match(/\b(?:do not|don t|cannot|can t)\b/) !== null) return true;
+    const following = tokens.slice(start + phraseLength, start + phraseLength + 4).join(' ');
+    return /^(?:(?:is|must|should|can) not\b|(?:is )?(?:forbidden|excluded|unsupported)\b)/.test(
+      following,
+    );
+  });
+}
+
+const MEDIUM_PHRASES: Readonly<Record<string, string[]>> = {
+  web: ['web', 'browser', 'web page', 'website', 'html', 'css'],
+  native: ['native', 'desktop', 'desktop app'],
+  mobile: ['mobile', 'mobile app', 'ios', 'android'],
+  terminal: ['terminal', 'command line', 'cli', 'tui'],
+  game: ['game ui', 'game hud'],
+  spatial: ['spatial interface', 'vr interface', 'ar interface'],
+  embedded: ['embedded ui', 'device interface', 'appliance display', 'industrial panel'],
+};
+
+function promptMediumEvidence(prompt: string): { positive: string[]; negated: string[] } {
+  const clauses = prompt
+    .split(/(?:[.!?;]|,(?=\s)|\bbut\b|\bhowever\b)/giu)
+    .map((clause) => normalizeSkillTokens(clause))
+    .filter((tokens) => tokens.length > 0);
+  const positive: string[] = [];
+  const negated: string[] = [];
+  for (const [medium, phrases] of Object.entries(MEDIUM_PHRASES)) {
+    const matching = clauses.flatMap((tokens) =>
+      phrases
+        .filter((phrase) => containsTokenPhrase(tokens, phrase))
+        .map((phrase) => ({ phrase, tokens })),
+    );
+    if (matching.length === 0) continue;
+    const hasPositive = matching.some(({ phrase, tokens }) => !isPhraseNegated(tokens, phrase));
+    const hasNegated = matching.some(({ phrase, tokens }) => isPhraseNegated(tokens, phrase));
+    if (hasPositive) positive.push(medium);
+    if (hasNegated) negated.push(medium);
+  }
+  return { positive: unique(positive), negated: unique(negated) };
+}
+
+/** Return a medium only when the task itself establishes one unambiguously. */
+export function deriveAuthoritativeTargetMedium(prompt: string): string | undefined {
+  const evidence = promptMediumEvidence(prompt);
+  const normalized = unique(
+    evidence.positive.map((medium) => (medium === 'mobile' ? 'native' : medium)),
+  );
+  return normalized.length === 1 ? normalized[0] : undefined;
+}
 
 export function collectSkillEvidence(
   projectRoot: string,
@@ -136,6 +380,8 @@ export function collectSkillEvidence(
   targetMedium?: string,
 ): SkillEvidence {
   const text = prompt.toLowerCase();
+  const promptTokens = normalizeSkillTokens(prompt);
+  const promptMedia = promptMediumEvidence(prompt);
   const root = resolve(projectRoot);
   const artifacts = [
     'package.json',
@@ -155,15 +401,26 @@ export function collectSkillEvidence(
     try {
       packageText = readFileSync(join(root, 'package.json'), 'utf8').toLowerCase();
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read package.json for skill evidence');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to read package.json for skill evidence',
+      );
     }
   }
   const declaredMedia = unique([
     ...(targetMedium ? [targetMedium.toLowerCase()] : []),
-    ...['web', 'native', 'terminal', 'embedded', 'game', 'spatial'].filter((term) =>
-      new RegExp(`\\b${term}\\b`).test(text),
-    ),
-    ...(text.includes('custom language') || text.includes('ui toolkit') ? ['novel-toolkit'] : []),
+    ...promptMedia.positive.map((medium) => (medium === 'mobile' ? 'native' : medium)),
+    ...((containsTokenPhrase(promptTokens, 'custom language') &&
+      hasAnyPhrase(promptTokens, [
+        'toolkit',
+        'widget system',
+        'render',
+        'rendering',
+        'renderer',
+      ])) ||
+    hasAnyPhrase(promptTokens, ['ui toolkit', 'widget system', 'rendering toolkit'])
+      ? ['novel-toolkit']
+      : []),
   ]);
   const repositoryMedia = unique([
     ...(artifacts.includes('index.html') || /"(react|svelte|vue|astro|next)"/.test(packageText)
@@ -194,19 +451,118 @@ export function collectSkillEvidence(
     ...['react', 'svelte', 'vue', 'astro', 'next'].filter((term) =>
       packageText.includes(`"${term}"`),
     ),
-    ...(text.includes('custom language') ? ['custom-language'] : []),
+    ...(containsTokenPhrase(promptTokens, 'custom language') ? ['custom-language'] : []),
+    ...(hasAnyPhrase(promptTokens, ['ui toolkit', 'rendering toolkit', 'widget system'])
+      ? ['ui-toolkit']
+      : []),
+    ...(hasAnyPhrase(promptTokens, ['render', 'rendering', 'renderer']) ? ['rendering'] : []),
   ]);
   const topologies = unique([
-    ...(text.includes('in-process') ? ['in-process'] : []),
-    ...(text.includes('local service') || text.includes('daemon') ? ['local-service'] : []),
-    ...(text.includes('network service') || text.includes('api server') ? ['network-service'] : []),
-    ...(text.includes('distributed') ? ['distributed'] : []),
-    ...(text.includes('compiler') || text.includes('runtime') ? ['compiler-runtime'] : []),
+    ...(containsTokenPhrase(promptTokens, 'in process') ? ['in-process'] : []),
+    ...(hasAnyPhrase(promptTokens, ['local service', 'daemon', 'ipc', 'sidecar'])
+      ? ['local-service']
+      : []),
+    ...(hasAnyPhrase(promptTokens, ['network service', 'api server', 'http api', 'rpc'])
+      ? ['network-service']
+      : []),
+    ...(containsTokenPhrase(promptTokens, 'distributed') ? ['distributed'] : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'compiler',
+      'language server',
+      'build daemon',
+      'virtual machine',
+      'language toolchain',
+    ])
+      ? ['compiler-runtime']
+      : []),
+  ]);
+  const domains = unique([
+    ...(hasAnyPhrase(promptTokens, [
+      'interface',
+      'screen',
+      'navigation',
+      'editor',
+      'workspace',
+      'client',
+      'command line',
+      'cli',
+      'tui',
+      'dashboard',
+      'frontend',
+      'web page',
+      'game hud',
+    ])
+      ? ['interface']
+      : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'accessible',
+      'accessibility',
+      'screen reader',
+      'keyboard access',
+    ])
+      ? ['accessibility']
+      : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'authorization',
+      'access control',
+      'permission boundary',
+      'role policy',
+    ])
+      ? ['authorization', 'application-security']
+      : []),
+    ...(hasAnyPhrase(promptTokens, ['fuzz', 'property test', 'generated inputs'])
+      ? ['fuzz-testing']
+      : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'uncertainty',
+      'confidence interval',
+      'estimate effect',
+      'statistical inference',
+    ])
+      ? ['statistical-inference']
+      : []),
+    ...(hasAnyPhrase(promptTokens, ['visualize', 'visualization', 'chart', 'plot'])
+      ? ['data-visualization']
+      : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'navigation',
+      'navigation structure',
+      'findability',
+      'taxonomy',
+      'organize settings',
+    ])
+      ? ['information-architecture']
+      : []),
+    ...(contract.taskKind === 'ui' &&
+    hasAnyPhrase(promptTokens, [
+      'error',
+      'error recovery',
+      'recovery',
+      'diagnostics',
+      'status text',
+      'failure message',
+    ])
+      ? ['content-error-design']
+      : []),
+    ...(hasAnyPhrase(promptTokens, [
+      'installation guide',
+      'setup guide',
+      'recovery guide',
+      'runbook',
+      'how to',
+    ])
+      ? ['instructional-communication']
+      : []),
+    ...(hasAnyPhrase(promptTokens, ['verify', 'verification', 'test', 'audit', 'assess'])
+      ? ['verification']
+      : []),
   ]);
   return {
     taskKind: contract.taskKind,
     declaredMedia,
+    negatedMedia: promptMedia.negated.map((medium) => (medium === 'mobile' ? 'native' : medium)),
     repositoryMedia,
+    domains,
     languages,
     runtimes,
     toolkits,
@@ -225,14 +581,15 @@ export interface SkillDefinition {
   should: string[];
   shouldNot: string[];
   evidence: string[];
-  parent?: string;
+  broader?: string[];
+  facets?: string[];
   requires?: string[];
   conflicts?: string[];
   activation?: string[];
   excludes?: string[];
 }
 
-const DEFINITIONS: SkillDefinition[] = [
+const BASE_SKILL_DEFINITIONS: SkillDefinition[] = [
   {
     name: 'task-routing',
     description: 'Classify the task and select only relevant local guidance.',
@@ -351,8 +708,10 @@ Do not introduce DOM, CSS, React, TypeScript, browser, REST, or database assumpt
     description:
       'Design and implement browser-based interfaces only after web runtime evidence is established.',
     domains: ['ui', 'web'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'accessibility-practice'],
+    // Primary breadcrumb keeps medium-specific design beneath the broad design discipline;
+    // interface engineering is an equally valid broader concept in the polyhierarchy.
+    broader: ['visual-interface-design', 'frontend-engineering'],
+    facets: ['interaction-design', 'accessibility-practice'],
     media: ['web'],
     activation: ['web', 'browser', 'html', 'css'],
     instructions: `Use this branch only when the target is genuinely browser-based. Inspect the rendered application, routes, framework, component library, tokens, content loading model, supported viewports, and browser constraints before editing. Prefer semantic HTML and native behavior, resilient layout, progressive enhancement where appropriate, URL and history correctness, explicit network states, and components already proven in the repository.
@@ -369,8 +728,8 @@ Implement responsive behavior from content and task priority rather than arbitra
     description:
       'Design and implement native desktop or mobile interfaces using confirmed platform characteristics and toolkit conventions.',
     domains: ['ui', 'native'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'accessibility-practice'],
+    broader: ['visual-interface-design', 'frontend-engineering'],
+    facets: ['interaction-design', 'accessibility-practice'],
     media: ['native', 'mobile'],
     activation: ['native', 'desktop app', 'mobile app', 'ios', 'android'],
     instructions: `Use this branch only after confirming a native application and its platform/toolkit. Study platform characteristics, window and lifecycle behavior, input devices, menus and commands, navigation conventions, density, scaling, localization, accessibility APIs, and existing application components. Prefer native semantics and established platform behavior; divergence requires a user benefit that outweighs lost familiarity.
@@ -385,8 +744,8 @@ For native visual anti-slop, start from the platform's information density, comm
     description:
       'Design terminal and command-line interfaces around text, keyboard operation, streams, automation, and terminal constraints.',
     domains: ['ui', 'terminal'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'content-error-design', 'accessibility-practice'],
+    broader: ['visual-interface-design', 'frontend-engineering'],
+    facets: ['interaction-design', 'content-error-design', 'accessibility-practice'],
     media: ['terminal'],
     activation: ['terminal', 'command line', 'cli', 'tui'],
     instructions: `Treat terminal interfaces as a distinct medium. Identify whether the product is a composable CLI, an interactive TUI, or both. Preserve predictable arguments, stdin/stdout/stderr separation, exit codes, noninteractive automation, discoverable help, safe confirmation, interruption and cancellation, narrow and wide terminal layouts, color-disabled operation, and keyboard-only interaction.
@@ -401,10 +760,10 @@ For terminal anti-slop, make hierarchy legible in plain text before adding color
     description:
       'Design a new cross-domain UI toolkit, rendering system, or language-native interface API without importing web architecture by default.',
     domains: ['ui', 'systems', 'language'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'accessibility-practice', 'developer-experience'],
+    broader: ['frontend-engineering', 'human-experience'],
+    facets: ['interaction-design', 'accessibility-practice', 'developer-experience'],
     media: ['native', 'game', 'spatial', 'embedded'],
-    activation: ['ui toolkit', 'widget system', 'rendering system', 'custom language'],
+    activation: ['ui toolkit', 'widget system', 'rendering system'],
     excludes: ['sandbox', 'security review', 'threat model'],
     instructions: `Use this branch when the task creates the interface substrate itself. Establish target platforms, consumers, language constraints, rendering backends, retained versus immediate ownership, layout model, text shaping, scene or widget tree, invalidation, event dispatch, focus, input capture, accessibility bridge, styling and theming, resource lifetime, concurrency boundary, testability, debugging tools, and performance budgets before proposing public APIs.
 
@@ -428,8 +787,8 @@ Build a vertical reference slice that proves layout, text, input, focus, theming
     description:
       'Design game, simulation, immersive, and spatial interfaces around attention, embodiment, controllers, world context, and performance.',
     domains: ['ui', 'game', 'spatial'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'accessibility-practice'],
+    broader: ['visual-interface-design', 'frontend-engineering'],
+    facets: ['interaction-design', 'accessibility-practice'],
     media: ['game', 'spatial'],
     activation: ['game ui', 'game hud', 'spatial interface', 'vr interface', 'ar interface'],
     instructions: `Treat game and spatial interfaces as situated experiences rather than flat application screens. Identify play or operational goals, camera and world relationship, attention budget, input devices, distance and scale, locomotion, handedness, latency and frame budget, interruption, multiplayer or spectator context, and accessibility options before choosing presentation.
@@ -446,8 +805,8 @@ For game and spatial anti-slop, reject HUD clutter, cosmetic chrome, faux dashbo
     description:
       'Design embedded, appliance, industrial, and constrained-device interfaces around safety, environment, physical controls, and resource limits.',
     domains: ['ui', 'embedded', 'safety'],
-    parent: 'frontend-engineering',
-    requires: ['interaction-design', 'content-error-design', 'accessibility-practice'],
+    broader: ['visual-interface-design', 'frontend-engineering'],
+    facets: ['interaction-design', 'content-error-design', 'accessibility-practice'],
     media: ['embedded'],
     activation: ['embedded ui', 'device interface', 'appliance display', 'industrial panel'],
     instructions: `Start from the physical system, operating environment, user expertise, frequency and urgency of use, gloves or mobility constraints, lighting, noise, viewing distance, physical controls, failure consequences, connectivity, power, memory, display, and update limitations. Separate normal operation, degraded operation, maintenance, calibration, emergency, and safe-state behavior.
@@ -481,7 +840,7 @@ Inspect the repository and runtime before choosing language, database, transport
     description:
       'Engineer stateful application cores, libraries, game simulations, and local modules that do not require a service boundary.',
     domains: ['backend', 'architecture'],
-    parent: 'backend-engineering',
+    broader: ['backend-engineering'],
     activation: ['in-process', 'application core', 'game simulation', 'library backend'],
     instructions: `Confirm that a process or network boundary is unnecessary before adding one. Define module ownership, state transitions, invariants, lifetime, concurrency or reentrancy, cancellation, resource ownership, error propagation, serialization boundaries, and test seams. Keep domain behavior independent from presentation and platform adapters without inventing interfaces that have no second implementation or substitution need.
 
@@ -495,7 +854,7 @@ Prefer direct calls and explicit data flow when they satisfy isolation and relia
     description:
       'Engineer desktop daemons, local IPC services, sidecars, and single-host processes without importing cloud assumptions.',
     domains: ['backend', 'local-service'],
-    parent: 'backend-engineering',
+    broader: ['backend-engineering'],
     activation: ['local service', 'desktop daemon', 'ipc service', 'sidecar process'],
     instructions: `Establish why a separate local process is beneficial: isolation, privilege separation, lifecycle, language boundary, sharing, or fault containment. Define startup readiness, discovery, IPC transport, authentication or peer identity, permissions, version negotiation, request cancellation, streaming, backpressure, crash recovery, single-instance behavior, upgrades, logs, and shutdown ownership.
 
@@ -509,7 +868,7 @@ Prefer the operating system's appropriate local primitives and existing project 
     description:
       'Engineer network-facing APIs and services from contracts, trust boundaries, load, failure, compatibility, and operations.',
     domains: ['backend', 'network'],
-    parent: 'backend-engineering',
+    broader: ['backend-engineering'],
     activation: ['network service', 'http api', 'rpc service', 'public api'],
     instructions: `Identify clients, trust zones, protocol constraints, request and response semantics, latency and throughput targets, payload limits, compatibility period, authentication and authorization, abuse cases, deployment topology, and operational ownership. Choose HTTP, RPC, messaging, streaming, or another protocol from those needs; REST is not a default.
 
@@ -523,7 +882,7 @@ Specify schemas, validation, idempotency, pagination or flow control, timeouts, 
     description:
       'Engineer distributed systems with explicit consistency, partition, retry, ordering, ownership, and operability models.',
     domains: ['backend', 'distributed'],
-    parent: 'backend-engineering',
+    broader: ['backend-engineering'],
     activation: ['distributed system', 'multi-region', 'consensus', 'event driven services'],
     instructions: `Require evidence that distribution is necessary. Define data and command ownership, consistency guarantees, ordering, clocks, identity, partition behavior, durability, replication, leader or coordination model, delivery semantics, idempotency, backpressure, retry budgets, failure detection, reconciliation, and disaster recovery. Make unavailable or uncertain states explicit instead of implying exactly-once behavior.
 
@@ -537,13 +896,13 @@ Minimize cross-boundary coordination and preserve debuggability. Document invari
     description:
       'Engineer compiler, language-server, build, VM, and language-runtime backends around semantics, diagnostics, determinism, and incremental behavior.',
     domains: ['backend', 'compiler', 'runtime'],
-    parent: 'backend-engineering',
+    broader: ['backend-engineering'],
+    facets: ['developer-experience'],
     activation: [
       'compiler runtime',
       'language server',
       'build daemon',
       'virtual machine',
-      'custom language',
       'language toolchain',
     ],
     instructions: `Establish language semantics, phase boundaries, intermediate representations, source mapping, diagnostics, determinism, incremental invalidation, caching, concurrency, resource limits, compatibility, and host/target boundaries. Keep parser, semantic analysis, lowering, optimization, code generation, runtime services, and tooling contracts explicit without forcing a conventional compiler layout where the language differs.
@@ -571,7 +930,7 @@ Test behavior and invariants rather than implementation trivia. Cover normal pat
     description:
       'Test deterministic functions, state machines, schemas, APIs, and compatibility contracts against observable claims.',
     domains: ['test'],
-    parent: 'testing-engineering',
+    broader: ['testing-engineering'],
     activation: ['unit test', 'contract test', 'state machine test', 'schema compatibility'],
     instructions: `Map each test to an observable contract or invariant. Choose examples that expose partitions, boundaries, transitions, error behavior, and compatibility rather than mirroring implementation lines. Use stable fixtures and explicit oracles; control time and randomness only at real seams. Keep tests readable enough to explain the product rule they protect.
 
@@ -585,7 +944,7 @@ Test public behavior, malformed input, boundary values, state-transition legalit
     description:
       'Use properties, generated input, fuzzing, model-based checks, and differential oracles for broad behavioral exploration.',
     domains: ['test', 'fuzz'],
-    parent: 'testing-engineering',
+    broader: ['testing-engineering'],
     activation: ['property test', 'fuzz test', 'differential test', 'generated inputs'],
     instructions: `Define invariants, generators, invalid-input space, shrink strategy, execution limits, seed recording, and the oracle before running generated tests. Prefer semantic properties such as round trips, conservation, monotonicity, equivalence, determinism, parser/formatter stability, or agreement with a trusted implementation over weak assertions like “does not crash.”
 
@@ -599,7 +958,7 @@ Preserve minimal counterexamples and exact seeds. Bound resource consumption and
     description:
       'Test real component boundaries, lifecycle, dependencies, concurrency, and recovery with controlled faults.',
     domains: ['test', 'integration'],
-    parent: 'testing-engineering',
+    broader: ['testing-engineering'],
     activation: [
       'integration test',
       'fault injection',
@@ -618,8 +977,8 @@ Exercise startup, readiness, shutdown, concurrency, retries, cancellation, parti
     description:
       'Verify interface behavior, accessibility, visual integrity, comprehension, and task completion in the real medium.',
     domains: ['test', 'ui', 'ux'],
-    parent: 'testing-engineering',
-    requires: ['frontend-engineering'],
+    broader: ['testing-engineering', 'usability-evaluation'],
+    facets: ['frontend-engineering', 'accessibility-practice'],
     activation: ['ui test', 'usability test', 'visual regression', 'interaction test'],
     instructions: `Separate functional interaction, accessibility conformance, visual regression, and usability evidence: none substitutes for the others. Derive realistic task flows and state coverage from the interface contract. Verify navigation, input, focus/selection, feedback, validation, loading, empty, partial, error, recovery, resize, scaling, localization pressure, reduced motion, and assistive behavior in the real medium.
 
@@ -633,7 +992,7 @@ Use stable visual goldens only for intentional visual contracts and review diffs
     description:
       'Measure latency, throughput, memory, frame time, startup, energy, and resource behavior with controlled representative workloads.',
     domains: ['test', 'performance'],
-    parent: 'testing-engineering',
+    broader: ['testing-engineering'],
     activation: ['performance test', 'benchmark latency', 'profile memory', 'frame time'],
     instructions: `Define the user or system consequence, metric, percentile or distribution, workload, dataset, environment, warmup, duration, baseline, budget, and noise controls before measuring. Select end-to-end or component scope according to the claim. Capture resource saturation and correctness under load; faster incorrect behavior is not a win.
 
@@ -647,7 +1006,7 @@ Repeat measurements, report variance, preserve raw artifacts, compare equivalent
     description:
       'Verify embedded, graphics, robotics, GPU, and device behavior through models, simulators, emulators, hardware-in-loop, and physical gates.',
     domains: ['test', 'device', 'simulation'],
-    parent: 'testing-engineering',
+    broader: ['testing-engineering'],
     activation: ['hardware in loop', 'device simulation', 'emulator test', 'gpu verification'],
     instructions: `Define which physical properties the simulation represents and which it cannot. Build a ladder from pure model and deterministic simulation through emulator, representative hardware, hardware-in-loop, and physical operation according to risk. Never report simulated success as physical proof.
 
@@ -687,6 +1046,11 @@ Exercise timing, sensor and actuator ranges, noise, saturation, disconnects, pow
     shouldNot: ['download a marketplace skill'],
     evidence: ['Validation and trigger test results'],
   },
+];
+
+/** The complete TypeScript-defined library. Stable IDs are part of the persisted skill contract. */
+export const BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] = [
+  ...BASE_SKILL_DEFINITIONS,
   ...PROFESSIONAL_SKILL_DEFINITIONS,
 ];
 
@@ -694,27 +1058,175 @@ function yamlList(values: string[]): string {
   return `[${values.map((value) => JSON.stringify(value)).join(', ')}]`;
 }
 
-function definitionDepth(definition: (typeof DEFINITIONS)[number]): number {
-  let depth = 0;
-  let parent = definition.parent;
-  const seen = new Set<string>([definition.name]);
-  while (parent) {
-    if (seen.has(parent)) return depth;
-    seen.add(parent);
-    depth += 1;
-    parent = DEFINITIONS.find((item) => item.name === parent)?.parent;
-  }
+function definitionDepth(
+  definition: SkillDefinition,
+  visiting = new Set<string>(),
+  memo = new Map<string, number>(),
+): number {
+  const cached = memo.get(definition.name);
+  if (cached !== undefined) return cached;
+  if (visiting.has(definition.name)) return 0;
+  visiting.add(definition.name);
+  const depths = (definition.broader ?? []).map((name) => {
+    const broader = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
+    return broader ? 1 + definitionDepth(broader, visiting, memo) : 1;
+  });
+  visiting.delete(definition.name);
+  const depth = depths.length > 0 ? Math.max(...depths) : 0;
+  memo.set(definition.name, depth);
   return depth;
 }
 
-function template(definition: (typeof DEFINITIONS)[number]): string {
-  const version =
-    definition.parent ||
-    ['frontend-engineering', 'backend-engineering', 'testing-engineering'].includes(definition.name)
-      ? '2.0.0'
-      : '1.0.0';
+const MAX_TRIGGER_DESCRIPTION_LENGTH = 360;
+
+function triggerDescription(definition: SkillDefinition): string {
+  const summary = definition.description.trim().replace(/[.!?]+$/, '');
+  const triggerTerms = (definition.activation?.length ? definition.activation : definition.should)
+    .slice(0, 4)
+    .join(', ');
+  const detailed = `${summary}. Use when a request involves ${triggerTerms}.`;
+  if (detailed.length <= MAX_TRIGGER_DESCRIPTION_LENGTH) return detailed;
+  const bounded = `${summary}. Use when a request involves ${(definition.activation?.[0] ?? definition.should[0]).trim()}.`;
+  if (bounded.length <= MAX_TRIGGER_DESCRIPTION_LENGTH) return bounded;
+  return `${summary.slice(0, MAX_TRIGGER_DESCRIPTION_LENGTH - 2).trimEnd()}.`;
+}
+
+export interface BundledSkillDefinitionAudit {
+  valid: boolean;
+  errors: string[];
+  definitionCount: number;
+  baseCount: number;
+  professionalCount: number;
+}
+
+/**
+ * Validate the shipped concept scheme before it is written into a user's local library.
+ * `broader` is a locally transitive polyhierarchy; `facets` are one-hop professional
+ * lenses and must not duplicate a hierarchical relationship.
+ */
+export function auditBundledSkillDefinitions(): BundledSkillDefinitionAudit {
+  const errors: string[] = [];
+  const byName = new Map<string, SkillDefinition>();
+  const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+  for (const definition of BUNDLED_SKILL_DEFINITIONS) {
+    if (!namePattern.test(definition.name)) {
+      errors.push(`${definition.name || '<empty>'} has an invalid skill name`);
+    }
+    if (byName.has(definition.name)) errors.push(`Duplicate skill name ${definition.name}`);
+    byName.set(definition.name, definition);
+    const description = triggerDescription(definition);
+    if (
+      description.length < 40 ||
+      description.length > MAX_TRIGGER_DESCRIPTION_LENGTH ||
+      !description.includes('Use when ')
+    ) {
+      errors.push(`${definition.name} has an unbounded or incomplete trigger description`);
+    }
+    if (definition.domains.length === 0) errors.push(`${definition.name} has no domain`);
+    if (definition.should.length === 0) errors.push(`${definition.name} has no positive trigger`);
+    if (definition.name !== 'task-routing' && definition.shouldNot.length === 0) {
+      errors.push(`${definition.name} has no negative trigger`);
+    }
+    if (definition.evidence.length === 0) errors.push(`${definition.name} has no evidence gate`);
+    for (const [kind, relations] of [
+      ['broader', definition.broader ?? []],
+      ['facet', definition.facets ?? []],
+      ['requirement', definition.requires ?? []],
+      ['conflict', definition.conflicts ?? []],
+    ] as const) {
+      if (new Set(relations).size !== relations.length) {
+        errors.push(`${definition.name} repeats a ${kind} relation`);
+      }
+      if (relations.includes(definition.name)) {
+        errors.push(`${definition.name} references itself as a ${kind}`);
+      }
+    }
+  }
+
+  for (const definition of BUNDLED_SKILL_DEFINITIONS) {
+    for (const [kind, relations] of [
+      ['broader', definition.broader ?? []],
+      ['facet', definition.facets ?? []],
+      ['requirement', definition.requires ?? []],
+      ['conflict', definition.conflicts ?? []],
+    ] as const) {
+      for (const relation of relations) {
+        if (!byName.has(relation)) {
+          errors.push(`${definition.name} references missing ${kind} ${relation}`);
+        }
+      }
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const path: string[] = [];
+  const visit = (name: string): void => {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) {
+      const cycleStart = path.indexOf(name);
+      errors.push(`Hierarchy cycle: ${[...path.slice(cycleStart), name].join(' -> ')}`);
+      return;
+    }
+    visiting.add(name);
+    path.push(name);
+    for (const broader of byName.get(name)?.broader ?? []) visit(broader);
+    path.pop();
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of byName.keys()) visit(name);
+
+  const dependencyVisiting = new Set<string>();
+  const dependencyVisited = new Set<string>();
+  const dependencyPath: string[] = [];
+  const visitDependency = (name: string): void => {
+    if (dependencyVisited.has(name)) return;
+    if (dependencyVisiting.has(name)) {
+      const cycleStart = dependencyPath.indexOf(name);
+      errors.push(`Dependency cycle: ${[...dependencyPath.slice(cycleStart), name].join(' -> ')}`);
+      return;
+    }
+    dependencyVisiting.add(name);
+    dependencyPath.push(name);
+    const definition = byName.get(name);
+    for (const dependency of [...(definition?.broader ?? []), ...(definition?.requires ?? [])]) {
+      if (byName.has(dependency)) visitDependency(dependency);
+    }
+    dependencyPath.pop();
+    dependencyVisiting.delete(name);
+    dependencyVisited.add(name);
+  };
+  for (const name of byName.keys()) visitDependency(name);
+
+  const isBroader = (candidate: string, narrower: string, seen = new Set<string>()): boolean => {
+    if (seen.has(narrower)) return false;
+    seen.add(narrower);
+    const direct = byName.get(narrower)?.broader ?? [];
+    return direct.includes(candidate) || direct.some((name) => isBroader(candidate, name, seen));
+  };
+  for (const definition of BUNDLED_SKILL_DEFINITIONS) {
+    for (const facet of definition.facets ?? []) {
+      if (isBroader(facet, definition.name) || isBroader(definition.name, facet)) {
+        errors.push(`${definition.name} facet ${facet} duplicates its broader hierarchy`);
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors: [...new Set(errors)],
+    definitionCount: BUNDLED_SKILL_DEFINITIONS.length,
+    baseCount: BASE_SKILL_DEFINITIONS.length,
+    professionalCount: PROFESSIONAL_SKILL_DEFINITIONS.length,
+  };
+}
+
+function template(definition: SkillDefinition): string {
+  const broader = definition.broader ?? [];
+  const version = '3.0.0';
   const playbook = skillPlaybook(definition.name);
-  const content = `---\nname: ${definition.name}\ndescription: ${definition.description}\nmetadata:\n  koryphaios:\n    version: ${version}\n    baseVersion: ${version}\n    baseHash: __BASE_HASH__\n    parent: ${definition.parent ?? ''}\n    depth: ${definitionDepth(definition)}\n    requires: ${yamlList(definition.requires ?? [])}\n    conflicts: ${yamlList(definition.conflicts ?? [])}\n    activation: ${yamlList(definition.activation ?? [])}\n    excludes: ${yamlList(definition.excludes ?? [])}\n    domains: ${yamlList(definition.domains)}\n    targetMedia: ${yamlList(definition.media ?? ['any'])}\n    shouldTrigger: ${yamlList(definition.should)}\n    shouldNotTrigger: ${yamlList(definition.shouldNot)}\n    evidence: ${yamlList(definition.evidence)}\n    contextBudget: ${definition.parent ? 5000 : 4000}\n    sourceScope: local-only\n---\n# ${definition.name}\n\n${definition.instructions}${playbook ? `\n\n${playbook}` : ''}\n`;
+  const content = `---\nname: ${definition.name}\ndescription: ${triggerDescription(definition)}\nmetadata:\n  koryphaios:\n    version: ${version}\n    baseVersion: ${version}\n    baseHash: __BASE_HASH__\n    parent: ${broader[0] ?? ''}\n    broader: ${yamlList(broader)}\n    facets: ${yamlList(definition.facets ?? [])}\n    depth: ${definitionDepth(definition)}\n    requires: ${yamlList(definition.requires ?? [])}\n    conflicts: ${yamlList(definition.conflicts ?? [])}\n    activation: ${yamlList(definition.activation ?? [])}\n    excludes: ${yamlList(definition.excludes ?? [])}\n    domains: ${yamlList(definition.domains)}\n    targetMedia: ${yamlList(definition.media ?? ['any'])}\n    shouldTrigger: ${yamlList(definition.should)}\n    shouldNotTrigger: ${yamlList(definition.shouldNot)}\n    evidence: ${yamlList(definition.evidence)}\n    contextBudget: ${broader.length > 0 ? 5000 : 4000}\n    sourceScope: local-only\n---\n# ${definition.name}\n\n${definition.instructions}${playbook ? `\n\n${playbook}` : ''}\n`;
   return content.replace('__BASE_HASH__', contentFingerprint(content));
 }
 
@@ -731,6 +1243,96 @@ function atomicWrite(path: string, content: string): void {
   const temporary = `${path}.${process.pid}.tmp`;
   writeFileSync(temporary, content, 'utf8');
   renameSync(temporary, path);
+}
+
+const NEW_DRAFT_TEMP_PREFIX = 'DRAFT.create-';
+const NEW_DRAFT_TEMP_MAX_AGE_MS = 5 * 60_000;
+const NEW_DRAFT_TEMP_CLEANUP_LIMIT = 32;
+
+/**
+ * Remove only bounded, old regular files created by publishNewSkillDraft.
+ * A crash before publication can leave one behind; a crash after publication
+ * can leave a second hard link to the already-durable draft. Neither should
+ * strand future creation forever or permit an unbounded cleanup scan.
+ */
+function cleanStaleNewDraftTemps(directory: string, now = Date.now()): void {
+  if (!existsSync(directory)) return;
+  const candidates = readdirSync(directory)
+    .filter((name) => name.startsWith(NEW_DRAFT_TEMP_PREFIX) && name.endsWith('.tmp'))
+    .slice(0, NEW_DRAFT_TEMP_CLEANUP_LIMIT);
+  for (const name of candidates) {
+    const path = join(directory, name);
+    try {
+      const stat = lstatSync(path);
+      if (
+        stat.isFile() &&
+        !stat.isSymbolicLink() &&
+        now - stat.mtimeMs >= NEW_DRAFT_TEMP_MAX_AGE_MS
+      ) {
+        unlinkSync(path);
+      }
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== 'ENOENT') {
+        serverLog.debug(
+          { path, err: error instanceof Error ? error.message : String(error) },
+          'Could not clean stale skill-draft publication file',
+        );
+      }
+    }
+  }
+}
+
+/** Publish a fully-written draft with an atomic no-replace filesystem CAS. */
+function publishNewSkillDraft(
+  path: string,
+  content: string,
+  name: string,
+  source: SkillSource,
+): void {
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true });
+  cleanStaleNewDraftTemps(directory);
+  const temporary = join(
+    directory,
+    `${NEW_DRAFT_TEMP_PREFIX}${process.pid}-${Date.now()}-${randomUUID()}.tmp`,
+  );
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(temporary, 'wx', 0o600);
+    writeFileSync(descriptor, content, 'utf8');
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+
+    // Hard-link publication is atomic and refuses to replace an existing
+    // destination. Unlike check-then-rename, simultaneous app processes cannot
+    // both report success while silently discarding one user's draft.
+    linkSync(temporary, path);
+  } catch (error: unknown) {
+    if (descriptor !== null) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Preserve the original publication error.
+      }
+    }
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') {
+      throw new SkillDraftConflictError(name, source);
+    }
+    throw error;
+  } finally {
+    try {
+      unlinkSync(temporary);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+        serverLog.debug(
+          { temporary, err: error instanceof Error ? error.message : String(error) },
+          'Could not remove skill-draft publication file',
+        );
+      }
+    }
+  }
 }
 
 /** A read-only installed library must remain usable even when an app update has a new default. */
@@ -751,6 +1353,10 @@ function writeSeedIfWritable(path: string, content: string): boolean {
 }
 
 export function seedDefaultSkills(): void {
+  const definitionAudit = auditBundledSkillDefinitions();
+  if (!definitionAudit.valid) {
+    throw new Error(`Bundled skill definitions are invalid: ${definitionAudit.errors.join('; ')}`);
+  }
   for (const name of ['ui-ux-professional-practice', 'interface-accessibility']) {
     const path = join(personalRoot(), name, 'SKILL.md');
     const local = readRevision(path, 'personal', 'active');
@@ -758,7 +1364,7 @@ export function seedDefaultSkills(): void {
       renameSync(path, join(personalRoot(), name, 'RETIRED.md'));
     }
   }
-  for (const definition of DEFINITIONS) {
+  for (const definition of BUNDLED_SKILL_DEFINITIONS) {
     const path = join(personalRoot(), definition.name, 'SKILL.md');
     if (!existsSync(path)) {
       writeSeedIfWritable(path, template(definition));
@@ -770,7 +1376,7 @@ export function seedDefaultSkills(): void {
     const legacyBodyHash = sha256(local?.instructions.replace(/^# .+\n+/, '').trim() ?? '');
     const legacyUntouched =
       local?.metadata.baseHash === legacyBodyHash &&
-      local.metadata.parent === definition.parent &&
+      local.metadata.parent === definition.broader?.[0] &&
       JSON.stringify(local.metadata.requires) === JSON.stringify(definition.requires ?? []) &&
       JSON.stringify(local.metadata.conflicts) === JSON.stringify(definition.conflicts ?? []) &&
       JSON.stringify(local.metadata.domains) === JSON.stringify(definition.domains) &&
@@ -782,7 +1388,6 @@ export function seedDefaultSkills(): void {
       writeSeedIfWritable(path, template(definition));
     }
   }
-  deployFileBasedSkills();
 }
 
 /** Directory in the tracked repo where file-based Koryphaios skills live. */
@@ -795,106 +1400,17 @@ function readBundledSkillContent(name: string): string | null {
   return readFileSync(path, 'utf8');
 }
 
-/** Names of all file-based skills in the repo `skills/` directory. */
-function listFileBasedSkillNames(): string[] {
-  const root = fileBasedSkillsRoot();
-  if (!existsSync(root)) return [];
-  try {
-    return readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => entry.name)
-      .filter((name) => existsSync(join(root, name, 'SKILL.md')));
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Deploy file-based skills from the tracked repo `skills/` directory to the
- * user's personal skills root (`~/.koryphaios/skills/`). These are
- * Koryphaios-native skills that ship with the repo and are completely
- * separated from Codex's `.system` skills and all 3rd party plugin skills.
- *
- * Each skill is a directory containing SKILL.md plus optional references/,
- * scripts/, assets/, and agents/ subdirectories. The deployment copies the
- * entire directory tree so bundled resources are available alongside the
- * SKILL.md.
- *
- * If a skill directory already exists at the destination and its baseHash
- * matches the source (i.e. it hasn't been user-edited), it is updated in
- * place. User-edited copies are preserved — the user can merge or replace
- * them through the explicit UI flow.
- */
-function deployFileBasedSkills(): void {
-  const sourceRoot = fileBasedSkillsRoot();
-  if (!existsSync(sourceRoot)) {
-    serverLog.debug({ sourceRoot }, 'File-based skills source directory not found, skipping deployment');
-    return;
-  }
-
-  let entries: string[];
-  try {
-    entries = readdirSync(sourceRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map((entry) => entry.name);
-  } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err), sourceRoot }, 'Failed to read file-based skills source directory');
-    return;
-  }
-
-  for (const skillName of entries) {
-    const sourceDir = join(sourceRoot, skillName);
-    const sourceSkillMd = join(sourceDir, 'SKILL.md');
-    if (!existsSync(sourceSkillMd)) continue;
-
-    const destDir = join(personalRoot(), skillName);
-    const destSkillMd = join(destDir, 'SKILL.md');
-
-    // Read source content and compute its fingerprint
-    const sourceContent = readFileSync(sourceSkillMd, 'utf8');
-    const sourceHash = contentFingerprint(sourceContent);
-
-    if (!existsSync(destSkillMd)) {
-      // Fresh deploy — copy the entire skill directory
-      try {
-        cpSync(sourceDir, destDir, { recursive: true });
-        serverLog.debug({ skillName, destDir }, 'Deployed file-based skill');
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), skillName }, 'Failed to deploy file-based skill');
-      }
-      continue;
-    }
-
-    // Check if the existing copy is untouched (content fingerprint matches source)
-    const local = readRevision(destSkillMd, 'personal', 'active');
-    const localFingerprint = local ? contentFingerprint(local.content) : null;
-    if (localFingerprint && localFingerprint === sourceHash) {
-      // Untouched — update in place by replacing the entire directory
-      try {
-        cpSync(sourceDir, destDir, { recursive: true, force: true });
-        serverLog.debug({ skillName, destDir }, 'Updated untouched file-based skill');
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), skillName }, 'Failed to update file-based skill');
-      }
-      continue;
-    }
-
-    // User has edited this skill — preserve their version and flag the update
-    serverLog.debug({ skillName }, 'Skipping user-edited file-based skill (update available)');
-  }
-}
-
 /**
  * Check whether a deployed personal skill has a newer bundled version available.
- * Returns true if the skill exists in the repo `skills/` directory AND the
- * local copy's content fingerprint differs from the bundled copy's fingerprint
- * (i.e. the user has edited it since it was deployed).
+ * Returns true when a Kory-native generated default differs from its bundled
+ * definition. Codex-only file resources are compatibility-gated separately.
  *
  * Note: contentFingerprint normalizes the baseHash line before hashing, so
  * two identical files with different baseHash values will still match.
  */
 function isBundledUpdateAvailable(name: string, localContent: string): boolean {
-  const bundled = readBundledSkillContent(name);
+  const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
+  const bundled = definition ? template(definition) : null;
   if (!bundled) return false;
   const bundledFingerprint = contentFingerprint(bundled);
   const localFingerprint = contentFingerprint(localContent);
@@ -904,7 +1420,16 @@ function isBundledUpdateAvailable(name: string, localContent: string): boolean {
 }
 
 function scalar(frontmatter: string, key: string): string {
-  return frontmatter.match(new RegExp(`^[ \\t]*${key}:[ \\t]*(.*)$`, 'm'))?.[1]?.trim() ?? '';
+  const raw = frontmatter.match(new RegExp(`^[ \\t]*${key}:[ \\t]*(.*)$`, 'm'))?.[1]?.trim() ?? '';
+  if (raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'string') return parsed;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
 }
 
 function list(frontmatter: string, key: string): string[] {
@@ -913,7 +1438,10 @@ function list(frontmatter: string, key: string): string[] {
   try {
     return JSON.parse(raw);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse frontmatter list as JSON, falling back to comma split');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to parse frontmatter list as JSON, falling back to comma split',
+    );
     return raw
       .replace(/^\[|\]$/g, '')
       .split(',')
@@ -931,8 +1459,16 @@ export function validateSkillContent(content: string): SkillValidationResult {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) errors.push('SKILL.md must contain YAML frontmatter delimited by ---');
   const frontmatter = match?.[1] ?? '';
-  if (!scalar(frontmatter, 'name')) errors.push('name is required');
-  if (!scalar(frontmatter, 'description')) errors.push('description is required');
+  const name = scalar(frontmatter, 'name');
+  const description = scalar(frontmatter, 'description');
+  if (!name) errors.push('name is required');
+  else if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name)) {
+    errors.push('name must use 1 to 64 lowercase letters, digits, or hyphens');
+  }
+  if (!description) errors.push('description is required');
+  else if (description.length < 12 || description.length > 1024) {
+    errors.push('description must be 12 to 1024 characters');
+  }
   if (!/metadata:\s*\n\s+koryphaios:/m.test(frontmatter))
     errors.push('metadata.koryphaios is required');
   if (!scalar(frontmatter, 'version')) errors.push('metadata.koryphaios.version is required');
@@ -947,13 +1483,33 @@ export function validateSkillContent(content: string): SkillValidationResult {
   return { valid: errors.length === 0, errors, warnings, ignoredAuthorityClaims };
 }
 
-function readRevision(path: string, source: SkillSource, state: SkillState): SkillRevision | null {
-  if (!existsSync(path)) return null;
-  const content = readFileSync(path, 'utf8');
+function revisionFromContent(
+  path: string,
+  content: string,
+  source: SkillSource,
+  state: SkillState,
+): SkillRevision {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   const frontmatter = match?.[1] ?? '';
+  const name = scalar(frontmatter, 'name');
+  const legacyParent = scalar(frontmatter, 'parent') || undefined;
+  const declaredBroader = list(frontmatter, 'broader');
+  const broader = declaredBroader.length > 0 ? declaredBroader : legacyParent ? [legacyParent] : [];
+  const validation = validateSkillContent(content);
+  const incompatibleReason = INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.get(name);
+  const compatibility = incompatibleReason
+    ? {
+        status: 'unavailable' as const,
+        reason: incompatibleReason,
+        supportingResources: [join(fileBasedSkillsRoot(), name)],
+      }
+    : undefined;
+  if (compatibility) {
+    validation.errors.push(`Unavailable in Koryphaios runtime: ${compatibility.reason}`);
+    validation.valid = false;
+  }
   return {
-    name: scalar(frontmatter, 'name'),
+    name,
     description: scalar(frontmatter, 'description'),
     source,
     state,
@@ -961,12 +1517,15 @@ function readRevision(path: string, source: SkillSource, state: SkillState): Ski
     content,
     instructions: match?.[2]?.trim() ?? '',
     hash: sha256(content),
-    validation: validateSkillContent(content),
+    validation,
+    compatibility,
     metadata: {
       version: scalar(frontmatter, 'version'),
       baseVersion: scalar(frontmatter, 'baseVersion') || scalar(frontmatter, 'version'),
       baseHash: scalar(frontmatter, 'baseHash'),
-      parent: scalar(frontmatter, 'parent') || undefined,
+      parent: legacyParent ?? broader[0],
+      broader,
+      facets: list(frontmatter, 'facets'),
       depth: Number(scalar(frontmatter, 'depth')) || 0,
       requires: list(frontmatter, 'requires'),
       conflicts: list(frontmatter, 'conflicts'),
@@ -981,8 +1540,16 @@ function readRevision(path: string, source: SkillSource, state: SkillState): Ski
       sourceScope: 'local-only',
     },
     bundledUpdateAvailable:
-      source === 'personal' && state === 'active' && isBundledUpdateAvailable(scalar(frontmatter, 'name'), content),
+      !compatibility &&
+      source === 'personal' &&
+      state === 'active' &&
+      isBundledUpdateAvailable(scalar(frontmatter, 'name'), content),
   };
+}
+
+function readRevision(path: string, source: SkillSource, state: SkillState): SkillRevision | null {
+  if (!existsSync(path)) return null;
+  return revisionFromContent(path, readFileSync(path, 'utf8'), source, state);
 }
 
 function scan(root: string, source: SkillSource): SkillRevision[] {
@@ -1012,7 +1579,9 @@ export function saveSkillDraft(
   name: string,
   content: string,
 ): SkillRevision {
-  if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(name)) throw new Error('Invalid skill name');
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name)) {
+    throw new Error('Invalid skill name');
+  }
   const root =
     source === 'personal' ? personalRoot() : join(resolve(projectRoot), '.koryphaios', 'skills');
   const path = join(root, name, 'DRAFT.md');
@@ -1020,47 +1589,388 @@ export function saveSkillDraft(
   return readRevision(path, source, 'draft')!;
 }
 
-function triggers(
+export interface CreateSkillDraftInput {
+  source: SkillSource;
+  name: string;
+  description: string;
+  instructions: string;
+  domains: string[];
+  activation: string[];
+  shouldTrigger: string[];
+  shouldNotTrigger: string[];
+  evidence: string[];
+  broader?: string[];
+  facets?: string[];
+  requires?: string[];
+  conflicts?: string[];
+  excludes?: string[];
+  targetMedia?: string[];
+  depth?: number;
+  contextBudget?: number;
+}
+
+export class SkillDraftConflictError extends Error {
+  constructor(name: string, source: SkillSource) {
+    super(`Skill ${name} already exists in ${source} scope; edit its draft instead`);
+    this.name = 'SkillDraftConflictError';
+  }
+}
+
+const SUPPORTED_TARGET_MEDIA = new Set([
+  'any',
+  'web',
+  'native',
+  'mobile',
+  'terminal',
+  'game',
+  'spatial',
+  'embedded',
+]);
+
+/** Create a portable, review-only skill from the native structured editor. */
+export function createSkillDraft(projectRoot: string, input: CreateSkillDraftInput): SkillRevision {
+  const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+  if (!namePattern.test(input.name)) throw new Error('Invalid skill name');
+  // Materialize Kory-native defaults before checking the requested name so a
+  // first-run create cannot race default seeding into an active/draft pair.
+  seedDefaultSkills();
+  const root =
+    input.source === 'personal'
+      ? personalRoot()
+      : join(resolve(projectRoot), '.koryphaios', 'skills');
+  const sameScopeDirectory = join(root, input.name);
+  if (
+    existsSync(join(sameScopeDirectory, 'SKILL.md')) ||
+    existsSync(join(sameScopeDirectory, 'DRAFT.md'))
+  ) {
+    throw new SkillDraftConflictError(input.name, input.source);
+  }
+  const description = input.description.trim();
+  if (description.length < 40 || description.length > MAX_TRIGGER_DESCRIPTION_LENGTH) {
+    throw new Error('Skill description must be 40 to 360 characters');
+  }
+  if (/[\r\n]/.test(description)) throw new Error('Skill description must be one line');
+  const instructions = input.instructions.trim();
+  if (instructions.length < 40)
+    throw new Error('Skill instructions must be at least 40 characters');
+  const cleanList = (values: string[], limit: number): string[] =>
+    unique(values.map((value) => value.trim()).filter(Boolean)).slice(0, limit);
+  const domains = cleanList(input.domains, 12);
+  const activation = cleanList(input.activation, 16);
+  const shouldTrigger = cleanList(input.shouldTrigger, 12);
+  const shouldNotTrigger = cleanList(input.shouldNotTrigger, 12);
+  const evidence = cleanList(input.evidence, 12);
+  const broader = cleanList(input.broader ?? [], 8);
+  const facets = cleanList(input.facets ?? [], 12);
+  const requires = cleanList(input.requires ?? [], 12);
+  const conflicts = cleanList(input.conflicts ?? [], 12);
+  const excludes = cleanList(input.excludes ?? [], 16);
+  const targetMedia = cleanList(input.targetMedia ?? ['any'], 8).map((medium) =>
+    medium.toLowerCase(),
+  );
+  const depth = input.depth ?? 0;
+  const contextBudget = input.contextBudget ?? 4000;
+  if (domains.length === 0) throw new Error('At least one professional domain is required');
+  if (shouldTrigger.length < 2 || shouldNotTrigger.length < 2) {
+    throw new Error('At least two trigger and two non-trigger examples are required');
+  }
+  if (activation.length === 0) throw new Error('At least one trigger phrase is required');
+  if (evidence.length === 0) throw new Error('At least one completion-evidence item is required');
+  for (const [kind, relations] of [
+    ['broader', broader],
+    ['facet', facets],
+    ['required skill', requires],
+    ['conflict', conflicts],
+  ] as const) {
+    for (const relation of relations) {
+      if (!namePattern.test(relation)) throw new Error(`Invalid ${kind} skill ID: ${relation}`);
+      if (relation === input.name)
+        throw new Error(`${input.name} cannot reference itself as a ${kind}`);
+    }
+  }
+  if (targetMedia.length === 0) throw new Error('At least one target medium is required');
+  if (targetMedia.includes('any') && targetMedia.length > 1) {
+    throw new Error('Target medium "any" cannot be combined with specific media');
+  }
+  for (const medium of targetMedia) {
+    if (!SUPPORTED_TARGET_MEDIA.has(medium))
+      throw new Error(`Unsupported target medium: ${medium}`);
+  }
+  if (!Number.isInteger(depth) || depth < 0 || depth > 32) {
+    throw new Error('Skill depth must be an integer from 0 to 32');
+  }
+  if (!Number.isInteger(contextBudget) || contextBudget < 100 || contextBudget > 20_000) {
+    throw new Error('Context budget must be an integer from 100 to 20000');
+  }
+  if (excludes.some((phrase) => phrase.length > 120 || /[\r\n]/.test(phrase))) {
+    throw new Error('Exclusion phrases must be single-line values of at most 120 characters');
+  }
+  const mutuallyIncluded = new Set([...broader, ...facets, ...requires]);
+  const contradictoryRelation = conflicts.find((name) => mutuallyIncluded.has(name));
+  if (contradictoryRelation) {
+    throw new Error(`${contradictoryRelation} cannot be both included and conflicting`);
+  }
+  const overlappingFacet = facets.find((name) => broader.includes(name) || requires.includes(name));
+  if (overlappingFacet) {
+    throw new Error(`${overlappingFacet} cannot duplicate a broader or required relation`);
+  }
+  const activationTokens = activation.map((phrase) => normalizeSkillTokens(phrase).join(' '));
+  const contradictoryExclusion = excludes.find((phrase) =>
+    activationTokens.includes(normalizeSkillTokens(phrase).join(' ')),
+  );
+  if (contradictoryExclusion) {
+    throw new Error(`Trigger and exclusion phrase conflict: ${contradictoryExclusion}`);
+  }
+
+  const initial = `---\nname: ${input.name}\ndescription: ${JSON.stringify(description)}\nmetadata:\n  koryphaios:\n    version: 0.1.0\n    baseVersion: 0.1.0\n    baseHash: __BASE_HASH__\n    parent: ${broader[0] ?? ''}\n    broader: ${yamlList(broader)}\n    facets: ${yamlList(facets)}\n    depth: ${depth}\n    requires: ${yamlList(requires)}\n    conflicts: ${yamlList(conflicts)}\n    activation: ${yamlList(activation)}\n    excludes: ${yamlList(excludes)}\n    domains: ${yamlList(domains)}\n    targetMedia: ${yamlList(targetMedia)}\n    shouldTrigger: ${yamlList(shouldTrigger)}\n    shouldNotTrigger: ${yamlList(shouldNotTrigger)}\n    evidence: ${yamlList(evidence)}\n    contextBudget: ${contextBudget}\n    sourceScope: local-only\n---\n# ${input.name}\n\n${instructions}\n`;
+  const content = initial.replace('__BASE_HASH__', contentFingerprint(initial));
+  const validation = validateSkillContent(content);
+  if (!validation.valid) throw new Error(validation.errors.join('; '));
+  const virtualDraft = revisionFromContent(
+    join(root, input.name, 'DRAFT.md'),
+    content,
+    input.source,
+    'draft',
+  );
+  const activeSkills = listSkills(projectRoot).filter(
+    (skill) => skill.state === 'active' && skill.name !== input.name,
+  );
+  const relationCounts = new Map<string, number>();
+  for (const skill of activeSkills) {
+    relationCounts.set(skill.name, (relationCounts.get(skill.name) ?? 0) + 1);
+  }
+  const knownNames = new Set(relationCounts.keys());
+  for (const relation of [...broader, ...facets, ...requires, ...conflicts]) {
+    if (!knownNames.has(relation)) throw new Error(`Unknown related skill ID: ${relation}`);
+    if ((relationCounts.get(relation) ?? 0) > 1) {
+      throw new Error(`Ambiguous related skill ID requires collision resolution: ${relation}`);
+    }
+  }
+  const hierarchyErrors = validateSkillHierarchy([...activeSkills, virtualDraft]);
+  if (hierarchyErrors.length > 0) {
+    throw new Error(`Skill hierarchy is invalid: ${hierarchyErrors.join('; ')}`);
+  }
+  // Re-check active publication after validation, then use DRAFT.md itself as
+  // the atomic compare-and-set target. The early check above is only a fast,
+  // friendly error path; this publication is the authoritative no-overwrite
+  // boundary across simultaneous Koryphaios processes.
+  if (existsSync(join(sameScopeDirectory, 'SKILL.md'))) {
+    throw new SkillDraftConflictError(input.name, input.source);
+  }
+  const draftPath = join(sameScopeDirectory, 'DRAFT.md');
+  publishNewSkillDraft(draftPath, content, input.name, input.source);
+  return readRevision(draftPath, input.source, 'draft')!;
+}
+
+export interface SkillTriggerDecision {
+  matched: boolean;
+  reason?: string;
+  evidenceUsed: string[];
+}
+
+function evidenceMatch(skill: SkillRevision, evidence?: SkillEvidence): string[] {
+  if (!evidence) return [];
+  const matches: string[] = [];
+  const primaryMedium = Object.entries(PRIMARY_MEDIUM_SKILLS).find(
+    ([, skillName]) => skillName === skill.name,
+  )?.[0];
+  if (
+    primaryMedium &&
+    evidence.declaredMedia.includes(primaryMedium) &&
+    evidence.domains.includes('interface')
+  ) {
+    matches.push(`declared-medium:${primaryMedium}`);
+  }
+
+  const topologyBySkill: Readonly<Record<string, string>> = {
+    'in-process-backend': 'in-process',
+    'local-service-backend': 'local-service',
+    'network-service-backend': 'network-service',
+    'distributed-backend': 'distributed',
+    'compiler-runtime-backend': 'compiler-runtime',
+  };
+  const topology = topologyBySkill[skill.name];
+  if (topology && evidence.topologies.includes(topology)) matches.push(`topology:${topology}`);
+
+  if (
+    skill.name === 'novel-ui-toolkit' &&
+    evidence.toolkits.includes('custom-language') &&
+    (evidence.toolkits.includes('ui-toolkit') || evidence.toolkits.includes('rendering'))
+  ) {
+    matches.push('toolkit:custom-language+rendering');
+  }
+
+  const domainsBySkill: Readonly<Record<string, string[]>> = {
+    'accessibility-practice': ['accessibility'],
+    'information-architecture': ['information-architecture'],
+    'content-error-design': ['content-error-design'],
+    'application-security': ['application-security'],
+    'authorization-security': ['authorization'],
+    'property-fuzz-differential-testing': ['fuzz-testing'],
+    'statistical-inference': ['statistical-inference'],
+    'data-visualization': ['data-visualization'],
+    'instructional-communication': ['instructional-communication'],
+  };
+  for (const domain of domainsBySkill[skill.name] ?? []) {
+    if (evidence.domains.includes(domain)) matches.push(`domain:${domain}`);
+  }
+  if (
+    skill.name === 'security-verification' &&
+    evidence.domains.includes('authorization') &&
+    evidence.domains.includes('verification')
+  ) {
+    matches.push('domain:authorization+verification');
+  }
+  if (
+    skill.name === 'accessibility-verification' &&
+    evidence.domains.includes('accessibility') &&
+    evidence.domains.includes('verification')
+  ) {
+    matches.push('domain:accessibility+verification');
+  }
+  return matches;
+}
+
+/**
+ * Evaluate trigger metadata using token/phrase boundaries. The returned reason
+ * records only the signal that actually selected the skill.
+ */
+export function evaluateSkillTrigger(
   skill: SkillRevision,
   prompt: string,
   contract?: TaskContract,
   targetMedium?: string,
-): boolean {
-  const text = prompt.toLowerCase();
-  if (skill.name === 'task-routing') return true;
+  evidence?: SkillEvidence,
+): SkillTriggerDecision {
+  const promptTokens = normalizeSkillTokens(prompt);
+  if (skill.name === 'task-routing') {
+    return { matched: true, reason: 'Universal task-routing contract', evidenceUsed: [] };
+  }
   // A user-confirmed medium is stronger evidence than a coincidental keyword
   // in the request (for example, "do not assume web technologies").
+  const normalizedMedium = targetMedium?.toLowerCase();
   if (
-    targetMedium &&
+    normalizedMedium &&
+    normalizedMedium !== 'any' &&
     !skill.metadata.targetMedia.includes('any') &&
-    !skill.metadata.targetMedia.includes(targetMedium.toLowerCase())
+    !skill.metadata.targetMedia.includes(normalizedMedium)
   ) {
-    return false;
+    return {
+      matched: false,
+      reason: `Rejected: confirmed ${normalizedMedium} target medium is incompatible`,
+      evidenceUsed: [`target-medium:${normalizedMedium}`],
+    };
   }
-  if (skill.metadata.excludes.some((term) => text.includes(term.toLowerCase()))) return false;
-  if (skill.metadata.activation.length > 0) {
-    return (
-      skill.metadata.activation.some((term) => text.includes(term.toLowerCase())) ||
-      skill.metadata.shouldTrigger.some((example) => text === example.toLowerCase())
-    );
+  const negatedMedia = evidence?.negatedMedia.filter(
+    (medium) =>
+      skill.metadata.targetMedia.includes(medium) &&
+      !skill.metadata.targetMedia.includes('any') &&
+      !evidence.declaredMedia.includes(medium),
+  );
+  if (negatedMedia?.length) {
+    return {
+      matched: false,
+      reason: `Rejected: request explicitly excludes ${negatedMedia.join(', ')} medium`,
+      evidenceUsed: negatedMedia.map((medium) => `negated-medium:${medium}`),
+    };
   }
+  const exclusion = skill.metadata.excludes.find((term) => containsTokenPhrase(promptTokens, term));
+  if (exclusion)
+    return {
+      matched: false,
+      reason: `Rejected: matched exclusion phrase "${exclusion}"`,
+      evidenceUsed: [`exclusion:${exclusion}`],
+    };
+
+  const activation = skill.metadata.activation.find((term) =>
+    containsTokenPhrase(promptTokens, term),
+  );
+  if (activation) {
+    return {
+      matched: true,
+      reason: `Matched trigger phrase "${activation}"`,
+      evidenceUsed: [`trigger:${activation}`],
+    };
+  }
+
+  const collectedEvidence = evidenceMatch(skill, evidence);
+  if (collectedEvidence.length > 0) {
+    return {
+      matched: true,
+      reason: `Matched collected ${collectedEvidence.join(', ')} evidence`,
+      evidenceUsed: collectedEvidence,
+    };
+  }
+
   if (
-    targetMedium &&
-    skill.metadata.parent &&
-    skill.metadata.targetMedia.includes(targetMedium.toLowerCase())
+    normalizedMedium &&
+    normalizedMedium !== 'any' &&
+    PRIMARY_MEDIUM_SKILLS[normalizedMedium] === skill.name &&
+    skill.metadata.targetMedia.includes(normalizedMedium)
   ) {
-    return true;
+    return {
+      matched: true,
+      reason: `Matched confirmed ${normalizedMedium} target medium`,
+      evidenceUsed: [`target-medium:${normalizedMedium}`],
+    };
   }
-  const definition = DEFINITIONS.find((item) => item.name === skill.name);
-  if (definition?.kinds?.includes(contract?.taskKind as TaskKind)) return true;
-  return skill.metadata.shouldTrigger.some((example) => {
-    const words = example
-      .toLowerCase()
-      .split(/\W+/)
-      .filter((word) => word.length > 2);
-    const matches = words.filter((word) => text.includes(word)).length;
-    return matches >= Math.min(2, words.length);
-  });
+
+  const promptWords = new Set(
+    promptTokens.filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
+  );
+  for (const example of skill.metadata.shouldTrigger) {
+    if (containsTokenPhrase(promptTokens, example)) {
+      return {
+        matched: true,
+        reason: `Matched trigger example "${example}"`,
+        evidenceUsed: [`example:${example}`],
+      };
+    }
+    if (skill.metadata.activation.length > 0) continue;
+    const exampleWords = unique(
+      normalizeSkillTokens(example).filter(
+        (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
+      ),
+    );
+    const overlapping = exampleWords.filter((word) => promptWords.has(word));
+    const specificOverlap = overlapping.filter((word) => !GENERIC_TRIGGER_WORDS.has(word));
+    const threshold = Math.max(1, Math.ceil(exampleWords.length * 0.6));
+    if (exampleWords.length > 0 && overlapping.length >= threshold && specificOverlap.length > 0) {
+      return {
+        matched: true,
+        reason: `Matched trigger-example terms: ${overlapping.slice(0, 4).join(', ')}`,
+        evidenceUsed: overlapping.map((word) => `example-token:${word}`),
+      };
+    }
+  }
+
+  const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === skill.name);
+  if (
+    contract &&
+    TASK_KIND_ROUTED_SKILLS.has(skill.name) &&
+    definition?.kinds?.includes(contract.taskKind)
+  ) {
+    return {
+      matched: true,
+      reason: `Applies to ${contract.taskKind} tasks by declared task-kind contract`,
+      evidenceUsed: [`task-kind:${contract.taskKind}`],
+    };
+  }
+  return {
+    matched: false,
+    reason: 'Rejected: no bounded trigger evidence matched',
+    evidenceUsed: [],
+  };
+}
+
+export function matchesSkillTrigger(
+  skill: SkillRevision,
+  prompt: string,
+  contract?: TaskContract,
+  targetMedium?: string,
+  evidence?: SkillEvidence,
+): boolean {
+  return evaluateSkillTrigger(skill, prompt, contract, targetMedium, evidence).matched;
 }
 
 export function testSkill(skill: SkillRevision): SkillTestResult {
@@ -1068,10 +1978,138 @@ export function testSkill(skill: SkillRevision): SkillTestResult {
     ...skill.metadata.shouldTrigger.map((prompt) => ({ prompt, expected: true })),
     ...skill.metadata.shouldNotTrigger.map((prompt) => ({ prompt, expected: false })),
   ].map((item) => {
-    const selected = triggers(skill, item.prompt);
+    const selected = matchesSkillTrigger(skill, item.prompt);
     return { ...item, selected, passed: selected === item.expected };
   });
   return { passed: cases.length > 0 && cases.every((item) => item.passed), cases };
+}
+
+export function validateSkillHierarchy(skills: SkillRevision[]): string[] {
+  const byName = new Map(skills.map((skill) => [skill.name, skill]));
+  const hierarchyErrors: string[] = [];
+  for (const skill of skills) {
+    if (skill.metadata.parent && skill.metadata.parent !== skill.metadata.broader[0]) {
+      hierarchyErrors.push(`${skill.name} parent breadcrumb must match its first broader concept`);
+    }
+    for (const [kind, relations] of [
+      ['broader', skill.metadata.broader],
+      ['facet', skill.metadata.facets],
+      ['required skill', skill.metadata.requires],
+      ['conflict', skill.metadata.conflicts],
+    ] as const) {
+      if (new Set(relations).size !== relations.length) {
+        hierarchyErrors.push(`${skill.name} repeats a ${kind} relation`);
+      }
+      for (const relation of relations) {
+        if (relation === skill.name) {
+          hierarchyErrors.push(`${skill.name} references itself as a ${kind}`);
+        } else if (!byName.has(relation)) {
+          hierarchyErrors.push(`${skill.name} references missing ${kind} ${relation}`);
+        }
+      }
+    }
+    const includedRelations = new Set([
+      ...skill.metadata.broader,
+      ...skill.metadata.facets,
+      ...skill.metadata.requires,
+    ]);
+    for (const conflict of skill.metadata.conflicts) {
+      if (includedRelations.has(conflict)) {
+        hierarchyErrors.push(`${skill.name} both includes and conflicts with ${conflict}`);
+      }
+    }
+    for (const facet of skill.metadata.facets) {
+      if (skill.metadata.requires.includes(facet)) {
+        hierarchyErrors.push(`${skill.name} repeats ${facet} as both a facet and requirement`);
+      }
+    }
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visitPath: string[] = [];
+  const visitHierarchy = (name: string): void => {
+    if (visited.has(name)) return;
+    if (visiting.has(name)) {
+      const start = visitPath.indexOf(name);
+      hierarchyErrors.push(
+        `Hierarchy cycle detected: ${[...visitPath.slice(start), name].join(' -> ')}`,
+      );
+      return;
+    }
+    visiting.add(name);
+    visitPath.push(name);
+    for (const broader of byName.get(name)?.metadata.broader ?? []) {
+      if (byName.has(broader)) visitHierarchy(broader);
+    }
+    visitPath.pop();
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of byName.keys()) visitHierarchy(name);
+
+  const dependencyVisiting = new Set<string>();
+  const dependencyVisited = new Set<string>();
+  const dependencyPath: string[] = [];
+  const visitDependencies = (name: string): void => {
+    if (dependencyVisited.has(name)) return;
+    if (dependencyVisiting.has(name)) {
+      const start = dependencyPath.indexOf(name);
+      hierarchyErrors.push(
+        `Skill dependency cycle detected: ${[...dependencyPath.slice(start), name].join(' -> ')}`,
+      );
+      return;
+    }
+    dependencyVisiting.add(name);
+    dependencyPath.push(name);
+    const skill = byName.get(name);
+    for (const dependency of [
+      ...(skill?.metadata.broader ?? []),
+      ...(skill?.metadata.requires ?? []),
+    ]) {
+      if (byName.has(dependency)) visitDependencies(dependency);
+    }
+    dependencyPath.pop();
+    dependencyVisiting.delete(name);
+    dependencyVisited.add(name);
+  };
+  for (const name of byName.keys()) visitDependencies(name);
+
+  const hasBroader = (candidate: string, narrower: string, seen = new Set<string>()): boolean => {
+    if (seen.has(narrower)) return false;
+    seen.add(narrower);
+    const direct = byName.get(narrower)?.metadata.broader ?? [];
+    return (
+      direct.includes(candidate) ||
+      direct.some((name) => byName.has(name) && hasBroader(candidate, name, seen))
+    );
+  };
+  const depthMemo = new Map<string, number>();
+  const actualDepth = (name: string, seen = new Set<string>()): number => {
+    const cached = depthMemo.get(name);
+    if (cached !== undefined) return cached;
+    if (seen.has(name)) return 0;
+    seen.add(name);
+    const depths = (byName.get(name)?.metadata.broader ?? [])
+      .filter((broader) => byName.has(broader))
+      .map((broader) => 1 + actualDepth(broader, new Set(seen)));
+    const depth = depths.length > 0 ? Math.max(...depths) : 0;
+    depthMemo.set(name, depth);
+    return depth;
+  };
+  for (const skill of skills) {
+    if (skill.metadata.depth !== actualDepth(skill.name)) {
+      hierarchyErrors.push(
+        `${skill.name} declares depth ${skill.metadata.depth}, expected ${actualDepth(skill.name)}`,
+      );
+    }
+    for (const facet of skill.metadata.facets) {
+      if (hasBroader(facet, skill.name) || hasBroader(skill.name, facet)) {
+        hierarchyErrors.push(`${skill.name} facet ${facet} duplicates its broader hierarchy`);
+      }
+    }
+  }
+  return [...new Set(hierarchyErrors)];
 }
 
 export function activateSkill(
@@ -1081,13 +2119,159 @@ export function activateSkill(
 ): SkillRevision {
   const root =
     source === 'personal' ? personalRoot() : join(resolve(projectRoot), '.koryphaios', 'skills');
-  const draft = readRevision(join(root, name, 'DRAFT.md'), source, 'draft');
+  const directory = join(root, name);
+  const draftPath = join(directory, 'DRAFT.md');
+  const activePath = join(directory, 'SKILL.md');
+  const draft = readRevision(draftPath, source, 'draft');
   if (!draft) throw new Error('Draft not found');
   if (!draft.validation.valid) throw new Error(draft.validation.errors.join('; '));
+  if (draft.name !== name) throw new Error('Skill frontmatter name must match its directory name');
   const tests = testSkill(draft);
   if (!tests.passed) throw new Error('Trigger tests must pass before activation');
-  atomicWrite(join(root, name, 'SKILL.md'), draft.content);
-  return readRevision(join(root, name, 'SKILL.md'), source, 'active')!;
+  const hierarchyCandidates = new Map(
+    listSkills(projectRoot)
+      .filter(
+        (skill) => skill.state === 'active' && !(skill.name === name && skill.source === source),
+      )
+      .map((skill) => [skill.name, skill]),
+  );
+  hierarchyCandidates.set(draft.name, draft);
+  const hierarchyErrors = validateSkillHierarchy([...hierarchyCandidates.values()]);
+  if (hierarchyErrors.length > 0) {
+    throw new Error(`Skill hierarchy is invalid: ${hierarchyErrors.join('; ')}`);
+  }
+  // Retire exactly the revision that passed validation before publishing it.
+  // Atomic rename prevents a same-path editor from being silently deleted; if
+  // a divergent DRAFT.md appears afterwards, it remains untouched.
+  const retiredPath = join(
+    directory,
+    `DRAFT.activated-${draft.hash.slice(0, 12)}-${Date.now()}-${process.pid}.md`,
+  );
+  renameSync(draftPath, retiredPath);
+  try {
+    const retired = readRevision(retiredPath, source, 'draft');
+    if (!retired || retired.hash !== draft.hash) {
+      throw new Error('Draft changed during activation; no active revision was published');
+    }
+    atomicWrite(activePath, draft.content);
+  } catch (error: unknown) {
+    if (existsSync(retiredPath) && !existsSync(draftPath)) renameSync(retiredPath, draftPath);
+    throw error;
+  }
+  return readRevision(activePath, source, 'active')!;
+}
+
+function withoutSkillTitle(instructions: string): string {
+  return instructions.replace(/^#\s+[^\n]+\n+/, '').trim();
+}
+
+function representationInstructions(
+  skill: SkillRevision,
+  representation: SkillRepresentation,
+): string {
+  const instructions = withoutSkillTitle(skill.instructions);
+  const bundledPlaybook = skillPlaybook(skill.name).trim();
+  const [corePart, ...professionalParts] = instructions.split(/\n##\s+Professional practice\b/);
+  const hasIntactBundledPlaybook =
+    bundledPlaybook.length > 0 && instructions.endsWith(bundledPlaybook);
+  const core = (
+    hasIntactBundledPlaybook
+      ? instructions.slice(0, -bundledPlaybook.length)
+      : (corePart ?? instructions)
+  ).trim();
+  const professional = hasIntactBundledPlaybook
+    ? bundledPlaybook
+    : professionalParts.join('\n## Professional practice').trim();
+  const evidence = skill.metadata.evidence.slice(0, 6).join('; ') || 'Task-specific proof';
+  const boundaries = [
+    skill.metadata.requires.length ? `Required skills: ${skill.metadata.requires.join(', ')}` : '',
+    skill.metadata.excludes.length
+      ? `Do not activate for: ${skill.metadata.excludes.join('; ')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const footer = [boundaries, `Completion evidence: ${evidence}`].filter(Boolean).join('\n\n');
+  if (representation === 'full') {
+    return [skill.instructions, footer].filter(Boolean).join('\n\n');
+  }
+  if (representation === 'compact') {
+    const professionalSummary = professional
+      .split(/\n\s*\n/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('\n\n');
+    return [
+      `Mandatory operating contract (lossless core):\n${core}`,
+      professionalSummary ? `Selected professional detail:\n${professionalSummary}` : '',
+      footer,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  const minimalEvidence =
+    skill.metadata.evidence
+      .slice(0, 3)
+      .map((item) => item.slice(0, 120))
+      .join('; ') || 'Task-specific proof';
+  return [
+    `Mandatory operating contract (lossless core):\n${core}`,
+    boundaries,
+    `Completion evidence: ${minimalEvidence}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function renderSkillPromptBlock(
+  skill: SkillRevision,
+  reason: string,
+  representation: SkillRepresentation,
+): string {
+  return `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${representation})\nReason: ${reason}\n${representationInstructions(skill, representation)}`;
+}
+
+function skillManifest(selected: ResolvedSkill[]) {
+  return selected.map(
+    ({ skill, reason, representation, contextCost, fullContextCost, omittedDetailChars }) => ({
+      name: skill.name,
+      version: skill.metadata.version,
+      source: skill.source,
+      hash: skill.hash,
+      reason,
+      representation,
+      contextCost,
+      fullContextCost,
+      omittedDetailChars,
+    }),
+  );
+}
+
+function renderResolvedSkillSection(selected: ResolvedSkill[]): {
+  promptText: string;
+  manifestHash: string;
+  totalContextCost: number;
+  contextOverheadCost: number;
+} {
+  const manifest = skillManifest(selected);
+  const manifestHash = sha256(JSON.stringify(manifest));
+  const skillText = selected.length
+    ? selected.map(({ promptText }) => promptText).join('')
+    : 'No local skills were selected.';
+  const promptText = `## Active local skills\nManifest: ${JSON.stringify(manifest)}\nManifest sha256: ${manifestHash}\n${skillText}`;
+  const itemCost = selected.reduce((sum, item) => sum + item.contextCost, 0);
+  return {
+    promptText,
+    manifestHash,
+    totalContextCost: promptText.length,
+    contextOverheadCost: promptText.length - itemCost,
+  };
+}
+
+function requiredCoreSkillNames(contract: TaskContract): string[] {
+  const mutationTask = !['question', 'research-docs'].includes(contract.taskKind);
+  return ['task-routing', ...(mutationTask ? ['testing-engineering', 'verification'] : [])];
 }
 
 export function resolveSkills(
@@ -1103,9 +2287,17 @@ export function resolveSkills(
   } = {},
 ): SkillResolverResult {
   const evidence = collectSkillEvidence(projectRoot, prompt, contract, options.targetMedium);
-  const active = listSkills(projectRoot).filter(
-    (skill) => skill.state === 'active' && skill.validation.valid,
-  );
+  const listed = listSkills(projectRoot);
+  const active = listed.filter((skill) => skill.state === 'active' && skill.validation.valid);
+  const candidateRejections = new Map<string, string>();
+  for (const skill of listed.filter(
+    (revision) => revision.state === 'active' && !revision.validation.valid,
+  )) {
+    candidateRejections.set(
+      skill.name,
+      `Rejected: unavailable or invalid skill (${skill.validation.errors[0] ?? 'validation failed'})`,
+    );
+  }
   const grouped = new Map<string, SkillRevision[]>();
   for (const skill of active) grouped.set(skill.name, [...(grouped.get(skill.name) ?? []), skill]);
   const collisions: SkillCollision[] = [];
@@ -1131,60 +2323,82 @@ export function resolveSkills(
   }
   const removed = new Set(options.remove ?? []);
   const pins = new Set(options.pins ?? []);
-  const directlySelected = candidates.filter(
-    (skill) =>
-      !removed.has(skill.name) &&
-      (pins.has(skill.name) || triggers(skill, prompt, contract, options.targetMedium)),
-  );
   const byName = new Map(candidates.map((skill) => [skill.name, skill]));
-  const hierarchyErrors: string[] = [];
+  const hierarchyErrors = validateSkillHierarchy(candidates);
+  const directDecisions = new Map<string, SkillTriggerDecision>();
   for (const skill of candidates) {
-    if (skill.metadata.parent && !byName.has(skill.metadata.parent)) {
-      hierarchyErrors.push(`${skill.name} references missing parent ${skill.metadata.parent}`);
+    if (removed.has(skill.name)) {
+      candidateRejections.set(skill.name, 'Rejected: removed explicitly for this task');
+      continue;
     }
-    for (const requirement of skill.metadata.requires) {
-      if (!byName.has(requirement)) {
-        hierarchyErrors.push(`${skill.name} requires missing skill ${requirement}`);
-      }
+    if (pins.has(skill.name)) {
+      directDecisions.set(skill.name, {
+        matched: true,
+        reason: 'Pinned explicitly for this task',
+        evidenceUsed: ['pin'],
+      });
+      continue;
     }
-    const seen = new Set<string>([skill.name]);
-    let parent = skill.metadata.parent;
-    while (parent) {
-      if (seen.has(parent)) {
-        hierarchyErrors.push(
-          `Hierarchy cycle detected at ${skill.name}: ${[...seen, parent].join(' -> ')}`,
-        );
-        break;
-      }
-      seen.add(parent);
-      parent = byName.get(parent)?.metadata.parent;
+    const decision = evaluateSkillTrigger(skill, prompt, contract, options.targetMedium, evidence);
+    if (decision.matched) directDecisions.set(skill.name, decision);
+    else candidateRejections.set(skill.name, decision.reason ?? 'Rejected: no trigger matched');
+  }
+
+  const requiredCore = requiredCoreSkillNames(contract);
+  for (const name of requiredCore) {
+    if (removed.has(name)) {
+      hierarchyErrors.push(`Required core skill ${name} was explicitly removed`);
+      continue;
+    }
+    if (!byName.has(name)) {
+      hierarchyErrors.push(`Required core skill ${name} is unavailable or invalid`);
+      continue;
+    }
+    if (!directDecisions.has(name)) {
+      directDecisions.set(name, {
+        matched: true,
+        reason: `Required ${name} guidance for ${contract.taskKind} task execution`,
+        evidenceUsed: [`required-core:${name}`],
+      });
     }
   }
+  for (const name of pins) {
+    if (removed.has(name)) hierarchyErrors.push(`Skill ${name} cannot be both pinned and removed`);
+    else if (!byName.has(name))
+      hierarchyErrors.push(`Pinned skill ${name} is unavailable or invalid`);
+  }
+
+  const directlySelected = candidates.filter((skill) => directDecisions.has(skill.name));
+
   const expanded = new Map<string, SkillRevision>();
-  const includeWithAncestors = (skill: SkillRevision): void => {
-    if (expanded.has(skill.name) || removed.has(skill.name)) return;
-    if (skill.metadata.parent) {
-      const parent = byName.get(skill.metadata.parent);
-      if (parent) includeWithAncestors(parent);
+  const expanding = new Set<string>();
+  const relationReasons = new Map<string, string[]>();
+  const recordRelationReason = (name: string, reason: string): void => {
+    relationReasons.set(name, unique([...(relationReasons.get(name) ?? []), reason]));
+  };
+  const includeWithAncestors = (skill: SkillRevision, relationReason?: string): void => {
+    if (relationReason) recordRelationReason(skill.name, relationReason);
+    if (expanded.has(skill.name) || expanding.has(skill.name) || removed.has(skill.name)) return;
+    expanding.add(skill.name);
+    for (const broaderName of skill.metadata.broader) {
+      const broader = byName.get(broaderName);
+      if (broader) includeWithAncestors(broader, `Broader concept of ${skill.name}`);
     }
     for (const requirement of skill.metadata.requires) {
       const required = byName.get(requirement);
-      if (required) includeWithAncestors(required);
+      if (required) includeWithAncestors(required, `Required by ${skill.name}`);
     }
+    expanding.delete(skill.name);
     expanded.set(skill.name, skill);
   };
-  directlySelected.forEach(includeWithAncestors);
-  const selectionConflicts: Array<{ left: string; right: string }> = [];
-  const conflictKeys = new Set<string>();
-  for (const skill of expanded.values()) {
-    for (const conflict of skill.metadata.conflicts) {
-      if (!expanded.has(conflict)) continue;
-      const [left, right] = [skill.name, conflict].sort();
-      const key = `${left}:${right}`;
-      if (!conflictKeys.has(key)) {
-        conflictKeys.add(key);
-        selectionConflicts.push({ left, right });
-      }
+  directlySelected.forEach((skill) => includeWithAncestors(skill));
+  const facetReasons = new Map<string, string[]>();
+  for (const selected of directlySelected) {
+    for (const facetName of selected.metadata.facets) {
+      const facet = byName.get(facetName);
+      if (!facet || removed.has(facetName)) continue;
+      facetReasons.set(facetName, [...(facetReasons.get(facetName) ?? []), selected.name]);
+      includeWithAncestors(facet, `Professional facet of ${selected.name} (declared relation)`);
     }
   }
   // Reserve context for the most specific evidence-matched branches first. Their
@@ -1193,105 +2407,244 @@ export function resolveSkills(
   const markSpecialistClosure = (skill: SkillRevision): void => {
     if (specialistClosure.has(skill.name)) return;
     specialistClosure.add(skill.name);
-    for (const name of [skill.metadata.parent, ...skill.metadata.requires]) {
-      const dependency = name ? byName.get(name) : undefined;
+    for (const name of [...skill.metadata.broader, ...skill.metadata.requires]) {
+      const dependency = byName.get(name);
       if (dependency) markSpecialistClosure(dependency);
     }
   };
-  directlySelected.filter((skill) => skill.metadata.depth > 0).forEach(markSpecialistClosure);
-  const ordered = [...expanded.values()].sort((left, right) => {
-    const priority =
-      Number(specialistClosure.has(right.name)) - Number(specialistClosure.has(left.name));
-    if (priority) return priority;
-    return left.metadata.depth - right.metadata.depth || left.name.localeCompare(right.name);
-  });
+  directlySelected
+    .filter((skill) => skill.metadata.broader.length > 0)
+    .forEach(markSpecialistClosure);
+  for (const name of facetReasons.keys()) {
+    const facet = byName.get(name);
+    if (facet) markSpecialistClosure(facet);
+  }
   const directlySelectedNames = new Set(directlySelected.map((skill) => skill.name));
-  const mandatory = new Set<string>([...pins]);
+  const routingPriority = (skill: SkillRevision): number => {
+    if (directlySelectedNames.has(skill.name) && skill.metadata.broader.length > 0) return 4;
+    if (facetReasons.has(skill.name)) return 3;
+    if (directlySelectedNames.has(skill.name)) return 2;
+    if (specialistClosure.has(skill.name)) return 1;
+    return 0;
+  };
+  const roots = [...expanded.values()].sort((left, right) => {
+    const priority = routingPriority(right) - routingPriority(left);
+    if (priority) return priority;
+    return right.metadata.depth - left.metadata.depth || left.name.localeCompare(right.name);
+  });
+  const ordered: SkillRevision[] = [];
+  const orderedNames = new Set<string>();
+  const appendWithDependencies = (skill: SkillRevision): void => {
+    if (orderedNames.has(skill.name)) return;
+    for (const name of [...skill.metadata.broader, ...skill.metadata.requires]) {
+      const dependency = expanded.get(name);
+      if (dependency) appendWithDependencies(dependency);
+    }
+    orderedNames.add(skill.name);
+    ordered.push(skill);
+  };
+  roots.forEach(appendWithDependencies);
+  const mandatory = new Set<string>(directlySelected.map((skill) => skill.name));
   const markDependencies = (name: string): void => {
     const skill = byName.get(name);
     if (!skill) return;
-    for (const dependency of [skill.metadata.parent, ...skill.metadata.requires]) {
-      if (dependency && !mandatory.has(dependency)) {
+    for (const dependency of [...skill.metadata.broader, ...skill.metadata.requires]) {
+      if (removed.has(dependency)) {
+        hierarchyErrors.push(`Mandatory skill ${name} depends on removed skill ${dependency}`);
+        continue;
+      }
+      if (!mandatory.has(dependency)) {
         mandatory.add(dependency);
         markDependencies(dependency);
       }
     }
   };
-  pins.forEach(markDependencies);
+  [...mandatory].forEach(markDependencies);
   const contextBudget = Math.max(1, options.contextBudget ?? 30_000);
-  let used = 0;
-  const included: SkillRevision[] = [];
-  const omittedByBudget: string[] = [];
+  const reasonFor = (skill: SkillRevision): string => {
+    const directReason = directDecisions.get(skill.name)?.reason;
+    if (directReason) return directReason;
+    const reasons = relationReasons.get(skill.name) ?? [];
+    return reasons.length > 0 ? reasons.slice(0, 3).join('; ') : 'Selected hierarchy dependency';
+  };
+  const representations = new Map<
+    string,
+    Record<SkillRepresentation, { block: string; cost: number }>
+  >();
   for (const skill of ordered) {
-    const cost = Math.min(skill.content.length, skill.metadata.contextBudget);
-    if (used + cost <= contextBudget || mandatory.has(skill.name)) {
-      included.push(skill);
-      used += cost;
-    } else {
-      omittedByBudget.push(skill.name);
+    const reason = reasonFor(skill);
+    representations.set(skill.name, {
+      full: { block: renderSkillPromptBlock(skill, reason, 'full'), cost: 0 },
+      compact: { block: renderSkillPromptBlock(skill, reason, 'compact'), cost: 0 },
+      minimal: { block: renderSkillPromptBlock(skill, reason, 'minimal'), cost: 0 },
+    });
+    const variants = representations.get(skill.name)!;
+    for (const representation of ['full', 'compact', 'minimal'] as const) {
+      variants[representation].cost = variants[representation].block.length;
     }
   }
-  // A budget may omit an ancestor that sorted after a child at the same declared
-  // depth. Prune the dependent too; never flatten a hierarchy silently.
-  let pruned = true;
-  while (pruned) {
-    pruned = false;
-    for (let index = included.length - 1; index >= 0; index -= 1) {
-      const skill = included[index];
-      const dependencies = [skill.metadata.parent, ...skill.metadata.requires].filter(
-        (name): name is string => Boolean(name),
-      );
+
+  const included: SkillRevision[] = [];
+  const chosenRepresentation = new Map<string, SkillRepresentation>();
+  const omittedByBudget: string[] = [];
+  const materialize = (
+    skills: SkillRevision[],
+    choices: Map<string, SkillRepresentation>,
+  ): ResolvedSkill[] =>
+    skills.map((skill, index) => {
+      const representation = choices.get(skill.name)!;
+      const reason = reasonFor(skill);
+      const variants = representations.get(skill.name)!;
+      const prefix = index > 0 ? '\n\n' : '';
+      const promptText = `${prefix}${variants[representation].block}`;
+      const fullContextCost = prefix.length + variants.full.cost;
+      return {
+        skill,
+        reason,
+        representation,
+        promptText,
+        contextCost: promptText.length,
+        fullContextCost,
+        omittedDetailChars: Math.max(0, fullContextCost - promptText.length),
+      };
+    });
+  for (const skill of ordered) {
+    const variants = representations.get(skill.name)!;
+    const dependencies = [...skill.metadata.broader, ...skill.metadata.requires].filter((name) =>
+      expanded.has(name),
+    );
+    const dependencyMissing = dependencies.some(
+      (name) => !included.some((item) => item.name === name),
+    );
+    if (mandatory.has(skill.name)) {
+      included.push(skill);
+      chosenRepresentation.set(skill.name, 'minimal');
+      if (variants.minimal.cost > skill.metadata.contextBudget) {
+        hierarchyErrors.push(
+          `Mandatory skill ${skill.name} minimal representation exceeds its ${skill.metadata.contextBudget}-character skill budget`,
+        );
+      }
+    } else {
+      const trialSkills = [...included, skill];
+      const trialChoices = new Map(chosenRepresentation).set(skill.name, 'minimal');
+      const trialCost = renderResolvedSkillSection(
+        materialize(trialSkills, trialChoices),
+      ).totalContextCost;
       if (
-        dependencies.some(
-          (name) => expanded.has(name) && !included.some((item) => item.name === name),
-        )
+        !dependencyMissing &&
+        variants.minimal.cost <= skill.metadata.contextBudget &&
+        trialCost <= contextBudget
       ) {
-        included.splice(index, 1);
-        used -= Math.min(skill.content.length, skill.metadata.contextBudget);
-        if (!omittedByBudget.includes(skill.name)) omittedByBudget.push(skill.name);
-        pruned = true;
+        included.push(skill);
+        chosenRepresentation.set(skill.name, 'minimal');
+      } else {
+        omittedByBudget.push(skill.name);
+        candidateRejections.set(
+          skill.name,
+          `Rejected: ${dependencyMissing ? 'required hierarchy dependency was not selected' : 'omitted by context budget'}`,
+        );
       }
     }
   }
-  const selected = included.map((skill) => ({
-    skill,
-    reason: pins.has(skill.name)
-      ? 'Pinned for this task'
-      : !directlySelectedNames.has(skill.name)
-        ? 'Required by a selected child skill'
-        : skill.name === 'task-routing'
-          ? 'Universal task routing'
-          : `Matched ${contract.taskKind} task; evidence: ${
-              [...evidence.declaredMedia, ...evidence.topologies, ...evidence.toolkits].join(
-                ', ',
-              ) || 'task contract and trigger metadata'
-            }`,
-    contextCost: Math.min(skill.content.length, skill.metadata.contextBudget),
-  }));
-  const manifest = selected.map(({ skill, reason, contextCost }) => ({
-    name: skill.name,
-    version: skill.metadata.version,
-    source: skill.source,
-    hash: skill.hash,
-    reason,
-    contextCost,
-  }));
+
+  const upgradeOrder = [...included].sort((left, right) => {
+    const priority = routingPriority(right) - routingPriority(left);
+    return (
+      priority || right.metadata.depth - left.metadata.depth || left.name.localeCompare(right.name)
+    );
+  });
+  for (const skill of upgradeOrder) {
+    const variants = representations.get(skill.name)!;
+    for (const next of ['compact', 'full'] as const) {
+      const current = chosenRepresentation.get(skill.name)!;
+      chosenRepresentation.set(skill.name, next);
+      const trialCost = renderResolvedSkillSection(
+        materialize(included, chosenRepresentation),
+      ).totalContextCost;
+      if (variants[next].cost <= skill.metadata.contextBudget && trialCost <= contextBudget) {
+        chosenRepresentation.set(skill.name, next);
+      } else {
+        chosenRepresentation.set(skill.name, current);
+      }
+    }
+  }
+
+  const selected = materialize(included, chosenRepresentation);
   const selectedSkillNames = new Set(selected.map((item) => item.skill.name));
+  const selectionConflicts: Array<{ left: string; right: string }> = [];
+  const conflictKeys = new Set<string>();
+  for (const { skill } of selected) {
+    for (const conflict of skill.metadata.conflicts) {
+      if (!selectedSkillNames.has(conflict)) continue;
+      const [left, right] = [skill.name, conflict].sort();
+      const key = `${left}:${right}`;
+      if (!conflictKeys.has(key)) {
+        conflictKeys.add(key);
+        selectionConflicts.push({ left, right });
+      }
+    }
+  }
+  const renderedSection = renderResolvedSkillSection(selected);
+  const totalContextCost = renderedSection.totalContextCost;
+  const compressedByBudget = selected
+    .filter(
+      (item): item is ResolvedSkill & { representation: 'compact' | 'minimal' } =>
+        item.representation !== 'full',
+    )
+    .map((item) => ({
+      name: item.skill.name,
+      representation: item.representation,
+      fullContextCost: item.fullContextCost,
+      contextCost: item.contextCost,
+      omittedDetailChars: item.omittedDetailChars,
+    }));
   const effectiveCollisions = collisions.filter((item) => selectedSkillNames.has(item.name));
+  const rejectionWeight = (reason: string): number => {
+    if (reason.includes('context budget') || reason.includes('hierarchy dependency')) return 4;
+    if (
+      reason.includes('explicitly excludes') ||
+      reason.includes('incompatible') ||
+      reason.includes('exclusion phrase') ||
+      reason.includes('unavailable or invalid')
+    )
+      return 3;
+    if (reason.includes('removed explicitly')) return 2;
+    return 1;
+  };
+  const allRejectedCandidates = [...candidateRejections]
+    .filter(([name]) => !selectedSkillNames.has(name))
+    .map(([name, reason]) => ({ name, reason: reason.slice(0, 240) }))
+    .sort(
+      (left, right) =>
+        rejectionWeight(right.reason) - rejectionWeight(left.reason) ||
+        left.name.localeCompare(right.name),
+    );
+  const rejectedCandidates = allRejectedCandidates.slice(0, 24);
+  if (mandatory.size > 0 && totalContextCost > contextBudget) {
+    hierarchyErrors.push(
+      `Mandatory skill guidance requires ${totalContextCost} characters but the context budget is ${contextBudget}`,
+    );
+  }
   return {
     selected,
     collisions: effectiveCollisions,
     selectionConflicts,
     hierarchyErrors,
     omittedByBudget,
+    compressedByBudget,
+    rejectedCandidates,
+    rejectedCandidateCount: allRejectedCandidates.length,
+    rejectedCandidatesTruncated: allRejectedCandidates.length > rejectedCandidates.length,
     blocked:
       effectiveCollisions.length > 0 ||
       selectionConflicts.length > 0 ||
       hierarchyErrors.length > 0 ||
-      omittedByBudget.some((name) => mandatory.has(name)) ||
-      used > contextBudget,
-    manifestHash: sha256(JSON.stringify(manifest)),
-    totalContextCost: selected.reduce((sum, item) => sum + item.contextCost, 0),
+      totalContextCost > contextBudget,
+    manifestHash: renderedSection.manifestHash,
+    promptText: renderedSection.promptText,
+    contextBudget,
+    contextOverheadCost: renderedSection.contextOverheadCost,
+    totalContextCost,
     evidence,
   };
 }
@@ -1315,9 +2668,13 @@ export function compareSkillRevisions(
  * whenever the user has an edited active skill and a newer bundled version
  * is available.
  */
-export function compareBundledSkill(
-  name: string,
-): { localHash: string; bundledHash: string; changed: boolean; local: string; bundled: string } | null {
+export function compareBundledSkill(name: string): {
+  localHash: string;
+  bundledHash: string;
+  changed: boolean;
+  local: string;
+  bundled: string;
+} | null {
   const localPath = join(personalRoot(), name, 'SKILL.md');
   if (!existsSync(localPath)) return null;
   const localContent = readFileSync(localPath, 'utf8');
@@ -1353,29 +2710,20 @@ export function applyDefaultUpdate(
   name: string,
   choice: DefaultUpdateChoice,
 ): SkillRevision {
+  if (INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.has(name)) {
+    throw new Error(
+      `Bundled resource ${name} is preserved for reference but is unavailable as a Koryphaios runtime skill`,
+    );
+  }
   const path = join(personalRoot(), name, 'SKILL.md');
   const local = readRevision(path, 'personal', 'active');
 
-  // Resolve the bundled version: file-based skills take priority, then fall
-  // back to TypeScript DEFINITIONS (the original seeded skills).
-  const fileBasedBundled = readBundledSkillContent(name);
-  const definition = DEFINITIONS.find((item) => item.name === name);
-  const bundled = fileBasedBundled ?? (definition ? template(definition) : null);
+  const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
+  const bundled = definition ? template(definition) : null;
   if (!bundled) throw new Error('Bundled default not found');
 
   if (!local || choice === 'replace') {
     atomicWrite(path, bundled);
-    // Also refresh bundled resources (references/, scripts/, assets/) for file-based skills
-    if (fileBasedBundled) {
-      const sourceDir = join(fileBasedSkillsRoot(), name);
-      if (existsSync(sourceDir)) {
-        try {
-          cpSync(sourceDir, join(personalRoot(), name), { recursive: true, force: true });
-        } catch (err: unknown) {
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err), name }, 'Failed to refresh bundled resources during replace');
-        }
-      }
-    }
   } else if (choice === 'merge') {
     const merged = `${bundled.trim()}\n\n## Preserved local additions\n\n${local.instructions}\n`;
     atomicWrite(join(personalRoot(), name, 'DRAFT.md'), merged);
@@ -1406,6 +2754,6 @@ export function saveAgentMergedSkillDraft(name: string, mergedContent: string): 
 export function getBundledSkillContent(name: string): string | null {
   const fileBased = readBundledSkillContent(name);
   if (fileBased) return fileBased;
-  const definition = DEFINITIONS.find((item) => item.name === name);
+  const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
   return definition ? template(definition) : null;
 }

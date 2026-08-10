@@ -131,6 +131,8 @@ export class IDEErrorDetector extends BaseErrorDetector {
 
   private async initializeVSCodeIntegration(): Promise<void> {
     try {
+      if (!this.isVSCodeEnvironment()) return;
+
       // This would be implemented when running as a VS Code extension
       // For now, we'll simulate IDE integration by checking common diagnostic sources
       // In a real VS Code extension, you would:
@@ -141,6 +143,19 @@ export class IDEErrorDetector extends BaseErrorDetector {
     } catch (error) {
       throw new Error(`Failed to initialize VS Code integration: ${error}`);
     }
+  }
+
+  /**
+   * Detect whether an external VS Code-compatible diagnostic bridge could be
+   * present. This is environment detection only: diagnostics enter this
+   * detector through updateDiagnostics(), never through an invented IDE API.
+   */
+  private isVSCodeEnvironment(): boolean {
+    return Boolean(
+      process.env['VSCODE_PID'] ||
+      process.env['TERM_PROGRAM'] === 'vscode' ||
+      (globalThis as typeof globalThis & { vscode?: unknown }).vscode
+    );
   }
 
   private startPolling(): void {

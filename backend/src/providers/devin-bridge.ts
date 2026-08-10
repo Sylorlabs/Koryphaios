@@ -14,9 +14,9 @@
 // --agent-config is unsupported (older Devins).
 
 import type { ProviderName } from '@koryphaios/shared';
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import {
   type CliAgentConfig,
   type CliBridge,
@@ -33,22 +33,56 @@ import {
   roleToPermissionMode,
   sandboxToScopes,
 } from './cli-bridge';
-import { KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
+import { koryToolWhitelistForRole } from './cli-bridges';
 import { getDevinCapabilitiesAsync, type DevinCapabilities } from './devin-capabilities';
 import type { ProviderEvent } from './types';
-import { getKoryCliBearer } from './kory-cli-mcp-config';
 import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
+import { getKoryBridgeGrant, type BridgeGrantAction } from './bridge-grant';
 import { providerLog } from '../logger';
+import { createPrivateCliTextArtifact } from './private-cli-transport';
+import { ensureManagedCliDirectory, writeManagedCliFile } from './managed-cli-storage';
+import type { SkillRevision } from '../kory/skills';
+
+interface DevinTrajectoryJson {
+  schema_version?: string;
+  session_id?: string;
+  agent?: {
+    name?: string;
+    version?: string;
+    model_name?: string;
+    tool_definitions?: Array<{ name?: string } | string>;
+  };
+  steps?: Array<{
+    source?: string;
+    message?: string;
+    reasoning_content?: string;
+    tool_calls?: Array<{
+      function_name?: string;
+      name?: string;
+      arguments?: Record<string, unknown>;
+      input?: Record<string, unknown>;
+    }>;
+    observation?: { results?: Array<{ content?: string }> };
+    model_name?: string;
+    generation_model?: string;
+    extra?: { generation_model?: string; telemetry?: Record<string, unknown> };
+    metrics?: Record<string, unknown>;
+  }>;
+  final_metrics?: {
+    total_prompt_tokens?: number;
+    total_completion_tokens?: number;
+    total_cached_tokens?: number;
+    total_steps?: number;
+  };
+}
 
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Koryphaios owns ALL tool execution, ' +
   'permissions, and orchestration. Do NOT use your native built-in tools (read, edit, write, ' +
-  'exec, etc.) — they are disabled. Instead, use the kory__ MCP tools exposed by the "kory" ' +
-  'MCP server (kory__read_file, kory__edit_file, kory__write_file, kory__bash, kory__grep, ' +
-  'kory__glob, kory__ls, kory__web_search, kory__web_fetch, kory__create_note, ' +
-  'kory__search_notes, kory__delegate_to_worker, etc.). Every kory__ tool call goes through ' +
-  'Koryphaios permission + sandbox policy. Never spawn subagents or delegate to other agents ' +
-  'yourself; use kory__delegate_to_worker and Koryphaios will dispatch its own worker agents.';
+  'exec, etc.) — they are disabled. Use only the role-scoped kory__ tools listed by the "kory" ' +
+  'MCP server. Every kory__ tool call goes through Koryphaios permission + sandbox policy. ' +
+  'Never spawn native subagents; delegate through Koryphaios only when your advertised ' +
+  'role-scoped tool list contains one; otherwise return the need to the manager.';
 
 export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'devin' as const;
@@ -102,7 +136,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // Disable ALL native Devin tools. The CLI should only use kory__ MCP tools
     // exposed via the .devin/config.json mcpServers. We list the kory__ tool
     // names as allowed_tools so Devin's agent-config parser pre-approves them.
-    const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
+    const allowedTools = koryToolWhitelistForRole(ctx.role);
 
     return {
       systemInstructions,
@@ -133,12 +167,11 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
 
   /** Write the agent config to a temp file and return its path. */
   writeAgentConfigFile(config: CliAgentConfig, sessionId?: string): string {
-    const path = join(
-      tmpdir(),
-      `devin-agent-config-${sessionId ?? 'anon'}-${Date.now()}-${Math.round(performance.now())}.json`,
-    );
-    writeFileSync(path, this.serializeAgentConfig(config), 'utf8');
-    return path;
+    return createPrivateCliTextArtifact(
+      `devin-agent-config-${sessionId ?? 'anon'}`,
+      this.serializeAgentConfig(config),
+      'json',
+    ).path;
   }
 
   buildHooks(ctx: CliBridgeContext): CliHookConfig[] | null {
@@ -149,19 +182,35 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
     if (!hookScript) return null;
     if (!ctx.sessionId) return null;
-    const bearer = getKoryCliBearer(ctx.sessionId, ctx.role);
-    const base = `node ${JSON.stringify(hookScript)} --session-id ${JSON.stringify(ctx.sessionId)} --auth ${JSON.stringify(bearer)}`;
-    return [
-      ...(['PreToolUse', 'PostToolUse', 'PermissionRequest', 'UserPromptSubmit'] as const).map((event) => ({
-        events: [event], command: `${base} --event ${event}`, matcher: '',
-      })),
-      { events: ['Stop'], command: `${base} --event Stop`, matcher: '' },
-    ];
+    const events = [
+      'PreToolUse',
+      'PostToolUse',
+      'PermissionRequest',
+      'UserPromptSubmit',
+      'Stop',
+    ] as const;
+    const actionForEvent: Record<(typeof events)[number], BridgeGrantAction> = {
+      PreToolUse: 'hook:pre-tool',
+      PostToolUse: 'hook:post-tool',
+      PermissionRequest: 'hook:permission',
+      UserPromptSubmit: 'hook:prompt-submit',
+      Stop: 'hook:stop',
+    };
+    return events.map((event) => {
+      const grant = ctx.bridgeGrantLease
+        ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
+        : getKoryBridgeGrant(ctx.sessionId!, ctx.role, [actionForEvent[event]]);
+      const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)} --event ${event}`;
+      return { events: [event], command, matcher: '' };
+    });
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {
     // .devin/hooks.v1.json format: { "<Event>": [{ matcher, hooks: [{ type, command }] }] }
-    const payload: Record<string, Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>> = {};
+    const payload: Record<
+      string,
+      Array<{ matcher: string; hooks: Array<{ type: 'command'; command: string }> }>
+    > = {};
     for (const hook of hooks) {
       for (const event of hook.events) {
         payload[event] = payload[event] ?? [];
@@ -197,14 +246,17 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     if (existsSync(configPath)) {
       try {
         existing = JSON.parse(require('node:fs').readFileSync(configPath, 'utf8'));
-      } catch (err: unknown) {
+      } catch {
         /* overwrite */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: existing config parse failed — will overwrite');
+        providerLog.debug({}, 'Devin bridge: existing config parse failed — will overwrite');
       }
     }
-    existing.mcpServers = { ...(existing.mcpServers as Record<string, unknown> ?? {}), ...mcpServers };
-    mkdirSync(dirname(configPath), { recursive: true });
-    writeFileSync(configPath, JSON.stringify(existing, null, 2), 'utf8');
+    existing.mcpServers = {
+      ...((existing.mcpServers as Record<string, unknown>) ?? {}),
+      ...mcpServers,
+    };
+    ensureManagedCliDirectory(dirname(configPath));
+    writeManagedCliFile(configPath, JSON.stringify(existing, null, 2), { encoding: 'utf8' });
   }
 
   buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
@@ -230,8 +282,8 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
       // Lazy import to avoid a circular dependency at module load time.
       const { listSkills } = require('../kory/skills');
       const homeDir = getKoryphaiosDevinHome(ctx.sessionId);
-      const skills = listSkills(ctx.workingDirectory).filter((s: any) => s.state === 'active');
-      return skills.map((skill: any) => ({
+      const skills = listSkills(ctx.workingDirectory).filter((s: SkillRevision) => s.state === 'active');
+      return skills.map((skill: SkillRevision) => ({
         path: join(homeDir, '.devin', 'skills', skill.name, 'SKILL.md'),
         // SkillRevision carries `instructions` (rendered full-text) and
         // `content` (raw SKILL.md source). Prefer the rendered instructions;
@@ -245,11 +297,14 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   parseTrajectory(raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
-    let data: any;
+    let data: DevinTrajectoryJson;
     try {
-      data = JSON.parse(raw);
+      data = JSON.parse(raw) as DevinTrajectoryJson;
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: trajectory JSON parse failed');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Devin bridge: trajectory JSON parse failed',
+      );
       return { trajectory: { steps: [] }, events: [] };
     }
     const trajectory: CliTrajectory = {
@@ -259,18 +314,20 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
       agentVersion: data.agent?.version,
       modelName: data.agent?.model_name,
       toolDefinitions: Array.isArray(data.agent?.tool_definitions)
-        ? data.agent.tool_definitions.map((t: any) => ({ name: t.name ?? String(t) }))
+        ? data.agent.tool_definitions.map((t) => ({
+            name: typeof t === 'string' ? t : (t.name ?? String(t)),
+          }))
         : [],
       steps: Array.isArray(data.steps)
-        ? data.steps.map((s: any) => ({
+        ? data.steps.map((s) => ({
             source: s.source ?? '',
             message: typeof s.message === 'string' ? s.message : undefined,
             reasoning: typeof s.reasoning_content === 'string' ? s.reasoning_content : undefined,
             toolCalls: Array.isArray(s.tool_calls)
-              ? s.tool_calls.map((c: any) => ({
+              ? s.tool_calls.map((c) => ({
                   name: c.function_name ?? c.name ?? 'tool',
                   input: (c.arguments ?? c.input ?? {}) as Record<string, unknown>,
-                  output: s.observation?.results?.map((r: any) => r.content ?? '').join('\n'),
+                  output: s.observation?.results?.map((r) => r.content ?? '').join('\n'),
                 }))
               : undefined,
             modelName: s.model_name,
@@ -334,26 +391,27 @@ export function getKoryphaiosDevinHome(sessionId?: string): string {
   const dir = sessionId ? join(base, sessionId) : base;
   if (cachedDevinHome === dir) return dir;
   try {
-    mkdirSync(dir, { recursive: true });
-    mkdirSync(join(dir, '.devin'), { recursive: true });
+    ensureManagedCliDirectory(dir);
+    ensureManagedCliDirectory(join(dir, '.devin'));
     // Share credentials with the user's real devin install via a symlink so
     // the subscription login works without re-auth. Isolation is about
     // sessions + rules/skills/hooks, not credentials.
     const realCreds = join(homedir(), '.local', 'share', 'devin', 'credentials.toml');
     const credParent = join(dir, '.local', 'share', 'devin');
     if (existsSync(realCreds)) {
-      mkdirSync(credParent, { recursive: true });
+      ensureManagedCliDirectory(credParent);
       const link = join(credParent, 'credentials.toml');
       try {
         if (existsSync(link)) require('node:fs').rmSync(link, { force: true });
         require('node:fs').symlinkSync(realCreds, link);
-      } catch (err: unknown) {
+      } catch {
         /* symlink unsupported/exists — best effort */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin bridge: credentials symlink best-effort failed');
+        providerLog.debug({}, 'Devin bridge: credentials symlink best-effort failed');
       }
     }
-  } catch (err) {
-    providerLog.warn({ provider: 'devin', err }, 'Could not build isolated devin home');
+  } catch {
+    providerLog.warn({ provider: 'devin' }, 'Could not build private isolated devin home');
+    throw new Error('Unable to create a private managed Devin home');
   }
   cachedDevinHome = dir;
   return dir;

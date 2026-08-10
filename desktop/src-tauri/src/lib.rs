@@ -121,9 +121,7 @@ fn copy_backend_to_cache(
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("Failed to create backend runtime directory: {e}"))?;
 
-    let source_size = std::fs::metadata(source)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let source_size = std::fs::metadata(source).map(|m| m.len()).unwrap_or(0);
 
     let destination = runtime_dir.join(format!(
         "koryphaios-service-{}-{}{}",
@@ -175,12 +173,166 @@ struct BackendReadyEvent {
     port: u16,
 }
 
-fn emit_backend_down(app: &tauri::AppHandle, reason: &'static str, message: String, pid: Option<u32>) {
-    let _ = app.emit("backend://down", BackendDownEvent { reason, pid, message });
+fn emit_backend_down(
+    app: &tauri::AppHandle,
+    reason: &'static str,
+    message: String,
+    pid: Option<u32>,
+) {
+    let _ = app.emit(
+        "backend://down",
+        BackendDownEvent {
+            reason,
+            pid,
+            message,
+        },
+    );
 }
 
 fn emit_backend_ready(app: &tauri::AppHandle, pid: Option<u32>, host: String, port: u16) {
     let _ = app.emit("backend://ready", BackendReadyEvent { pid, host, port });
+}
+
+fn validate_log_file_name(name: &str) -> std::io::Result<()> {
+    let mut components = std::path::Path::new(name).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(()),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "backend log names must be a single path component",
+        )),
+    }
+}
+
+/// Open the backend's append-only logs without allowing either filename to
+/// escape (or symlink out of) the private log directory. Existing logs are
+/// retained and their permissions are healed on every launch.
+#[cfg(unix)]
+fn open_private_backend_logs(
+    log_dir: &std::path::Path,
+    stdout_name: &str,
+    stderr_name: &str,
+) -> std::io::Result<(std::fs::File, std::fs::File)> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+    validate_log_file_name(stdout_name)?;
+    validate_log_file_name(stderr_name)?;
+
+    let mut directory_builder = std::fs::DirBuilder::new();
+    directory_builder.recursive(true).mode(0o700);
+    directory_builder.create(log_dir)?;
+
+    let directory_path = CString::new(log_dir.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "backend log directory contains a NUL byte",
+        )
+    })?;
+    // Keep a descriptor for the verified directory while opening both files.
+    // O_NOFOLLOW rejects a final `logs` symlink, and openat below remains bound
+    // to this exact directory even if its pathname is concurrently replaced.
+    let directory_fd = unsafe {
+        libc::open(
+            directory_path.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
+    };
+    if directory_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: a successful libc::open returned an owned descriptor.
+    let directory = unsafe { std::fs::File::from_raw_fd(directory_fd) };
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "backend log path is not a directory",
+        ));
+    }
+    directory.set_permissions(std::fs::Permissions::from_mode(0o700))?;
+
+    let open_log = |name: &str| -> std::io::Result<std::fs::File> {
+        let name = CString::new(name).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "backend log name contains a NUL byte",
+            )
+        })?;
+        let file_fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_WRONLY
+                    | libc::O_CREAT
+                    | libc::O_APPEND
+                    | libc::O_CLOEXEC
+                    | libc::O_NOFOLLOW
+                    | libc::O_NONBLOCK,
+                0o600,
+            )
+        };
+        if file_fd < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        // SAFETY: a successful libc::openat returned an owned descriptor.
+        let file = unsafe { std::fs::File::from_raw_fd(file_fd) };
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "backend log path is not a regular file",
+            ));
+        }
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        Ok(file)
+    };
+
+    Ok((open_log(stdout_name)?, open_log(stderr_name)?))
+}
+
+#[cfg(not(unix))]
+fn open_private_backend_logs(
+    log_dir: &std::path::Path,
+    stdout_name: &str,
+    stderr_name: &str,
+) -> std::io::Result<(std::fs::File, std::fs::File)> {
+    validate_log_file_name(stdout_name)?;
+    validate_log_file_name(stderr_name)?;
+    std::fs::create_dir_all(log_dir)?;
+
+    let metadata = std::fs::symlink_metadata(log_dir)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "backend log path is not a real directory",
+        ));
+    }
+
+    let open_log = |name: &str| -> std::io::Result<std::fs::File> {
+        let path = log_dir.join(name);
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "backend log path is a symlink",
+                ));
+            }
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "backend log path is not a regular file",
+            ));
+        }
+        Ok(file)
+    };
+
+    Ok((open_log(stdout_name)?, open_log(stderr_name)?))
 }
 
 /// Start the bundled backend service.
@@ -217,18 +369,12 @@ fn spawn_bundled_backend(
         .map(|d| d.join("logs"))
         .ok();
     if let Some(dir) = &log_dir {
-        let _ = std::fs::create_dir_all(dir);
-        let open = |name: &str| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(dir.join(name))
-        };
-        match (open("backend.log"), open("backend.err.log")) {
-            (Ok(out), Ok(err)) => {
+        match open_private_backend_logs(dir, "backend.log", "backend.err.log") {
+            Ok((out, err)) => {
                 cmd.stdout(Stdio::from(out)).stderr(Stdio::from(err));
             }
-            _ => {
+            Err(error) => {
+                eprintln!("[Koryphaios] Refusing unsafe backend log path: {error}");
                 cmd.stdout(Stdio::null()).stderr(Stdio::null());
             }
         }
@@ -465,19 +611,17 @@ fn spawn_dev_backend(
     // Log to the app data dir so a crash leaves a trail.
     if let Ok(data_dir) = app_handle.path().app_data_dir() {
         let logs = data_dir.join("logs");
-        let _ = std::fs::create_dir_all(&logs);
-        let open = |name: &str| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(logs.join(name))
-        };
-        match (open("backend-dev-supervised.log"), open("backend-dev-supervised.err.log")) {
-            (Ok(out), Ok(err)) => {
+        match open_private_backend_logs(
+            &logs,
+            "backend-dev-supervised.log",
+            "backend-dev-supervised.err.log",
+        ) {
+            Ok((out, err)) => {
                 cmd.stdout(Stdio::from(out));
                 cmd.stderr(Stdio::from(err));
             }
-            _ => {
+            Err(error) => {
+                eprintln!("[Koryphaios] Refusing unsafe dev backend log path: {error}");
                 cmd.stdout(Stdio::null());
                 cmd.stderr(Stdio::null());
             }
@@ -1292,7 +1436,7 @@ fn setup_file_drop_handler(window: &WebviewWindow) {
 
     // Handle file drop events
     window.listen("tauri://drag-drop", move |event| {
-        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload()) {
+        if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
             if let Some(paths) = payload.get("paths").and_then(|p| p.as_array()) {
                 let file_paths: Vec<String> = paths
                     .iter()
@@ -1426,7 +1570,6 @@ pub fn run() {
                                 if let Ok(mut child) = nav_process.lock() {
                                     let _ = child.kill();
                                 }
-                                return;
                             }
                             Ok(actual_port) => {
                                 // Keep the packaged UI on Tauri's local app origin.
@@ -1726,4 +1869,193 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Koryphaios desktop app");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{open_private_backend_logs, validate_log_file_name};
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new(label: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock should be after the Unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "koryphaios-log-permissions-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&path).expect("unique test directory should be creatable");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn private_backend_logs_reject_path_components() {
+        for invalid in ["", ".", "..", "../escape", "nested/backend.log"] {
+            assert!(
+                validate_log_file_name(invalid).is_err(),
+                "accepted {invalid:?}"
+            );
+        }
+        assert!(validate_log_file_name("backend.log").is_ok());
+    }
+
+    #[test]
+    fn private_backend_logs_preserve_existing_content() {
+        let root = TestDirectory::new("preserve");
+        let logs = root.path().join("logs");
+        std::fs::create_dir(&logs).expect("logs directory should be creatable");
+        std::fs::write(logs.join("backend.log"), b"existing\n")
+            .expect("existing log should be writable");
+        std::fs::write(logs.join("backend.err.log"), b"existing error\n")
+            .expect("existing error log should be writable");
+
+        let (mut stdout, mut stderr) =
+            open_private_backend_logs(&logs, "backend.log", "backend.err.log")
+                .expect("private logs should open");
+        stdout.write_all(b"next\n").expect("stdout should append");
+        stderr
+            .write_all(b"next error\n")
+            .expect("stderr should append");
+        drop((stdout, stderr));
+
+        assert_eq!(
+            std::fs::read(logs.join("backend.log")).expect("stdout log should be readable"),
+            b"existing\nnext\n"
+        );
+        assert_eq!(
+            std::fs::read(logs.join("backend.err.log")).expect("stderr log should be readable"),
+            b"existing error\nnext error\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_backend_logs_create_and_heal_unix_modes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TestDirectory::new("modes");
+        let logs = root.path().join("logs");
+
+        drop(
+            open_private_backend_logs(&logs, "backend.log", "backend.err.log")
+                .expect("missing private logs should be created"),
+        );
+        assert_eq!(
+            std::fs::metadata(&logs)
+                .expect("created logs metadata should be available")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        for name in ["backend.log", "backend.err.log"] {
+            assert_eq!(
+                std::fs::metadata(logs.join(name))
+                    .expect("created log metadata should be available")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
+        std::fs::set_permissions(&logs, std::fs::Permissions::from_mode(0o777))
+            .expect("directory mode should be adjustable");
+        for name in ["backend.log", "backend.err.log"] {
+            let path = logs.join(name);
+            std::fs::write(&path, b"sentinel\n").expect("log should be writable");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666))
+                .expect("file mode should be adjustable");
+        }
+
+        drop(
+            open_private_backend_logs(&logs, "backend.log", "backend.err.log")
+                .expect("private logs should open"),
+        );
+
+        assert_eq!(
+            std::fs::metadata(&logs)
+                .expect("logs metadata should be available")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        for name in ["backend.log", "backend.err.log"] {
+            let path = logs.join(name);
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("log metadata should be available")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("log should remain readable"),
+                b"sentinel\n"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_backend_logs_reject_directory_and_file_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let root = TestDirectory::new("symlinks");
+        let real_logs = root.path().join("real-logs");
+        std::fs::create_dir(&real_logs).expect("real logs directory should be creatable");
+        let linked_logs = root.path().join("logs");
+        symlink(&real_logs, &linked_logs).expect("directory symlink should be creatable");
+        assert!(
+            open_private_backend_logs(&linked_logs, "backend.log", "backend.err.log").is_err(),
+            "a symlinked log directory must be rejected"
+        );
+
+        std::fs::remove_file(&linked_logs).expect("directory symlink should be removable");
+        std::fs::create_dir(&linked_logs).expect("logs directory should be creatable");
+        let outside = root.path().join("outside.log");
+        std::fs::write(&outside, b"do not touch\n").expect("outside file should be writable");
+        symlink(&outside, linked_logs.join("backend.log"))
+            .expect("file symlink should be creatable");
+        assert!(
+            open_private_backend_logs(&linked_logs, "backend.log", "backend.err.log").is_err(),
+            "a symlinked log file must be rejected"
+        );
+        assert_eq!(
+            std::fs::read(&outside).expect("outside file should remain readable"),
+            b"do not touch\n"
+        );
+
+        std::fs::remove_file(linked_logs.join("backend.log"))
+            .expect("stdout symlink should be removable");
+        symlink(&outside, linked_logs.join("backend.err.log"))
+            .expect("stderr symlink should be creatable");
+        assert!(
+            open_private_backend_logs(&linked_logs, "backend.log", "backend.err.log").is_err(),
+            "a symlinked stderr log must be rejected"
+        );
+        assert_eq!(
+            std::fs::read(&outside).expect("outside file should remain readable"),
+            b"do not touch\n"
+        );
+    }
 }

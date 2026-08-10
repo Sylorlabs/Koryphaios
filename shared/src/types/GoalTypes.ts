@@ -1,19 +1,27 @@
 /** Durable, chat-independent goal and checklist contracts. */
 export type GoalScope = 'workspace' | 'project' | 'session';
 export type GoalStatus =
-  | 'queued'
-  | 'planning'
-  | 'running'
-  | 'paused'
-  | 'blocked'
-  | 'completed'
-  | 'cancelled';
+  'queued' | 'planning' | 'running' | 'paused' | 'blocked' | 'completed' | 'cancelled';
 export type GoalItemStatus = 'pending' | 'running' | 'completed' | 'blocked' | 'skipped';
+export type GoalEvidenceSource = 'producer' | 'verifier' | 'legacy';
+export type GoalVerificationStatus =
+  'submitted' | 'verified' | 'rejected' | 'unverified' | 'legacy-unverified';
 
 export interface GoalEvidence {
   id: string;
   kind: 'check' | 'artifact' | 'note';
   value: string;
+  /** Optional on disk only for goals created before producer/verifier evidence was split. */
+  source?: GoalEvidenceSource;
+  /** Optional on disk only for older goals; readers normalize it to legacy-unverified. */
+  verificationStatus?: GoalVerificationStatus;
+  /** Verifier records point to the exact producer submission they evaluated. */
+  producerEvidenceId?: string;
+  /** Execution identity attached to producer submissions after the evidence split. */
+  producerModel?: string;
+  producerProvider?: string;
+  verifierModel?: string;
+  verifierProvider?: string;
   verified: boolean;
   createdAt: number;
 }
@@ -38,6 +46,9 @@ export interface GoalExecutionConfig {
   sessionId: string;
   provider: string;
   model: string;
+  /** Durable epoch for retry/blocker accounting; regenerated on each human start/resume. */
+  attemptId?: string;
+  attemptStartedAt?: number;
   reasoningLevel?: string;
   instructions?: string;
   remotePlanApproved?: boolean;

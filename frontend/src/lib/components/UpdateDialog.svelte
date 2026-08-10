@@ -1,6 +1,9 @@
 <script lang="ts">
   import { updater } from '$lib/stores/updater.svelte';
-  import { Download, ExternalLink, Loader2, AlertCircle } from 'lucide-svelte';
+  import Download from 'lucide-svelte/icons/download';
+  import ExternalLink from 'lucide-svelte/icons/external-link';
+  import Loader2 from 'lucide-svelte/icons/loader-2';
+  import AlertCircle from 'lucide-svelte/icons/alert-circle';
 
   let installing = $state(false);
 

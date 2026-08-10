@@ -212,13 +212,43 @@ describe('API Integration Tests', () => {
   });
 
   describe('CORS Headers', () => {
-    test('handles preflight OPTIONS request', async () => {
-      const res = request('/api/sessions', {
+    const nativeDevOrigins = ['http://127.0.0.1:3003', 'http://localhost:3003'];
+
+    test.each(nativeDevOrigins)('allows native dev GET origin %s', async (origin) => {
+      const res = await fetch(`${BASE_URL}/api/health`, { headers: { Origin: origin } });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(res.headers.get('vary')).toContain('Origin');
+    });
+
+    test.each(nativeDevOrigins)('allows native dev OPTIONS origin %s', async (origin) => {
+      const res = await fetch(`${BASE_URL}/api/sessions`, {
         method: 'OPTIONS',
-        headers: { Origin: 'http://localhost:5173' },
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'GET',
+        },
       });
 
       expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(res.headers.get('access-control-allow-methods')).toContain('GET');
     });
+
+    test.each(['GET', 'OPTIONS'] as const)(
+      'does not allow a disallowed origin on %s',
+      async (method) => {
+        const res = await fetch(`${BASE_URL}/api/health`, {
+          method,
+          headers: {
+            Origin: 'https://attacker.example',
+            ...(method === 'OPTIONS' ? { 'Access-Control-Request-Method': 'GET' } : {}),
+          },
+        });
+
+        expect(res.headers.get('access-control-allow-origin')).toBeNull();
+      },
+    );
   });
 });

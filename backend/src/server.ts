@@ -39,7 +39,6 @@ import { billingRoutes } from './routes/v1/billing';
 import { processRoutes } from './routes/v1/processes';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
-import { feedbackRoutes } from './routes/v1/feedback';
 import { goalRoutes } from './routes/v1/goals';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
@@ -95,7 +94,6 @@ const baseApp = new Elysia()
   .use(processRoutes)
   .use(notesRoutes)
   .use(workspaceRoutes)
-  .use(feedbackRoutes)
   .use(goalRoutes)
   .use(nativeCommandRoutes)
   .use(mcpBridgeRoutes)
@@ -143,7 +141,8 @@ function isIpInCidr(ip: string, cidr: string): boolean {
   if (ipParts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
   if (baseParts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return false;
   const ipNum = ((ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3]) >>> 0;
-  const baseNum = ((baseParts[0] << 24) | (baseParts[1] << 16) | (baseParts[2] << 8) | baseParts[3]) >>> 0;
+  const baseNum =
+    ((baseParts[0] << 24) | (baseParts[1] << 16) | (baseParts[2] << 8) | baseParts[3]) >>> 0;
   const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
   // The network portions (ip & mask and base & mask) must match.
   return (ipNum & mask) === (baseNum & mask);
@@ -184,8 +183,9 @@ async function main() {
   // reflecting any origin (the old `origin: undefined` behavior). This keeps
   // the desktop app working while closing the cross-origin hole that opens
   // the moment someone binds the backend to 0.0.0.0.
-  const corsOrigins =
-    config.corsOrigins?.length ? config.corsOrigins : [...SECURITY.ALLOWED_ORIGINS];
+  const corsOrigins = config.corsOrigins?.length
+    ? config.corsOrigins
+    : [...SECURITY.ALLOWED_ORIGINS];
 
   // Trusted proxy CIDRs for X-Forwarded-For. When the backend is behind a
   // reverse proxy, the operator sets KORYPHAIOS_TRUSTED_PROXIES to the
@@ -274,9 +274,7 @@ async function main() {
           ?.split(',')
           .map((s) => s.trim()) || [];
       const authToken =
-        authHeader ??
-        (protocols.length > 1 ? protocols[1] : null) ??
-        url.searchParams.get('auth');
+        authHeader ?? (protocols.length > 1 ? protocols[1] : null) ?? url.searchParams.get('auth');
 
       const authSession = validateLocalBearerToken(authToken);
       if (!authSession) {
@@ -424,7 +422,10 @@ async function main() {
       // Never remove a marker written by a replacement backend.
       if (active.pid === process.pid) rmSync(activePortPath, { force: true });
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to clear active port file on shutdown');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to clear active port file on shutdown',
+      );
     }
   }
 

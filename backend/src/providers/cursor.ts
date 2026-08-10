@@ -8,7 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -22,6 +22,23 @@ import {
   type StreamRequest,
 } from './types';
 import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  spawnWithPrivateArtifactCleanup,
+  writePrivatePromptToStdin,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  ensureManagedCliDirectory,
+  healManagedCliFile,
+  writeManagedCliFile,
+} from './managed-cli-storage';
+import { appendBoundedProviderFrames } from './bounded-provider-stream';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -365,6 +382,10 @@ export class CursorProvider implements Provider {
     // rules. Writing these before each turn ensures the CLI discovers the
     // kory__ tool catalog and Kory's session rules on startup.
     const cursorBridge = getCliBridge('cursor');
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'cursor' as const,
       role: request.harnessRole ?? 'manager',
@@ -373,16 +394,25 @@ export class CursorProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     const cursorHome = researchOnly
       ? join(getKoryphaiosCursorHome(), 'research-only')
       : getKoryphaiosCursorHome();
-    mkdirSync(cursorHome, { recursive: true });
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
+    ensureManagedCliDirectory(cursorHome);
     if (!researchOnly) try {
       // MCP: write the kory server config so the CLI gets kory__ tools.
       const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
         const mcpConfigPath = join(cursorHome, 'mcp.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
@@ -394,14 +424,13 @@ export class CursorProvider implements Provider {
             env: srv.env,
           };
         }
-        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
       }
       // Rules: write .cursorrules with the Kory session rules.
       const ruleFiles = cursorBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
-          mkdirSync(cursorHome, { recursive: true });
-          writeFileSync(rule.path, rule.content);
+          writeManagedCliFile(rule.path, rule.content);
         }
       }
     } catch (wiringErr) {
@@ -410,7 +439,6 @@ export class CursorProvider implements Provider {
 
     const args = [
       '-p',
-      prompt,
       '--output-format',
       'stream-json',
       '--stream-partial-output',
@@ -426,17 +454,29 @@ export class CursorProvider implements Provider {
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cursor')]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd,
+          configDirs: [cursorHome, ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : [])],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server
     // and .cursorrules we just wrote.
     const cursorEnv = { ...(jail?.env ?? { ...process.env }) };
     cursorEnv.CURSOR_CONFIG_DIR = cursorHome;
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: cursorEnv,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: cursorEnv,
+        }),
+      [],
+      () => bridgeGrantLease?.cleanup(),
+    );
+    bridgeGrantLease?.bindToChild(child);
+    writePrivatePromptToStdin(child, prompt);
 
     const onAbort = () => {
       try {
@@ -457,7 +497,7 @@ export class CursorProvider implements Provider {
     timeout.unref?.();
 
     let stderr = '';
-    child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
+    child.stderr.on('data', (c: Buffer) => (stderr = appendPrivateDiagnostic(stderr, c)));
 
     const decoder = new TextDecoder();
     let buffer = '';
@@ -467,17 +507,22 @@ export class CursorProvider implements Provider {
     try {
       for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
         if (request.signal?.aborted) break;
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const raw of lines) {
+        const bounded = appendBoundedProviderFrames(
+          buffer,
+          decoder.decode(chunk, { stream: true }),
+        );
+        buffer = bounded.remainder;
+        for (const raw of bounded.frames) {
           const line = raw.trim();
           if (!line) continue;
           let row: CursorStreamLine;
           try {
             row = JSON.parse(line) as CursorStreamLine;
           } catch (err: unknown) {
-            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor skipping non-JSON stream line');
+            providerLog.debug(
+              safeProviderDiagnostic('cursor', 'stdout', err),
+              'Cursor skipping non-JSON stream line',
+            );
             continue;
           }
           for (const event of this.mapLine(row)) {
@@ -492,9 +537,12 @@ export class CursorProvider implements Provider {
       const aborted =
         request.signal?.aborted || (err instanceof Error && err.name === 'AbortError');
       if (!aborted) {
+        onAbort();
+        const diagnostic = safeProviderDiagnostic('cursor', 'stream', err);
+        providerLog.error(diagnostic, 'Cursor harness stream failed');
         yield {
           type: 'error',
-          error: `Cursor harness error: ${err instanceof Error ? err.message : String(err)}`,
+          error: safeProviderFailureMessage('cursor', diagnostic),
         };
       }
       clearTimeout(timeout);
@@ -511,11 +559,14 @@ export class CursorProvider implements Provider {
     if (request.signal?.aborted) return;
 
     if (exitCode !== 0 && !sawContent) {
-      const hint = stderr.trim() || `cursor-agent exited with status ${exitCode}`;
-      const loginHint = /not.*logged in|unauthorized|login|authenticate/i.test(hint)
-        ? ' — run "cursor-agent login".'
-        : '';
-      yield { type: 'error', error: `Cursor: ${hint.slice(0, 300)}${loginHint}` };
+      const diagnostic = safeProviderDiagnostic('cursor', 'stderr', stderr, { exitCode });
+      providerLog.warn(diagnostic, 'Cursor CLI exited unsuccessfully');
+      yield {
+        type: 'error',
+        error: safeProviderFailureMessage('cursor', diagnostic, {
+          authenticationAction: 'Run "cursor-agent login", then reconnect.',
+        }),
+      };
       return;
     }
     if (!emittedComplete) yield { type: 'complete', finishReason: 'end_turn' };
@@ -571,7 +622,9 @@ export class CursorProvider implements Provider {
           };
         }
         if (row.is_error) {
-          yield { type: 'error', error: row.result || 'Cursor request failed' };
+          const diagnostic = safeProviderDiagnostic('cursor', 'stdout', row.result);
+          providerLog.warn(diagnostic, 'Cursor CLI reported a request failure');
+          yield { type: 'error', error: safeProviderFailureMessage('cursor', diagnostic) };
           return;
         }
         yield { type: 'complete', finishReason: 'end_turn' };

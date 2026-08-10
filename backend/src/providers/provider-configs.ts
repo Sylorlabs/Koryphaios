@@ -24,7 +24,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'openai',
-    baseUrl: 'https://api.openai.com',
+    baseUrl: 'https://api.openai.com/v1',
     authMode: 'api_key',
     envKeys: ['OPENAI_API_KEY'],
   },
@@ -76,10 +76,28 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envAuthTokenKey: 'GITHUB_COPILOT_TOKEN',
   },
   // CLI harness providers — authenticated via their own CLI login, no API key.
-  { name: 'codex', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CODEX_AUTH_TOKEN' },
+  {
+    name: 'codex',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'CODEX_AUTH_TOKEN',
+  },
   { name: 'codex-auth', baseUrl: '', authMode: 'auth_only', envKeys: [] },
-  { name: 'claude', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'CLAUDE_CODE_OAUTH_TOKEN' },
-  { name: 'grok', baseUrl: '', authMode: 'auth_only', envKeys: [], envAuthTokenKey: 'GROK_CODE_XAI_API_KEY' },
+  {
+    name: 'claude',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'CLAUDE_CODE_OAUTH_TOKEN',
+  },
+  {
+    name: 'grok',
+    baseUrl: '',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'GROK_CODE_XAI_API_KEY',
+  },
   { name: 'antigravity', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
@@ -103,7 +121,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envUrlKey: 'AZURE_OPENAI_ENDPOINT',
   },
   { name: 'bedrock', baseUrl: '', authMode: 'env_auth', envKeys: ['AWS_ACCESS_KEY_ID'] },
-  { name: 'vertexai', baseUrl: '', authMode: 'env_auth', envKeys: ['GOOGLE_VERTEX_AI_API_KEY'] },
+  {
+    name: 'vertexai',
+    baseUrl: '',
+    authMode: 'api_key',
+    envKeys: ['GOOGLE_VERTEX_AI_API_KEY'],
+  },
 
   // Local
   {
@@ -153,12 +176,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['MINIMAX_API_KEY'],
   },
   {
-      name: 'kimicode',
-      baseUrl: 'https://api.kimi.com/coding/v1',
-      authMode: 'auth_only',
-      envKeys: [],
-      envAuthTokenKey: 'KIMI_CODE_AUTH_TOKEN',
-    },
+    name: 'kimicode',
+    baseUrl: 'https://api.kimi.com/coding/v1',
+    authMode: 'auth_only',
+    envKeys: [],
+    envAuthTokenKey: 'KIMI_CODE_AUTH_TOKEN',
+  },
   {
     name: 'moonshot',
     baseUrl: 'https://api.moonshot.ai/v1',
@@ -550,9 +573,20 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['MOARK_API_KEY'],
   },
   // Legacy/enterprise providers kept for backward compatibility with existing configs.
-  { name: 'azurecognitive', baseUrl: '', authMode: 'api_key', envKeys: ['AZURE_COGNITIVE_API_KEY'], envUrlKey: 'AZURE_COGNITIVE_RESOURCE_URL' },
+  {
+    name: 'azurecognitive',
+    baseUrl: '',
+    authMode: 'api_key',
+    envKeys: ['AZURE_COGNITIVE_API_KEY'],
+    envUrlKey: 'AZURE_COGNITIVE_RESOURCE_URL',
+  },
   { name: 'sapai', baseUrl: '', authMode: 'api_key', envKeys: ['AICORE_SERVICE_KEY'] },
-  { name: 'gitlab', baseUrl: 'https://gitlab.com/api/v4', authMode: 'api_key', envKeys: ['GITLAB_API_KEY'] },
+  {
+    name: 'gitlab',
+    baseUrl: 'https://gitlab.com/api/v4',
+    authMode: 'api_key',
+    envKeys: ['GITLAB_API_KEY'],
+  },
   // Note: Amazon Nova models are accessed through AWS Bedrock, not a separate API
   // Use 'bedrock' provider with nova models instead
 ];

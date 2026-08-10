@@ -16,12 +16,42 @@
 import Elysia from 'elysia';
 import { serverLog } from '../logger';
 import {
-  KoryphaiosError,
+  MalformedJsonError,
+  ValidationError,
   normalizeError,
   getErrorStatusCode,
   getErrorCode,
 } from '../errors/types';
 import { generateCorrelationId } from '../errors';
+
+const PUBLIC_CONFLICT_DETAIL_KEYS = new Set([
+  'expectedRevision',
+  'currentRevision',
+  'actualRevision',
+  'sourceChanged',
+  'sourceDeleted',
+]);
+
+/** Conflict recovery needs a small amount of authoritative state, but arbitrary
+ * error details can contain paths or submitted content. Only return bounded,
+ * primitive fields that are part of the public optimistic-concurrency contract. */
+function publicConflictDetails(
+  code: string,
+  statusCode: number,
+  details?: Record<string, unknown>,
+): Record<string, string | number | boolean> | undefined {
+  if (code !== 'CONFLICT' || statusCode !== 409 || !details) return undefined;
+  const safe: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (!PUBLIC_CONFLICT_DETAIL_KEYS.has(key)) continue;
+    if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+      safe[key] = value;
+    } else if (typeof value === 'string' && value.length <= 128) {
+      safe[key] = value;
+    }
+  }
+  return Object.keys(safe).length ? safe : undefined;
+}
 
 /**
  * The error handler function used by both the plugin form and the direct
@@ -31,13 +61,22 @@ import { generateCorrelationId } from '../errors';
 // Elysia's onError context shape — using a loose type so the handler can be
 // registered both via .onError(errorHandler) and via the plugin form.
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export function errorHandler({ error, request, set }: any) {
+export function errorHandler({ code: frameworkCode, error, request, set }: any) {
   const method = request.method;
   const url = new URL(request.url);
   const path = url.pathname;
   const correlationId = generateCorrelationId();
 
-  const normalized = normalizeError(error);
+  // Elysia's schema/parser failures are caller errors. Its raw validation
+  // message can contain the full schema and submitted value, so return a
+  // stable bounded description rather than converting it to an opaque 500 or
+  // echoing private request content.
+  const normalized =
+    frameworkCode === 'VALIDATION' || error?.code === 'VALIDATION'
+      ? new ValidationError('Request does not match the required schema')
+      : frameworkCode === 'PARSE' || error?.code === 'PARSE'
+        ? new MalformedJsonError()
+        : normalizeError(error);
   const statusCode = getErrorStatusCode(normalized);
   const code = getErrorCode(normalized);
 
@@ -68,16 +107,17 @@ export function errorHandler({ error, request, set }: any) {
 
   // Don't leak internal error details to clients for 5xx errors.
   const message = statusCode >= 500 ? 'Internal server error' : normalized.message;
+  const details = publicConflictDetails(code, statusCode, normalized.details);
 
   return {
     ok: false,
     error: message,
     code,
     correlationId,
+    ...(details ? { details } : {}),
   };
 }
 
 export const errorHandlingMiddleware = new Elysia({
   name: 'error-handling',
-})
-  .onError(errorHandler);
+}).onError(errorHandler);

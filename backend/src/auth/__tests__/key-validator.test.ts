@@ -8,6 +8,7 @@
 
 import { describe, it, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { validateProviderKey, type KeyStatus } from '../../core/auth/KeyValidator';
+import { ANTHROPIC_VERSION } from '../../providers/api-endpoints';
 
 const PROVIDERS = ['anthropic', 'openai', 'google'] as const;
 
@@ -72,6 +73,24 @@ describe('KeyValidator', () => {
     }
   });
 
+  it("sends Anthropic's documented 2023-06-01 version exactly", async () => {
+    let requestUrl = '';
+    let requestHeaders = new Headers();
+    globalThis.fetch = mock((input: RequestInfo | URL, init?: RequestInit) => {
+      requestUrl = String(input);
+      requestHeaders = new Headers(init?.headers);
+      return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+    }) as typeof fetch;
+
+    const result = await validateProviderKey('anthropic', { apiKey: 'synthetic-key' });
+
+    expect(result.status).toBe('VALID');
+    expect(ANTHROPIC_VERSION).toBe('2023-06-01');
+    expect(requestUrl).toBe('https://api.anthropic.com/v1/models');
+    expect(requestHeaders.get('anthropic-version')).toBe('2023-06-01');
+    expect(requestHeaders.get('x-api-key')).toBe('synthetic-key');
+  });
+
   describe('timeout', () => {
     it('returns INVALID on timeout (5s)', async () => {
       globalThis.fetch = mock(
@@ -112,7 +131,9 @@ describe('Live connectivity (.env keys)', () => {
     google: process.env.GEMINI_API_KEY ?? '',
   };
 
-  const hasAnyKey = Object.values(envKeys).some((v) => v && v.length > 0);
+  const hasAnyKey =
+    process.env.KORY_RUN_LIVE_PROVIDER_TESTS === '1' &&
+    Object.values(envKeys).some((v) => v && v.length > 0);
 
   it.skipIf(!hasAnyKey)(
     'reports status for each provider with key in .env',

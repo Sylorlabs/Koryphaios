@@ -104,6 +104,22 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   poe: 'https://api.poe.com/v1',
 };
 
+/**
+ * Runtime default for a provider's request adapter.
+ *
+ * OpenCode-compatible providers intentionally override older catalog URLs
+ * that describe a control plane, legacy API, or non-chat surface. Keeping the
+ * precedence here gives runtime construction and synthetic conformance one
+ * authoritative configured host.
+ */
+export function providerDefaultBaseUrl(name: ProviderName): string | undefined {
+  return (
+    OPENCODE_DEFAULT_BASE_URL[name] ??
+    PROVIDER_CONFIGS.find((provider) => provider.name === name)?.baseUrl ??
+    undefined
+  );
+}
+
 export const LLAMACPP_DEFAULT = 'http://127.0.0.1:8080/v1';
 export const LMSTUDIO_DEFAULT = 'http://localhost:1234/v1';
 

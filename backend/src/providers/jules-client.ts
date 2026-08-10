@@ -2,6 +2,7 @@
 // https://developers.google.com/jules/api
 
 import { serverLog } from '../logger';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 const JULES_API_BASE = 'https://jules.googleapis.com/v1alpha';
 
@@ -98,7 +99,10 @@ export class JulesClient {
     const { query: _q, ...rest } = init ?? {};
     const res = await fetch(url.toString(), {
       ...rest,
-      headers: { ...this.headers(rest.method === 'POST' || rest.method === 'PATCH'), ...(rest.headers as Record<string, string> | undefined) },
+      headers: {
+        ...this.headers(rest.method === 'POST' || rest.method === 'PATCH'),
+        ...(rest.headers as Record<string, string> | undefined),
+      },
       signal: this.options.signal,
     });
     if (!res.ok) {
@@ -193,6 +197,7 @@ export async function resolveGitHubRepoFromDir(
       cwd: workingDirectory,
       stdout: 'pipe',
       stderr: 'ignore',
+      env: getSafeSubprocessEnv(),
     });
     const remote = (await new Response(proc.stdout).text()).trim();
     const exit = await proc.exited;
@@ -204,12 +209,16 @@ export async function resolveGitHubRepoFromDir(
       cwd: workingDirectory,
       stdout: 'pipe',
       stderr: 'ignore',
+      env: getSafeSubprocessEnv(),
     });
     const branch = (await new Response(branchProc.stdout).text()).trim() || 'main';
     await branchProc.exited;
     return { ...parsed, branch };
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Jules client: GitHub repo resolution from dir failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Jules client: GitHub repo resolution from dir failed',
+    );
     return null;
   }
 }

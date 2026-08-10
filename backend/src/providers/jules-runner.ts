@@ -16,6 +16,16 @@ const POLL_INTERVAL_MS = 2_000;
 const JULES_TIMEOUT_MS = 30 * 60_000;
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED']);
 
+export const JULES_APPROVAL_REQUIRED_ERROR =
+  'Jules is unavailable in this build: Koryphaios cannot yet present and record explicit user approval for a Jules plan. No cloud session, branch, or pull request was created.';
+
+// This is deliberately not configurable through headers or environment
+// variables. A future implementation must replace this with a durable,
+// user-originated approval record before any Jules API mutation is enabled.
+function hasAuthoritativeUserApprovalFlow(): boolean {
+  return false;
+}
+
 export interface JulesRunConfig {
   apiKey: string;
   prompt: string;
@@ -59,8 +69,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   for (const m of turns) {
     const text = flattenContent(m.content);
     if (!text.trim()) continue;
-    const label =
-      m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
+    const label = m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
     lines.push(`${label}: ${text}`);
   }
   return lines.join('\n\n');
@@ -72,9 +81,12 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) parts.push(block.text);
     else if (block.type === 'tool_use')
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image') parts.push('[image omitted — Jules API text-only in this integration]');
+    else if (block.type === 'image')
+      parts.push('[image omitted — Jules API text-only in this integration]');
   }
   return parts.join('\n');
 }
@@ -146,7 +158,10 @@ async function resolveSourceContext(
   workingDirectory: string | undefined,
   defaultBranch: string,
   repolessFallback: boolean,
-): Promise<{ sourceContext?: { source: string; githubRepoContext: { startingBranch: string } }; repoless: boolean }> {
+): Promise<{
+  sourceContext?: { source: string; githubRepoContext: { startingBranch: string } };
+  repoless: boolean;
+}> {
   if (!workingDirectory) {
     return { repoless: repolessFallback };
   }
@@ -177,6 +192,11 @@ async function resolveSourceContext(
 }
 
 export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<ProviderEvent> {
+  if (!hasAuthoritativeUserApprovalFlow()) {
+    yield { type: 'error', error: JULES_APPROVAL_REQUIRED_ERROR };
+    return;
+  }
+
   const prompt = config.prompt.trim();
   if (!prompt) {
     yield { type: 'error', error: 'Jules: empty prompt' };
@@ -185,11 +205,11 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
 
   const client = new JulesClient({ apiKey: config.apiKey, signal: config.signal });
   const defaultBranch = config.defaultBranch ?? process.env.JULES_DEFAULT_BRANCH ?? 'main';
-  const repolessFallback = config.repolessFallback ?? process.env.JULES_REPOLESS_FALLBACK !== 'false';
-  const automationMode =
-    config.automationMode ?? process.env.JULES_AUTOMATION_MODE ?? 'AUTO_CREATE_PR';
-  const requirePlanApproval =
-    config.requirePlanApproval ?? process.env.JULES_REQUIRE_PLAN_APPROVAL !== 'false';
+  const repolessFallback =
+    config.repolessFallback ?? process.env.JULES_REPOLESS_FALLBACK !== 'false';
+  // Creating a PR is never a default. Even after the approval flow is wired,
+  // Koryphaios must require Jules to stop at its plan boundary.
+  const requirePlanApproval = true;
 
   let julesSessionId = config.resumeSessionId;
   let isFollowUp = false;
@@ -231,7 +251,6 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
 
       if (sourceContext) {
         body.sourceContext = sourceContext;
-        if (automationMode) body.automationMode = automationMode;
         yield {
           type: 'content_delta',
           content: `Starting Jules on **${sourceContext.source}** (branch \`${sourceContext.githubRepoContext.startingBranch}\`)…\n`,
@@ -301,12 +320,12 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
         for (const event of mapActivityToEvents(activity)) yield event;
 
         if (activity.planGenerated && requirePlanApproval) {
-          try {
-            await client.approvePlan(julesSessionId!);
-            yield { type: 'content_delta', content: 'Plan approved — Jules executing in the cloud…\n' };
-          } catch (err) {
-            providerLog.warn({ err }, 'Jules approvePlan failed');
-          }
+          yield {
+            type: 'error',
+            error:
+              'Jules produced a plan and is waiting for explicit user approval. Koryphaios cannot submit that approval in this build.',
+          };
+          return;
         }
       }
 
@@ -338,12 +357,12 @@ export async function* runJulesTask(config: JulesRunConfig): AsyncGenerator<Prov
       }
 
       if (session.state === 'AWAITING_PLAN_APPROVAL' && requirePlanApproval) {
-        try {
-          await client.approvePlan(julesSessionId!);
-        } catch (err: unknown) {
-          /* polled on next activity batch */
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Jules approvePlan failed — will retry on next poll');
-        }
+        yield {
+          type: 'error',
+          error:
+            'Jules is waiting for explicit user approval. Koryphaios cannot submit that approval in this build.',
+        };
+        return;
       }
 
       await sleep(POLL_INTERVAL_MS, config.signal);

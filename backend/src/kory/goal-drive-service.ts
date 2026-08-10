@@ -1,14 +1,37 @@
 import type { Goal, GoalExecutionConfig } from '@koryphaios/shared';
-import type { GoalStore } from '../stores/goal-store';
+import { sanitizeGoalEvidence, type GoalStore } from '../stores/goal-store';
 import type { SessionStore } from '../stores/session-store';
 import type { WSManager } from '../ws/ws-manager';
 import type { KoryManager } from './manager';
 import { GoalRunner, goalProviderPolicy } from './goal-runner';
 import { koryLog } from '../logger';
 import { getWorkflowDefinition, listWorkflowRuns, workflowNextInstruction } from './workflows';
+import { lstatSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { processSupervisor, type AgentToolBarrierLease } from '../process-supervisor/supervisor';
+import type { CheckpointStore } from './checkpoint-store';
 
 const ACTIVE_STATUSES = new Set(['queued', 'planning', 'running']);
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+type GoalCheckpointStore = Pick<CheckpointStore, 'createGhostCommit'>;
+
+export interface GoalDriveServiceOptions {
+  checkpointIntervalMs?: number;
+  checkpointStoreFactory?: (
+    workingDirectory: string,
+  ) => GoalCheckpointStore | Promise<GoalCheckpointStore>;
+  acquireSessionMutationBarrier?: (sessionId: string) => { release(): void } | null;
+  acquireAgentToolBarrier?: (sessionId: string) => AgentToolBarrierLease | null;
+  /** Test/diagnostic override; production retries remain one second apart. */
+  retryDelayMs?: number;
+}
+
+export interface GoalSessionErasureLease {
+  waitForIdle(timeoutMs?: number): Promise<void>;
+  complete(): void;
+  rollback(): Promise<void>;
+}
 
 /**
  * Backend-owned durable Goal Mode loop.
@@ -20,16 +43,29 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export class GoalDriveService {
   private active = new Set<string>();
+  /** Per-goal periodic checkpoint timers (30 min interval). */
+  private checkpointTimers = new Map<string, NodeJS.Timeout>();
+  private checkpointInFlight = new Set<string>();
+  private goalTurnInFlight = new Set<string>();
+  private erasingSessions = new Set<string>();
+  private static readonly CHECKPOINT_INTERVAL_MS = 30 * 60 * 1000;
 
   constructor(
     private goals: GoalStore,
     private sessions: SessionStore,
     private kory: KoryManager,
     private wsManager: WSManager,
+    private options: GoalDriveServiceOptions = {},
   ) {}
 
   private publish(goal: Goal | undefined) {
     if (!goal) return;
+    if (
+      (goal.sessionId && this.erasingSessions.has(goal.sessionId)) ||
+      (goal.execution?.sessionId && this.erasingSessions.has(goal.execution.sessionId))
+    ) {
+      return;
+    }
     this.wsManager.broadcast({
       type: 'goals.updated',
       payload: { goal },
@@ -39,20 +75,66 @@ export class GoalDriveService {
   }
 
   async start(goalId: string, execution: GoalExecutionConfig): Promise<Goal> {
-    const prior = await this.goals.get(goalId);
+    if (this.erasingSessions.has(execution.sessionId)) {
+      throw new Error('Goal execution refused because this session is being deleted');
+    }
+    let prior = await this.goals.get(goalId);
     if (!prior) throw new Error('Goal not found');
     if (prior.status === 'completed' || prior.status === 'cancelled')
       throw new Error('Terminal goals cannot be restarted; create a new goal.');
+    if (this.active.has(goalId) || prior.status === 'running' || prior.status === 'planning') {
+      throw new Error('Goal is already running');
+    }
+    if (!execution.provider.trim() || !execution.model.trim()) {
+      throw new Error('Goal execution requires an explicit provider and model');
+    }
+    if (prior.scope === 'session' && prior.sessionId !== execution.sessionId) {
+      throw new Error('This session goal can only run in its owning chat');
+    }
+    const session = await this.sessions.get(execution.sessionId);
+    if (!session) throw new Error('The execution chat no longer exists');
+    this.resolveWorkingDirectory(prior, session);
+    const resumed = prior.status === 'paused' || prior.status === 'blocked';
+    prior = (await this.goals.reopenUnverifiedItems(goalId)) ?? prior;
+    const attemptStartedAt = Date.now();
+    const attemptId = crypto.randomUUID();
+    const executionAttempt: GoalExecutionConfig = {
+      ...execution,
+      attemptId,
+      attemptStartedAt,
+    };
     const linkedSessionIds = prior.linkedSessionIds.includes(execution.sessionId)
       ? prior.linkedSessionIds
       : [...prior.linkedSessionIds, execution.sessionId];
-    const updated = await this.goals.update(goalId, {
+    let updated = await this.goals.update(goalId, {
       status: 'queued',
       blocker: undefined,
-      execution,
+      execution: executionAttempt,
       linkedSessionIds,
+      activity: [
+        ...prior.activity,
+        {
+          id: crypto.randomUUID(),
+          type: 'execution_attempt_started',
+          message: `${attemptId}|${resumed ? 'resumed' : 'started'}`,
+          sessionId: execution.sessionId,
+          createdAt: attemptStartedAt,
+        },
+      ],
     });
     if (!updated) throw new Error('Goal not found');
+    const interrupted = updated.checklist.find((item) => item.status === 'running');
+    if (interrupted) {
+      updated = await this.goals.resetItem(
+        goalId,
+        interrupted.id,
+        resumed
+          ? 'Resumed in a fresh execution attempt; replaying the interrupted checklist item.'
+          : 'Starting in a fresh execution attempt; replaying the interrupted checklist item.',
+        attemptId,
+      );
+      if (!updated) throw new Error('Goal execution attempt changed before it could start');
+    }
     this.publish(updated);
     this.schedule(goalId);
     return updated;
@@ -61,6 +143,10 @@ export class GoalDriveService {
   async pause(goalId: string, reason = 'Paused by user'): Promise<Goal> {
     const goal = await this.goals.get(goalId);
     if (!goal) throw new Error('Goal not found');
+    if (goal.status === 'completed' || goal.status === 'cancelled') {
+      throw new Error('Terminal goals cannot be paused');
+    }
+    if (goal.status === 'paused') return goal;
     const paused = await this.goals.update(goalId, {
       status: 'paused',
       blocker: reason,
@@ -70,7 +156,8 @@ export class GoalDriveService {
       ],
     });
     if (!paused) throw new Error('Goal not found');
-    if (goal.execution?.sessionId) this.kory.cancelSessionWorkers(goal.execution.sessionId);
+    this.stopCheckpointTimer(goalId);
+    if (goal.execution?.sessionId) await this.kory.cancelSessionWorkers(goal.execution.sessionId);
     this.publish(paused);
     return paused;
   }
@@ -78,6 +165,9 @@ export class GoalDriveService {
   async resume(goalId: string): Promise<Goal> {
     const goal = await this.goals.get(goalId);
     if (!goal) throw new Error('Goal not found');
+    if (goal.status !== 'paused' && goal.status !== 'blocked') {
+      throw new Error('Only paused or blocked goals can be resumed');
+    }
     if (!goal.execution) throw new Error('Choose a provider model before resuming this goal');
     return this.start(goalId, goal.execution);
   }
@@ -85,6 +175,8 @@ export class GoalDriveService {
   async stop(goalId: string): Promise<Goal> {
     const goal = await this.goals.get(goalId);
     if (!goal) throw new Error('Goal not found');
+    if (goal.status === 'completed') throw new Error('Completed goals cannot be stopped');
+    if (goal.status === 'cancelled') return goal;
     const stopped = await this.goals.update(goalId, {
       status: 'cancelled',
       blocker: 'Stopped by user',
@@ -99,7 +191,8 @@ export class GoalDriveService {
       ],
     });
     if (!stopped) throw new Error('Goal not found');
-    if (goal.execution?.sessionId) this.kory.cancelSessionWorkers(goal.execution.sessionId);
+    this.stopCheckpointTimer(goalId);
+    if (goal.execution?.sessionId) await this.kory.cancelSessionWorkers(goal.execution.sessionId);
     this.publish(stopped);
     return stopped;
   }
@@ -114,15 +207,40 @@ export class GoalDriveService {
   }
 
   async recover(): Promise<void> {
-    for (const goal of await this.goals.list()) {
+    for (let goal of await this.goals.list()) {
       if (!ACTIVE_STATUSES.has(goal.status) || !goal.execution) continue;
+      if (this.erasingSessions.has(goal.execution.sessionId)) continue;
+      if (!goal.execution.attemptId || !goal.execution.attemptStartedAt) {
+        const attemptStartedAt = Date.now();
+        const attemptId = crypto.randomUUID();
+        goal =
+          (await this.goals.update(goal.id, {
+            execution: { ...goal.execution, attemptId, attemptStartedAt },
+            activity: [
+              ...goal.activity,
+              {
+                id: crypto.randomUUID(),
+                type: 'execution_attempt_started',
+                message: `${attemptId}|recovered`,
+                sessionId: goal.execution.sessionId,
+                createdAt: attemptStartedAt,
+              },
+            ],
+          })) ?? goal;
+      }
+      goal = (await this.goals.reopenUnverifiedItems(goal.id)) ?? goal;
+      const attemptId = goal.execution?.attemptId;
+      if (!attemptId) continue;
       const running = goal.checklist.find((item) => item.status === 'running');
-      if (running)
-        await this.goals.resetItem(
+      if (running) {
+        const recovered = await this.goals.resetItem(
           goal.id,
           running.id,
           'Recovered after restart; replaying the interrupted checklist item.',
+          attemptId,
         );
+        if (!recovered) continue;
+      }
       this.schedule(goal.id);
     }
   }
@@ -130,23 +248,26 @@ export class GoalDriveService {
   private schedule(goalId: string) {
     if (this.active.has(goalId)) return;
     this.active.add(goalId);
+    this.startCheckpointTimer(goalId);
     void this.run(goalId)
       .catch(async (error) => {
         koryLog.error({ goalId, error }, 'Goal Mode durable loop failed');
         const goal = await this.goals.get(goalId);
         const item = goal?.checklist.find((entry) => entry.status === 'running');
         const message = error instanceof Error ? error.message : String(error);
-        if (goal && item && goal.execution) {
-          const recorded = await this.goals.addActivity(
+        const attemptId = goal?.execution?.attemptId;
+        if (goal && item && goal.execution && attemptId && ACTIVE_STATUSES.has(goal.status)) {
+          const recorded = await this.goals.addActivityForActiveAttempt(
             goalId,
+            attemptId,
             'driver_error',
             `${item.id}|${message}`,
             goal.execution.sessionId,
           );
-          const repeats =
-            recorded?.activity.filter(
-              (event) => event.type === 'driver_error' && event.message === `${item.id}|${message}`,
-            ).length ?? 0;
+          if (!recorded) return;
+          const repeats = this.attemptActivity(recorded).filter(
+            (event) => event.type === 'driver_error' && event.message === `${item.id}|${message}`,
+          ).length;
           if (repeats >= 3) {
             const adjudication = await this.kory.verifyGoalBlocker(
               goal.execution.sessionId,
@@ -154,39 +275,250 @@ export class GoalDriveService {
               item.title,
               `Repeated execution failure: ${message}`,
               goal.execution.model,
+              goal.execution.provider,
             );
-            if (adjudication.passed) {
-              const prefix = adjudication.skipped
-                ? 'Critic disabled; failure repeated across 3 attempts'
-                : 'Critic confirmed repeated execution failure';
-              const blocked = await this.goals.update(goalId, {
-                status: 'blocked',
-                blocker: `${prefix}: ${message}`,
+            if (adjudication.skipped) {
+              const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+                status: 'paused',
+                blocker:
+                  'Independent blocker verification is disabled. Enable the Goal Mode critic and resume to adjudicate the repeated execution failure.',
               });
+              if (!paused) return;
+              this.publish(paused);
+              return;
+            }
+            if (adjudication.passed) {
+              const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+                status: 'blocked',
+                blocker: `Critic confirmed repeated execution failure: ${message}`,
+              });
+              if (!blocked) return;
               this.publish(blocked);
+              return;
             } else {
-              this.publish(
-                await this.goals.resetItem(
-                  goalId,
-                  item.id,
-                  adjudication.feedback ??
-                    'The Critic rejected the execution failure as a terminal blocker; retrying.',
-                ),
+              const retrying = await this.goals.resetItem(
+                goalId,
+                item.id,
+                adjudication.feedback ??
+                  'The Critic rejected the execution failure as a terminal blocker; retrying.',
+                attemptId,
               );
+              if (!retrying) return;
+              this.publish(retrying);
             }
           }
         }
-        await sleep(1_000);
+        await sleep(this.options.retryDelayMs ?? 1_000);
       })
       .finally(async () => {
         this.active.delete(goalId);
         const goal = await this.goals.get(goalId);
-        if (goal?.execution && ACTIVE_STATUSES.has(goal.status)) this.schedule(goalId);
+        if (goal?.execution && ACTIVE_STATUSES.has(goal.status)) {
+          this.schedule(goalId);
+        } else {
+          // Goal is done/blocked/cancelled — stop the periodic checkpoint timer.
+          this.stopCheckpointTimer(goalId);
+        }
       });
   }
 
+  /** Stop Goal producers before session data is erased and keep a tombstone so
+   * a stale scheduled callback cannot recreate activity after commit. */
+  tryBeginSessionErasure(sessionId: string): GoalSessionErasureLease | null {
+    if (this.erasingSessions.has(sessionId)) return null;
+    this.erasingSessions.add(sessionId);
+    let settled = false;
+    return {
+      waitForIdle: async (timeoutMs = 10_000) => {
+        const deadline = Date.now() + timeoutMs;
+        while (true) {
+          const related = (await this.goals.list()).filter(
+            (goal) => goal.sessionId === sessionId || goal.execution?.sessionId === sessionId,
+          );
+          for (const goal of related) this.stopCheckpointTimer(goal.id);
+          const inFlight = related.some(
+            (goal) =>
+              this.goalTurnInFlight.has(goal.id) || this.checkpointInFlight.has(goal.id),
+          );
+          if (!inFlight) return;
+          if (Date.now() >= deadline) {
+            throw new Error('Session erasure timed out waiting for Goal activity to settle');
+          }
+          await sleep(10);
+        }
+      },
+      complete: () => {
+        if (settled) return;
+        settled = true;
+        // Keep the process-lifetime tombstone. Session IDs are unique and a
+        // late Goal callback must never publish or persist against this chat.
+        this.erasingSessions.add(sessionId);
+      },
+      rollback: async () => {
+        if (settled) return;
+        settled = true;
+        this.erasingSessions.delete(sessionId);
+        await this.recover();
+      },
+    };
+  }
+
+  /**
+   * Start a periodic 30-minute checkpoint timer for a goal.
+   * Checkpoints are intentionally deferred while an agent turn or owned
+   * background process may still be writing the workspace.
+   */
+  private startCheckpointTimer(goalId: string): void {
+    if (this.checkpointTimers.has(goalId)) return;
+    const timer = setInterval(
+      () => void this.createGoalCheckpoint(goalId),
+      this.options.checkpointIntervalMs ?? GoalDriveService.CHECKPOINT_INTERVAL_MS,
+    );
+    timer.unref?.();
+    this.checkpointTimers.set(goalId, timer);
+  }
+
+  private stopCheckpointTimer(goalId: string): void {
+    const timer = this.checkpointTimers.get(goalId);
+    if (timer) {
+      clearInterval(timer);
+      this.checkpointTimers.delete(goalId);
+    }
+  }
+
+  /** Create a periodic goal checkpoint using the goal's session and working directory. */
+  private async createGoalCheckpoint(goalId: string): Promise<void> {
+    if (this.checkpointInFlight.has(goalId) || this.goalTurnInFlight.has(goalId)) return;
+    this.checkpointInFlight.add(goalId);
+    let sessionLease: { release(): void } | null = null;
+    let processLease: AgentToolBarrierLease | null = null;
+    try {
+      const goal = await this.goals.get(goalId);
+      if (!goal || !ACTIVE_STATUSES.has(goal.status) || !goal.execution) {
+        this.stopCheckpointTimer(goalId);
+        return;
+      }
+      if (this.erasingSessions.has(goal.execution.sessionId)) return;
+      const session = await this.sessions.get(goal.execution.sessionId);
+      if (!session) throw new Error('Goal execution chat no longer exists');
+      const workingDirectory = this.resolveWorkingDirectory(goal, session);
+      if (this.kory.isSessionRunning(goal.execution.sessionId)) {
+        koryLog.debug({ goalId }, 'Deferred periodic goal checkpoint until the session is idle');
+        return;
+      }
+      sessionLease = (
+        this.options.acquireSessionMutationBarrier ??
+        ((sessionId: string) => this.kory.tryAcquireSessionMutationBarrier(sessionId))
+      )(goal.execution.sessionId);
+      if (!sessionLease) {
+        koryLog.debug({ goalId }, 'Deferred periodic goal checkpoint until manager work is idle');
+        return;
+      }
+      processLease = (
+        this.options.acquireAgentToolBarrier ??
+        ((sessionId: string) => processSupervisor.tryAcquireAgentToolBarrier(sessionId))
+      )(goal.execution.sessionId);
+      if (!processLease) {
+        koryLog.debug({ goalId }, 'Deferred periodic goal checkpoint until agent tools are idle');
+        return;
+      }
+      const changedFiles = this.kory.getRecordedSessionChanges(goal.execution.sessionId);
+      if (changedFiles.length === 0) {
+        koryLog.debug({ goalId }, 'Skipped periodic goal checkpoint with no owned file changes');
+        return;
+      }
+      // Re-read status immediately before publication so pause/stop takes
+      // effect without waiting for another timer tick.
+      const current = await this.goals.get(goalId);
+      if (
+        !current ||
+        this.erasingSessions.has(goal.execution.sessionId) ||
+        !ACTIVE_STATUSES.has(current.status) ||
+        current.execution?.sessionId !== goal.execution.sessionId ||
+        this.goalTurnInFlight.has(goalId)
+      )
+        return;
+      const store = this.options.checkpointStoreFactory
+        ? await this.options.checkpointStoreFactory(workingDirectory)
+        : new (await import('./checkpoint-store')).CheckpointStore(workingDirectory);
+      const label = `Goal checkpoint: ${goal.objective.slice(0, 60)}`;
+      const hash = await store.createGhostCommit(label, {
+        agentId: goal.execution.sessionId,
+        checkpointType: 'goal_checkpoint',
+        model: goal.execution.model,
+        provider: goal.execution.provider,
+        summary: label,
+        changedFiles,
+      });
+      if (!hash) throw new Error('Checkpoint publication returned no hash');
+      const stillActive = await this.goals.get(goalId);
+      if (!stillActive || !ACTIVE_STATUSES.has(stillActive.status)) return;
+      const acknowledged = await this.goals.addActivity(
+        goalId,
+        'goal_checkpoint',
+        `${hash}|${changedFiles.length} owned file change${changedFiles.length === 1 ? '' : 's'} checkpointed`,
+        goal.execution.sessionId,
+      );
+      this.publish(acknowledged);
+      koryLog.info(
+        { goalId, sessionId: goal.execution.sessionId, hash },
+        'Periodic goal checkpoint created',
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      koryLog.warn({ goalId, err }, 'Failed to create periodic goal checkpoint — non-fatal');
+      const current = await this.goals.get(goalId).catch(() => undefined);
+      if (current && ACTIVE_STATUSES.has(current.status)) {
+        const recorded = await this.goals
+          .addActivity(
+            goalId,
+            'goal_checkpoint_failed',
+            `Periodic checkpoint was not published: ${detail}`,
+            current.execution?.sessionId,
+          )
+          .catch(() => undefined);
+        this.publish(recorded);
+      }
+    } finally {
+      processLease?.release();
+      sessionLease?.release();
+      this.checkpointInFlight.delete(goalId);
+    }
+  }
+
+  private resolveWorkingDirectory(
+    goal: Goal,
+    session: { workingDirectory?: string | null },
+  ): string {
+    const configured = session.workingDirectory?.trim();
+    if (!configured) throw new Error('Goal session has no durable project directory');
+    const absolute = resolve(configured);
+    const stat = lstatSync(absolute);
+    if (!stat.isDirectory()) throw new Error('Goal session working directory is not a directory');
+    const canonical = realpathSync(absolute);
+    if (goal.scope === 'project') {
+      if (!goal.projectPath?.trim()) throw new Error('Project goal has no project directory');
+      const project = realpathSync(resolve(goal.projectPath));
+      if (canonical !== project) {
+        throw new Error('This project goal must run in a chat scoped to its project');
+      }
+    }
+    return canonical;
+  }
+
+  private async waitUntilCheckpointIdle(goalId: string): Promise<boolean> {
+    while (this.checkpointInFlight.has(goalId)) {
+      const goal = await this.goals.get(goalId);
+      if (!goal || !ACTIVE_STATUSES.has(goal.status)) return false;
+      await sleep(25);
+    }
+    return true;
+  }
+
   private async waitUntilSessionIdle(sessionId: string, goalId: string): Promise<boolean> {
+    if (this.erasingSessions.has(sessionId)) return false;
     while (this.kory.isSessionRunning(sessionId)) {
+      if (this.erasingSessions.has(sessionId)) return false;
       const goal = await this.goals.get(goalId);
       if (!goal || !ACTIVE_STATUSES.has(goal.status)) return false;
       await sleep(250);
@@ -195,7 +527,7 @@ export class GoalDriveService {
   }
 
   private blockerCandidates(goal: Goal, itemId: string): string[] {
-    return goal.activity
+    return this.attemptActivity(goal)
       .filter(
         (event) => event.type === 'blocker_candidate' && event.message.startsWith(`${itemId}|`),
       )
@@ -203,7 +535,7 @@ export class GoalDriveService {
   }
 
   private evidenceCandidates(goal: Goal, itemId: string): string[] {
-    return goal.activity
+    return this.attemptActivity(goal)
       .filter(
         (event) => event.type === 'evidence_candidate' && event.message.startsWith(`${itemId}|`),
       )
@@ -218,6 +550,19 @@ export class GoalDriveService {
       : undefined;
   }
 
+  private attemptActivity(goal: Goal): Goal['activity'] {
+    const attemptId = goal.execution?.attemptId;
+    const attemptStartedAt = goal.execution?.attemptStartedAt;
+    if (!attemptId || !attemptStartedAt) return goal.activity;
+    const marker = goal.activity.findLastIndex(
+      (event) =>
+        event.type === 'execution_attempt_started' && event.message.startsWith(`${attemptId}|`),
+    );
+    return marker >= 0
+      ? goal.activity.slice(marker + 1)
+      : goal.activity.filter((event) => event.createdAt >= attemptStartedAt);
+  }
+
   private async run(goalId: string): Promise<void> {
     let verificationFeedback = '';
     while (true) {
@@ -225,12 +570,29 @@ export class GoalDriveService {
       if (!goal || !ACTIVE_STATUSES.has(goal.status)) return;
       const execution = goal.execution;
       if (!execution) return;
+      if (this.erasingSessions.has(execution.sessionId)) return;
+      const attemptId = execution.attemptId;
+      if (!attemptId) return;
       const session = await this.sessions.get(execution.sessionId);
       if (!session) {
-        const blocked = await this.goals.update(goalId, {
+        const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
           status: 'blocked',
           blocker: 'The execution chat no longer exists. Choose another chat to resume.',
         });
+        if (!blocked) return;
+        this.publish(blocked);
+        return;
+      }
+      let workflowRoot: string;
+      try {
+        workflowRoot = this.resolveWorkingDirectory(goal, session);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+          status: 'blocked',
+          blocker: `Goal execution directory is unavailable: ${detail}`,
+        });
+        if (!blocked) return;
         this.publish(blocked);
         return;
       }
@@ -238,10 +600,11 @@ export class GoalDriveService {
 
       const policy = goalProviderPolicy(execution.provider, execution.remotePlanApproved === true);
       if (!policy.allowed) {
-        const paused = await this.goals.update(goalId, {
+        const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
           status: 'paused',
           blocker: policy.reason,
         });
+        if (!paused) return;
         this.publish(paused);
         return;
       }
@@ -250,6 +613,15 @@ export class GoalDriveService {
       if (!item) {
         if (goal.checklist.every((entry) => entry.status === 'completed')) {
           const finalized = await new GoalRunner(this.goals).finalize(goalId);
+          if (finalized.blocked) {
+            const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+              status: 'paused',
+              blocker: finalized.blocked,
+            });
+            if (!paused) return;
+            this.publish(paused);
+            return;
+          }
           this.publish(finalized.goal);
           return;
         }
@@ -267,10 +639,6 @@ export class GoalDriveService {
       const currentGoal = goal;
       const currentItem = item;
 
-      const workflowRoot =
-        (session as { workingDirectory?: string }).workingDirectory ??
-        currentGoal.projectPath ??
-        process.cwd();
       const linkedBefore = listWorkflowRuns(workflowRoot, execution.sessionId).filter(
         (run) => run.goalId === currentGoal.id && run.goalItemId === currentItem.id,
       );
@@ -284,44 +652,57 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
 
       const blockerCountBefore = this.blockerCandidates(currentGoal, currentItem.id).length;
       const evidenceCountBefore = this.evidenceCandidates(currentGoal, currentItem.id).length;
-      await this.goals.addActivity(
+      const dispatched = await this.goals.addActivityForActiveAttempt(
         goalId,
+        attemptId,
         'provider_dispatched',
         `${execution.provider}: ${policy.verification}`,
         execution.sessionId,
       );
-      await this.kory.processTask(
-        execution.sessionId,
-        prompt,
-        execution.model,
-        execution.reasoningLevel,
-        undefined,
-        undefined,
-        undefined,
-        {
-          goalId: currentGoal.id,
-          objective: currentGoal.objective,
-          itemId: currentItem.id,
-          itemTitle: currentItem.title,
-          verification: policy.verification,
-        },
-      );
+      if (!dispatched) return;
+      if (!(await this.waitUntilCheckpointIdle(goalId))) return;
+      this.goalTurnInFlight.add(goalId);
+      try {
+        await this.kory.processTask(
+          execution.sessionId,
+          prompt,
+          execution.model,
+          execution.reasoningLevel,
+          undefined,
+          undefined,
+          undefined,
+          {
+            goalId: currentGoal.id,
+            objective: currentGoal.objective,
+            itemId: currentItem.id,
+            itemTitle: currentItem.title,
+            verification: policy.verification,
+          },
+        );
+      } finally {
+        this.goalTurnInFlight.delete(goalId);
+      }
+
+      if (this.erasingSessions.has(execution.sessionId)) return;
 
       goal = await this.goals.get(goalId);
-      if (!goal || !ACTIVE_STATUSES.has(goal.status)) return;
+      if (!goal || !ACTIVE_STATUSES.has(goal.status) || goal.execution?.attemptId !== attemptId)
+        return;
       const linkedAfter = listWorkflowRuns(workflowRoot, execution.sessionId).filter(
         (run) => run.goalId === goal!.id && run.goalItemId === currentItem.id,
       );
       const blockedWorkflow = linkedAfter.find((run) => run.status === 'blocked');
       if (blockedWorkflow) {
         const candidate = `Workflow ${blockedWorkflow.id} blocked: ${blockedWorkflow.blocker ?? 'No concrete blocker was recorded'}`;
-        await this.goals.addActivity(
+        const recorded = await this.goals.addActivityForActiveAttempt(
           goalId,
+          attemptId,
           'blocker_candidate',
           `${item.id}|${candidate}`,
           execution.sessionId,
         );
-        goal = (await this.goals.get(goalId)) ?? goal;
+        if (!recorded) return;
+        goal = recorded;
       }
       const runningWorkflow = linkedAfter.find((run) => run.status === 'running');
       if (runningWorkflow) {
@@ -332,21 +713,30 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
               event.message.startsWith(`${runningWorkflow.id}|`),
           )
         ) {
-          await this.goals.addActivity(
+          const linked = await this.goals.addActivityForActiveAttempt(
             goalId,
+            attemptId,
             'workflow_linked',
             `${runningWorkflow.id}|${getWorkflowDefinition(runningWorkflow.workflowId)?.name ?? runningWorkflow.workflowId}`,
             execution.sessionId,
           );
+          if (!linked) return;
+          goal = linked;
         }
         verificationFeedback = `The linked ${getWorkflowDefinition(runningWorkflow.workflowId)?.name ?? 'workflow'} is not complete. ${workflowNextInstruction(runningWorkflow)}`;
-        const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+        const retrying = await this.goals.resetItem(
+          goalId,
+          item.id,
+          verificationFeedback,
+          attemptId,
+        );
+        if (!retrying) return;
         this.publish(retrying);
-        await sleep(1_000);
+        await sleep(this.options.retryDelayMs ?? 1_000);
         continue;
       }
       for (const completedWorkflow of linkedAfter.filter((run) => run.status === 'completed')) {
-        const alreadyPromoted = goal.activity.some(
+        const alreadyPromoted = this.attemptActivity(goal).some(
           (event) =>
             event.type === 'workflow_evidence' &&
             event.message.startsWith(`${completedWorkflow.id}|`),
@@ -355,19 +745,23 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
         const evidence = completedWorkflow.evidence
           .map((entry) => `${entry.stageId}: ${entry.value}`)
           .join('\n');
-        await this.goals.addActivity(
+        const promoted = await this.goals.addActivityForActiveAttempt(
           goalId,
+          attemptId,
           'workflow_evidence',
           `${completedWorkflow.id}|${completedWorkflow.workflowId}|${completedWorkflow.evidence.length} stages`,
           execution.sessionId,
         );
-        await this.goals.addActivity(
+        if (!promoted) return;
+        const recorded = await this.goals.addActivityForActiveAttempt(
           goalId,
+          attemptId,
           'evidence_candidate',
           `${item.id}|Completed linked workflow ${completedWorkflow.id}:\n${evidence}`,
           execution.sessionId,
         );
-        goal = (await this.goals.get(goalId)) ?? goal;
+        if (!recorded) return;
+        goal = recorded;
       }
       const blocker = this.repeatedBlocker(goal, item.id);
       if (blocker) {
@@ -377,70 +771,205 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
           item.title,
           blocker,
           execution.model,
+          execution.provider,
         );
-        if (adjudication.passed) {
-          const prefix = adjudication.skipped
-            ? 'Critic disabled; blocker repeated across 3 attempts'
-            : 'Critic confirmed after 3 attempts';
-          const blocked = await this.goals.update(goalId, {
-            status: 'blocked',
-            blocker: `${prefix}: ${blocker}`,
+        if (adjudication.skipped) {
+          const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+            status: 'paused',
+            blocker:
+              'Independent blocker verification is disabled. Enable the Goal Mode critic and resume to adjudicate the submitted blocker.',
           });
+          if (!paused) return;
+          this.publish(paused);
+          return;
+        }
+        if (adjudication.passed) {
+          const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+            status: 'blocked',
+            blocker: `Critic confirmed after 3 attempts: ${blocker}`,
+          });
+          if (!blocked) return;
           this.publish(blocked);
           return;
         }
         verificationFeedback =
           adjudication.feedback ??
           'The Critic rejected the proposed blocker; continue with another approach.';
-        const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+        const retrying = await this.goals.resetItem(
+          goalId,
+          item.id,
+          verificationFeedback,
+          attemptId,
+        );
+        if (!retrying) return;
         this.publish(retrying);
-        await sleep(1_000);
+        await sleep(this.options.retryDelayMs ?? 1_000);
         continue;
       }
       if (this.blockerCandidates(goal, item.id).length > blockerCountBefore) {
         verificationFeedback =
           'The proposed blocker is not yet established. Continue trying safe alternatives.';
-        const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+        const retrying = await this.goals.resetItem(
+          goalId,
+          item.id,
+          verificationFeedback,
+          attemptId,
+        );
+        if (!retrying) return;
         this.publish(retrying);
-        await sleep(1_000);
+        await sleep(this.options.retryDelayMs ?? 1_000);
         continue;
       }
 
       const evidenceCandidates = this.evidenceCandidates(goal, item.id);
       if (evidenceCandidates.length === evidenceCountBefore) {
-        verificationFeedback =
+        const missingEvidence =
           'No concrete completion evidence was recorded. Continue the item and call update_goal with the checks or artifacts that prove it is complete.';
-        const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+        const recorded = await this.goals.addActivityForActiveAttempt(
+          goalId,
+          attemptId,
+          'evidence_missing',
+          `${item.id}|${missingEvidence}`,
+          execution.sessionId,
+        );
+        if (!recorded) return;
+        const repeats = this.attemptActivity(recorded).filter(
+          (event) =>
+            event.type === 'evidence_missing' && event.message === `${item.id}|${missingEvidence}`,
+        ).length;
+        if (repeats >= 3) {
+          const adjudication = await this.kory.verifyGoalBlocker(
+            execution.sessionId,
+            goal.objective,
+            item.title,
+            'The producer returned from three consecutive attempts without submitting any concrete completion evidence.',
+            execution.model,
+            execution.provider,
+          );
+          if (adjudication.skipped) {
+            const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+              status: 'paused',
+              blocker:
+                'Independent blocker verification is disabled. Enable the Goal Mode critic and resume to adjudicate repeated missing producer evidence.',
+            });
+            if (!paused) return;
+            this.publish(paused);
+            return;
+          }
+          if (adjudication.passed) {
+            const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+              status: 'blocked',
+              blocker:
+                'Critic confirmed the producer repeatedly returned without concrete completion evidence.',
+            });
+            if (!blocked) return;
+            this.publish(blocked);
+            return;
+          }
+          verificationFeedback = adjudication.feedback
+            ? sanitizeGoalEvidence(adjudication.feedback)
+            : missingEvidence;
+        } else {
+          verificationFeedback = missingEvidence;
+        }
+        const retrying = await this.goals.resetItem(
+          goalId,
+          item.id,
+          verificationFeedback,
+          attemptId,
+        );
+        if (!retrying) return;
         this.publish(retrying);
-        await sleep(1_000);
+        await sleep(this.options.retryDelayMs ?? 1_000);
         continue;
       }
 
       // Even native-passthrough and remote producers may finish an item when a
       // separate managed critic can verify their concrete local result.
-      const verification = await this.kory.verifyGoalItem(
-        execution.sessionId,
-        goal.objective,
-        item.title,
-        execution.model,
+      let verification: Awaited<ReturnType<KoryManager['verifyGoalItem']>>;
+      try {
+        verification = await this.kory.verifyGoalItem(
+          execution.sessionId,
+          goal.objective,
+          item.title,
+          evidenceCandidates.at(-1)!,
+          execution.model,
+          execution.provider,
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        verification = {
+          passed: false,
+          feedback: sanitizeGoalEvidence(`Independent verifier failed to run: ${detail}`),
+        };
+      }
+      const reviewed = await this.goals.completeItem(
+        goalId,
+        item.id,
+        {
+          producer: {
+            kind: 'check',
+            value: evidenceCandidates.at(-1)!,
+            provider: execution.provider,
+            model: execution.model,
+          },
+          verifier: verification,
+        },
+        attemptId,
       );
-      if (verification.passed) {
-        const completed = await this.goals.completeItem(goalId, item.id, {
-          kind: 'check',
-          value: verification.skipped
-            ? `Critic disabled by user; producer evidence accepted without a critic pass: ${evidenceCandidates.at(-1)}`
-            : `Producer evidence: ${evidenceCandidates.at(-1)}\nIndependent Goal Mode critic PASS${verification.feedback ? `: ${verification.feedback}` : ''}`,
-        });
-        this.publish(completed);
+      if (!reviewed) return;
+      this.publish(reviewed);
+      const reviewedItem = reviewed.checklist.find((entry) => entry.id === item.id);
+      if (reviewedItem?.status === 'completed') {
         verificationFeedback = '';
         continue;
       }
 
-      verificationFeedback =
-        verification.feedback ?? 'The item lacks independently verified completion evidence.';
-      const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback);
+      if (verification.skipped) {
+        const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+          status: 'paused',
+          blocker:
+            'Independent verification is disabled. Enable the Goal Mode critic and resume to verify the submitted producer evidence.',
+        });
+        if (!paused) return;
+        this.publish(paused);
+        return;
+      }
+
+      const persistedVerdict = reviewedItem?.evidence.findLast(
+        (evidence) => evidence.source === 'verifier',
+      )?.value;
+      verificationFeedback = persistedVerdict
+        ? sanitizeGoalEvidence(persistedVerdict)
+        : verification.feedback
+          ? sanitizeGoalEvidence(verification.feedback)
+          : 'The item lacks independently verified completion evidence.';
+      const recordedFailure = await this.goals.addActivityForActiveAttempt(
+        goalId,
+        attemptId,
+        'verification_failure',
+        `${item.id}|${verificationFeedback}`,
+        execution.sessionId,
+      );
+      if (!recordedFailure) return;
+      const repeatedVerificationFailures = this.attemptActivity(recordedFailure).filter(
+        (event) =>
+          event.type === 'verification_failure' &&
+          event.message === `${item.id}|${verificationFeedback}`,
+      ).length;
+      if (repeatedVerificationFailures >= 3) {
+        const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+          status: 'blocked',
+          blocker: `Independent verification failed with the same concrete result after 3 attempts: ${verificationFeedback}`,
+        });
+        if (!blocked) return;
+        this.publish(blocked);
+        return;
+      }
+      const retrying = await this.goals.resetItem(goalId, item.id, verificationFeedback, attemptId);
+      if (!retrying) return;
       this.publish(retrying);
-      await sleep(1_000);
+      await sleep(this.options.retryDelayMs ?? 1_000);
     }
   }
 }

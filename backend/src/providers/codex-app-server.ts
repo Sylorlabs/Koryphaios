@@ -1,13 +1,23 @@
-import { mkdirSync } from 'node:fs';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { dirname } from 'node:path';
 import { serverLog } from '../logger';
 import { getKoryCodexHome } from './auth-utils';
 import { whichBinary } from './cli-detection';
+import { buildProviderCliEnv } from './cli-environment';
+import { ensureManagedCliDirectory } from './managed-cli-storage';
+
+export interface CodexAppServerModel {
+  model?: string;
+  id?: string;
+  displayName?: string;
+  hidden?: boolean;
+  supportedReasoningEfforts?: Array<{ reasoningEffort?: string } | null>;
+}
 
 type JsonRpcResponse = {
   id?: number;
-  result?: any;
+  result?: unknown;
   error?: { message?: string };
   method?: string;
   params?: unknown;
@@ -49,6 +59,7 @@ type LoginCompletion = {
 };
 
 const IDLE_SHUTDOWN_MS = 2 * 60_000;
+const MAX_JSONL_FRAME_BYTES = 1024 * 1024;
 
 /**
  * Local control-plane client for the official Codex app-server.
@@ -61,16 +72,24 @@ export class CodexAppServer {
   private started: Promise<void> | null = null;
   private nextId = 1;
   private buffer = '';
+  private bufferBytes = 0;
   private readonly notifications = new EventEmitter();
-  private readonly pending = new Map<number, {
-    resolve: (result: any) => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-  }>();
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (result: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+    }
+  >();
   private idleShutdown: ReturnType<typeof setTimeout> | null = null;
   private loginWaiters = 0;
+  private readonly loginWaiterFailures = new Set<(error: Error) => void>();
 
-  constructor(private readonly codexHome = getKoryCodexHome()) {}
+  constructor(
+    private readonly codexHome = getKoryCodexHome(),
+    private readonly binaryOverride?: string,
+  ) {}
 
   async account(refreshToken = false): Promise<CodexManagedAuthStatus> {
     const result = await this.request('account/read', { refreshToken });
@@ -96,7 +115,11 @@ export class CodexAppServer {
       useHostedLoginSuccessPage: true,
       appBrand: 'chatgpt',
     });
-    if (result?.type !== 'chatgpt' || typeof result.loginId !== 'string' || typeof result.authUrl !== 'string') {
+    if (
+      result?.type !== 'chatgpt' ||
+      typeof result.loginId !== 'string' ||
+      typeof result.authUrl !== 'string'
+    ) {
       throw new Error('Codex did not return a ChatGPT sign-in URL');
     }
     return { loginId: result.loginId, authUrl: result.authUrl };
@@ -133,11 +156,13 @@ export class CodexAppServer {
       const finish = (completion?: LoginCompletion, error?: Error) => {
         clearTimeout(timeout);
         this.notifications.off('account/login/completed', onCompletion);
+        this.loginWaiterFailures.delete(onFailure);
         this.loginWaiters = Math.max(0, this.loginWaiters - 1);
         this.scheduleIdleShutdown();
         if (error) reject(error);
         else resolve(completion!);
       };
+      const onFailure = (error: Error) => finish(undefined, error);
       const onCompletion = (params: unknown) => {
         const completion = params as Partial<LoginCompletion> | null;
         if (completion?.loginId !== loginId) return;
@@ -152,6 +177,7 @@ export class CodexAppServer {
       }, timeoutMs);
       timeout.unref?.();
       this.notifications.on('account/login/completed', onCompletion);
+      this.loginWaiterFailures.add(onFailure);
     });
   }
 
@@ -167,22 +193,25 @@ export class CodexAppServer {
     if (child && !child.killed) child.kill('SIGTERM');
   }
 
-  async listModels(): Promise<any[]> {
-    const result = await this.request('model/list', { limit: 100, includeHidden: false });
+  async listModels(): Promise<CodexAppServerModel[]> {
+    const result = (await this.request('model/list', {
+      limit: 100,
+      includeHidden: false,
+    })) as { data?: CodexAppServerModel[] } | null;
     return Array.isArray(result?.data)
-      ? result.data.filter((model: { hidden?: boolean }) => !model?.hidden)
+      ? result.data.filter((model) => !model?.hidden)
       : [];
   }
 
   private async ensureStarted(): Promise<void> {
     if (this.started) return this.started;
-    const binary = whichBinary('codex');
+    const binary = this.binaryOverride ?? whichBinary('codex');
     if (!binary) throw new Error('Codex CLI (codex) was not found on PATH');
 
     this.started = new Promise<void>((resolve, reject) => {
       const codexHome = this.codexHome;
       try {
-        mkdirSync(codexHome, { recursive: true });
+        ensureManagedCliDirectory(codexHome, { root: dirname(codexHome) });
       } catch (error) {
         this.started = null;
         reject(error instanceof Error ? error : new Error(String(error)));
@@ -190,32 +219,40 @@ export class CodexAppServer {
       }
       const child = spawn(binary, ['app-server', '--stdio'], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, CODEX_HOME: codexHome },
+        env: buildProviderCliEnv('codex', { CODEX_HOME: codexHome }),
       });
       this.child = child;
-      let stderr = '';
-      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      let stderrBytes = 0;
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderrBytes += chunk.byteLength;
+      });
       child.stdout.on('data', (chunk: Buffer) => this.consume(chunk.toString()));
       child.once('error', (error) => this.fail(error));
       child.once('exit', (code) => {
-        const error = new Error((stderr.trim() || `Codex app-server exited with status ${code}`).slice(0, 500));
+        serverLog.debug(
+          { provider: 'codex', source: 'app-server', exitCode: code, stderrBytes },
+          'Codex app-server exited',
+        );
+        const error = new Error(`Codex app-server exited with status ${code}`);
         this.fail(error);
       });
       this.request('initialize', {
         clientInfo: { name: 'Koryphaios', version: '1.0' },
         capabilities: null,
-      }).then(() => {
-        this.notify('initialized', {});
-        resolve();
-      }).catch((error) => {
-        this.started = null;
-        reject(error);
-      });
+      })
+        .then(() => {
+          this.notify('initialized', {});
+          resolve();
+        })
+        .catch((error) => {
+          this.started = null;
+          reject(error);
+        });
     });
     return this.started;
   }
 
-  private async request(method: string, params: Record<string, unknown>): Promise<any> {
+  private async request(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (method !== 'initialize') await this.ensureStarted();
     const child = this.child;
     if (!child?.stdin.writable) throw new Error('Codex app-server is unavailable');
@@ -260,28 +297,68 @@ export class CodexAppServer {
   }
 
   private consume(chunk: string): void {
-    this.buffer += chunk;
-    const lines = this.buffer.split('\n');
-    this.buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      try {
-        const message = JSON.parse(line) as JsonRpcResponse;
-        if (typeof message.method === 'string') {
-          this.notifications.emit(message.method, message.params);
-          continue;
-        }
-        if (typeof message.id !== 'number') continue;
-        const pending = this.pending.get(message.id);
-        if (!pending) continue;
-        this.pending.delete(message.id);
-        clearTimeout(pending.timeout);
-        if (message.error) pending.reject(new Error(message.error.message ?? 'Codex app-server request failed'));
-        else pending.resolve(message.result);
-      } catch (err: unknown) {
-        // The protocol is JSONL; ignore non-protocol diagnostics.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex app-server: non-protocol JSONL line skipped');
+    let remainder = chunk;
+    while (remainder) {
+      const newline = remainder.indexOf('\n');
+      const segment = newline === -1 ? remainder : remainder.slice(0, newline);
+      const segmentBytes = Buffer.byteLength(segment);
+      const frameBytes = this.bufferBytes + segmentBytes;
+      if (frameBytes > MAX_JSONL_FRAME_BYTES) {
+        this.failProtocolFrame(frameBytes);
+        return;
       }
+
+      this.buffer += segment;
+      this.bufferBytes = frameBytes;
+      if (newline === -1) return;
+
+      const line = this.buffer;
+      this.buffer = '';
+      this.bufferBytes = 0;
+      remainder = remainder.slice(newline + 1);
+      this.consumeLine(line);
+      if (!this.child) return;
     }
+  }
+
+  private consumeLine(line: string): void {
+    try {
+      const message = JSON.parse(line) as JsonRpcResponse;
+      if (typeof message.method === 'string') {
+        this.notifications.emit(message.method, message.params);
+        return;
+      }
+      if (typeof message.id !== 'number') return;
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      this.pending.delete(message.id);
+      clearTimeout(pending.timeout);
+      if (message.error) pending.reject(new Error('Codex app-server request failed'));
+      else pending.resolve(message.result);
+    } catch {
+      // The protocol is JSONL; ignore non-protocol diagnostics without
+      // retaining or logging provider-controlled content.
+      serverLog.debug(
+        { provider: 'codex', source: 'app-server', bytes: Buffer.byteLength(line) },
+        'Codex app-server: non-protocol JSONL line skipped',
+      );
+    }
+  }
+
+  private failProtocolFrame(bytes: number): void {
+    serverLog.warn(
+      {
+        provider: 'codex',
+        source: 'app-server',
+        category: 'invalid-protocol-frame',
+        bytes,
+        limitBytes: MAX_JSONL_FRAME_BYTES,
+      },
+      'Codex app-server exceeded its JSONL frame limit',
+    );
+    const child = this.child;
+    if (child && !child.killed) child.kill('SIGTERM');
+    this.fail(new Error('Codex app-server closed an invalid protocol stream'));
   }
 
   private fail(error: Error): void {
@@ -291,10 +368,17 @@ export class CodexAppServer {
       clearTimeout(request.timeout);
       request.reject(error);
     }
+    const loginWaiterFailures = [...this.loginWaiterFailures];
+    this.loginWaiterFailures.clear();
+    for (const rejectLogin of loginWaiterFailures) rejectLogin(error);
+    this.buffer = '';
+    this.bufferBytes = 0;
     this.child = null;
     this.started = null;
   }
 }
+
+export const CODEX_APP_SERVER_MAX_FRAME_BYTES_FOR_TESTING = MAX_JSONL_FRAME_BYTES;
 
 let managedServer: CodexAppServer | null = null;
 

@@ -6,8 +6,15 @@
 
 import type { ProviderName } from '@koryphaios/shared';
 
-/** Anthropic API version header (2026-01-01 is current stable). */
-export const ANTHROPIC_VERSION = '2026-01-01';
+/**
+ * Anthropic Messages API version documented by Anthropic.
+ *
+ * This is an API contract version, not the current calendar date. Inventing a
+ * future date makes otherwise-valid credentials fail before the request can be
+ * evaluated. Keep this value pinned to Anthropic's published version history.
+ * @see https://platform.claude.com/docs/en/api/versioning
+ */
+export const ANTHROPIC_VERSION = '2023-06-01';
 
 /** 2026 base URLs for connectivity and verification. Primary endpoints per provider. */
 export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
@@ -32,6 +39,18 @@ export const GEMINI_VERIFY_PATH = '/models';
 export const GEMINI_V1BETA_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 export const GEMINI_V1_BASE = 'https://generativelanguage.googleapis.com/v1';
 
+/**
+ * Vertex AI express-mode credential probe.
+ *
+ * Google does not expose a model-list method on the express surface. A tiny
+ * countTokens request proves that the key is accepted by Vertex AI without
+ * generating model output. Keep this on the official global endpoint and do
+ * not fall back to the consumer Gemini API: those credentials are different
+ * provider contracts.
+ */
+export const VERTEX_EXPRESS_VERIFY_URL =
+  'https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:countTokens';
+
 /** Mask API key for logs and errors. Never log raw keys. */
 export function maskApiKey(key: string | undefined | null): string {
   if (!key || typeof key !== 'string') return '(none)';
@@ -41,13 +60,7 @@ export function maskApiKey(key: string | undefined | null): string {
 }
 
 export type AuthHeaderKind =
-  | 'x-api-key'
-  | 'bearer'
-  | 'anthropic'
-  | 'gemini-query'
-  | 'gemini-header'
-  | 'api-key'
-  | 'azure';
+  'x-api-key' | 'bearer' | 'anthropic' | 'gemini-query' | 'gemini-header' | 'api-key' | 'azure';
 
 export interface AuthHeadersResult {
   headers: Record<string, string>;
@@ -102,6 +115,10 @@ export function buildAuthHeaders(
       // Default: use query param for verification (matches existing behavior).
       return { headers, urlSuffix: token ? `?key=${encodeURIComponent(token)}` : '' };
     }
+
+    case 'vertexai':
+      if (token) headers['x-goog-api-key'] = token;
+      return { headers };
 
     case 'azure':
       if (apiKey) headers['api-key'] = apiKey;

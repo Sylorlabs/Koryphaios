@@ -23,7 +23,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Investigate users, operators, contexts, needs, and existing behavior before consequential decisions.',
     domains: ['ux', 'research'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: ['user research', 'customer interviews', 'field study', 'understand users'],
     instructions: `Define the decision and uncertainty first, then select observation, contextual inquiry, interviews, diary study, survey, or artifact analysis to fit it. Recruit across meaningful differences, protect privacy, separate observation from interpretation, seek contradictions, and never invent personas, quotes, prevalence, or consensus.`,
     should: ['research how operators perform this workflow'],
@@ -39,7 +39,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design behavior, controls, feedback, state transitions, recovery, and task flows for any medium.',
     domains: ['ux', 'interaction'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: ['interaction', 'workflow', 'task flow', 'controls', 'state transitions'],
     instructions: `Model goals, entry conditions, system state, actions, consequences, feedback, interruption, and recovery before arranging controls. Match behavior to confirmed input methods and risk. Specify initial, processing, partial, empty, invalid, blocked, success, failure, cancellation, undo, reconnection, and restoration states; verify with the real runtime or a faithful prototype.`,
     should: ['design the workflow for this native editor'],
@@ -51,7 +51,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Organize concepts, navigation, labels, relationships, and findability across products, APIs, tools, and documents.',
     domains: ['ux', 'information-architecture'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: [
       'information architecture',
       'navigation structure',
@@ -69,7 +69,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Establish a non-generic visual direction, then use composition, typography, color, density, imagery, and motion to communicate hierarchy and identity.',
     domains: ['ui', 'visual-design'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: [
       'visual design',
       'visual polish',
@@ -96,7 +96,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design labels, instructions, status, errors, diagnostics, and recovery language that helps people act.',
     domains: ['ux', 'communication'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: [
       'content design',
       'error message',
@@ -114,7 +114,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design equitable access across perception, operation, comprehension, environment, and assistive technology.',
     domains: ['accessibility', 'human-factors'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: [
       'accessibility',
       'assistive technology',
@@ -137,7 +137,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Evaluate whether representative people can understand, complete, recover from, and trust realistic tasks.',
     domains: ['ux', 'evaluation'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: ['usability test', 'evaluate ux', 'cognitive walkthrough', 'heuristic review'],
     instructions: `Define the decision, representative participants or justified proxies, realistic tasks, success measures, and severity model. Observe completion, errors, recovery, assistance, confidence, and comprehension without teaching the intended solution. Do not present convenience samples as population statistics; prioritize by harm and task criticality, preserve contradictions, and retest consequential changes.`,
     should: ['test whether people can complete onboarding'],
@@ -153,7 +153,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design APIs, SDKs, languages, tools, diagnostics, configuration, and workflows for reliable developer use.',
     domains: ['developer-experience', 'engineering'],
-    parent: 'human-experience',
+    broader: ['human-experience'],
     activation: [
       'developer experience',
       'api usability',
@@ -172,7 +172,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Plan boundaries, responsibilities, interfaces, qualities, and evolutionary constraints.',
     domains: ['planning', 'architecture'],
-    parent: 'planning',
+    broader: ['planning'],
     activation: ['architecture plan', 'system design', 'component boundaries'],
     instructions: `Model responsibilities, data and control flow, trust boundaries, failure modes, quality attributes, and change axes. Compare alternatives against explicit criteria and record irreversible decisions and evolutionary seams. Prefer the least complex architecture satisfying demonstrated constraints.`,
     should: ['design the architecture'],
@@ -184,7 +184,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Plan compatible transitions between schemas, APIs, runtimes, architectures, or operational states.',
     domains: ['planning', 'migration'],
-    parent: 'planning',
+    broader: ['planning'],
     activation: ['migration plan', 'upgrade path', 'data transition'],
     requires: ['verification'],
     instructions: `Inventory producers, consumers, state, compatibility, and recovery constraints. Define staged coexistence, translation or backfill, validation, cutover, rollback, and cleanup; make every phase safe to pause and test mixed versions.`,
@@ -196,7 +196,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'release-planning',
     description: 'Plan evidence-gated delivery, rollout, observation, recovery, and support.',
     domains: ['planning', 'release'],
-    parent: 'planning',
+    broader: ['planning'],
     activation: ['release plan', 'rollout plan', 'launch checklist'],
     requires: ['verification'],
     instructions: `Define release units, dependencies, user impact, telemetry, support ownership, preflight gates, rollout increments, observation windows, stop conditions, rollback, and post-release confirmation. Never equate a successful build with a successful release.`,
@@ -209,7 +209,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Implement new end-to-end behavior through existing product and system boundaries.',
     domains: ['code', 'feature'],
-    parent: 'implementation',
+    broader: ['implementation'],
     activation: ['new feature', 'add support', 'implement capability'],
     requires: ['verification'],
     instructions: `Trace behavior from entry through state, side effects, outputs, errors, and feedback. Reuse established contracts and cover authorization, invalid input, partial failure, cancellation, persistence, and observability according to risk. Deliver a vertical slice, not disconnected scaffolding.`,
@@ -221,7 +221,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'refactor-implementation',
     description: 'Improve internal structure while preserving defined external behavior.',
     domains: ['code', 'refactor'],
-    parent: 'implementation',
+    broader: ['implementation'],
     activation: ['refactor', 'restructure', 'extract abstraction', 'remove duplication'],
     requires: ['verification'],
     instructions: `Define invariants and compatibility first, add characterization evidence where behavior is uncertain, move in reviewable steps, reduce rather than relocate complexity, and remove obsolete paths without mixing unrelated features.`,
@@ -234,7 +234,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Connect components or external systems through explicit contracts and failure boundaries.',
     domains: ['code', 'integration'],
-    parent: 'implementation',
+    broader: ['implementation'],
     activation: ['integrate', 'adapter', 'provider connection'],
     requires: ['verification'],
     instructions: `Confirm both sides, isolate translation, identity, lifecycle, retries, timeouts, cancellation, versioning, idempotency, and partial failure. Preserve provider-reported truth, keep unknown values unknown, and test drift and degraded dependencies.`,
@@ -246,7 +246,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'deterministic-debugging',
     description: 'Debug repeatable state, logic, parsing, lifecycle, or contract failures.',
     domains: ['debugging'],
-    parent: 'debugging',
+    broader: ['debugging'],
     activation: ['reproducible bug', 'wrong output', 'parse failure', 'state bug'],
     instructions: `Minimize input and path, inspect transitions and invariants, and locate the first incorrect value or decision rather than the final symptom.`,
     should: ['debug consistently wrong output'],
@@ -257,7 +257,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'concurrency-debugging',
     description: 'Debug races, deadlocks, ordering, cancellation, and shared-state failures.',
     domains: ['debugging', 'concurrency'],
-    parent: 'debugging',
+    broader: ['debugging'],
     activation: ['race condition', 'deadlock', 'threading bug', 'async ordering'],
     instructions: `Model actors, ownership, resources, synchronization, happens-before, cancellation, and teardown. Capture schedules or traces and repair the violated invariant; non-reproduction is not proof.`,
     should: ['debug a race condition'],
@@ -269,7 +269,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Debug failures spanning processes, services, nodes, clocks, or partial availability.',
     domains: ['debugging', 'distributed'],
-    parent: 'debugging',
+    broader: ['debugging'],
     activation: ['distributed failure', 'partial outage', 'message duplication', 'consistency bug'],
     instructions: `Correlate identities, versions, messages, retries, and transitions across boundaries. Account for delay, loss, duplication, reordering, partitions, and stale reads; reconstruct causality without trusting wall-clock order alone.`,
     should: ['debug cross-service inconsistency'],
@@ -281,9 +281,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Debug latency, throughput, memory, energy, frame, or resource regressions using measurement.',
     domains: ['debugging', 'performance'],
-    parent: 'debugging',
+    broader: ['debugging', 'performance-testing'],
     activation: ['performance regression', 'memory leak', 'latency spike'],
-    requires: ['performance-testing'],
     instructions: `Reproduce under a controlled representative workload, establish baseline and budget, then profile before optimizing. Separate startup, steady state, contention, saturation, allocation, I/O, and cleanup and verify equivalent builds with variance.`,
     should: ['debug a latency regression'],
     shouldNot: ['choose animation aesthetics'],
@@ -294,9 +293,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Debug device, driver, graphics, accelerator, sensor, actuator, or runtime failures safely.',
     domains: ['debugging', 'device'],
-    parent: 'debugging',
+    broader: ['debugging', 'simulation-device-testing'],
     activation: ['hardware bug', 'gpu crash', 'device failure', 'driver issue'],
-    requires: ['simulation-device-testing'],
     instructions: `Record exact hardware, firmware, driver, runtime, workload, topology, and safety constraints. Separate host, runtime, driver, transport, and device hypotheses; use simulation and non-disruptive gates first and never claim physical proof from emulation.`,
     should: ['debug a GPU hang'],
     shouldNot: ['browser layout bug'],
@@ -306,7 +304,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'functional-verification',
     description: 'Verify required behavior, contracts, boundaries, and regressions.',
     domains: ['verification'],
-    parent: 'verification',
+    broader: ['verification'],
     activation: ['functional verification', 'acceptance test', 'regression check'],
     instructions: `Exercise representative success, boundary, invalid, failure, cancellation, persistence, and recovery paths. Verify observable effects rather than only internal calls.`,
     should: ['verify feature behavior'],
@@ -318,7 +316,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Verify rendered hierarchy, states, resizing, density, platform presentation, and visual-direction claims in the real medium.',
     domains: ['verification', 'ui'],
-    parent: 'verification',
+    broader: ['verification', 'visual-interface-design'],
+    facets: ['frontend-engineering'],
     activation: [
       'visual verification',
       'screenshot review',
@@ -338,7 +337,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'accessibility-verification',
     description: 'Verify equitable task completion with alternate inputs and assistive technology.',
     domains: ['verification', 'accessibility'],
-    parent: 'verification',
+    broader: ['verification', 'accessibility-practice'],
     activation: ['accessibility audit', 'keyboard test', 'screen reader test'],
     requires: ['accessibility-practice'],
     instructions: `Combine applicable automation with alternate-input traversal, focus, semantics, names, relationships, contrast, scaling, motion, error recovery, and representative assistive technology. Automated success is never complete proof.`,
@@ -350,7 +349,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'reliability-verification',
     description: 'Verify resilience, degradation, restart, recovery, and sustained operation.',
     domains: ['verification', 'reliability'],
-    parent: 'verification',
+    broader: ['verification'],
     activation: ['reliability test', 'fault recovery', 'soak test', 'resilience'],
     instructions: `Inject realistic faults and resource pressure; test restart, replay, timeout, cancellation, partial availability, durability, cleanup, recovery objectives, and health observability.`,
     should: ['verify outage recovery'],
@@ -361,9 +360,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'security-verification',
     description: 'Verify enforced security properties at trust and authorization boundaries.',
     domains: ['verification', 'security'],
-    parent: 'verification',
+    broader: ['verification', 'security-review'],
     activation: ['security verification', 'authorization test', 'isolation test'],
-    requires: ['security-review'],
     instructions: `Test identities, roles, denied paths, isolation, secret exposure, injection, unsafe defaults, auditability, and fail-closed behavior at the enforcing layer. Prompt wording and hidden UI are not enforcement.`,
     should: ['verify authorization boundaries'],
     shouldNot: ['format code'],
@@ -374,9 +372,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Verify performance claims against representative budgets and reproducible measurements.',
     domains: ['verification', 'performance'],
-    parent: 'verification',
+    broader: ['verification', 'performance-testing'],
     activation: ['verify performance', 'performance gate', 'latency budget'],
-    requires: ['performance-testing'],
     instructions: `Define workloads, environment, budgets, warmup, sampling, variance, and comparison rules. Verify relevant cold, warm, steady, peak, degraded, and cleanup behavior and report distributions and resource costs.`,
     should: ['verify the latency target'],
     shouldNot: ['debug an unmeasured slowdown'],
@@ -387,7 +384,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Explain technical systems, decisions, operations, and evidence to technical readers.',
     domains: ['documents', 'technical'],
-    parent: 'documents-communication',
+    broader: ['documents-communication'],
     activation: ['technical document', 'design document', 'engineering report'],
     instructions: `State scope, constraints, mechanism, decisions, alternatives, interfaces, risks, evidence, and unresolved work. Use visuals only when they clarify relationships and keep examples executable or explicitly illustrative.`,
     should: ['write a technical design'],
@@ -399,7 +396,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Present decision-relevant outcomes, tradeoffs, risk, cost, and asks without hiding uncertainty.',
     domains: ['documents', 'executive'],
-    parent: 'documents-communication',
+    broader: ['documents-communication'],
     activation: ['executive brief', 'leadership update', 'decision memo'],
     instructions: `Lead with the decision, status, or outcome and tie evidence to impact, options, risk, timing, ownership, and explicit asks. Include implementation detail only when it changes the decision.`,
     should: ['write a leadership brief'],
@@ -410,7 +407,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'instructional-communication',
     description: 'Teach a reader to complete and verify a task safely.',
     domains: ['documents', 'instructional'],
-    parent: 'documents-communication',
+    broader: ['documents-communication'],
     activation: ['tutorial', 'how-to guide', 'setup guide', 'runbook', 'onboarding'],
     instructions: `Define prerequisites, starting state, goal, actions, decisions, expected feedback, failure recovery, warnings, and completion checks. Test from the intended environment without omitted expert knowledge.`,
     should: ['write a setup guide'],
@@ -421,7 +418,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'reference-communication',
     description: 'Create precise, searchable, version-aware factual references.',
     domains: ['documents', 'reference'],
-    parent: 'documents-communication',
+    broader: ['documents-communication'],
     activation: ['reference documentation', 'api reference', 'configuration reference'],
     instructions: `Organize around stable concepts and lookup paths. Define names, types, units, defaults, constraints, lifecycle, compatibility, errors, examples, and version scope; derive from authoritative definitions and test examples where possible.`,
     should: ['write an API reference'],
@@ -433,7 +430,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Assess application trust and authorization boundaries without assuming web architecture.',
     domains: ['security', 'application'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: [
       'application security',
       'authorization review',
@@ -450,7 +447,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Assess hosts, networks, identities, deployments, and operational control planes in their actual environment.',
     domains: ['security', 'infrastructure'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: [
       'infrastructure security',
       'host hardening',
@@ -467,7 +464,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design and verify subject-resource-action authorization policy at the actual enforcement boundary.',
     domains: ['security', 'authorization'],
-    parent: 'application-security',
+    broader: ['application-security'],
     activation: [
       'authorization security',
       'authorization review',
@@ -485,7 +482,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Evaluate provenance and compromise risk across source, dependencies, tools, builds, artifacts, and updates.',
     domains: ['security', 'supply-chain'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: [
       'supply chain security',
       'dependency audit',
@@ -502,7 +499,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Minimize and govern sensitive information across collection, use, retention, sharing, and deletion.',
     domains: ['security', 'privacy', 'data'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: ['privacy', 'privacy review', 'personal data', 'data retention', 'consent design'],
     instructions: `Map subjects, purposes, fields, sensitivity, collection, transformations, storage, access, sharing, retention, deletion, and inferences. Challenge necessity, verify lifecycle and controls, and separate engineering findings from jurisdiction-specific legal conclusions.`,
     should: ['review personal-data handling'],
@@ -513,7 +510,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'embedded-device-security',
     description: 'Assess device, firmware, physical, communication, update, and safety boundaries.',
     domains: ['security', 'embedded'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: ['embedded security', 'firmware security', 'device threat model', 'secure boot'],
     instructions: `Establish physical access, debug interfaces, boot chain, provenance, keys, communications, peripherals, update, recovery, limits, and safety consequences. Verify safe failure, rollback resistance, authenticated updates, isolation, and recovery on representative hardware or bounded simulation.`,
     should: ['threat model device firmware'],
@@ -525,7 +522,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Assess compilers, interpreters, runtimes, loaders, sandboxes, and foreign interfaces.',
     domains: ['security', 'runtime'],
-    parent: 'security-review',
+    broader: ['security-review'],
     activation: [
       'runtime security',
       'compiler security',
@@ -544,7 +541,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Understand unfamiliar data through structure, quality, distributions, relationships, and anomalies.',
     domains: ['data', 'analysis'],
-    parent: 'data-analysis',
+    broader: ['data-analysis'],
     activation: ['exploratory analysis', 'explore dataset', 'find patterns', 'data profiling'],
     instructions: `Identify provenance, observation unit, schema, units, missingness, censoring, duplication, selection, time coverage, and transformations. Examine distributions, subgroups, relationships, anomalies, and cleaning sensitivity while labeling discoveries as hypotheses. Use the native medium; do not assume SQL, Python, or tables.`,
     should: ['explore this unfamiliar dataset'],
@@ -556,7 +553,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Estimate effects or relationships with explicit population, assumptions, uncertainty, and multiplicity.',
     domains: ['data', 'statistics'],
-    parent: 'data-analysis',
+    broader: ['data-analysis'],
     activation: [
       'statistical analysis',
       'confidence interval',
@@ -577,7 +574,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design and analyze controlled or quasi-experimental evidence around a predeclared decision.',
     domains: ['data', 'experiment'],
-    parent: 'data-analysis',
+    broader: ['data-analysis'],
     activation: ['experiment design', 'a/b test', 'causal analysis', 'randomized trial'],
     instructions: `State the causal question, units, intervention, comparator, outcomes, assignment, interference, stopping, exclusions, and analysis before outcomes where possible. Justify power and meaningful effect; for observational designs expose identification assumptions and falsification checks.`,
     should: ['design an A/B experiment'],
@@ -589,7 +586,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Turn production or process data into decisions while accounting for instrumentation and system change.',
     domains: ['data', 'operations'],
-    parent: 'data-analysis',
+    broader: ['data-analysis'],
     activation: [
       'operational analysis',
       'production metrics',
@@ -606,7 +603,8 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Design accurate visual representations matched to the analytical question, audience, and display medium.',
     domains: ['data', 'visualization'],
-    parent: 'data-analysis',
+    broader: ['data-analysis', 'visual-interface-design'],
+    facets: ['accessibility-practice'],
     activation: ['data visualization', 'design a chart', 'dashboard design', 'visualize results'],
     instructions: `Identify the comparison, distribution, relationship, composition, geography, flow, or uncertainty before choosing an encoding. Preserve scale, units, denominator, uncertainty, and missingness; use a table for exact lookup and never add charts decoratively.`,
     should: ['choose a chart for these results'],
@@ -618,7 +616,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Evaluate predictive or generative systems against representative tasks, failure costs, uncertainty, and drift.',
     domains: ['data', 'machine-learning'],
-    parent: 'data-analysis',
+    broader: ['data-analysis', 'testing-engineering'],
     activation: ['model evaluation', 'ml benchmark', 'classifier evaluation', 'llm evaluation'],
     instructions: `Define deployment tasks, populations, failures, costs, baselines, and thresholds before metrics. Prevent leakage and contamination; stratify meaningful conditions and report uncertainty, calibration, robustness, abstention, and justified adversarial cases. Use blinded rubrics and agreement checks for human judgment.`,
     should: ['design a blinded LLM benchmark'],
@@ -630,7 +628,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Resolve concrete factual questions using authoritative current evidence and explicit uncertainty.',
     domains: ['research', 'facts'],
-    parent: 'research',
+    broader: ['research'],
     activation: [
       'fact check',
       'verify current information',
@@ -647,7 +645,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Synthesize scholarly or technical literature by question, evidence quality, disagreement, and applicability.',
     domains: ['research', 'literature'],
-    parent: 'research',
+    broader: ['research'],
     activation: ['literature review', 'research papers', 'state of the art', 'systematic review'],
     instructions: `Frame scope, inclusion, disciplines, dates, and evidence hierarchy. Search beyond one vocabulary, assess methods and external validity, and synthesize agreement, conflict, gaps, and applicability rather than listing papers. Distinguish peer review, preprint, benchmark, opinion, and replication.`,
     should: ['review research on agent routing'],
@@ -659,7 +657,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Assess markets and alternatives through customer, product, business, and adoption evidence.',
     domains: ['research', 'market'],
-    parent: 'research',
+    broader: ['research'],
     activation: [
       'market research',
       'competitive analysis',
@@ -676,7 +674,7 @@ export const PROFESSIONAL_SKILL_DEFINITIONS: SkillDefinition[] = [
     description:
       'Answer architectural and behavioral questions by tracing the actual repository, history, configuration, and runtime.',
     domains: ['research', 'repository'],
-    parent: 'research',
+    broader: ['research', 'repository-environment-discovery'],
     activation: [
       'research repository',
       'understand codebase',

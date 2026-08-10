@@ -9,8 +9,11 @@ import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registr
 import * as notesService from '../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../notes/notes-events';
 
-async function resolveId(input: { id?: string; title?: string }): Promise<string | null> {
-  return notesService.resolveNoteId(input.id, input.title);
+async function resolveId(
+  input: { id?: string; title?: string },
+  projectRoot: string,
+): Promise<string | null> {
+  return notesService.resolveNoteId(input.id, input.title, projectRoot);
 }
 
 // ============================================================================
@@ -21,7 +24,7 @@ export const createNoteTool: Tool = {
   name: 'create_note',
   description:
     'Create a new note in the knowledge network. Supports [[wikilinks]] in content that automatically create graph edges to other notes.',
-  role: 'any',
+  role: 'worker',
   inputSchema: {
     type: 'object',
     properties: {
@@ -60,14 +63,17 @@ export const createNoteTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const note = await notesService.createNote({
-        title: String(input.title),
-        content: (input.content as string) ?? '',
-        format: input.format === 'html' ? 'html' : undefined,
-        folderPath: (input.folderPath as string) ?? '/',
-        tags: (input.tags as string[]) ?? [],
-        includeInContext: Boolean(input.includeInContext),
-      });
+      const note = await notesService.createNote(
+        {
+          title: String(input.title),
+          content: (input.content as string) ?? '',
+          format: input.format === 'html' ? 'html' : undefined,
+          folderPath: (input.folderPath as string) ?? '/',
+          tags: (input.tags as string[]) ?? [],
+          includeInContext: Boolean(input.includeInContext),
+        },
+        ctx.workingDirectory,
+      );
       broadcastNotesNetworkUpdate('create', note.id, ctx.sessionId);
       return {
         callId: call.id,
@@ -114,11 +120,14 @@ export const readNoteTool: Tool = {
     const start = Date.now();
     try {
       let note = input.id
-        ? await notesService.getNoteWithLinks(String(input.id))
+        ? await notesService.getNoteWithLinks(String(input.id), ctx.workingDirectory)
         : null;
       if (!note && input.title) {
-        const byTitle = await notesService.getNoteByTitle(String(input.title));
-        if (byTitle) note = await notesService.getNoteWithLinks(byTitle.id);
+        const byTitle = await notesService.getNoteByTitle(
+          String(input.title),
+          ctx.workingDirectory,
+        );
+        if (byTitle) note = await notesService.getNoteWithLinks(byTitle.id, ctx.workingDirectory);
       }
       if (!note) {
         return {
@@ -129,8 +138,8 @@ export const readNoteTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      const backlinks = await notesService.getNoteBacklinks(note.id);
-      const outlinks = await notesService.getNoteOutlinks(note.id);
+      const backlinks = await notesService.getNoteBacklinks(note.id, ctx.workingDirectory);
+      const outlinks = await notesService.getNoteOutlinks(note.id, ctx.workingDirectory);
       const output = [
         '# ' + note.title,
         'ID: ' + note.id,
@@ -168,7 +177,7 @@ export const updateNoteTool: Tool = {
   name: 'update_note',
   description:
     'Update an existing note (title, content, folder, tags, pinned, includeInContext). Wikilinks in content are re-parsed and graph edges updated. Renaming updates [[wikilinks]] vault-wide.',
-  role: 'any',
+  role: 'worker',
   inputSchema: {
     type: 'object',
     properties: {
@@ -192,7 +201,9 @@ export const updateNoteTool: Tool = {
     const start = Date.now();
     try {
       const lookupTitle = input.newTitle ? input.title : input.title;
-      let id = (input.id as string) || (await resolveId({ title: lookupTitle as string }));
+      let id =
+        (input.id as string) ||
+        (await resolveId({ title: lookupTitle as string }, ctx.workingDirectory));
       if (!id) {
         return {
           callId: call.id,
@@ -202,15 +213,19 @@ export const updateNoteTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      const note = await notesService.updateNote(id, {
-        title: input.newTitle ? String(input.newTitle) : undefined,
-        content: input.content as string | undefined,
-        tags: input.tags as string[] | undefined,
-        folderPath: input.folderPath as string | undefined,
-        pinned: input.pinned as boolean | undefined,
-        includeInContext: input.includeInContext as boolean | undefined,
-        format: input.format === 'html' || input.format === 'markdown' ? input.format : undefined,
-      });
+      const note = await notesService.updateNote(
+        id,
+        {
+          title: input.newTitle ? String(input.newTitle) : undefined,
+          content: input.content as string | undefined,
+          tags: input.tags as string[] | undefined,
+          folderPath: input.folderPath as string | undefined,
+          pinned: input.pinned as boolean | undefined,
+          includeInContext: input.includeInContext as boolean | undefined,
+          format: input.format === 'html' || input.format === 'markdown' ? input.format : undefined,
+        },
+        ctx.workingDirectory,
+      );
       broadcastNotesNetworkUpdate('update', note.id, ctx.sessionId);
       return {
         callId: call.id,
@@ -238,7 +253,7 @@ export const updateNoteTool: Tool = {
 export const deleteNoteTool: Tool = {
   name: 'delete_note',
   description: 'Delete a note from the knowledge network. Removes its graph edges and attachments.',
-  role: 'any',
+  role: 'worker',
   inputSchema: {
     type: 'object',
     properties: {
@@ -250,10 +265,13 @@ export const deleteNoteTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const id = await resolveId({
-        id: input.id as string | undefined,
-        title: input.title as string | undefined,
-      });
+      const id = await resolveId(
+        {
+          id: input.id as string | undefined,
+          title: input.title as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
       if (!id) {
         return {
           callId: call.id,
@@ -263,8 +281,8 @@ export const deleteNoteTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      const note = await notesService.getNote(id);
-      await notesService.deleteNote(id);
+      const note = await notesService.getNote(id, ctx.workingDirectory);
+      await notesService.deleteNote(id, ctx.workingDirectory, note?.revision);
       broadcastNotesNetworkUpdate('delete', id, ctx.sessionId);
       return {
         callId: call.id,
@@ -293,7 +311,7 @@ export const linkNotesTool: Tool = {
   name: 'link_notes',
   description:
     'Create a directed link from one note to another in the knowledge graph. Also appends [[Target]] wikilink to source content unless syncContent is false.',
-  role: 'any',
+  role: 'worker',
   inputSchema: {
     type: 'object',
     properties: {
@@ -311,14 +329,20 @@ export const linkNotesTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const fromId = await resolveId({
-        id: input.fromId as string | undefined,
-        title: input.fromTitle as string | undefined,
-      });
-      const toId = await resolveId({
-        id: input.toId as string | undefined,
-        title: input.toTitle as string | undefined,
-      });
+      const fromId = await resolveId(
+        {
+          id: input.fromId as string | undefined,
+          title: input.fromTitle as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
+      const toId = await resolveId(
+        {
+          id: input.toId as string | undefined,
+          title: input.toTitle as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
       if (!fromId || !toId) {
         return {
           callId: call.id,
@@ -328,13 +352,18 @@ export const linkNotesTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      await notesService.linkNotes(fromId, toId, {
-        syncContent: input.syncContent !== false,
-      });
+      await notesService.linkNotes(
+        fromId,
+        toId,
+        {
+          syncContent: input.syncContent !== false,
+        },
+        ctx.workingDirectory,
+      );
       broadcastNotesNetworkUpdate('link', fromId, ctx.sessionId);
       const [fromNote, toNote] = await Promise.all([
-        notesService.getNote(fromId),
-        notesService.getNote(toId),
+        notesService.getNote(fromId, ctx.workingDirectory),
+        notesService.getNote(toId, ctx.workingDirectory),
       ]);
       return {
         callId: call.id,
@@ -359,7 +388,7 @@ export const unlinkNotesTool: Tool = {
   name: 'unlink_notes',
   description:
     'Remove a directed link between two notes. Optionally strips the [[wikilink]] from source content.',
-  role: 'any',
+  role: 'worker',
   inputSchema: {
     type: 'object',
     properties: {
@@ -374,14 +403,20 @@ export const unlinkNotesTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const fromId = await resolveId({
-        id: input.fromId as string | undefined,
-        title: input.fromTitle as string | undefined,
-      });
-      const toId = await resolveId({
-        id: input.toId as string | undefined,
-        title: input.toTitle as string | undefined,
-      });
+      const fromId = await resolveId(
+        {
+          id: input.fromId as string | undefined,
+          title: input.fromTitle as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
+      const toId = await resolveId(
+        {
+          id: input.toId as string | undefined,
+          title: input.toTitle as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
       if (!fromId || !toId) {
         return {
           callId: call.id,
@@ -391,9 +426,14 @@ export const unlinkNotesTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      await notesService.unlinkNotes(fromId, toId, {
-        syncContent: input.syncContent !== false,
-      });
+      await notesService.unlinkNotes(
+        fromId,
+        toId,
+        {
+          syncContent: input.syncContent !== false,
+        },
+        ctx.workingDirectory,
+      );
       broadcastNotesNetworkUpdate('unlink', fromId, ctx.sessionId);
       return {
         callId: call.id,
@@ -441,7 +481,8 @@ export const recallNotesTool: Tool = {
         query: input.query as string | undefined,
         titles: input.titles as string[] | undefined,
         ids: input.ids as string[] | undefined,
-        limit: typeof input.limit === 'number' ? input.limit : 10,
+        limit: Math.min(20, Math.max(1, typeof input.limit === 'number' ? input.limit : 10)),
+        projectRoot: ctx.workingDirectory,
       });
       if (!recalled.length) {
         return {
@@ -507,7 +548,7 @@ export const searchNotesTool: Tool = {
     const start = Date.now();
     try {
       await notesService.syncProjectDocuments(ctx.workingDirectory);
-      const results = await notesService.searchNotes(String(input.query));
+      const results = await notesService.searchNotes(String(input.query), 50, ctx.workingDirectory);
       if (!results.length) {
         return {
           callId: call.id,
@@ -570,9 +611,12 @@ export const listNotesTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const notesList = await notesService.listNotes({
-        folderPath: input.folderPath as string | undefined,
-      }, ctx.workingDirectory);
+      const notesList = await notesService.listNotes(
+        {
+          folderPath: input.folderPath as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
       if (!notesList.length) {
         return {
           callId: call.id,
@@ -622,14 +666,17 @@ export const getBacklinksTool: Tool = {
       id: { type: 'string', description: 'Note ID' },
     },
   },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      const id = await resolveId({
-        id: input.id as string | undefined,
-        title: input.title as string | undefined,
-      });
+      const id = await resolveId(
+        {
+          id: input.id as string | undefined,
+          title: input.title as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
       if (!id) {
         return {
           callId: call.id,
@@ -639,7 +686,7 @@ export const getBacklinksTool: Tool = {
           durationMs: Date.now() - start,
         };
       }
-      const backlinks = await notesService.getNoteBacklinks(id);
+      const backlinks = await notesService.getNoteBacklinks(id, ctx.workingDirectory);
       if (!backlinks.length) {
         return {
           callId: call.id,
@@ -678,10 +725,10 @@ export const noteGraphSummaryTool: Tool = {
     'Get a text summary of the entire note knowledge graph: node count, most connected notes, isolated notes.',
   role: 'any',
   inputSchema: { type: 'object', properties: {} },
-  async run(_ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const start = Date.now();
     try {
-      const graph = await notesService.getGraphData();
+      const graph = await notesService.getGraphData(ctx.workingDirectory);
       const sorted = [...graph.nodes].sort((a, b) => b.linkCount - a.linkCount);
       const isolated = sorted.filter((n) => n.linkCount === 0);
       const connected = sorted.filter((n) => n.linkCount > 0);
@@ -701,9 +748,7 @@ export const noteGraphSummaryTool: Tool = {
           .map((n) => '  - ' + n.title + ' (' + n.linkCount + ' links, ' + n.folderPath + ')'),
         '',
         'Context-injected notes: ' +
-          (contextNotes.length
-            ? contextNotes.map((n) => n.title).join(', ')
-            : '(none)'),
+          (contextNotes.length ? contextNotes.map((n) => n.title).join(', ') : '(none)'),
       ];
 
       return {
@@ -739,9 +784,16 @@ export const renderNoteTool: Tool = {
     properties: {
       id: { type: 'string', description: 'Note ID from the catalog (preferred)' },
       title: { type: 'string', description: 'Exact title when ID is unavailable' },
-      mode: { type: 'string', enum: ['excerpt', 'document'], description: 'excerpt for context; document for rendered chat output' },
+      mode: {
+        type: 'string',
+        enum: ['excerpt', 'document'],
+        description: 'excerpt for context; document for rendered chat output',
+      },
       query: { type: 'string', description: 'Text to center the excerpt around' },
-      heading: { type: 'string', description: 'Markdown heading whose section should be extracted' },
+      heading: {
+        type: 'string',
+        description: 'Markdown heading whose section should be extracted',
+      },
       maxChars: { type: 'number', description: 'Excerpt limit, 200–4000; default 1200' },
     },
   },
@@ -750,11 +802,14 @@ export const renderNoteTool: Tool = {
     const start = Date.now();
     try {
       await notesService.syncProjectDocuments(ctx.workingDirectory);
-      const id = await resolveId({
-        id: input.id as string | undefined,
-        title: input.title as string | undefined,
-      });
-      const note = id ? await notesService.getNote(id) : null;
+      const id = await resolveId(
+        {
+          id: input.id as string | undefined,
+          title: input.title as string | undefined,
+        },
+        ctx.workingDirectory,
+      );
+      const note = id ? await notesService.getNote(id, ctx.workingDirectory) : null;
       if (!note) throw new Error('Note not found');
 
       if (input.mode === 'document') {
@@ -776,7 +831,7 @@ export const renderNoteTool: Tool = {
         const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const match = new RegExp(`^#{1,6}\\s+${escaped}\\s*$`, 'im').exec(note.content);
         if (match) {
-          const level = (match[0].match(/^#+/)?.[0].length ?? 6);
+          const level = match[0].match(/^#+/)?.[0].length ?? 6;
           const rest = note.content.slice(match.index + match[0].length);
           const next = new RegExp(`^#{1,${level}}\\s+`, 'm').exec(rest);
           excerpt = match[0] + rest.slice(0, next?.index ?? rest.length);

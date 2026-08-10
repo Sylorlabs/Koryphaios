@@ -1,5 +1,6 @@
-// Complete Rate Limiting Implementation
-// Production-ready distributed rate limiting with Redis, multiple strategies, and CAPTCHA integration
+// Rate-limiting primitives with Redis-backed and in-memory strategies.
+// Deployment readiness still depends on the caller's topology, Redis health,
+// proxy identity configuration, and failure policy.
 
 import { getRedisClient, type InMemoryRedis } from '../redis';
 import { randomBytes } from 'node:crypto';
@@ -128,42 +129,65 @@ export class SlidingWindowRateLimiter {
     const { identifier, maxRequests, windowMs } = { ...this.config, ...options };
     const key = `${this.config.keyPrefix || 'ratelimit'}:sliding:${identifier}`;
     const now = Date.now();
-    const windowStart = now - windowMs;
 
     try {
-      // Remove expired entries
-      await redis.zremrangebyscore(key, '0', windowStart);
+      // Removal, admission, insertion, and reset calculation must be one Redis
+      // operation. Splitting ZCARD and ZADD lets concurrent callers all observe
+      // the same count and over-admit a burst beyond maxRequests.
+      const luaScript = `
+        local key = KEYS[1]
+        local window_ms = tonumber(ARGV[1])
+        local max_requests = tonumber(ARGV[2])
+        local now = tonumber(ARGV[3])
+        local member = ARGV[4]
+        local ttl = tonumber(ARGV[5])
+        local window_start = now - window_ms
 
-      // Count current requests in window
-      const current = await redis.zcard(key);
+        redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+        local current = redis.call('ZCARD', key)
 
-      if (current < maxRequests) {
-        // Add current request
-        const score = now;
-        const member = `${now}:${randomBytes(8).toString('hex')}`;
-        await redis.zadd(key, score, member);
-        await redis.expire(key, Math.ceil(windowMs / 1000) + 1);
+        if current < max_requests then
+          redis.call('ZADD', key, now, member)
+          redis.call('EXPIRE', key, ttl)
+          local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+          local reset_at = now + window_ms
+          if oldest[2] then
+            reset_at = tonumber(oldest[2]) + window_ms
+          end
+          return {1, max_requests - current - 1, reset_at}
+        end
 
-        return {
-          allowed: true,
-          remaining: maxRequests - current - 1,
-          resetAt: now + windowMs,
-          limit: maxRequests,
-        };
-      } else {
-        // Rate limit exceeded - find when the oldest request will expire
-        const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
-        const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
-        const retryAfter = Math.ceil((resetAt - now) / 1000);
+        local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+        local reset_at = now + window_ms
+        if oldest[2] then
+          reset_at = tonumber(oldest[2]) + window_ms
+        end
+        return {0, 0, reset_at}
+      `;
+      const scriptHash = String(await redis.script('LOAD', luaScript));
+      const member = `${now}:${randomBytes(8).toString('hex')}`;
+      const ttl = Math.ceil(windowMs / 1000) + 1;
+      const raw = (await redis.evalsha(
+        scriptHash,
+        1,
+        key,
+        String(windowMs),
+        String(maxRequests),
+        String(now),
+        member,
+        String(ttl),
+      )) as Array<number | string>;
+      const allowed = Number(raw[0]) === 1;
+      const remaining = Math.max(0, Number(raw[1]) || 0);
+      const resetAt = Number(raw[2]) || now + windowMs;
 
-        return {
-          allowed: false,
-          remaining: 0,
-          resetAt,
-          retryAfter,
-          limit: maxRequests,
-        };
-      }
+      return {
+        allowed,
+        remaining,
+        resetAt,
+        retryAfter: allowed ? undefined : Math.max(1, Math.ceil((resetAt - now) / 1000)),
+        limit: maxRequests,
+      };
     } catch (err) {
       serverLog.warn({ err, key }, 'Redis rate limiter unavailable, using fallback');
 
@@ -1078,12 +1102,31 @@ export function getEndpointConfig(endpoint: string): RateLimitConfig | null {
 // EXPRESS-COMPATIBLE MIDDLEWARE
 // ============================================================================
 
+export interface RateLimitRequest {
+  authenticatedUser?: { id: string; rateLimitTier?: string };
+  ip?: string;
+  connection?: { remoteAddress?: string };
+  path?: string;
+}
+
+export interface RateLimitResponse {
+  setHeader(name: string, value: string): unknown;
+  status(code: number): { json(body: unknown): unknown };
+}
+
+export type RateLimitNextFunction = (err?: unknown) => void;
+
 export interface ExpressRateLimitOptions {
   algorithm?: RateLimitStrategy;
   config?: RateLimitConfig;
   skipAuthenticated?: boolean;
-  keyGenerator?: (req: any) => string;
-  handler?: (req: any, res: any, next: any, retryAfter: number) => void;
+  keyGenerator?: (req: RateLimitRequest) => string;
+  handler?: (
+    req: RateLimitRequest,
+    res: RateLimitResponse,
+    next: RateLimitNextFunction,
+    retryAfter: number,
+  ) => void;
   prefix?: string;
 }
 
@@ -1183,7 +1226,7 @@ export function rateLimit(options: ExpressRateLimitOptions = {}) {
   const algorithm = options.algorithm || 'sliding-window';
   const config = options.config || DEFAULT_MIDDLEWARE_CONFIG;
 
-  return async (req: any, res: any, next: any): Promise<void> => {
+  return async (req: RateLimitRequest, res: RateLimitResponse, next: RateLimitNextFunction): Promise<void> => {
     try {
       if (options.skipAuthenticated && req.authenticatedUser) {
         return next();
@@ -1275,12 +1318,12 @@ export function multiLayerRateLimit(endpoint?: string, options: ExpressRateLimit
 
   const endpointMiddleware = endpoint
     ? endpointRateLimit(endpoint, options)
-    : (_req: any, _res: any, next: any) => next();
+    : (_req: RateLimitRequest, _res: RateLimitResponse, next: RateLimitNextFunction) => next();
 
-  return (req: any, res: any, next: any): void => {
-    globalMiddleware(req, res, (err?: any) => {
+  return (req: RateLimitRequest, res: RateLimitResponse, next: RateLimitNextFunction): void => {
+    globalMiddleware(req, res, (err?: unknown) => {
       if (err) return next(err);
-      tierMiddleware(req, res, (err2?: any) => {
+      tierMiddleware(req, res, (err2?: unknown) => {
         if (err2) return next(err2);
         endpointMiddleware(req, res, next);
       });

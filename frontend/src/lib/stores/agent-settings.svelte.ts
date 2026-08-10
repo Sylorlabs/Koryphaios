@@ -1,8 +1,9 @@
 /**
  * Agent Settings Store
  *
- * Manages agent behavior, rule enforcement, and workflow preferences.
- * Rules are ALWAYS applied - no option to disable.
+ * Manages project-scoped agent behavior, permissions, and workflow preferences.
+ * The backend response is authoritative; defaults are only an initial shell
+ * until the current project settings have loaded.
  */
 
 import { apiUrl } from '$lib/utils/api-url';
@@ -52,7 +53,6 @@ export interface AgentSettings {
   designDiscovery: boolean;
   planApproval: 'always' | 'material' | 'never';
   modelQualification: 'enforce' | 'warn' | 'off';
-  feedbackSharing: 'local' | 'sanitized-opt-in';
   skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
@@ -92,8 +92,12 @@ export interface AgentSettings {
   contextPruneMinChars: number;
   /** Live context-usage report injected each turn so the agent self-manages */
   contextSelfAwareness: boolean;
+  /** Compact a completed turn after it reaches the trusted context threshold. */
+  autoCompactEnabled: boolean;
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
+  skillCollisionChoices: Record<string, 'personal' | 'project'>;
+  updatedAt?: number;
 }
 
 export interface CriticReviewResult {
@@ -135,6 +139,8 @@ export interface SkillRevision {
     baseVersion: string;
     baseHash: string;
     parent?: string;
+    broader: string[];
+    facets: string[];
     depth: number;
     requires: string[];
     conflicts: string[];
@@ -149,6 +155,11 @@ export interface SkillRevision {
     errors: string[];
     warnings: string[];
     ignoredAuthorityClaims: string[];
+  };
+  compatibility?: {
+    status: 'available' | 'unavailable';
+    reason: string;
+    supportingResources: string[];
   };
   /** True when a newer bundled version exists and the local copy has user edits. */
   bundledUpdateAvailable?: boolean;
@@ -223,6 +234,8 @@ export interface BundledSkillComparison {
 }
 
 export interface SkillResolutionPreview {
+  planningOnly: boolean;
+  planningLimit: string;
   selected: Array<{
     skill: SkillRevision;
     reason: string;
@@ -242,7 +255,12 @@ export interface SkillResolutionPreview {
     contextCost: number;
     omittedDetailChars: number;
   }>;
+  rejectedCandidates: Array<{ name: string; reason: string }>;
+  rejectedCandidateCount: number;
+  rejectedCandidatesTruncated: boolean;
   blocked: boolean;
+  contextBudget: number;
+  contextOverheadCost: number;
   totalContextCost: number;
 }
 
@@ -257,18 +275,17 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   preferencesEnabled: true,
   criticGateEnabled: true,
   gateStrictness: 'strict',
-  intentInterview: 'off',
+  intentInterview: 'adaptive',
   goalPlanningDepth: 'adaptive',
   automaticGoalDriving: true,
-  designDiscovery: false,
-  planApproval: 'never',
+  designDiscovery: true,
+  planApproval: 'material',
   modelQualification: 'enforce',
-  feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
-  autoRunTools: true,
+  autoRunTools: false,
   allowExternalPaths: false,
   managerModelAccess: {},
   managerNotes: {},
@@ -290,7 +307,9 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextKeepRecentTurns: 3,
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
-  reasoningExpandedByDefault: false,
+  autoCompactEnabled: true,
+  reasoningExpandedByDefault: true,
+  skillCollisionChoices: {},
 };
 
 // ============================================================================
@@ -301,6 +320,9 @@ function createAgentSettingsStore() {
   let settings = $state<AgentSettings>(DEFAULT_AGENT_SETTINGS);
   let preferences = $state<{ exists: boolean; content: string; path: string } | null>(null);
   let isLoading = $state(false);
+  let settingsSaving = $state(false);
+  let settingsError = $state<string | null>(null);
+  let settingsLoaded = $state(false);
   let activeTab = $state<'settings' | 'preferences' | 'skills'>('settings');
   let skills = $state<SkillRevision[]>([]);
   let skillQualifications = $state<HarnessQualificationRecord[]>([]);
@@ -322,19 +344,23 @@ function createAgentSettingsStore() {
   async function loadSettings(): Promise<void> {
     const revision = ++settingsRequestRevision;
     isLoading = true;
+    settingsError = null;
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings'));
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok) {
-          if (revision === settingsRequestRevision) settings = data.data;
-        }
+      const data = await res.json();
+      if (!res.ok || !data.ok || !data.data) {
+        throw new Error(data.error || `Agent settings returned ${res.status}`);
+      }
+      if (revision === settingsRequestRevision) {
+        settings = data.data;
+        settingsLoaded = true;
       }
     } catch (err) {
-      console.error('Failed to load agent settings:', err);
+      if (revision === settingsRequestRevision) {
+        settingsError = err instanceof Error ? err.message : 'Could not load agent settings';
+      }
     } finally {
-      isLoading = false;
+      if (revision === settingsRequestRevision) isLoading = false;
     }
   }
 
@@ -344,6 +370,8 @@ function createAgentSettingsStore() {
   ): Promise<boolean> {
     const revision = ++settingsRequestRevision;
     const previousSettings = settings;
+    settingsSaving = true;
+    settingsError = null;
     // Keep controls stationary and responsive while the write happens. The
     // server response remains authoritative, but saving no longer blanks the
     // entire panel or waits before moving a switch/stepper.
@@ -358,22 +386,30 @@ function createAgentSettingsStore() {
       if (res.ok) {
         const data = await res.json();
         if (data.ok) {
-          if (revision === settingsRequestRevision) settings = data.data;
+          if (revision === settingsRequestRevision) {
+            settings = data.data;
+            settingsLoaded = true;
+          }
           if (!options?.quietSuccess) {
             toastStore.success('Agent settings saved');
           }
           return true;
         }
       }
-      throw new Error('Failed to save');
+      throw new Error('The backend did not persist the agent setting');
     } catch (err) {
       if (revision === settingsRequestRevision) settings = previousSettings;
-      toastStore.error('Failed to save agent settings');
+      settingsError = err instanceof Error ? err.message : 'Could not save agent settings';
+      toastStore.error(settingsError);
       return false;
+    } finally {
+      if (revision === settingsRequestRevision) settingsSaving = false;
     }
   }
 
   async function resetSettings(): Promise<boolean> {
+    settingsSaving = true;
+    settingsError = null;
     try {
       const res = await apiFetch(apiUrl('/api/agent/settings/reset'), { method: 'POST' });
 
@@ -381,14 +417,18 @@ function createAgentSettingsStore() {
         const data = await res.json();
         if (data.ok) {
           settings = data.data;
+          settingsLoaded = true;
           toastStore.success('Agent settings reset to defaults');
           return true;
         }
       }
-      return false;
+      throw new Error('The backend did not reset agent settings');
     } catch (err) {
-      toastStore.error('Failed to reset agent settings');
+      settingsError = err instanceof Error ? err.message : 'Could not reset agent settings';
+      toastStore.error(settingsError);
       return false;
+    } finally {
+      settingsSaving = false;
     }
   }
 
@@ -424,7 +464,7 @@ function createAgentSettingsStore() {
         const data = await res.json();
         if (data.ok) {
           preferences = { ...preferences, content, exists: true } as typeof preferences;
-          toastStore.success('Preferences saved. Critic will enforce new rules.');
+          toastStore.success('Project preferences saved locally');
           return true;
         }
       }
@@ -515,6 +555,14 @@ function createAgentSettingsStore() {
     shouldTrigger: string[];
     shouldNotTrigger: string[];
     evidence: string[];
+    broader?: string[];
+    facets?: string[];
+    requires?: string[];
+    conflicts?: string[];
+    excludes?: string[];
+    targetMedia?: string[];
+    depth?: number;
+    contextBudget?: number;
   }): Promise<SkillRevision | null> {
     try {
       const res = await apiFetch(apiUrl('/api/agent/skills'), {
@@ -528,7 +576,9 @@ function createAgentSettingsStore() {
       toastStore.success('Skill draft created');
       return data.data as SkillRevision;
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to create skill draft');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to create skill draft',
+      );
       return null;
     }
   }
@@ -546,7 +596,9 @@ function createAgentSettingsStore() {
       toastStore.success('Skill saved as draft');
       return true;
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to save skill draft');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to save skill draft',
+      );
       return false;
     }
   }
@@ -572,7 +624,9 @@ function createAgentSettingsStore() {
       toastStore.success('Validated skill activated');
       return true;
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to activate skill');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to activate skill',
+      );
       return false;
     }
   }
@@ -587,7 +641,10 @@ function createAgentSettingsStore() {
       return true;
     } catch (err: unknown) {
       skillComparison = null;
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Active and draft revisions are required');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ??
+          'Active and draft revisions are required',
+      );
       return false;
     }
   }
@@ -601,7 +658,10 @@ function createAgentSettingsStore() {
       return true;
     } catch (err: unknown) {
       bundledComparison = null;
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to compare with bundled version');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ??
+          'Failed to compare with bundled version',
+      );
       return false;
     }
   }
@@ -631,7 +691,9 @@ function createAgentSettingsStore() {
       toastStore.success(messages[choice] ?? 'Skill update choice applied');
       return true;
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to apply bundled update');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to apply bundled update',
+      );
       return false;
     } finally {
       isMergingSkill = false;
@@ -650,11 +712,39 @@ function createAgentSettingsStore() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error);
-      skillResolutionPreview = data.data;
+      const preview = data.data as Partial<SkillResolutionPreview>;
+      skillResolutionPreview = {
+        planningOnly: preview.planningOnly ?? true,
+        planningLimit:
+          preview.planningLimit ??
+          'Final manager selection is recomputed against live model and context limits at run time.',
+        selected: (preview.selected ?? []).map((item) => ({
+          ...item,
+          representation: item.representation ?? 'full',
+          contextCost: item.contextCost ?? 0,
+          fullContextCost: item.fullContextCost ?? item.contextCost ?? 0,
+          omittedDetailChars: item.omittedDetailChars ?? 0,
+        })),
+        collisions: preview.collisions ?? [],
+        selectionConflicts: preview.selectionConflicts ?? [],
+        hierarchyErrors: preview.hierarchyErrors ?? [],
+        omittedByBudget: preview.omittedByBudget ?? [],
+        compressedByBudget: preview.compressedByBudget ?? [],
+        rejectedCandidates: preview.rejectedCandidates ?? [],
+        rejectedCandidateCount:
+          preview.rejectedCandidateCount ?? preview.rejectedCandidates?.length ?? 0,
+        rejectedCandidatesTruncated: preview.rejectedCandidatesTruncated ?? false,
+        blocked: preview.blocked ?? true,
+        contextBudget: preview.contextBudget ?? preview.totalContextCost ?? 0,
+        contextOverheadCost: preview.contextOverheadCost ?? 0,
+        totalContextCost: preview.totalContextCost ?? 0,
+      };
       return true;
     } catch (err: unknown) {
       skillResolutionPreview = null;
-      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Failed to preview skill selection');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to preview skill selection',
+      );
       return false;
     }
   }
@@ -746,6 +836,15 @@ function createAgentSettingsStore() {
     get isLoading() {
       return isLoading;
     },
+    get settingsSaving() {
+      return settingsSaving;
+    },
+    get settingsError() {
+      return settingsError;
+    },
+    get settingsLoaded() {
+      return settingsLoaded;
+    },
     get activeTab() {
       return activeTab;
     },
@@ -777,10 +876,6 @@ function createAgentSettingsStore() {
       return bundledUpdateCount;
     },
 
-    // Rules are always enforced - no getter to disable
-    get rulesAlwaysEnforced() {
-      return true;
-    },
     get criticActive() {
       return settings.criticGateEnabled;
     },

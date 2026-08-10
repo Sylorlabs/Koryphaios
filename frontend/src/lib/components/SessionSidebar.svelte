@@ -7,22 +7,20 @@
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import { isFullDemo, isGuidedDemo } from '$lib/demo-flags';
-  import {
-    Plus,
-    Search,
-    Pencil,
-    Trash2,
-    Check,
-    X,
-    MessageSquare,
-    LoaderCircle,
-    FolderOpen,
-    Users,
-    LogOut,
-    UserPlus,
-    ShieldAlert,
-    Target,
-  } from 'lucide-svelte';
+  import Plus from 'lucide-svelte/icons/plus';
+  import Search from 'lucide-svelte/icons/search';
+  import Pencil from 'lucide-svelte/icons/pencil';
+  import Trash2 from 'lucide-svelte/icons/trash-2';
+  import Check from 'lucide-svelte/icons/check';
+  import X from 'lucide-svelte/icons/x';
+  import MessageSquare from 'lucide-svelte/icons/message-square';
+  import LoaderCircle from 'lucide-svelte/icons/loader-circle';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
+  import Users from 'lucide-svelte/icons/users';
+  import LogOut from 'lucide-svelte/icons/log-out';
+  import UserPlus from 'lucide-svelte/icons/user-plus';
+  import ShieldAlert from 'lucide-svelte/icons/shield-alert';
+  import Target from 'lucide-svelte/icons/target';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import ActiveGoals from './ActiveGoals.svelte';
@@ -46,7 +44,9 @@
   let creating = $state(false);
   let goalClock = $state(Date.now());
   const nowClock = useNow();
-  $effect(() => { goalClock = nowClock.now; });
+  $effect(() => {
+    goalClock = nowClock.now;
+  });
   // Track which session we last loaded feed for, so we load when active changes (e.g. new session from +)
   let lastLoadedSessionId = $state<string>('');
 
@@ -55,15 +55,16 @@
     return () => nowClock.unsubscribe();
   });
 
-  const goalsForSession = (sessionId: string) => goalStore.goals.filter((goal) =>
-    isActiveGoal(goal) && goal.execution?.sessionId === sessionId
-  );
+  const goalsForSession = (sessionId: string) =>
+    goalStore.goals.filter((goal) => isActiveGoal(goal) && goal.execution?.sessionId === sessionId);
 
   function openSessionGoal(sessionId: string, goalId: string) {
     void selectSession(sessionId);
     goalStore.selectedGoalId = goalId;
     goalDisplayStore.update({ sidebar: true });
-    queueMicrotask(() => window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })));
+    queueMicrotask(() =>
+      window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })),
+    );
   }
 
   $effect(() => {
@@ -75,7 +76,9 @@
 
   async function handleCreateSession(event?: MouseEvent) {
     if (isGuidedDemo) {
-      toastStore.info('Sample sessions are read-only in the demo. Run the app to create a workspace.');
+      toastStore.info(
+        'Sample sessions are read-only in the demo. Run the app to create a workspace.',
+      );
       return;
     }
     creating = true;
@@ -202,7 +205,11 @@
       style="color: var(--color-text-secondary);"
       disabled={creating || isGuidedDemo}
       onclick={(e) => handleCreateSession(e)}
-      title={isGuidedDemo ? 'Sample sessions are read-only in the guided demo' : isFullDemo ? 'New ephemeral session' : 'New session (Ctrl+N; Shift-click forces a new chat)'}
+      title={isGuidedDemo
+        ? 'Sample sessions are read-only in the guided demo'
+        : isFullDemo
+          ? 'New ephemeral session'
+          : 'New session (Ctrl+N; Shift-click forces a new chat)'}
       aria-label="New session"
     >
       {#if creating}
@@ -350,8 +357,8 @@
     <div class="flex items-center justify-between gap-2 px-3 py-2">
       <span
         class="min-w-0 text-[10px] font-semibold uppercase tracking-[0.12em]"
-        style="color:var(--color-text-muted)"
-      >Personal sessions</span>
+        style="color:var(--color-text-muted)">Personal sessions</span
+      >
       <button
         type="button"
         class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-35"
@@ -377,17 +384,10 @@
           {@const sessionGoals = goalsForSession(session.id)}
           {@const primaryGoal = sessionGoals[0]}
           <div
-            role="button"
-            tabindex="0"
-            class="session-item group flex items-center gap-3 px-3 py-3 mx-1 rounded-xl cursor-pointer transition-colors border border-transparent {sessionStore.activeSessionId ===
+            class="session-item group relative flex items-center gap-3 px-3 py-3 mx-1 rounded-xl cursor-pointer transition-colors border border-transparent {sessionStore.activeSessionId ===
               session.id && !collaborationStore.activeJoinedSession
               ? 'active-session'
               : 'hover:bg-[var(--color-surface-2)] hover:border-[var(--color-border)]'}"
-            onclick={() => selectSession(session.id)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') selectSession(session.id);
-            }}
-            ondblclick={() => !isGuidedDemo && startRename(session.id, session.title)}
           >
             {#if editingId === session.id}
               <div class="flex-1 flex flex-col gap-0.5">
@@ -442,9 +442,23 @@
                 {/if}
               </div>
             {:else}
+              <button
+                type="button"
+                class="absolute inset-0 z-0 rounded-xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
+                aria-label={sessionStore.activeSessionId === session.id &&
+                !collaborationStore.activeJoinedSession
+                  ? `Open session ${session.title}, currently open`
+                  : `Open session ${session.title}`}
+                aria-current={sessionStore.activeSessionId === session.id &&
+                !collaborationStore.activeJoinedSession
+                  ? 'page'
+                  : undefined}
+                onclick={() => selectSession(session.id)}
+                ondblclick={() => !isGuidedDemo && startRename(session.id, session.title)}
+              ></button>
               {#if wsStore.getManagerStatusForSession(session.id) !== 'idle'}
                 <div
-                  class="shrink-0 flex items-center justify-center rounded-lg"
+                  class="pointer-events-none relative z-[1] shrink-0 flex items-center justify-center rounded-lg"
                   style="width: 18px; height: 18px; background: rgba(var(--color-accent-rgb), 0.08);"
                 >
                   <AnimatedStatusIcon
@@ -456,7 +470,7 @@
                 </div>
               {:else if primaryGoal}
                 <div
-                  class="shrink-0 flex items-center justify-center rounded-lg"
+                  class="pointer-events-none relative z-[1] shrink-0 flex items-center justify-center rounded-lg"
                   style="width: 18px; height: 18px; background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
                   title="This chat is assigned to an active goal"
                 >
@@ -464,13 +478,13 @@
                 </div>
               {:else}
                 <div
-                  class="shrink-0 flex items-center justify-center rounded-lg"
+                  class="pointer-events-none relative z-[1] shrink-0 flex items-center justify-center rounded-lg"
                   style="width: 18px; height: 18px; background: var(--color-surface-3);"
                 >
                   <MessageSquare size={12} style="color: var(--color-text-muted);" />
                 </div>
               {/if}
-              <div class="flex-1 min-w-0">
+              <div class="pointer-events-none relative z-[1] flex-1 min-w-0">
                 <div class="text-sm font-medium truncate" style="color: var(--color-text-primary);">
                   {session.title}
                 </div>
@@ -479,21 +493,34 @@
                     <span
                       class="inline-flex items-center rounded-full px-1.5 py-0.5 font-bold uppercase tracking-wider"
                       style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
-                      aria-label="Currently open chat"
-                    >Open</span>
+                      >Open</span
+                    >
                   {/if}
                   {#if primaryGoal}
                     <button
                       type="button"
-                      class="inline-flex max-w-[170px] items-center gap-1 rounded-full px-1.5 py-0.5 font-semibold"
+                      class="pointer-events-auto relative z-10 inline-flex max-w-[170px] items-center gap-1 rounded-full px-1.5 py-0.5 font-semibold"
                       style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
                       title={sessionGoals.map((goal) => goal.objective).join('\n')}
                       aria-label={`${sessionGoals.length > 1 ? `${sessionGoals.length} goals assigned to this chat` : `Goal ${primaryGoal.status}: ${primaryGoal.objective}`}. Active time ${formatGoalRuntime(primaryGoal, goalClock)}`}
-                      onclick={(event) => { event.stopPropagation(); openSessionGoal(session.id, primaryGoal.id); }}
+                      onclick={(event) => {
+                        event.stopPropagation();
+                        openSessionGoal(session.id, primaryGoal.id);
+                      }}
                     >
                       <Target size={9} class="shrink-0" />
-                      <span class="truncate">{sessionGoals.length > 1 ? `${sessionGoals.length} goals` : primaryGoal.status === 'blocked' ? 'Goal blocked' : primaryGoal.status === 'paused' ? 'Goal paused' : `Goal ${goalProgress(primaryGoal)}%`}</span>
-                      <span class="shrink-0 opacity-70">· {formatGoalRuntime(primaryGoal, goalClock)}</span>
+                      <span class="truncate"
+                        >{sessionGoals.length > 1
+                          ? `${sessionGoals.length} goals`
+                          : primaryGoal.status === 'blocked'
+                            ? 'Goal blocked'
+                            : primaryGoal.status === 'paused'
+                              ? 'Goal paused'
+                              : `Goal ${goalProgress(primaryGoal)}%`}</span
+                      >
+                      <span class="shrink-0 opacity-70"
+                        >· {formatGoalRuntime(primaryGoal, goalClock)}</span
+                      >
                     </button>
                   {/if}
                   {#if wsStore.pendingPermissions.some((p) => p.sessionId === session.id) && sessionStore.activeSessionId !== session.id}
@@ -534,37 +561,37 @@
                 </div>
               </div>
               {#if !isGuidedDemo}<div
-                class="flex items-center gap-1 transition-opacity {sessionStore.activeSessionId ===
-                session.id
-                  ? 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
-                  : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}"
-              >
-                <button
-                  type="button"
-                  class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
-                  style="color: var(--color-text-muted);"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    startRename(session.id, session.title);
-                  }}
-                  ondblclick={(e) => e.stopPropagation()}
-                  title="Rename"
-                  aria-label="Rename session"
+                  class="pointer-events-auto relative z-10 flex items-center gap-1 transition-opacity {sessionStore.activeSessionId ===
+                  session.id
+                    ? 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
+                    : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}"
                 >
-                  <Pencil size={12} />
-                </button>
-                <button
-                  type="button"
-                  class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
-                  style="color: var(--color-text-muted);"
-                  onclick={(e) => confirmDelete(e, session.id)}
-                  ondblclick={(e) => e.stopPropagation()}
-                  title="Delete (Shift+Click to skip confirmation)"
-                  aria-label="Delete session"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>{/if}
+                  <button
+                    type="button"
+                    class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
+                    style="color: var(--color-text-muted);"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      startRename(session.id, session.title);
+                    }}
+                    ondblclick={(e) => e.stopPropagation()}
+                    title="Rename"
+                    aria-label="Rename session"
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
+                    style="color: var(--color-text-muted);"
+                    onclick={(e) => confirmDelete(e, session.id)}
+                    ondblclick={(e) => e.stopPropagation()}
+                    title="Delete (Shift+Click to skip confirmation)"
+                    aria-label="Delete session"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>{/if}
             {/if}
           </div>
         {/each}

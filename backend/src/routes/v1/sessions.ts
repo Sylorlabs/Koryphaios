@@ -5,7 +5,19 @@ import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { serverLog } from '../../logger';
 import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
-import { AuthenticationError, NotFoundError } from '../../errors/types';
+import { AuthenticationError, ConflictError, NotFoundError } from '../../errors/types';
+import { timeTravelDegradedResponse, withSessionRecoveryGuard } from './session-recovery-guard';
+import {
+  eraseSessionsCoordinated,
+  tryAcquireSessionCreationLease,
+} from '../../services/session-erasure-service';
+
+async function timeTravelForSession(sessionId: string) {
+  const { sessions, kory, timeTravel } = getContext();
+  if (!(await sessions.get(sessionId))) throw new NotFoundError('Session', sessionId);
+  const workingDirectory = await kory.resolveSessionWorkingDirectoryPublic(sessionId);
+  return timeTravel.forWorkingDirectory(workingDirectory);
+}
 
 export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request }) => {
@@ -19,12 +31,23 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { sessions } = getContext();
-      const session = await sessions.create(
-        'local-user',
-        body.title,
-        body.parentId,
-        body.workingDirectory,
-      );
+      const creationLease = tryAcquireSessionCreationLease();
+      if (!creationLease) {
+        throw new ConflictError(
+          'Session creation is temporarily blocked while delete-all is finishing.',
+        );
+      }
+      let session;
+      try {
+        session = await sessions.create(
+          'local-user',
+          body.title,
+          body.parentId,
+          body.workingDirectory,
+        );
+      } finally {
+        creationLease.release();
+      }
       // Write Koryphaios rules + skills files to every CLI's isolated home so
       // the native CLIs (claude, codex, devin, grok, cursor, cline, antigravity)
       // discover Kory's tool-usage + orchestration conventions on startup.
@@ -47,21 +70,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   )
   .delete('/', async ({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    const { sessions, kory, goalDriver } = getContext();
-    const existingSessions = await sessions.list();
-    const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
-
-    // A bulk delete must not leave work running for conversations that no
-    // longer exist. Stop every session before removing their persisted data.
-    for (const session of existingSessions) {
-      await goalDriver.pauseForSession(session.id);
-      kory.cancelSessionWorkers(session.id);
-      kory.abortManagerRun(session.id);
-      await cancelLLMJobsForSession(session.id);
-    }
-
-    await sessions.clear();
-    return { ok: true, deleted: existingSessions.length };
+    const result = await eraseSessionsCoordinated({ kind: 'all' });
+    return { ok: true, deleted: result.deleted, operationId: result.operationId };
   })
   .get('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
@@ -94,23 +104,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   )
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    const { sessions, kory, goalDriver, wsManager } = getContext();
-    const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
-
-    // A deleted session must not retain a live manager turn or queued job:
-    // either can otherwise publish a stale update after its row is removed.
-    await goalDriver.pauseForSession(id);
-    kory.cancelSessionWorkers(id);
-    kory.abortManagerRun(id);
-    await cancelLLMJobsForSession(id);
-    await sessions.delete(id);
-    wsManager.broadcast({
-      type: 'session.deleted',
-      payload: { sessionId: id },
-      timestamp: Date.now(),
-      sessionId: id,
-    });
-    return { ok: true };
+    const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });
+    return { ok: true, operationId: result.operationId };
   })
   .get('/:id/processes', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
@@ -125,9 +120,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const { kory, wsManager } = getContext();
     // Cancel all workers for this session
     await getContext().goalDriver.pauseForSession(id);
-    kory.cancelSessionWorkers(id);
-    // Abort manager thread for this session
-    kory.abortManagerRun(id);
+    await kory.cancelSessionWorkers(id);
     // Cancel any LLM jobs for this session
     const { cancelLLMJobsForSession } = await import('../../queue/workers/llm-worker');
     await cancelLLMJobsForSession(id);
@@ -152,10 +145,17 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       });
       return { ok: true, data: result };
     },
-    { body: t.Object({ model: t.String(), reasoningLevel: t.Optional(t.String()), automatic: t.Optional(t.Boolean()) }) },
+    {
+      body: t.Object({
+        model: t.String(),
+        reasoningLevel: t.Optional(t.String()),
+        automatic: t.Optional(t.Boolean()),
+      }),
+    },
   )
   .get('/:id/context', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    if (!(await getContext().sessions.get(id))) throw new NotFoundError('Session', id);
     // Archived tool activity for this session — used to restore tool entries
     // in the feed after a reload (they're not part of the message history).
     const { getContextArchive } = await import('../../kory/context-archive');
@@ -172,20 +172,34 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         kind: e.kind,
         label: e.label,
         content: e.content.slice(0, 4000),
+        originalByteCount: e.originalByteCount,
+        contentSha256: e.contentSha256,
+        truncated: e.truncated,
+        redacted: e.redacted,
         prunedForAgent: e.prunedForAgent === true,
       })),
     };
   })
-  .post('/:id/context/model-preview',
+  .post(
+    '/:id/context/model-preview',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Model switched in the composer: re-baseline the context bar from the
       // backend's trusted window data (never a frontend guess).
-      const { kory } = getContext();
+      const { kory, sessions } = getContext();
+      if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
+      const lease = kory.tryAcquireSessionMutationBarrier(id);
+      if (!lease) {
+        throw new ConflictError('Wait for active session work or deletion to finish.');
+      }
       // previewModelContext types provider as `never` to force literal callers;
       // the runtime value is a valid provider string from the client request.
-      const usage = await kory.previewModelContext(id, body.model, body.provider as never);
-      return { ok: true, usage };
+      try {
+        const usage = await kory.previewModelContext(id, body.model, body.provider as never);
+        return { ok: true, usage };
+      } finally {
+        lease.release();
+      }
     },
     { body: t.Object({ model: t.String(), provider: t.String() }) },
   )
@@ -194,25 +208,56 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, params: { id, archiveId }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // User-driven "hide from agent": stubs this entry out of the model's
-      // context on the next turn. Content stays archived and recoverable.
+      // context on the next turn. Its bounded, redacted preview stays archived.
+      const { sessions, kory } = getContext();
+      if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
+      const lease = kory.tryAcquireSessionMutationBarrier(id);
+      if (!lease) {
+        throw new ConflictError('Wait for active session work or deletion to finish.');
+      }
       const { getContextArchive } = await import('../../kory/context-archive');
       const archive = getContextArchive();
-      if (!archive) return { ok: false, error: 'Context archive unavailable' };
-      // Body has no t.Object schema so it is untyped — cast to the expected shape.
-      const hidden =
-        (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
-      const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
-      if (!changed) throw new NotFoundError('Archive entry', archiveId);
-      return { ok: true };
+      try {
+        if (!archive) return { ok: false, error: 'Context archive unavailable' };
+        // Body has no t.Object schema so it is untyped — cast to the expected shape.
+        const hidden =
+          (body as { hiddenFromAgent?: boolean } | undefined)?.hiddenFromAgent === true;
+        const changed = await archive.setPrunedForAgent(id, archiveId, hidden);
+        if (!changed) throw new NotFoundError('Archive entry', archiveId);
+        return { ok: true };
+      } finally {
+        lease.release();
+      }
     },
   )
   .post(
     '/:id/rewind/preview',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const { timeTravel } = getContext();
-      const preview = await timeTravel.previewTravel(body.hash, id);
-      return { ok: preview.canTravel, data: preview, message: preview.message };
+      const busy = () => ({
+        ok: false,
+        data: {
+          canTravel: false,
+          currentHash: '',
+          targetHash: body.hash,
+          description: '',
+          evidence: { timestamp: 0 },
+          diff: '',
+          filesChanged: [],
+          conversationEffect: 'code-only' as const,
+          message: 'Stop or wait for active agent work before rewinding this session.',
+        },
+        message: 'Stop or wait for active agent work before rewinding this session.',
+      });
+      return withSessionRecoveryGuard({
+        tryAcquireManager: () => getContext().kory.tryAcquireSessionMutationBarrier(id),
+        tryAcquireProcess: () => processSupervisor.tryAcquireAgentToolBarrier(id),
+        onBusy: busy,
+        run: async () => {
+          const preview = await (await timeTravelForSession(id)).previewTravel(body.hash, id);
+          return { ok: preview.canTravel, data: preview, message: preview.message };
+        },
+      });
     },
     { body: t.Object({ hash: t.String() }) },
   )
@@ -220,9 +265,21 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/rewind',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const { timeTravel } = getContext();
-      const result = await timeTravel.travelTo(body.hash, id, body.expectedCurrentHash);
-      return { ok: result.success, message: result.message };
+      const busy = () => ({
+        ok: false,
+        message: 'Stop or wait for active agent work before rewinding this session.',
+      });
+      return withSessionRecoveryGuard({
+        tryAcquireManager: () => getContext().kory.tryAcquireSessionMutationBarrier(id),
+        tryAcquireProcess: () => processSupervisor.tryAcquireAgentToolBarrier(id),
+        onBusy: busy,
+        run: async () => {
+          const result = await (
+            await timeTravelForSession(id)
+          ).travelTo(body.hash, id, body.expectedCurrentHash);
+          return { ok: result.success, message: result.message };
+        },
+      });
     },
     {
       body: t.Object({
@@ -235,23 +292,13 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/:id/timetravel', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     try {
-      const { timeTravel } = getContext();
-      const state = await timeTravel.getState(id);
+      const state = await (await timeTravelForSession(id)).getState(id);
       return { ok: true, data: state };
     } catch (err: unknown) {
-      // Timeline history is supplementary UI. A git/reflog edge case must not
-      // turn opening an otherwise valid session into a browser-console 500.
-      // Return the empty, non-rewindable state the UI already understands.
+      // Preserve the session while truthfully surfacing missing/corrupt shadow
+      // storage or an unreconciled journal. This remains an HTTP-successful
+      // route response so panel loading does not create a console-level 500.
       serverLog.warn({ err, sessionId: id }, 'Failed to load time travel timeline');
-      return {
-        ok: true,
-        data: {
-          currentHash: '',
-          timeline: [],
-          canUndo: false,
-          canRedo: false,
-          stats: { totalStates: 0, totalCost: 0, modelsUsed: [] },
-        },
-      };
+      return timeTravelDegradedResponse(err);
     }
   });

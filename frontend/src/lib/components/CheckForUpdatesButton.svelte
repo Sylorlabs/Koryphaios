@@ -2,7 +2,9 @@
   import { updater } from "$lib/stores/updater.svelte";
   import { theme } from "$lib/stores/theme.svelte";
   import { toastStore as toast } from "$lib/stores/toast.svelte";
-  import { RefreshCw, Check, AlertCircle } from "lucide-svelte";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import Check from "lucide-svelte/icons/check";
+  import AlertCircle from "lucide-svelte/icons/alert-circle";
 
   interface Props {
     variant?: 'button' | 'menu-item';

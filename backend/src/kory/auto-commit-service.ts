@@ -7,7 +7,6 @@
  * - A PR is opened on origin for review
  */
 
-import { spawnSync } from 'bun';
 import { koryLog } from '../logger';
 import { GitManager } from './git-manager';
 
@@ -82,18 +81,7 @@ export class AutoCommitService {
    * Run a git command asynchronously
    */
   private async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
-    const proc = Bun.spawn(['git', ...args], {
-      cwd: this.workingDirectory,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    return { success: exitCode === 0, output: (stdout + stderr).trim() };
+    return this.git.runGit(args);
   }
 
   /**

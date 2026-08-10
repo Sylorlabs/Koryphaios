@@ -2,16 +2,17 @@
  * Integration tests for proactive monitoring functionality
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
-import { join } from 'path';
 import { tmpdir } from 'os';
+import { join } from 'path';
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
 
 import { ErrorDetectorManager } from '@/detectors/error-detector-manager.js';
 import { ProactiveMonitoringCoordinator } from '@/monitoring/proactive-monitoring-coordinator.js';
-import { UnifiedFileWatcher } from '@/monitoring/unified-file-watcher.js';
-import type { ErrorDetectionConfig } from '@/types/index.js';
 import type { ProactiveMonitoringConfig } from '@/monitoring/proactive-monitoring-coordinator.js';
+import type { ErrorDetectionConfig } from '@/types/index.js';
 
 describe('Proactive Monitoring Integration', () => {
   let tempDir: string;
@@ -165,8 +166,7 @@ describe('Proactive Monitoring Integration', () => {
       `
       );
 
-      // Wait for file watching to trigger
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitFor(() => proactiveErrorsDetected.mock.calls.length > 0, { attempts: 60 });
 
       // Should have detected the file change and analyzed it
       expect(proactiveErrorsDetected).toHaveBeenCalled();
@@ -193,8 +193,7 @@ describe('Proactive Monitoring Integration', () => {
         );
       }
 
-      // Wait for file watching to process all files
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await waitFor(() => proactiveErrorsDetected.mock.calls.length > 0, { attempts: 60 });
 
       // Should have processed multiple files
       expect(proactiveErrorsDetected).toHaveBeenCalled();
@@ -217,8 +216,7 @@ describe('Proactive Monitoring Integration', () => {
       const testFile = join(tempDir, 'compile-test.ts');
       await fs.writeFile(testFile, 'const x: string = "test";');
 
-      // Wait for compilation status to update
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitFor(() => compilationStatusChanged.mock.calls.length > 0, { attempts: 60 });
 
       // Should have triggered compilation status change
       expect(compilationStatusChanged).toHaveBeenCalled();
@@ -363,8 +361,7 @@ describe('Proactive Monitoring Integration', () => {
         );
       }
 
-      // Wait for all files to be processed
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await waitFor(() => proactiveErrorsDetected.mock.calls.length > 0, { attempts: 80 });
 
       // Should have processed files (may be batched)
       expect(proactiveErrorsDetected).toHaveBeenCalled();
@@ -398,8 +395,7 @@ describe('Proactive Monitoring Integration', () => {
       `
       );
 
-      // Wait for file watching to process
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await waitFor(() => fileWatchingStats.mock.calls.length > 0, { attempts: 60 });
 
       // Should have received performance stats
       expect(fileWatchingStats).toHaveBeenCalled();
@@ -411,29 +407,30 @@ describe('Proactive Monitoring Integration', () => {
       const coordinator = new ProactiveMonitoringCoordinator(detectorManager, proactiveConfig);
       coordinator.on('file-batch-processed', fileBatchProcessed);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create multiple files rapidly to trigger batching
-      const files = Array.from({ length: 8 }, (_, i) => `batch-${i}.ts`);
+        // Create multiple files rapidly to trigger batching
+        const files = Array.from({ length: 8 }, (_, i) => `batch-${i}.ts`);
 
-      for (const fileName of files) {
-        const filePath = join(tempDir, fileName);
-        await fs.writeFile(
-          filePath,
+        for (const fileName of files) {
+          const filePath = join(tempDir, fileName);
+          await fs.writeFile(
+            filePath,
+            `
+            export const ${fileName.replace('.ts', '').replace('-', '_')} = {
+              id: ${Math.random()},
+              name: "${fileName}",
+              timestamp: new Date()
+            };
           `
-          export const ${fileName.replace('.ts', '').replace('-', '_')} = {
-            id: ${Math.random()},
-            name: "${fileName}",
-            timestamp: new Date()
-          };
-        `
-        );
+          );
+        }
+
+        await waitFor(() => fileBatchProcessed.mock.calls.length > 0, { attempts: 80 });
+      } finally {
+        await coordinator.stop();
       }
-
-      // Wait for batch processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      await coordinator.stop();
 
       // Should have processed files in batches
       expect(fileBatchProcessed).toHaveBeenCalled();
@@ -464,8 +461,8 @@ describe('Proactive Monitoring Integration', () => {
           () =>
             sourceFileChanged.mock.calls.length > 0 &&
             testFileChanged.mock.calls.length > 0 &&
-            configFileChanged.mock.calls.length > 0
-          , { attempts: 80, delayMs: 120 }
+            configFileChanged.mock.calls.length > 0,
+          { attempts: 80, delayMs: 120 }
         );
       } finally {
         await coordinator.stop();
@@ -479,24 +476,27 @@ describe('Proactive Monitoring Integration', () => {
 
     it('should provide file watching statistics', async () => {
       const coordinator = new ProactiveMonitoringCoordinator(detectorManager, proactiveConfig);
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Check initial stats
-      const stats = coordinator.getFileWatchingStats();
-      expect(stats).toBeDefined();
-      expect(stats?.totalEvents).toBe(0);
-      expect(stats?.watchedFiles).toBeGreaterThanOrEqual(0);
+        // Check initial stats
+        const stats = coordinator.getFileWatchingStats();
+        expect(stats).toBeDefined();
+        expect(stats?.totalEvents).toBe(0);
+        expect(stats?.watchedFiles).toBeGreaterThanOrEqual(0);
 
-      // Create a file to generate events
-      await fs.writeFile(join(tempDir, 'stats-test.ts'), 'const x = 1;');
+        // Create a file to generate events
+        await fs.writeFile(join(tempDir, 'stats-test.ts'), 'const x = 1;');
 
-      // Wait for event processing
-      await new Promise(resolve => setTimeout(resolve, 300));
+        await waitFor(() => (coordinator.getFileWatchingStats()?.totalEvents ?? 0) > 0, {
+          attempts: 60,
+        });
 
-      const updatedStats = coordinator.getFileWatchingStats();
-      expect(updatedStats?.totalEvents).toBeGreaterThan(0);
-
-      await coordinator.stop();
+        const updatedStats = coordinator.getFileWatchingStats();
+        expect(updatedStats?.totalEvents).toBeGreaterThan(0);
+      } finally {
+        await coordinator.stop();
+      }
     });
 
     it('should handle language-specific file changes', async () => {
@@ -507,16 +507,22 @@ describe('Proactive Monitoring Integration', () => {
       coordinator.on('typescript-file-changed', typescriptFileChanged);
       coordinator.on('javascript-file-changed', javascriptFileChanged);
 
-      await coordinator.start();
+      try {
+        await coordinator.start();
 
-      // Create language-specific files
-      await fs.writeFile(join(tempDir, 'typescript-file.ts'), 'const x: number = 42;');
-      await fs.writeFile(join(tempDir, 'javascript-file.js'), 'const y = 42;');
+        // Create language-specific files
+        await fs.writeFile(join(tempDir, 'typescript-file.ts'), 'const x: number = 42;');
+        await fs.writeFile(join(tempDir, 'javascript-file.js'), 'const y = 42;');
 
-      // Wait for language detection
-      await new Promise(resolve => setTimeout(resolve, 400));
-
-      await coordinator.stop();
+        await waitFor(
+          () =>
+            typescriptFileChanged.mock.calls.length > 0 &&
+            javascriptFileChanged.mock.calls.length > 0,
+          { attempts: 60 }
+        );
+      } finally {
+        await coordinator.stop();
+      }
 
       // Should have detected language-specific changes
       expect(typescriptFileChanged).toHaveBeenCalled();
@@ -568,8 +574,8 @@ describe('Proactive Monitoring Integration', () => {
           () =>
             tsconfigChanged.mock.calls.length > 0 &&
             packageJsonChanged.mock.calls.length > 0 &&
-            eslintConfigChanged.mock.calls.length > 0
-          , { attempts: 80, delayMs: 120 }
+            eslintConfigChanged.mock.calls.length > 0,
+          { attempts: 80, delayMs: 120 }
         );
       } finally {
         await coordinator.stop();

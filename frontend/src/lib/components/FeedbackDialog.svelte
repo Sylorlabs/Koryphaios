@@ -1,6 +1,13 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { ArrowUpRight, Bug, CheckCircle2, Flag, HelpCircle, Lightbulb, LoaderCircle, X } from 'lucide-svelte';
+  import ArrowUpRight from 'lucide-svelte/icons/arrow-up-right';
+  import Bug from 'lucide-svelte/icons/bug';
+  import CheckCircle2 from 'lucide-svelte/icons/check-circle-2';
+  import Flag from 'lucide-svelte/icons/flag';
+  import HelpCircle from 'lucide-svelte/icons/help-circle';
+  import Lightbulb from 'lucide-svelte/icons/lightbulb';
+  import LoaderCircle from 'lucide-svelte/icons/loader-circle';
+  import X from 'lucide-svelte/icons/x';
 
   type FeedbackCategory = 'bug' | 'idea' | 'question' | 'other';
 
@@ -39,7 +46,10 @@
           appVersion = version;
         })
         .catch((err: unknown) => {
-          console.warn('App version check failed:', err instanceof Error ? err.message : String(err));
+          console.warn(
+            'App version check failed:',
+            err instanceof Error ? err.message : String(err),
+          );
         });
     }
   });
@@ -54,8 +64,7 @@
 
   async function openIssue(url: string): Promise<boolean> {
     const inTauri =
-      typeof window !== 'undefined' &&
-      ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+      typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
     if (inTauri) {
       try {
         const { open } = await import('@tauri-apps/plugin-shell');
@@ -83,13 +92,16 @@
 
     submitting = true;
     error = '';
-    const type = categories.find((option) => option.id === category)?.label.toLowerCase() ?? 'feedback';
+    const type =
+      categories.find((option) => option.id === category)?.label.toLowerCase() ?? 'feedback';
     const title = `[${type}] ${trimmed.slice(0, 80)}`;
     const body = [trimmed, ...(appVersion ? [``, `**App version:** ${appVersion}`] : [])].join(
       '\n',
     );
     try {
-      const opened = await openIssue(`${ISSUE_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`);
+      const opened = await openIssue(
+        `${ISSUE_URL}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`,
+      );
       if (!opened) {
         error = 'Could not open GitHub to create the report. Check your connection and try again.';
         return;
@@ -119,7 +131,7 @@
     >
       <div class="relative border-b border-[var(--color-border)] px-6 py-5">
         <div
-          class="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/12 via-transparent to-violet-500/8"
+          class="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--color-accent-transparent)] via-transparent to-[var(--color-info-bg)]"
         ></div>
         <div class="relative flex items-start justify-between gap-4">
           <div>
@@ -147,7 +159,7 @@
       {#if sent}
         <div class="flex flex-col items-center px-8 py-12 text-center">
           <div
-            class="mb-4 grid size-14 place-items-center rounded-2xl bg-emerald-500/12 text-emerald-400"
+            class="mb-4 grid size-14 place-items-center rounded-2xl bg-[var(--color-success-bg)] text-[var(--color-success)]"
           >
             <CheckCircle2 size={28} />
           </div>
@@ -221,7 +233,7 @@
 
           {#if error}<p
               role="alert"
-              class="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2.5 text-xs text-red-300"
+              class="rounded-xl border border-[var(--color-error)]/25 bg-[var(--color-error-bg)] px-3 py-2.5 text-xs text-[var(--color-error)]"
             >
               {error}
             </p>{/if}
@@ -241,7 +253,9 @@
                 disabled={submitting || !message.trim()}
                 class="flex min-w-28 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent)]/15 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<ArrowUpRight size={14} />Create issue{/if}
+                {#if submitting}<LoaderCircle size={14} class="animate-spin" />Opening GitHub{:else}<ArrowUpRight
+                    size={14}
+                  />Create issue{/if}
               </button>
             </div>
           </div>

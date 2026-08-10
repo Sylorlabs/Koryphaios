@@ -2,7 +2,9 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { ProcessSupervisor, type ProcessLifecycleEvent } from '../supervisor';
 
 // Reset the singleton between tests.
-function getFreshSupervisor(config?: Parameters<typeof ProcessSupervisor.getInstance>[0]): ProcessSupervisor {
+function getFreshSupervisor(
+  config?: Parameters<typeof ProcessSupervisor.getInstance>[0],
+): ProcessSupervisor {
   (ProcessSupervisor as unknown as { instance: ProcessSupervisor | null }).instance = null;
   return ProcessSupervisor.getInstance(config);
 }
@@ -24,7 +26,11 @@ describe('ProcessSupervisor exponential backoff', () => {
   afterEach(() => {
     globalThis.setTimeout = originalSetTimeout;
     // No shutdown method — clear timers manually.
-    const procs = (supervisor as unknown as { processes: Map<string, { healthCheckTimer?: Timer; restartTimer?: Timer }> }).processes;
+    const procs = (
+      supervisor as unknown as {
+        processes: Map<string, { healthCheckTimer?: Timer; restartTimer?: Timer }>;
+      }
+    ).processes;
     for (const proc of procs.values()) {
       if (proc.healthCheckTimer) clearInterval(proc.healthCheckTimer);
       if (proc.restartTimer) clearTimeout(proc.restartTimer);
@@ -51,6 +57,9 @@ describe('ProcessSupervisor exponential backoff', () => {
       cwd: '/tmp',
       sessionId: '',
       status: 'crashed' as const,
+      provenance: 'manual-service' as const,
+      supervision: 'owned-child' as const,
+      isBackground: true,
       pid: 0,
       restartCount,
       maxRestarts: 10,
@@ -72,10 +81,8 @@ describe('ProcessSupervisor exponential backoff', () => {
     expect(delays).toEqual([5000, 10000, 20000, 40000, 60000, 60000]);
   });
 
-  test('max restart cap emits gave_up lifecycle event', () => {
-    const events: ProcessLifecycleEvent[] = [];
-    supervisor.onLifecycle((e) => events.push(e));
-
+  test('max restart cap does not schedule another attempt', () => {
+    let scheduled = 0;
     const proc = {
       id: 'cap-test',
       name: 'capped',
@@ -83,6 +90,9 @@ describe('ProcessSupervisor exponential backoff', () => {
       cwd: '/tmp',
       sessionId: '',
       status: 'crashed' as const,
+      provenance: 'manual-service' as const,
+      supervision: 'owned-child' as const,
+      isBackground: true,
       pid: 0,
       restartCount: 5,
       maxRestarts: 5,
@@ -94,8 +104,8 @@ describe('ProcessSupervisor exponential backoff', () => {
       lastOutputAt: Date.now(),
     };
 
-    globalThis.setTimeout = ((cb: () => void) => {
-      cb();
+    globalThis.setTimeout = (() => {
+      scheduled++;
       return 0 as unknown as ReturnType<typeof setTimeout>;
     }) as typeof setTimeout;
 
@@ -104,41 +114,52 @@ describe('ProcessSupervisor exponential backoff', () => {
     ).scheduleRestart.bind(supervisor);
     scheduleRestart(proc);
 
-    const gaveUpEvent = events.find((e) => e.status === 'gave_up');
-    expect(gaveUpEvent).toBeDefined();
-    expect(gaveUpEvent?.type).toBe('exited');
-    expect(gaveUpEvent?.id).toBe('cap-test');
+    expect(scheduled).toBe(0);
   });
 
   test('shouldRestart respects restartPolicy never', () => {
     const shouldRestart = (
       supervisor as unknown as { shouldRestart: (proc: unknown, isCrash: boolean) => boolean }
     ).shouldRestart.bind(supervisor);
-    expect(shouldRestart({ restartPolicy: 'never', restartCount: 0, maxRestarts: 5 }, true)).toBe(false);
+    expect(shouldRestart({ restartPolicy: 'never', restartCount: 0, maxRestarts: 5 }, true)).toBe(
+      false,
+    );
   });
 
   test('shouldRestart respects maxRestarts cap', () => {
     const shouldRestart = (
       supervisor as unknown as { shouldRestart: (proc: unknown, isCrash: boolean) => boolean }
     ).shouldRestart.bind(supervisor);
-    expect(shouldRestart({ restartPolicy: 'on-failure', restartCount: 5, maxRestarts: 5 }, true)).toBe(false);
-    expect(shouldRestart({ restartPolicy: 'on-failure', restartCount: 4, maxRestarts: 5 }, true)).toBe(true);
+    expect(
+      shouldRestart({ restartPolicy: 'on-failure', restartCount: 5, maxRestarts: 5 }, true),
+    ).toBe(false);
+    expect(
+      shouldRestart({ restartPolicy: 'on-failure', restartCount: 4, maxRestarts: 5 }, true),
+    ).toBe(true);
   });
 
   test('shouldRestart does not restart on normal exit with on-failure policy', () => {
     const shouldRestart = (
       supervisor as unknown as { shouldRestart: (proc: unknown, isCrash: boolean) => boolean }
     ).shouldRestart.bind(supervisor);
-    expect(shouldRestart({ restartPolicy: 'on-failure', restartCount: 0, maxRestarts: 5 }, false)).toBe(false);
-    expect(shouldRestart({ restartPolicy: 'on-failure', restartCount: 0, maxRestarts: 5 }, true)).toBe(true);
+    expect(
+      shouldRestart({ restartPolicy: 'on-failure', restartCount: 0, maxRestarts: 5 }, false),
+    ).toBe(false);
+    expect(
+      shouldRestart({ restartPolicy: 'on-failure', restartCount: 0, maxRestarts: 5 }, true),
+    ).toBe(true);
   });
 
   test('shouldRestart always restarts with always policy even on normal exit', () => {
     const shouldRestart = (
       supervisor as unknown as { shouldRestart: (proc: unknown, isCrash: boolean) => boolean }
     ).shouldRestart.bind(supervisor);
-    expect(shouldRestart({ restartPolicy: 'always', restartCount: 0, maxRestarts: 5 }, false)).toBe(true);
-    expect(shouldRestart({ restartPolicy: 'always', restartCount: 0, maxRestarts: 5 }, true)).toBe(true);
+    expect(shouldRestart({ restartPolicy: 'always', restartCount: 0, maxRestarts: 5 }, false)).toBe(
+      true,
+    );
+    expect(shouldRestart({ restartPolicy: 'always', restartCount: 0, maxRestarts: 5 }, true)).toBe(
+      true,
+    );
   });
 });
 
@@ -159,6 +180,9 @@ describe('ProcessSupervisor degraded lifecycle event', () => {
       cwd: '/tmp',
       sessionId: '',
       status: 'running' as const,
+      provenance: 'agent-tool' as const,
+      supervision: 'owned-child' as const,
+      isBackground: true,
       pid: 12345,
       restartCount: 0,
       maxRestarts: 3,
@@ -169,7 +193,10 @@ describe('ProcessSupervisor degraded lifecycle event', () => {
       stderr: '',
       lastOutputAt: Date.now(),
     };
-    (supervisor as unknown as { processes: Map<string, unknown> }).processes.set('stream-test', proc);
+    (supervisor as unknown as { processes: Map<string, unknown> }).processes.set(
+      'stream-test',
+      proc,
+    );
 
     const throwingReader = {
       read: () => Promise.reject(new Error('Stream broken')),

@@ -26,6 +26,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { providerLog } from '../logger';
 import type { ProviderEvent } from './types';
+import { appendPrivateDiagnostic, safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
 // ─── JSON-RPC types ────────────────────────────────────────────────────────
 
@@ -77,6 +78,7 @@ export class DevinAcpClient {
   private binaryPath: string;
   private devinHome: string;
   private agentConfigPath: string | null;
+  private stderr = '';
 
   constructor(opts: {
     binaryPath: string;
@@ -107,11 +109,14 @@ export class DevinAcpClient {
     this.child.stdout?.setEncoding('utf-8');
     this.child.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
     this.child.stderr?.on('data', (chunk: Buffer) => {
-      providerLog.debug({ stderr: chunk.toString().slice(0, 200) }, 'Devin ACP stderr');
+      this.stderr = appendPrivateDiagnostic(this.stderr, chunk);
     });
     this.child.on('exit', (code) => {
-      providerLog.info({ code }, 'Devin ACP process exited');
-      this.rejectAllPending(new Error(`Devin ACP exited with code ${code}`));
+      const diagnostic = safeProviderDiagnostic('devin', 'stderr', this.stderr, {
+        exitCode: code ?? -1,
+      });
+      providerLog.info(diagnostic, 'Devin ACP process exited');
+      this.rejectAllPending(new Error(safeProviderFailureMessage('devin', diagnostic)));
     });
 
     await this.sendRequest('initialize', {
@@ -244,7 +249,11 @@ export class DevinAcpClient {
           done = true;
           break;
         case 'error':
-          eventQueue.push({ type: 'error', error: event.message });
+          {
+            const diagnostic = safeProviderDiagnostic('devin', 'stream', event.message);
+            providerLog.warn(diagnostic, 'Devin ACP emitted an error event');
+            eventQueue.push({ type: 'error', error: safeProviderFailureMessage('devin', diagnostic) });
+          }
           done = true;
           break;
       }

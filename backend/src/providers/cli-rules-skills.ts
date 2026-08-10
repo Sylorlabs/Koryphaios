@@ -19,10 +19,10 @@
 //   antigravity → .claude/skills/<name>/SKILL.md (imported from Claude)
 //   others      → no skills system (rules file only)
 
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { providerLog } from '../logger';
+import { ensureManagedCliDirectory, writeManagedCliFile } from './managed-cli-storage';
 
 export interface KoryRuleContent {
   title: string;
@@ -33,6 +33,35 @@ export interface KorySkillContent {
   name: string;
   description: string;
   body: string;
+}
+
+type CliRulesEnvironment = Pick<
+  NodeJS.ProcessEnv,
+  'KORY_DISABLE_CLI_AUTODETECT' | 'KORYPHAIOS_DATA_DIR'
+>;
+
+export interface CliRulesWriteOptions {
+  env?: CliRulesEnvironment;
+  homeDirectory?: string;
+}
+
+/**
+ * Resolve the only directory session creation may use for managed CLI homes.
+ *
+ * CLI autodetection opt-out is also a filesystem opt-out: a provider-free or
+ * isolated run must not create provider homes as a side effect of creating a
+ * chat. An explicit KORYPHAIOS_DATA_DIR keeps every managed home inside that
+ * same test/profile boundary. Normal desktop installs retain the established
+ * ~/.koryphaios location.
+ */
+export function resolveManagedCliHomeRoot(options: CliRulesWriteOptions = {}): string | null {
+  const env = options.env ?? process.env;
+  if (env.KORY_DISABLE_CLI_AUTODETECT?.trim()) return null;
+
+  const dataDirectory = env.KORYPHAIOS_DATA_DIR?.trim();
+  if (dataDirectory) return join(resolve(dataDirectory), 'cli-homes');
+
+  return join(options.homeDirectory ?? homedir(), '.koryphaios');
 }
 
 /** Build the default Kory rules content for a session. */
@@ -104,9 +133,6 @@ export function buildKorySkills(): KorySkillContent[] {
         '- kory__delegate_to_jules: Delegate to Google Jules (cloud async)',
         '',
         '## Git',
-        '- kory__git_status: Get git status',
-        '- kory__git_diff: Get git diff',
-        '- kory__git_commit: Commit changes',
         '- kory__commit_and_create_pr: Commit + create PR',
       ].join('\n'),
     },
@@ -151,30 +177,43 @@ export function writeRulesAndSkills(
   systemPrompt: string,
   rulesFile: string,
   skillsDir: string | null,
+  managedRoot?: string,
 ): void {
   try {
-    mkdirSync(homeDir, { recursive: true });
+    const storage = managedRoot ? { root: managedRoot } : {};
+    ensureManagedCliDirectory(homeDir, storage);
     // Write the rules file.
     const rulesPath = join(homeDir, rulesFile);
-    writeFileSync(rulesPath, buildKoryRules(systemPrompt), 'utf8');
+    writeManagedCliFile(rulesPath, buildKoryRules(systemPrompt), { encoding: 'utf8' }, storage);
     // Write skills if the CLI supports them.
     if (skillsDir) {
       const skills = buildKorySkills();
       for (const skill of skills) {
         const skillDir = join(homeDir, skillsDir, skill.name);
-        mkdirSync(skillDir, { recursive: true });
-        writeFileSync(join(skillDir, 'SKILL.md'), skill.body, 'utf8');
+        ensureManagedCliDirectory(skillDir, storage);
+        writeManagedCliFile(join(skillDir, 'SKILL.md'), skill.body, { encoding: 'utf8' }, storage);
       }
     }
-    providerLog.debug({ provider, homeDir, rulesFile }, 'Wrote Kory rules + skills for CLI');
-  } catch (err) {
-    providerLog.warn({ err, provider, homeDir }, 'Failed to write Kory rules + skills');
+    providerLog.debug({ provider, rulesFile }, 'Wrote private Kory rules + skills for CLI');
+  } catch {
+    providerLog.warn({ provider }, 'Failed to write private Kory rules + skills');
   }
 }
 
 /** Write rules + skills for all supported CLIs. Called once at session start. */
-export function writeAllCliRulesAndSkills(sessionId: string, systemPrompt: string): void {
-  const base = join(homedir(), '.koryphaios');
+export function writeAllCliRulesAndSkills(
+  sessionId: string,
+  systemPrompt: string,
+  options: CliRulesWriteOptions = {},
+): boolean {
+  const base = resolveManagedCliHomeRoot(options);
+  if (!base) {
+    providerLog.debug(
+      { sessionId },
+      'Skipped CLI rules + skills because CLI autodetection is disabled',
+    );
+    return false;
+  }
   // Devin: AGENTS.md + .devin/skills/
   writeRulesAndSkills(
     join(base, 'devin-home', sessionId),
@@ -182,15 +221,10 @@ export function writeAllCliRulesAndSkills(sessionId: string, systemPrompt: strin
     systemPrompt,
     'AGENTS.md',
     '.devin/skills',
+    base,
   );
   // Claude Code: CLAUDE.md (no skills system)
-  writeRulesAndSkills(
-    join(base, 'claude-home'),
-    'claude',
-    systemPrompt,
-    'CLAUDE.md',
-    null,
-  );
+  writeRulesAndSkills(join(base, 'claude-home'), 'claude', systemPrompt, 'CLAUDE.md', null, base);
   // Antigravity: AGENTS.md + .claude/skills/ (imported from Claude)
   writeRulesAndSkills(
     join(base, 'antigravity-home'),
@@ -198,23 +232,12 @@ export function writeAllCliRulesAndSkills(sessionId: string, systemPrompt: strin
     systemPrompt,
     'AGENTS.md',
     '.claude/skills',
+    base,
   );
   // Codex: AGENTS.md (no skills)
-  writeRulesAndSkills(
-    join(base, 'codex-home'),
-    'codex',
-    systemPrompt,
-    'AGENTS.md',
-    null,
-  );
+  writeRulesAndSkills(join(base, 'codex-home'), 'codex', systemPrompt, 'AGENTS.md', null, base);
   // Cline: .clinerules
-  writeRulesAndSkills(
-    join(base, 'cline-home'),
-    'cline',
-    systemPrompt,
-    '.clinerules',
-    null,
-  );
+  writeRulesAndSkills(join(base, 'cline-home'), 'cline', systemPrompt, '.clinerules', null, base);
   // Cursor: .cursorrules
   writeRulesAndSkills(
     join(base, 'cursor-home'),
@@ -222,13 +245,9 @@ export function writeAllCliRulesAndSkills(sessionId: string, systemPrompt: strin
     systemPrompt,
     '.cursorrules',
     null,
+    base,
   );
   // Grok: .grokrules
-  writeRulesAndSkills(
-    join(base, 'grok-home'),
-    'grok',
-    systemPrompt,
-    '.grokrules',
-    null,
-  );
+  writeRulesAndSkills(join(base, 'grok-home'), 'grok', systemPrompt, '.grokrules', null, base);
+  return true;
 }

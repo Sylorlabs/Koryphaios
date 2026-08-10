@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,14 +17,24 @@ import {
 import { ListWorkflowsTool, StartWorkflowTool, UpdateWorkflowTool } from '../tools/workflows';
 
 const roots: string[] = [];
+let previousPersonalWorkflowRoot: string | undefined;
 const root = () => {
   const value = mkdtempSync(join(tmpdir(), 'kory-workflow-'));
   roots.push(value);
   return value;
 };
-afterEach(() =>
-  roots.splice(0).forEach((value) => rmSync(value, { recursive: true, force: true })),
-);
+beforeEach(() => {
+  previousPersonalWorkflowRoot = process.env.KORYPHAIOS_WORKFLOWS_HOME;
+  process.env.KORYPHAIOS_WORKFLOWS_HOME = root();
+});
+afterEach(() => {
+  if (previousPersonalWorkflowRoot === undefined) {
+    delete process.env.KORYPHAIOS_WORKFLOWS_HOME;
+  } else {
+    process.env.KORYPHAIOS_WORKFLOWS_HOME = previousPersonalWorkflowRoot;
+  }
+  roots.splice(0).forEach((value) => rmSync(value, { recursive: true, force: true }));
+});
 
 describe('host-owned workflows', () => {
   test('starts a design-quality run and persists each evidence-gated stage', () => {
@@ -171,5 +181,70 @@ describe('host-owned workflows', () => {
         ],
       }),
     ).toThrow('declarative');
+  });
+
+  test('malformed persisted workflow data fails visibly and is never overwritten', () => {
+    const project = root();
+    const workflowDirectory = join(project, '.koryphaios', 'workflows');
+    const draftsPath = join(workflowDirectory, 'drafts.json');
+    mkdirSync(workflowDirectory, { recursive: true });
+    writeFileSync(draftsPath, '{ malformed draft data');
+
+    expect(() =>
+      createWorkflowDraft(project, {
+        name: 'Safe draft',
+        description: 'A valid description',
+        goalId: 'goal-1',
+        goalItemId: 'item-1',
+        stages: [
+          { label: 'Inspect', description: 'Inspect first' },
+          { label: 'Verify', description: 'Verify second' },
+        ],
+      }),
+    ).toThrow('existing file was preserved');
+    expect(readFileSync(draftsPath, 'utf8')).toBe('{ malformed draft data');
+  });
+
+  test('activation preserves a malformed definition library and leaves the draft inactive', () => {
+    const project = root();
+    const draft = createWorkflowDraft(project, {
+      name: 'Safe draft',
+      description: 'A valid description',
+      goalId: 'goal-1',
+      goalItemId: 'item-1',
+      stages: [
+        { label: 'Inspect', description: 'Inspect first' },
+        { label: 'Verify', description: 'Verify second' },
+      ],
+    });
+    const definitionsPath = join(project, '.koryphaios', 'workflows', 'definitions.json');
+    writeFileSync(definitionsPath, '{ malformed definitions');
+
+    expect(() => activateWorkflowDraft(project, draft.id, 'project')).toThrow(
+      'existing file was preserved',
+    );
+    expect(readFileSync(definitionsPath, 'utf8')).toBe('{ malformed definitions');
+    expect(listWorkflowDrafts(project)[0]?.status).toBe('draft');
+  });
+
+  test('bounds and redacts persisted tasks and stage evidence', () => {
+    const project = root();
+    const secret = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
+    const run = startWorkflow(project, {
+      workflowId: 'design-quality',
+      sessionId: 'session-1',
+      task: `Inspect token=${secret}`,
+      requestedBy: 'human',
+    });
+    const advanced = advanceWorkflow(project, run.id, {
+      evidence: `token=${secret}\n${'proof '.repeat(2_000)}`,
+    });
+
+    expect(advanced.task).not.toContain(secret);
+    expect(advanced.evidence[0]?.value).not.toContain(secret);
+    expect(advanced.evidence[0]?.value.length).toBeLessThanOrEqual(8_000);
+    expect(
+      readFileSync(join(project, '.koryphaios', 'workflows', 'runs.json'), 'utf8'),
+    ).not.toContain(secret);
   });
 });

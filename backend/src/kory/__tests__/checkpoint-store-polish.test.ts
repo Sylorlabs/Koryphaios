@@ -12,17 +12,25 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { CheckpointStore } from '../checkpoint-store';
 import { GitExecutor } from '../git-executor';
+import { ShadowRepo } from '../shadow-repo';
 import { spawnSync } from 'bun';
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const TEST_DIR = join(tmpdir(), `kory-checkpoint-polish-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+const TEST_DIR = join(
+  tmpdir(),
+  `kory-checkpoint-polish-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+);
 
 function gitInit(dir: string): void {
   mkdirSync(dir, { recursive: true });
   spawnSync(['git', 'init', '-b', 'main'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
-  spawnSync(['git', 'config', 'user.email', 'test@test.com'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
+  spawnSync(['git', 'config', 'user.email', 'test@test.com'], {
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   spawnSync(['git', 'config', 'user.name', 'Test'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
   writeFileSync(join(dir, 'README.md'), '# Initial\n');
   spawnSync(['git', 'add', '-A'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
@@ -40,21 +48,27 @@ describe('CheckpointStore polish features', () => {
   });
 
   afterAll(() => {
-    try { rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
   });
 
-  // NOTE: This suite requires a generous test timeout (30s) because git
-  // operations are serialized by the global gitMutex. Run with:
-  //   bun test --test-timeout 30000 src/kory/__tests__/checkpoint-store-polish.test.ts
+  // NOTE: This suite requires a generous test timeout (60s) because git
+  // operations are serialized by the global gitMutex and later tests
+  // accumulate checkpoint state. Run with:
+  //   bun test --timeout 60000 src/kory/__tests__/checkpoint-store-polish.test.ts
 
   // ─── Legacy notes ref backward compatibility ────────────────────────────
 
   describe('legacy notes ref backward compatibility', () => {
     test('reads metadata from legacy refs/notes/shadow-logger ref', async () => {
       const store = new CheckpointStore(TEST_DIR);
-      const git = new GitExecutor(TEST_DIR);
+      // Use shadow-context GitExecutor for notes operations (notes live in shadow repo).
+      const shadowGit = new GitExecutor(TEST_DIR, ShadowRepo.shadowEnv(TEST_DIR));
 
-      // Create a checkpoint — it writes to the new notes ref
+      // Create a checkpoint — v2 writes direct per-checkpoint metadata.
       writeFileSync(join(TEST_DIR, 'compat-test.txt'), 'content');
       const hash = await store.createGhostCommit('Compat test', {
         agentId: 'compat-session',
@@ -62,12 +76,21 @@ describe('CheckpointStore polish features', () => {
       });
       expect(hash).toBeTruthy();
 
-      // Manually copy the note to the legacy ref to simulate a pre-rename checkpoint
-      const newNote = await git.exec(['notes', '--ref', 'refs/notes/checkpoint-store', 'show', hash!]);
-      expect(newNote.success).toBe(true);
-      await git.exec(['notes', '--ref', 'refs/notes/shadow-logger', 'add', '-f', '-m', newNote.stdout, hash!]);
-      // Remove from the new ref so we can verify the legacy fallback works
-      await git.exec(['notes', '--ref', 'refs/notes/checkpoint-store', 'remove', hash!]);
+      // Copy direct metadata into the old notes ref, then remove the direct ref
+      // to prove old checkpoints remain readable.
+      const direct = await shadowGit.exec(['cat-file', 'blob', `refs/kory/metadata/${hash}`]);
+      expect(direct.success).toBe(true);
+      await shadowGit.exec([
+        'notes',
+        '--ref',
+        'refs/notes/shadow-logger',
+        'add',
+        '-f',
+        '-m',
+        direct.stdout,
+        hash!,
+      ]);
+      await shadowGit.exec(['update-ref', '-d', `refs/kory/metadata/${hash}`]);
 
       // getMetadata should fall back to the legacy ref
       const metadata = await store.getMetadata(hash!);
@@ -78,7 +101,7 @@ describe('CheckpointStore polish features', () => {
 
     test('prefers new notes ref over legacy when both exist', async () => {
       const store = new CheckpointStore(TEST_DIR);
-      const git = new GitExecutor(TEST_DIR);
+      const shadowGit = new GitExecutor(TEST_DIR, ShadowRepo.shadowEnv(TEST_DIR));
 
       writeFileSync(join(TEST_DIR, 'pref-test.txt'), 'content');
       const hash = await store.createGhostCommit('Pref test', {
@@ -88,9 +111,14 @@ describe('CheckpointStore polish features', () => {
       expect(hash).toBeTruthy();
 
       // Also add a legacy note with different model
-      await git.exec([
-        'notes', '--ref', 'refs/notes/shadow-logger', 'add', '-f',
-        '-m', JSON.stringify({ id: 'old', model: 'old-model', timestamp: Date.now() }),
+      await shadowGit.exec([
+        'notes',
+        '--ref',
+        'refs/notes/shadow-logger',
+        'add',
+        '-f',
+        '-m',
+        JSON.stringify({ id: 'old', model: 'old-model', timestamp: Date.now() }),
         hash!,
       ]);
 
@@ -183,10 +211,15 @@ describe('CheckpointStore polish features', () => {
       const timeline1 = await store.getTimeline(10, agentId);
       expect(timeline1.length).toBe(3);
 
-      // Verify manifest ref was created
-      const git = new GitExecutor(TEST_DIR);
-      const refResult = await git.exec(['rev-parse', '--verify', 'refs/kory/manifests/manifest-session']);
+      // Verify manifest ref was created in the shadow repo
+      const shadowGit = new GitExecutor(TEST_DIR, ShadowRepo.shadowEnv(TEST_DIR));
+      const refResult = await shadowGit.exec([
+        'for-each-ref',
+        '--format=%(refname)',
+        'refs/kory/manifests',
+      ]);
       expect(refResult.success).toBe(true);
+      expect(refResult.stdout).toContain('refs/kory/manifests/manifest-session-');
 
       // Second read: should use the manifest (O(1))
       const timeline2 = await store.getTimeline(10, agentId);
@@ -213,15 +246,18 @@ describe('CheckpointStore polish features', () => {
     });
   });
 
-  // ─── Temp dir sweep on construction ─────────────────────────────────────
+  // ─── Interrupted temp-index cleanup ─────────────────────────────────────
 
-  describe('temp dir sweep on construction', () => {
-    test('sweeps orphaned temp dirs from a previous crash', () => {
-      const sweepDir = join(tmpdir(), `kory-sweep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  describe('interrupted temp-index cleanup', () => {
+    test('sweeps orphaned temp dirs before the next locked checkpoint', async () => {
+      const sweepDir = join(
+        tmpdir(),
+        `kory-sweep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(sweepDir);
 
       // Simulate a crash by creating orphaned temp dirs
-      const tempDir = join(sweepDir, '.koryphaios', 'tmp', 'checkpoints');
+      const tempDir = join(ShadowRepo.shadowPath(sweepDir), '..', 'tmp', 'checkpoints');
       mkdirSync(join(tempDir, 'orphan-1'), { recursive: true });
       mkdirSync(join(tempDir, 'orphan-2'), { recursive: true });
       writeFileSync(join(tempDir, 'orphan-1', 'index'), 'stale');
@@ -229,25 +265,32 @@ describe('CheckpointStore polish features', () => {
 
       expect(existsSync(join(tempDir, 'orphan-1'))).toBe(true);
 
-      // Wait a bit so the dirs are older than the new process start time
-      // (the sweep uses a 5s safety margin)
-      // Instead, we can verify the sweep logic by checking that dirs created
-      // before construction are removed. Since we can't easily wait 5s in a test,
-      // we verify the sweep doesn't crash and the dirs may or may not be swept
-      // depending on timing. The important thing is no exception is thrown.
       const store = new CheckpointStore(sweepDir);
-      expect(store).toBeDefined();
+      writeFileSync(join(sweepDir, 'after-crash.txt'), 'safe');
+      expect(
+        await store.createGhostCommit('After interrupted index', { agentId: 'sweep-session' }),
+      ).toBeTruthy();
+      expect(existsSync(join(tempDir, 'orphan-1'))).toBe(false);
+      expect(existsSync(join(tempDir, 'orphan-2'))).toBe(false);
 
       // Clean up
-      try { rmSync(sweepDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try {
+        rmSync(sweepDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
 
-    test('does not sweep dirs created during current process lifetime', async () => {
-      const noSweepDir = join(tmpdir(), `kory-no-sweep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    test('constructors are side-effect free and do not sweep temp dirs', () => {
+      const noSweepDir = join(
+        tmpdir(),
+        `kory-no-sweep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(noSweepDir);
 
-      // Construct first — this sweeps (nothing to sweep)
+      // Construct first — initialization and cleanup remain lazy.
       const store = new CheckpointStore(noSweepDir);
+      expect(store).toBeDefined();
 
       // Now create a temp dir that's "in use" (created after construction)
       const tempDir = join(noSweepDir, '.koryphaios', 'tmp', 'checkpoints');
@@ -256,12 +299,16 @@ describe('CheckpointStore polish features', () => {
       mkdirSync(activeDir, { recursive: true });
       writeFileSync(join(activeDir, 'index'), 'active');
 
-      // Construct a second store — should NOT sweep the active dir
-      // because it was created during this process's lifetime
+      // Construct a second store — construction alone must not touch it.
       const store2 = new CheckpointStore(noSweepDir);
+      expect(store2).toBeDefined();
       expect(existsSync(activeDir)).toBe(true);
 
-      try { rmSync(noSweepDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try {
+        rmSync(noSweepDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
   });
 
@@ -290,8 +337,8 @@ describe('CheckpointStore polish features', () => {
 
   // ─── Cursor sequence-based race prevention ──────────────────────────────
 
-  describe('cursor sequence-based race prevention', () => {
-    test('setCursorIfNewer does not regress cursor to older checkpoint', async () => {
+  describe('cursor sequence and explicit navigation', () => {
+    test('new atomic checkpoint publication advances an explicitly rewound cursor', async () => {
       const store = new CheckpointStore(TEST_DIR);
       const agentId = 'cursor-race-session';
 
@@ -311,11 +358,56 @@ describe('CheckpointStore polish features', () => {
       await store.setCursor(agentId, hash1!);
       expect(await store.getCursor(agentId)).toBe(hash1);
 
-      // Now create a new checkpoint — setCursorIfNewer should update
-      // because the new checkpoint has a higher sequence than hash1
+      // A new checkpoint allocates the next sequence under the repository
+      // lock and advances the cursor in the same ref transaction.
       writeFileSync(join(TEST_DIR, 'cr-4.txt'), '4');
       const hash4 = await store.createGhostCommit('CR 4', { agentId });
       expect(await store.getCursor(agentId)).toBe(hash4);
+    });
+
+    test('orders checkpoints by sequence when wall-clock time ties or moves backward', async () => {
+      const clockDir = join(
+        tmpdir(),
+        `kory-clock-${process.pid}-${Math.random().toString(36).slice(2, 8)}`,
+      );
+      gitInit(clockDir);
+      const store = new CheckpointStore(clockDir);
+      try {
+        writeFileSync(join(clockDir, 'clock.txt'), 'first');
+        const first = await store.createGhostCommit('First clock state', {
+          agentId: 'clock-session',
+        });
+        writeFileSync(join(clockDir, 'clock.txt'), 'second');
+        const second = await store.createGhostCommit('Second clock state', {
+          agentId: 'clock-session',
+        });
+
+        const shadowGit = new GitExecutor(clockDir, ShadowRepo.shadowEnv(clockDir));
+        const manifestRef = (
+          await shadowGit.exec(['for-each-ref', '--format=%(refname)', 'refs/kory/manifests'])
+        ).stdout.trim();
+        const manifestBlob = await shadowGit.exec(['cat-file', 'blob', manifestRef]);
+        const manifest = JSON.parse(manifestBlob.stdout);
+        for (const entry of manifest.entries) {
+          entry.timestamp = entry.sequence === 0 ? 2_000 : 1_000;
+        }
+        const replacement = await shadowGit.exec(['hash-object', '-w', '--stdin'], {
+          stdin: JSON.stringify(manifest),
+        });
+        expect(
+          (await shadowGit.exec(['update-ref', manifestRef, replacement.stdout.trim()])).success,
+        ).toBe(true);
+
+        const timeline = await store.getTimeline(10, 'clock-session');
+        expect(timeline.map((entry) => entry.hash)).toEqual([second, first]);
+        expect(timeline.map((entry) => entry.sequence)).toEqual([1, 0]);
+      } finally {
+        try {
+          rmSync(clockDir, { recursive: true, force: true });
+        } catch {
+          /* best-effort */
+        }
+      }
     });
   });
 
@@ -323,7 +415,10 @@ describe('CheckpointStore polish features', () => {
 
   describe('prune with manifest rebuild', () => {
     test('prune removes old checkpoints and rebuilds manifest', async () => {
-      const pruneDir = join(tmpdir(), `kory-prune-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      const pruneDir = join(
+        tmpdir(),
+        `kory-prune-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(pruneDir);
 
       const store = new CheckpointStore(pruneDir);
@@ -342,19 +437,28 @@ describe('CheckpointStore polish features', () => {
       const result = await store.prune(-1);
       expect(result.removed).toBeGreaterThanOrEqual(1);
 
-      // Verify the checkpoint ref was actually deleted
-      const git = new GitExecutor(pruneDir);
-      const refsAfter = await git.exec([
-        'for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints/prune-session',
+      // Verify the checkpoint ref was actually deleted in the shadow repo
+      const shadowGit = new GitExecutor(pruneDir, ShadowRepo.shadowEnv(pruneDir));
+      const refsAfter = await shadowGit.exec([
+        'for-each-ref',
+        '--format=%(objectname)',
+        'refs/kory/checkpoints',
       ]);
-      expect(refsAfter.stdout.trim()).toBe('');
+      expect(refsAfter.stdout.split('\n')).not.toContain(hash!);
+      expect(await store.getMetadata(hash!)).toBeUndefined();
+      expect(await store.getCursor(agentId)).toBeNull();
 
-      // Manifest should have been rebuilt with 0 entries
-      const manifestResult = await git.exec(['cat-file', 'blob', 'refs/kory/manifests/prune-session']);
-      if (manifestResult.success) {
-        const manifest = JSON.parse(manifestResult.stdout);
-        expect(manifest.entries).toHaveLength(0);
-      }
+      // The manifest is retained empty, and the separate high-water ref keeps
+      // sequence allocation monotonic even after all public checkpoints go.
+      const manifestRefs = await shadowGit.exec([
+        'for-each-ref',
+        '--format=%(objectname)',
+        'refs/kory/manifests',
+      ]);
+      const manifestOid = manifestRefs.stdout.trim();
+      expect(manifestOid).toBeTruthy();
+      const manifestResult = await shadowGit.exec(['cat-file', 'blob', manifestOid]);
+      expect(JSON.parse(manifestResult.stdout).entries).toHaveLength(0);
 
       // Timeline via manifest should now be empty
       const timelineAfter = await store.getTimeline(10, agentId);
@@ -363,7 +467,15 @@ describe('CheckpointStore polish features', () => {
       // which triggers manifest rebuild, the manifest should be empty.
       expect(timelineAfter.length).toBe(0);
 
-      try { rmSync(pruneDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      writeFileSync(join(pruneDir, 'prune-2.txt'), '2');
+      const replacement = await store.createGhostCommit('Prune 2', { agentId });
+      expect((await store.getMetadata(replacement!))?.sequence).toBe(1);
+
+      try {
+        rmSync(pruneDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
   });
 
@@ -387,10 +499,9 @@ describe('CheckpointStore polish features', () => {
       const git = new GitExecutor(TEST_DIR);
       // Use a command that genuinely hangs: `git fetch` with a bogus URL
       // and a very short timeout. The abort controller should kick in.
-      const result = await git.exec(
-        ['fetch', 'https://10.255.255.1/nonexistent/repo.git'],
-        { timeoutMs: 100 },
-      );
+      const result = await git.exec(['fetch', 'https://10.255.255.1/nonexistent/repo.git'], {
+        timeoutMs: 100,
+      });
       expect(result.success).toBe(false);
       expect(result.stderr).toContain('timed out');
     });
@@ -400,7 +511,10 @@ describe('CheckpointStore polish features', () => {
 
   describe('WorkspaceManager manifest persistence', () => {
     test('persists worktree metadata to .koryphaios/worktrees.json', async () => {
-      const wmDir = join(tmpdir(), `kory-wm-manifest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      const wmDir = join(
+        tmpdir(),
+        `kory-wm-manifest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(wmDir);
 
       const { WorkspaceManager } = await import('../workspace-manager');
@@ -422,11 +536,18 @@ describe('CheckpointStore polish features', () => {
       await wm.cleanup('persist-test');
       await wm.shutdown();
 
-      try { rmSync(wmDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try {
+        rmSync(wmDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
 
     test('recovers worktree metadata losslessly on restart', async () => {
-      const recoverDir = join(tmpdir(), `kory-wm-recover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      const recoverDir = join(
+        tmpdir(),
+        `kory-wm-recover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(recoverDir);
 
       const { WorkspaceManager } = await import('../workspace-manager');
@@ -451,11 +572,18 @@ describe('CheckpointStore polish features', () => {
       await wm2.cleanup('recover-test');
       await wm2.shutdown();
 
-      try { rmSync(recoverDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try {
+        rmSync(recoverDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
 
     test('shutdown drains all active worktrees', async () => {
-      const shutdownDir = join(tmpdir(), `kory-wm-shutdown-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+      const shutdownDir = join(
+        tmpdir(),
+        `kory-wm-shutdown-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
       gitInit(shutdownDir);
 
       const { WorkspaceManager } = await import('../workspace-manager');
@@ -478,7 +606,11 @@ describe('CheckpointStore polish features', () => {
       const worktreeLines = listResult.stdout.split('\n').filter((l) => l.startsWith('worktree '));
       expect(worktreeLines.length).toBe(1);
 
-      try { rmSync(shutdownDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try {
+        rmSync(shutdownDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
     });
   });
 

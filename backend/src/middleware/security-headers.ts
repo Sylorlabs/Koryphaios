@@ -1,5 +1,6 @@
-// Security Headers Middleware - Complete Implementation
-// Applies CSP, XSS protection, and other security headers to all responses
+// Security-header middleware helpers.
+// Deployment-specific proxy, TLS, and browser-policy validation remains the
+// responsibility of the host environment.
 
 import type { Elysia } from 'elysia';
 import { getCorsHeaders } from '../security';

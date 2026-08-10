@@ -1,33 +1,31 @@
 <script lang="ts">
-  import {
-    MessageSquare,
-    Send,
-    ChevronRight,
-    ChevronLeft,
-    ChevronDown,
-    ChevronUp,
-    Trash2,
-    EyeOff,
-    Eye,
-    Copy,
-    Check,
-    Terminal,
-    Undo,
-    RotateCcw,
-    X,
-    Globe,
-    FileText,
-    Folder,
-    FilePlus,
-    Bot,
-    Palette,
-    Server,
-    ShieldCheck,
-    FlaskConical,
-    Layers,
-    AlertTriangle,
-    LoaderCircle,
-  } from 'lucide-svelte';
+  import MessageSquare from 'lucide-svelte/icons/message-square';
+  import Send from 'lucide-svelte/icons/send';
+  import ChevronRight from 'lucide-svelte/icons/chevron-right';
+  import ChevronLeft from 'lucide-svelte/icons/chevron-left';
+  import ChevronDown from 'lucide-svelte/icons/chevron-down';
+  import ChevronUp from 'lucide-svelte/icons/chevron-up';
+  import Trash2 from 'lucide-svelte/icons/trash-2';
+  import EyeOff from 'lucide-svelte/icons/eye-off';
+  import Eye from 'lucide-svelte/icons/eye';
+  import Copy from 'lucide-svelte/icons/copy';
+  import Check from 'lucide-svelte/icons/check';
+  import Terminal from 'lucide-svelte/icons/terminal';
+  import Undo from 'lucide-svelte/icons/undo';
+  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
+  import X from 'lucide-svelte/icons/x';
+  import Globe from 'lucide-svelte/icons/globe';
+  import FileText from 'lucide-svelte/icons/file-text';
+  import Folder from 'lucide-svelte/icons/folder';
+  import FilePlus from 'lucide-svelte/icons/file-plus';
+  import Bot from 'lucide-svelte/icons/bot';
+  import Palette from 'lucide-svelte/icons/palette';
+  import Server from 'lucide-svelte/icons/server';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import FlaskConical from 'lucide-svelte/icons/flask-conical';
+  import Layers from 'lucide-svelte/icons/layers';
+  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
+  import LoaderCircle from 'lucide-svelte/icons/loader-circle';
   import { fly, fade } from 'svelte/transition';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';

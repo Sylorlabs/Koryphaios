@@ -62,7 +62,8 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     '/join',
     async ({ request, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      if (!relayAvailable) throw new ConfigurationError('WAN collaboration relay is not configured');
+      if (!relayAvailable)
+        throw new ConfigurationError('WAN collaboration relay is not configured');
       // Body shape is validated by the Elysia schema below.
       const input = body as { joinCode: string };
       const session = await collaborationManager.joinRelaySession(input.joinCode);
@@ -93,7 +94,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         joinMode?: 'approval' | 'auto';
         defaultTierId?: string;
         accessTiers?: CollaborationAccessTier[];
-        modelCatalog?: Array<{ id: string; label: string; provider: string; reasoningLevels: string[] }>;
+        modelCatalog?: Array<{
+          id: string;
+          label: string;
+          provider: string;
+          reasoningLevels: string[];
+        }>;
         sessionName?: string;
         workspacePaths?: string[];
       };
@@ -241,15 +247,15 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         // visible (and explains why it cannot be shared) rather than vanishing
         // from the user's mental model of what Koryphaios supports.
         candidates: status.map((p) => ({
-            provider: p.name,
-            label: p.label ?? p.name,
-            modelCount: p.allAvailableModels.length || p.models.length,
-            models: p.allAvailableModels.map((model) => ({ id: model.id, name: model.name })),
-            available: p.authenticated && p.enabled,
-            // CLI harnesses run on the host and see the guest's files.
-            agentic: isAgenticProvider(p.name),
-            ...classifyProviderShare(p.name),
-          })),
+          provider: p.name,
+          label: p.label ?? p.name,
+          modelCount: p.allAvailableModels.length || p.models.length,
+          models: p.allAvailableModels.map((model) => ({ id: model.id, name: model.name })),
+          available: p.adapterAvailable && p.enabled,
+          // CLI harnesses run on the host and see the guest's files.
+          agentic: isAgenticProvider(p.name),
+          ...classifyProviderShare(p.name),
+        })),
       },
     };
   })
@@ -263,7 +269,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       setSharedProviders(input.providers ?? [], input.models ?? {});
       return { ok: true };
     },
-    { body: t.Object({ providers: t.Array(t.String()), models: t.Optional(t.Record(t.String(), t.Array(t.String()))) }) },
+    {
+      body: t.Object({
+        providers: t.Array(t.String()),
+        models: t.Optional(t.Record(t.String(), t.Array(t.String()))),
+      }),
+    },
   )
 
   // ─── Sandbox policy (host side): how remote CLI turns are confined ────────
@@ -307,10 +318,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
       // Body shape is validated by the Elysia schema below.
       const input = body as { joinCode: string; name?: string };
-      const result = await connectToProviderHost(
-        input.joinCode,
-        input.name || 'Koryphaios client',
-      );
+      const result = await connectToProviderHost(input.joinCode, input.name || 'Koryphaios client');
       return { ok: true, data: result };
     },
     { body: t.Object({ joinCode: t.String(), name: t.Optional(t.String()) }) },

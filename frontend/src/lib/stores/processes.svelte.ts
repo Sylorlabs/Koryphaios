@@ -8,6 +8,12 @@
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
+import type {
+  ProcessProvenance,
+  ProcessStatus,
+  ProcessSupervision,
+  ProcessTerminalReason,
+} from '@koryphaios/shared';
 
 // ============================================================================
 // Types
@@ -17,11 +23,17 @@ export interface Process {
   id: string;
   name: string;
   command: string;
+  commandReplayable: boolean;
   pid: number;
   sessionId: string;
-  status: 'starting' | 'running' | 'exited' | 'killed' | 'crashed' | 'orphaned';
+  status: ProcessStatus;
+  provenance: ProcessProvenance;
+  supervision: ProcessSupervision;
+  isBackground: boolean;
   exitCode?: number;
   signal?: string;
+  terminalReason?: ProcessTerminalReason;
+  terminalError?: string;
   restartCount: number;
   maxRestarts: number;
   restartPolicy: 'never' | 'on-failure' | 'always';
@@ -252,7 +264,10 @@ function createProcessStore() {
       const data = await res.json().catch(() => ({}));
       toastStore.error(data.error || 'Failed to send terminal input');
     } catch (err: unknown) {
-      console.warn('Failed to send terminal input:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to send terminal input:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Failed to send terminal input');
     }
     return false;
@@ -367,9 +382,12 @@ function createProcessStore() {
       case 'killed':
         return '#f59e0b'; // amber
       case 'crashed':
+      case 'spawn_failed':
         return '#ef4444'; // red
       case 'orphaned':
         return '#8b5cf6'; // purple
+      case 'detached':
+        return '#a1a1aa'; // neutral
       default:
         return '#6b7280';
     }

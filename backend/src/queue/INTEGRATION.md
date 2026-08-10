@@ -1,6 +1,8 @@
-# Queue System Integration Guide
+# Queue System Integration Proposal
 
-This guide shows how to integrate the Redis Job Queue system into the Koryphaios backend.
+This document is a proposal for future integration. None of the server, manager, dashboard-route, monitoring, or shutdown changes shown below are present in the active Koryphaios runtime. Do not use this document as evidence that queue-backed execution is enabled.
+
+The embedding worker also remains unavailable and returns no vector. A future integration must wire and verify a real authenticated embedding provider before exposing embedding readiness.
 
 ## Step 1: Import Queue System
 

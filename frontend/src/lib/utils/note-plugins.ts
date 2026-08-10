@@ -5,12 +5,9 @@
 //   • transform the rendered HTML before it is shown  (htmlPostProcess)
 //   • register slash commands surfaced in the notes UI  (commands)
 //
-// This is deliberately NOT a marketplace or a security sandbox. User-authored
-// plugins (loadUserPlugin) run with the same privileges as the app, exactly
-// like Obsidian community plugins — they are trusted code the user opts into.
-// The value here is a stable, documented extension surface + built-ins, not
-// isolation. The output still passes through DOMPurify, so a plugin cannot
-// inject active content into the preview even if it tries.
+// Only bundled, reviewed plugin objects are registered. Source-string loading
+// is intentionally absent: evaluating note text as renderer code would cross
+// the native app's trust boundary without a real plugin sandbox.
 
 export interface NoteCommand {
   id: string;
@@ -36,8 +33,6 @@ export interface PluginRegistry {
   readonly commands: NoteCommand[];
   transformMarkdown(src: string): string;
   postProcessHtml(html: string): string;
-  /** Compile + register a user plugin from source. Returns the plugin id or throws. */
-  loadUserPlugin(source: string): string;
 }
 
 export function createPluginRegistry(initial: NotePlugin[] = []): PluginRegistry {
@@ -80,16 +75,6 @@ export function createPluginRegistry(initial: NotePlugin[] = []): PluginRegistry
         }
       }
       return out;
-    },
-    loadUserPlugin(source: string): string {
-      // `source` is a factory body that receives the plugin API and returns a
-      // NotePlugin. Runs with app privileges (documented, opt-in trust model).
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
-      const factory = new Function('return (' + source + ')')();
-      const plugin: NotePlugin = typeof factory === 'function' ? factory() : factory;
-      if (!plugin?.id) throw new Error('User plugin did not return a plugin with an id');
-      register(plugin);
-      return plugin.id;
     },
   };
 }

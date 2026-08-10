@@ -1,51 +1,83 @@
 <script lang="ts">
-  import { wsStore } from "$lib/stores/websocket.svelte";
-  import { sessionStore } from "$lib/stores/sessions.svelte";
-  import { AlertTriangle, X, Check, Shield, ShieldAlert, ShieldCheck, ArrowRight } from "lucide-svelte";
+  import { onDestroy, tick } from 'svelte';
+  import ArrowRight from 'lucide-svelte/icons/arrow-right';
+  import Shield from 'lucide-svelte/icons/shield';
+  import ShieldAlert from 'lucide-svelte/icons/shield-alert';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { wsStore } from '$lib/stores/websocket.svelte';
 
-  function getRiskColor(risk: string): string {
-    switch (risk) {
-      case "low": return "text-green-400";
-      case "medium": return "text-yellow-400";
-      case "high": return "text-red-400";
-      default: return "text-text-muted";
-    }
-  }
+  type RiskLevel = 'low' | 'medium' | 'high';
 
-  function getRiskBorder(risk: string): string {
-    switch (risk) {
-      case "low": return "border-green-500/30";
-      case "medium": return "border-yellow-500/30";
-      case "high": return "border-red-500/30";
-      default: return "border-border";
-    }
-  }
+  const highRisk = new Set([
+    'bash',
+    'write_file',
+    'edit_file',
+    'delete_file',
+    'move_file',
+    'patch',
+    'run',
+  ]);
+  const mediumRisk = new Set(['read_file', 'grep', 'glob', 'web_fetch', 'diff']);
 
-  function getRiskIcon(risk: string) {
-    switch (risk) {
-      case "low": return ShieldCheck;
-      case "medium": return ShieldAlert;
-      case "high": return Shield;
-      default: return Shield;
-    }
-  }
-
-  function determineRiskLevel(toolName: string): "low" | "medium" | "high" {
-    const highRisk = ['bash', 'write_file', 'edit_file', 'delete_file', 'move_file', 'patch', 'run'];
-    const mediumRisk = ['read_file', 'grep', 'glob', 'web_fetch', 'diff'];
-    const lowRisk = ['ls', 'glob', 'search'];
-    
-    if (highRisk.includes(toolName)) return "high";
-    if (mediumRisk.includes(toolName)) return "medium";
-    return "low";
-  }
-
-  let pendingPermissions = $derived(wsStore.pendingPermissions.filter(p => p.sessionId === sessionStore.activeSessionId));
-  // Approvals stalled in sessions the user is NOT looking at. Without a
-  // surface for these, a backgrounded agent waits forever in silence.
-  let otherSessionPermissions = $derived(
-    wsStore.pendingPermissions.filter(p => p.sessionId && p.sessionId !== sessionStore.activeSessionId)
+  let dialogEl = $state<HTMLElement | null>(null);
+  let previouslyFocused = $state<HTMLElement | null>(null);
+  let dialogWasOpen = $state(false);
+  let pendingPermissions = $derived(
+    wsStore.pendingPermissions.filter(
+      (permission) => permission.sessionId === sessionStore.activeSessionId,
+    ),
   );
+  // Approvals stalled in sessions the user is not looking at. Keep the
+  // request visible without opening or granting anything automatically.
+  let otherSessionPermissions = $derived(
+    wsStore.pendingPermissions.filter(
+      (permission) => permission.sessionId && permission.sessionId !== sessionStore.activeSessionId,
+    ),
+  );
+
+  function determineRiskLevel(toolName: string): RiskLevel {
+    if (highRisk.has(toolName)) return 'high';
+    if (mediumRisk.has(toolName)) return 'medium';
+    return 'low';
+  }
+
+  function riskColor(risk: RiskLevel): string {
+    if (risk === 'high') return 'var(--color-error)';
+    if (risk === 'medium') return 'var(--color-warning)';
+    return 'var(--color-success)';
+  }
+
+  function riskIcon(risk: RiskLevel) {
+    if (risk === 'low') return ShieldCheck;
+    if (risk === 'medium') return ShieldAlert;
+    return Shield;
+  }
+
+  function focusSafeAction() {
+    dialogEl?.querySelector<HTMLElement>('[data-permission-deny]')?.focus();
+  }
+
+  $effect(() => {
+    const isOpen = pendingPermissions.length > 0 && Boolean(dialogEl);
+    if (isOpen && !dialogWasOpen) {
+      previouslyFocused =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      dialogWasOpen = true;
+      void tick().then(focusSafeAction);
+    } else if (!isOpen && dialogWasOpen) {
+      const restoreTarget = previouslyFocused;
+      dialogWasOpen = false;
+      previouslyFocused = null;
+      void tick().then(() => {
+        if (restoreTarget?.isConnected) restoreTarget.focus();
+      });
+    }
+  });
+
+  onDestroy(() => {
+    if (dialogWasOpen && previouslyFocused?.isConnected) previouslyFocused.focus();
+  });
 
   function jumpToPendingSession() {
     const target = otherSessionPermissions[0];
@@ -54,125 +86,189 @@
 
   function pendingSessionTitle(): string {
     const target = otherSessionPermissions[0];
-    return sessionStore.sessions.find(s => s.id === target?.sessionId)?.title ?? 'another session';
-  }
-  let dialogEl = $state<HTMLElement | null>(null);
-
-  $effect(() => {
-    if (pendingPermissions.length > 0 && dialogEl) {
-      const focusable = dialogEl.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      first?.focus();
-
-      function trapFocus(e: KeyboardEvent) {
-        if (e.key !== 'Tab') return;
-        if (e.shiftKey) {
-          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
-        } else {
-          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
-        }
-      }
-
-      dialogEl.addEventListener('keydown', trapFocus);
-      return () => dialogEl?.removeEventListener('keydown', trapFocus);
-    }
-  });
-
-  function approve(id: string) {
-    wsStore.respondToPermission(id, true);
+    return (
+      sessionStore.sessions.find((session) => session.id === target?.sessionId)?.title ??
+      'another session'
+    );
   }
 
-  function deny(id: string) {
-    wsStore.respondToPermission(id, false);
+  function respond(id: string, approved: boolean) {
+    wsStore.respondToPermission(id, approved);
+    void tick().then(() => {
+      if (pendingPermissions.length > 0) focusSafeAction();
+    });
   }
 
   function approveAll() {
-    for (const p of pendingPermissions) {
-      wsStore.respondToPermission(p.id, true);
+    for (const permission of [...pendingPermissions]) {
+      wsStore.respondToPermission(permission.id, true);
+    }
+  }
+
+  function denyAll() {
+    for (const permission of [...pendingPermissions]) {
+      wsStore.respondToPermission(permission.id, false);
+    }
+  }
+
+  function handleDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      denyAll();
+      return;
+    }
+    if (event.key !== 'Tab' || !dialogEl) return;
+    const focusable = [
+      ...dialogEl.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ];
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
 </script>
 
 {#if pendingPermissions.length === 0 && otherSessionPermissions.length > 0}
-  <!-- Floating jump-pill: approvals are waiting somewhere the user can't see. -->
   <button
     type="button"
     onclick={jumpToPendingSession}
-    class="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-full border shadow-lg transition-transform hover:scale-[1.02]"
-    style="background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.4); color: #f59e0b; backdrop-filter: blur(8px);"
+    class="fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 shadow-lg transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+    style="background: color-mix(in srgb, var(--color-warning) 12%, var(--color-surface-2)); border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border)); color: var(--color-warning); backdrop-filter: blur(8px);"
   >
-    <ShieldAlert size={14} />
+    <ShieldAlert size={14} aria-hidden="true" />
     <span class="text-xs font-medium">
       {otherSessionPermissions.length === 1
         ? `Approval needed in "${pendingSessionTitle()}"`
-        : `${otherSessionPermissions.length} approvals waiting in other sessions`} — click to review
+        : `${otherSessionPermissions.length} approvals waiting in other sessions`} — review
     </span>
   </button>
 {/if}
 
 {#if pendingPermissions.length > 0}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-    <div class="bg-surface-2 border border-border rounded-2xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden" bind:this={dialogEl} role="dialog" aria-modal="true">
-      <div class="px-5 py-4 border-b border-border flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <div class="w-3 h-3 rounded-full bg-yellow-400 animate-pulse"></div>
-          <h3 class="text-sm font-semibold text-text-primary">Permission Required</h3>
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+    style="background: color-mix(in srgb, var(--color-surface-0) 82%, transparent);"
+  >
+    <div
+      bind:this={dialogEl}
+      role="dialog"
+      tabindex="-1"
+      aria-modal="true"
+      aria-labelledby="permission-dialog-title"
+      aria-describedby="permission-dialog-description"
+      onkeydown={handleDialogKeydown}
+      class="mx-4 w-full max-w-lg overflow-hidden rounded-2xl border shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+    >
+      <div
+        class="flex items-start justify-between gap-4 border-b px-5 py-4"
+        style="border-color: var(--color-border);"
+      >
+        <div class="min-w-0">
+          <div class="flex items-center gap-2">
+            <span
+              class="h-3 w-3 shrink-0 animate-pulse rounded-full bg-[var(--color-warning)]"
+              aria-hidden="true"
+            ></span>
+            <h2
+              id="permission-dialog-title"
+              class="text-sm font-semibold text-[var(--color-text-primary)]"
+            >
+              Tool approval required
+            </h2>
+          </div>
+          <p
+            id="permission-dialog-description"
+            class="mt-1.5 text-xs leading-relaxed text-[var(--color-text-secondary)]"
+          >
+            Review each request before allowing it. Escape safely denies every request shown here.
+          </p>
         </div>
-        <span class="text-xs text-text-muted">
+        <span class="shrink-0 text-xs text-[var(--color-text-secondary)]" aria-live="polite">
           {pendingPermissions.length} pending
         </span>
       </div>
 
-      <div class="max-h-80 overflow-y-auto p-4 space-y-3">
-        {#each pendingPermissions as perm (perm.id)}
-          {@const risk = determineRiskLevel(perm.toolName)}
-          {@const RiskIcon = getRiskIcon(risk)}
-          <div class="p-3 rounded-xl border {getRiskBorder(risk)} bg-surface-3">
-            <div class="flex items-start justify-between mb-2">
-              <div>
-                <span class="text-xs font-mono text-text-secondary">{perm.toolName}</span>
-                <ArrowRight size={10} class="mx-1" style="color: var(--color-text-muted);" />
-                <span class="text-xs font-mono font-bold text-text-primary">{perm.description}</span>
+      <div class="max-h-80 space-y-3 overflow-y-auto p-4">
+        {#each pendingPermissions as permission, index (permission.id)}
+          {@const risk = determineRiskLevel(permission.toolName)}
+          {@const RiskIcon = riskIcon(risk)}
+          <section
+            class="rounded-xl border p-3"
+            aria-labelledby={`permission-request-${index}`}
+            style={`border-color: color-mix(in srgb, ${riskColor(risk)} 35%, var(--color-border)); background: var(--color-surface-3);`}
+          >
+            <div class="mb-2 flex items-start justify-between gap-3">
+              <div class="flex min-w-0 flex-wrap items-center gap-1">
+                <code class="text-xs text-[var(--color-text-secondary)]">{permission.toolName}</code
+                >
+                <ArrowRight
+                  size={11}
+                  class="shrink-0 text-[var(--color-text-muted)]"
+                  aria-hidden="true"
+                />
+                <span
+                  id={`permission-request-${index}`}
+                  class="min-w-0 break-words font-mono text-xs font-bold text-[var(--color-text-primary)]"
+                  >{permission.description}</span
+                >
               </div>
-              <span class="flex items-center gap-1 text-[10px] uppercase font-bold {getRiskColor(risk)}">
-                <RiskIcon size={12} />
+              <span
+                class="flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase"
+                style={`color: var(--color-text-primary); background: color-mix(in srgb, ${riskColor(risk)} 20%, var(--color-surface-4)); border-color: color-mix(in srgb, ${riskColor(risk)} 55%, var(--color-border));`}
+              >
+                <RiskIcon size={12} aria-hidden="true" />
                 {risk}
               </span>
             </div>
-            {#if perm.path}
-              <p class="text-xs text-text-muted font-mono mb-3">
-                {perm.path}
+            {#if permission.path}
+              <p class="mb-3 break-all font-mono text-xs text-[var(--color-text-secondary)]">
+                {permission.path}
               </p>
             {/if}
-            <div class="flex gap-2 justify-end">
+            <div class="flex justify-end gap-2">
               <button
-                onclick={() => deny(perm.id)}
-                class="px-3 py-1 text-xs rounded-lg bg-surface-4 text-text-secondary hover:bg-red-500/20 hover:text-red-400 transition-colors"
+                type="button"
+                data-permission-deny
+                onclick={() => respond(permission.id, false)}
+                aria-label={`Deny ${permission.toolName}`}
+                class="rounded-lg border px-3 py-1.5 text-xs font-medium text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-error-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-error)]/60"
+                style="background: var(--color-surface-4); border-color: var(--color-border);"
               >
                 Deny
               </button>
               <button
-                onclick={() => approve(perm.id)}
-                class="px-3 py-1 text-xs rounded-lg bg-accent/20 text-accent hover:bg-accent/30 transition-colors"
+                type="button"
+                onclick={() => respond(permission.id, true)}
+                aria-label={`Approve ${permission.toolName}`}
+                class="rounded-lg px-3 py-1.5 text-xs font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                style="background: var(--color-accent); color: var(--color-surface-0);"
               >
                 Approve
               </button>
             </div>
-          </div>
+          </section>
         {/each}
       </div>
 
       {#if pendingPermissions.length > 1}
-        <div class="px-5 py-3 border-t border-border flex justify-end">
+        <div class="flex justify-end border-t px-5 py-3" style="border-color: var(--color-border);">
           <button
+            type="button"
             onclick={approveAll}
-            class="px-4 py-1.5 text-xs rounded-lg font-medium transition-colors"
+            class="rounded-lg px-4 py-1.5 text-xs font-semibold transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
             style="background: var(--color-accent); color: var(--color-surface-0);"
           >
-            Approve All ({pendingPermissions.length})
+            Approve all ({pendingPermissions.length})
           </button>
         </div>
       {/if}

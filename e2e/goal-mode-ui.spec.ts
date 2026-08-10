@@ -17,13 +17,17 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
 
   const auth = await createAuthSession(request, BACKEND_URL);
   await injectAuthIntoPage(page, auth.bearerToken);
+  const api = new ApiClient(request, BACKEND_URL, auth.bearerToken);
+  const sessionTitle = `Goal Mode E2E ${Date.now()}`;
+  await api.createSession(sessionTitle);
 
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
+  await page.getByText(sessionTitle, { exact: true }).click();
 
   // Wait for the composer to be ready
   const composer = page.getByTestId('composer-input');
-  await expect(composer).toBeVisible({ timeout: 30_000 });
+  await expect(composer).toBeEnabled({ timeout: 30_000 });
 
   // Type a goal creation command
   await composer.fill('/goal create Finish the release');
@@ -47,5 +51,7 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
   await composer.fill('/goal resume');
   await composer.press('Enter');
   // With no paused goals, an alert should appear
-  await expect(goals.getByRole('alert')).toContainText('No paused or blocked goal', { timeout: 10_000 });
+  await expect(goals.getByRole('alert')).toContainText('No paused or blocked goal', {
+    timeout: 10_000,
+  });
 });

@@ -16,10 +16,7 @@ import { syncProviderConfigsToConfig } from '../runtime/config';
 import { startCopilotDeviceAuth } from './copilot';
 import { getManagedCodexAppServer } from './codex-app-server';
 import { CODEX_MANAGED_AUTH_MARKER } from './codex-auth';
-import {
-  clearKimiCodeAuthState,
-  startKimiCodeDeviceAuth,
-} from './kimicode-auth';
+import { clearKimiCodeAuthState, startKimiCodeDeviceAuth } from './kimicode-auth';
 import {
   detectClaudeCodeLogin,
   createClaudeCLIAuthMarker,
@@ -32,12 +29,7 @@ import {
 import type { ProviderName } from '@koryphaios/shared';
 
 export type BrowserAuthProvider =
-  | 'copilot'
-  | 'codex-auth'
-  | 'kimicode'
-  | 'claude'
-  | 'grok'
-  | 'antigravity';
+  'copilot' | 'codex-auth' | 'kimicode' | 'claude' | 'grok' | 'antigravity';
 
 const BROWSER_AUTH_PROVIDER_NAMES: ReadonlySet<BrowserAuthProvider> = new Set([
   'copilot',
@@ -104,7 +96,7 @@ async function activateManagedCodexAuth(): Promise<AuthResult> {
 export async function adoptManagedCodexSession(): Promise<void> {
   const { providers } = getContext();
   const status = providers.getStatus().find((provider) => provider.name === 'codex-auth');
-  if (!status || status.authenticated) return;
+  if (!status || status.connectionState === 'verified') return;
   try {
     const account = await getManagedCodexAppServer().account(false);
     if (account.account?.type !== 'chatgpt') return;
@@ -122,16 +114,15 @@ export async function adoptManagedCodexSession(): Promise<void> {
 }
 
 // ─── CLI-login strategy factory ─────────────────────────────────────────────
-// Claude, Grok, and Antigravity share one shape: detect a logged-in CLI, then
-// store an opt-in marker (the CLI owns the real token). Parameterized by the
-// provider name, the CLI-login detector, the marker factory, and the
-// "not logged in" guidance shown to the user.
+// Claude, Grok, and Antigravity share one shape: detect local CLI login
+// material, then store an opt-in marker (the CLI owns the real token). File or
+// environment presence is setup evidence, not an authenticated account probe.
 
 function cliLoginStrategy(opts: {
   provider: ProviderName;
   detect: () => boolean;
   marker: () => string;
-  startConnectedMessage: string;
+  startDetectedMessage: string;
   startNotLoggedInMessage: string;
   completeNotLoggedInError: string;
   completeLogLabel: string;
@@ -140,7 +131,7 @@ function cliLoginStrategy(opts: {
     provider,
     detect,
     marker,
-    startConnectedMessage,
+    startDetectedMessage,
     startNotLoggedInMessage,
     completeNotLoggedInError,
     completeLogLabel,
@@ -155,10 +146,10 @@ function cliLoginStrategy(opts: {
           return { ok: false, error: setResult.error ?? `Failed to activate ${provider} auth` };
         }
         syncProviderConfigsSafely();
-        serverLog.info({ provider }, `${completeLogLabel} connected via CLI subscription`);
+        serverLog.info({ provider }, `${completeLogLabel} CLI login material detected`);
         return {
           ok: true,
-          data: { status: 'connected', provider, message: startConnectedMessage },
+          data: { status: 'detected', provider, message: startDetectedMessage },
         };
       }
       serverLog.info({ provider }, `No ${completeLogLabel} CLI login detected`);
@@ -176,8 +167,8 @@ function cliLoginStrategy(opts: {
         return { ok: false, error: result.error ?? `Failed to activate ${provider} auth` };
       }
       syncProviderConfigsSafely();
-      serverLog.info({ provider }, `${completeLogLabel} auth completed`);
-      return { ok: true, data: { status: 'connected', provider } };
+      serverLog.info({ provider }, `${completeLogLabel} CLI login material recorded`);
+      return { ok: true, data: { status: 'detected', provider } };
     },
   };
 }
@@ -189,7 +180,10 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
     async start(): Promise<AuthResult> {
       const result = await startCopilotDeviceAuth();
       serverLog.info(
-        { provider: 'copilot', deviceCode: result.deviceCode, verificationUri: result.verificationUri },
+        {
+          provider: 'copilot',
+          verificationUri: result.verificationUri,
+        },
         'Browser auth flow started',
       );
       return { ok: true, data: { provider: 'copilot', ...result } };
@@ -207,19 +201,31 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
         .waitForLoginCompletion(result.loginId)
         .then(async (completion) => {
           if (!completion.success) {
-            serverLog.warn({ provider: 'codex-auth', error: completion.error }, 'OpenAI Codex sign-in was not approved');
+            serverLog.warn(
+              { provider: 'codex-auth', error: completion.error },
+              'OpenAI Codex sign-in was not approved',
+            );
             return;
           }
           const activation = await activateManagedCodexAuth();
           if (!activation.ok) {
-            serverLog.error({ provider: 'codex-auth', error: activation.error }, 'OpenAI Codex sign-in completed but activation failed');
+            serverLog.error(
+              { provider: 'codex-auth', error: activation.error },
+              'OpenAI Codex sign-in completed but activation failed',
+            );
             return;
           }
-          serverLog.info({ provider: 'codex-auth' }, 'OpenAI Codex signed in and activated automatically');
+          serverLog.info(
+            { provider: 'codex-auth' },
+            'OpenAI Codex signed in and activated automatically',
+          );
         })
         .catch((error) => {
           serverLog.warn(
-            { provider: 'codex-auth', error: error instanceof Error ? error.message : String(error) },
+            {
+              provider: 'codex-auth',
+              error: error instanceof Error ? error.message : String(error),
+            },
             'OpenAI Codex sign-in did not complete',
           );
         });
@@ -246,7 +252,11 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
       clearKimiCodeAuthState();
       const result = await startKimiCodeDeviceAuth();
       serverLog.info(
-        { provider: 'kimicode', userCode: result.userCode, verificationUri: result.verificationUri },
+        {
+          provider: 'kimicode',
+          userCode: result.userCode,
+          verificationUri: result.verificationUri,
+        },
         'Browser auth flow started',
       );
       return { ok: true, data: { provider: 'kimicode', ...result } };
@@ -260,9 +270,12 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
     provider: 'claude',
     detect: detectClaudeCodeLogin,
     marker: createClaudeCLIAuthMarker,
-    startConnectedMessage: 'Claude Code connected via your Claude subscription (CLI harness)',
-    startNotLoggedInMessage: 'Run "claude login" in your terminal, then click Auth again to connect.',
-    completeNotLoggedInError: 'Claude Code is not logged in. Run "claude login" in your terminal first.',
+    startDetectedMessage:
+      'Claude Code login material detected locally. Account access remains unverified until the CLI runs.',
+    startNotLoggedInMessage:
+      'Run "claude login" in your terminal, then click Auth again to connect.',
+    completeNotLoggedInError:
+      'No Claude Code login material was detected. Run "claude login" in your terminal first.',
     completeLogLabel: 'Claude Code',
   }),
 
@@ -270,9 +283,12 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
     provider: 'grok',
     detect: detectGrokCLILogin,
     marker: createGrokCLIAuthMarker,
-    startConnectedMessage: 'Grok Build connected via your local grok CLI (subscription or xAI key)',
-    startNotLoggedInMessage: 'Install the grok CLI and run "grok login", then click Auth again to connect.',
-    completeNotLoggedInError: 'Grok Build CLI is not logged in. Install grok and run "grok login" first.',
+    startDetectedMessage:
+      'Grok Build login material detected locally. Account access remains unverified until the CLI runs.',
+    startNotLoggedInMessage:
+      'Install the grok CLI and run "grok login", then click Auth again to connect.',
+    completeNotLoggedInError:
+      'No Grok Build login material was detected. Install grok and run "grok login" first.',
     completeLogLabel: 'Grok Build',
   }),
 
@@ -280,9 +296,12 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
     provider: 'antigravity',
     detect: detectAntigravityCLILogin,
     marker: createAntigravityCLIAuthMarker,
-    startConnectedMessage: 'Antigravity connected via your local agy CLI',
-    startNotLoggedInMessage: 'Install the agy CLI and run "agy login", then click Auth again to connect.',
-    completeNotLoggedInError: 'Antigravity CLI is not logged in. Install agy and run "agy login" first.',
+    startDetectedMessage:
+      'Antigravity login material detected locally. Account access remains unverified until the CLI runs.',
+    startNotLoggedInMessage:
+      'Install the agy CLI and run "agy login", then click Auth again to connect.',
+    completeNotLoggedInError:
+      'No Antigravity login material was detected. Install agy and run "agy login" first.',
     completeLogLabel: 'Antigravity',
   }),
 };
@@ -297,7 +316,10 @@ export async function startBrowserAuth(name: BrowserAuthProvider): Promise<AuthR
       { provider: name, error: error instanceof Error ? error.message : String(error) },
       'Failed to start browser auth flow',
     );
-    return { ok: false, error: error instanceof Error ? error.message : 'Failed to start auth flow' };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to start auth flow',
+    };
   }
 }
 
@@ -309,6 +331,9 @@ export async function completeBrowserAuth(name: BrowserAuthProvider): Promise<Au
       { provider: name, error: error instanceof Error ? error.message : String(error) },
       'Failed to complete browser auth flow',
     );
-    return { ok: false, error: error instanceof Error ? error.message : 'Failed to complete auth flow' };
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Failed to complete auth flow',
+    };
   }
 }

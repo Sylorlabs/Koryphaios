@@ -1,6 +1,8 @@
 // Resource Limits for Command Execution
 // Prevents runaway commands from exhausting server resources
 
+import { readdirSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'bun';
 import { serverLog } from '../logger';
 
 export interface ResourceLimits {
@@ -11,6 +13,20 @@ export interface ResourceLimits {
   maxNetworkSockets?: number; // Maximum network sockets
   allowNetworkAccess?: boolean; // Whether to allow network access
   maxDiskWriteMB?: number; // Maximum disk write in MB
+}
+
+/**
+ * Host observations used to translate a relative child-process allowance into
+ * the absolute, per-user value expected by RLIMIT_NPROC. Tests can provide
+ * these values explicitly so command construction stays deterministic.
+ */
+export interface ResourceLimitRuntime {
+  /** Explicit platform for deterministic construction tests. */
+  platform?: NodeJS.Platform;
+  /** Existing processes/tasks charged to this real user. `null` means unknown. */
+  userProcessBaseline?: number | null;
+  /** Inherited hard RLIMIT_NPROC ceiling. `null` means unknown/unbounded. */
+  userProcessHardLimit?: number | null;
 }
 
 export const DEFAULT_RESOURCE_LIMITS: ResourceLimits = {
@@ -45,15 +61,24 @@ export const AGENT_RESOURCE_LIMITS: ResourceLimits = {
  * by bash but NOT enforced by the kernel, so they are intentionally omitted to
  * avoid implying a memory cap that does not actually bind. CPU time (-t), file
  * size (-f), open fds/sockets (-n), and process count (-u) ARE enforced.
+ *
+ * RLIMIT_NPROC is an absolute per-real-user limit, not a child count and not a
+ * session/container boundary. Kory therefore adds the requested process
+ * allowance to the user's observed baseline and changes only the soft limit.
+ * If the baseline cannot be measured safely, Kory omits NPROC rather than
+ * installing a deceptively low absolute value that can make ordinary commands
+ * unable to fork. This is best-effort fork headroom, not cgroup isolation.
  */
 export function buildCommandWithLimits(
   command: string,
   limits: Partial<ResourceLimits> = {},
+  runtime: ResourceLimitRuntime = {},
 ): string {
   const finalLimits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
+  const platform = runtime.platform ?? process.platform;
 
   // ─── Linux: prlimit ──────────────────────────────────────────────────────
-  if (process.platform === 'linux') {
+  if (platform === 'linux') {
     const limitCommands: string[] = [];
 
     if (finalLimits.maxCpuTimeMs) {
@@ -68,7 +93,16 @@ export function buildCommandWithLimits(
       limitCommands.push(`prlimit --fsize=${finalLimits.maxFileSize}`);
     }
     if (finalLimits.maxProcesses) {
-      limitCommands.push(`prlimit --nproc=${finalLimits.maxProcesses}`);
+      const processLimit = resolvePerUserProcessSoftLimit(
+        finalLimits.maxProcesses,
+        platform,
+        runtime,
+      );
+      if (processLimit !== null) {
+        // Trailing ':' changes the soft limit only and preserves the inherited
+        // hard ceiling, so the command cannot permanently narrow its subtree.
+        limitCommands.push(`prlimit --nproc=${processLimit}:`);
+      }
     }
     if (finalLimits.maxNetworkSockets) {
       limitCommands.push(`prlimit --nofile=${finalLimits.maxNetworkSockets}`);
@@ -82,7 +116,7 @@ export function buildCommandWithLimits(
   }
 
   // ─── macOS: ulimit (bash builtin) ────────────────────────────────────────
-  if (process.platform === 'darwin') {
+  if (platform === 'darwin') {
     // ulimit settings apply to the current shell and its children. Since
     // bash.ts spawns `bash -c <limitedCommand>`, we prepend ulimit calls that
     // take effect before the user command runs in the same shell.
@@ -98,7 +132,15 @@ export function buildCommandWithLimits(
       ulimitCalls.push(`ulimit -f ${fileBlocks}`);
     }
     if (finalLimits.maxProcesses) {
-      ulimitCalls.push(`ulimit -u ${finalLimits.maxProcesses}`);
+      const processLimit = resolvePerUserProcessSoftLimit(
+        finalLimits.maxProcesses,
+        platform,
+        runtime,
+      );
+      if (processLimit !== null) {
+        // -S changes only the soft limit; RLIMIT_NPROC remains per user.
+        ulimitCalls.push(`ulimit -S -u ${processLimit}`);
+      }
     }
     // open fds covers network sockets too
     if (finalLimits.maxNetworkSockets) {
@@ -120,10 +162,142 @@ export function buildCommandWithLimits(
 
   // ─── Other platforms (Windows, etc.) ─────────────────────────────────────
   serverLog.warn(
-    { platform: process.platform },
+    { platform },
     'Resource limits not supported on this platform; proceeding without limits',
   );
   return command;
+}
+
+/**
+ * Count the host work already charged to this real user for RLIMIT_NPROC.
+ * Linux charges threads/tasks, so counting only `/proc/<pid>` would still
+ * understate the baseline for browsers, Bun, and language servers.
+ */
+export function detectCurrentUserProcessBaseline(
+  platform: NodeJS.Platform = process.platform,
+): number | null {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (uid === null) return null;
+
+  if (platform === 'linux') {
+    let total = 0;
+    try {
+      for (const entry of readdirSync('/proc', { withFileTypes: true })) {
+        if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+        try {
+          const status = readFileSync(`/proc/${entry.name}/status`, 'utf8');
+          const owner = status.match(/^Uid:\s+(\d+)/m);
+          if (!owner || Number(owner[1]) !== uid) continue;
+          total += readdirSync(`/proc/${entry.name}/task`, { withFileTypes: true }).filter(
+            (task) => task.isDirectory() && /^\d+$/.test(task.name),
+          ).length;
+        } catch {
+          // Processes can exit between the directory and status/task reads.
+        }
+      }
+    } catch {
+      return null;
+    }
+    return total > 0 ? total : null;
+  }
+
+  if (platform === 'darwin') {
+    try {
+      const result = spawnSync(['ps', '-axo', 'uid='], { stdout: 'pipe', stderr: 'pipe' });
+      if (result.exitCode !== 0) return null;
+      const total = result.stdout
+        .toString()
+        .split(/\r?\n/)
+        .reduce((count, value) => count + (Number(value.trim()) === uid ? 1 : 0), 0);
+      return total > 0 ? total : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/** Read the inherited hard ceiling when the host exposes it without mutation. */
+export function detectCurrentUserProcessHardLimit(
+  platform: NodeJS.Platform = process.platform,
+): number | null {
+  if (platform === 'linux') {
+    try {
+      const limits = readFileSync('/proc/self/limits', 'utf8');
+      const row = limits.match(/^Max processes\s+(\S+)\s+(\S+)/m);
+      if (!row || row[2] === 'unlimited') return null;
+      const hard = Number(row[2]);
+      return Number.isSafeInteger(hard) && hard > 0 ? hard : null;
+    } catch {
+      return null;
+    }
+  }
+
+  if (platform === 'darwin') {
+    try {
+      const result = spawnSync(['/bin/bash', '-c', 'ulimit -H -u'], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      if (result.exitCode !== 0) return null;
+      const value = result.stdout.toString().trim();
+      if (value === 'unlimited') return null;
+      const hard = Number(value);
+      return Number.isSafeInteger(hard) && hard > 0 ? hard : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function runtimeObservation(
+  runtime: ResourceLimitRuntime,
+  key: 'userProcessBaseline' | 'userProcessHardLimit',
+  detect: () => number | null,
+): number | null {
+  return Object.prototype.hasOwnProperty.call(runtime, key) ? (runtime[key] ?? null) : detect();
+}
+
+function resolvePerUserProcessSoftLimit(
+  requestedHeadroom: number,
+  platform: NodeJS.Platform,
+  runtime: ResourceLimitRuntime,
+): number | null {
+  const baseline = runtimeObservation(runtime, 'userProcessBaseline', () =>
+    detectCurrentUserProcessBaseline(platform),
+  );
+  if (!Number.isSafeInteger(baseline) || baseline === null || baseline < 1) {
+    serverLog.warn(
+      { platform, requestedHeadroom },
+      'Per-user process baseline unavailable; RLIMIT_NPROC was not applied',
+    );
+    return null;
+  }
+
+  const hardLimit = runtimeObservation(runtime, 'userProcessHardLimit', () =>
+    detectCurrentUserProcessHardLimit(platform),
+  );
+  const desired = baseline + Math.max(1, Math.floor(requestedHeadroom));
+  const softLimit =
+    hardLimit !== null && Number.isSafeInteger(hardLimit) ? Math.min(desired, hardLimit) : desired;
+
+  if (softLimit <= baseline) {
+    serverLog.warn(
+      { baseline, hardLimit, requestedHeadroom },
+      'No safe RLIMIT_NPROC headroom remains; per-user process limit was not changed',
+    );
+    return null;
+  }
+  if (softLimit < desired) {
+    serverLog.warn(
+      { baseline, hardLimit, requestedHeadroom, effectiveHeadroom: softLimit - baseline },
+      'RLIMIT_NPROC headroom was capped by the inherited hard limit',
+    );
+  }
+  return softLimit;
 }
 
 /**

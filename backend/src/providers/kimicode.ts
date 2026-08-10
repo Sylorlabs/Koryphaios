@@ -13,9 +13,8 @@ import {
   loadKimiCodeAuthState,
   resolveKimiCodeAccessToken,
 } from './kimicode-auth';
-import { getCliBridge, KORY_TOOL_WHITELIST, KORY_CRITIC_TOOL_WHITELIST } from './cli-bridges';
-import { KORY_HARNESS_NOTE } from './cli-bridges';
-import { KORY_TOOLS, toolsForRole, type KoryToolDef } from './kory-mcp-bridge';
+import { getCliBridge } from './cli-bridges';
+import { KORY_DIRECT_TOOL_HARNESS_NOTE } from './cli-bridges';
 
 const KIMICODE_BASE_URL = 'https://api.kimi.com/coding/v1';
 
@@ -82,9 +81,7 @@ export class KimiCodeProvider extends OpenAIProvider {
     return this.kimiClient;
   }
 
-  override async *streamResponse(
-    request: StreamRequest,
-  ): AsyncGenerator<ProviderEvent> {
+  override async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     await this.ensureAccessToken();
     // Inject the Koryphaios harness note into the system prompt via the
     // KimiCodeCliBridge (Phase 1). KimiCode is API-based so the bridge
@@ -99,23 +96,17 @@ export class KimiCodeProvider extends OpenAIProvider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     });
-    // Inject the full kory__ tool catalog as function-calling tools so the
-    // KimiCode model can call them via the standard OpenAI tool-calling
-    // protocol. The tools are filtered by role (critic gets read-only).
-    const role = request.harnessRole ?? 'manager';
-    const koryTools = toolsForRole(role);
-    const koryProviderTools: ProviderToolDef[] = koryTools.map((t: KoryToolDef) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-    }));
+    // Kimi uses direct OpenAI-compatible function calls, not the MCP subprocess.
+    // Keep the manager-supplied ToolRegistry definitions (already role-filtered)
+    // so returned tool names execute directly and cannot drift from authority.
+    const koryProviderTools: ProviderToolDef[] = request.tools ?? [];
     const augmentedRequest: StreamRequest = {
       ...request,
       systemPrompt: bridgeConfig?.systemInstructions?.length
         ? bridgeConfig.systemInstructions.filter(Boolean).join('\n\n')
         : request.systemPrompt?.trim()
-          ? `${request.systemPrompt}\n\n${KORY_HARNESS_NOTE}`
-          : KORY_HARNESS_NOTE,
+          ? `${request.systemPrompt}\n\n${KORY_DIRECT_TOOL_HARNESS_NOTE}`
+          : KORY_DIRECT_TOOL_HARNESS_NOTE,
       tools: koryProviderTools,
     };
     yield* super.streamResponse(augmentedRequest);

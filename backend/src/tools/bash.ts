@@ -6,10 +6,12 @@ import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registr
 import {
   validateBashCommand,
   auditBashCommand,
+  bashValidationUserMessage,
+  logBashExecutionAudit,
+  summarizeToolErrorForAudit,
   SANDBOX_CMD_WHITELIST,
 } from '../security/bash-sandbox';
 import { toolLog } from '../logger';
-import { shellManager } from './shell-manager';
 import { processSupervisor } from '../process-supervisor/supervisor';
 import { getCollaborationToolPolicy } from '../collaboration/tool-policy';
 import {
@@ -26,6 +28,8 @@ import {
 } from '../security/os-sandbox';
 import { bypassLocalRiskPrompts } from './permission-policy';
 import { loadAgentSettings, saveAgentSettings } from '../agent-settings';
+import { captureGitChangeEvidence, diffGitChangeEvidence } from './git-change-evidence';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 const MAX_OUTPUT_BYTES = 512_000; // 512KB output limit per command
 
@@ -107,9 +111,9 @@ function commandPatternMatches(command: string, pattern: string): boolean {
 // ─── Sandboxed execution helpers ───────────────────────────────────────
 //
 // Sandboxed commands route through the OS sandbox (bwrap on Linux,
-// sandbox-exec on macOS) when enabled, otherwise argv-only execution
-// (no shell). The old `bash -c <string>` path is only used for
-// unsandboxed (manager) commands that legitimately need shell features.
+// sandbox-exec on macOS). If that boundary is disabled or unavailable, the
+// caller rejects execution. The `bash -c <string>` path is used only inside
+// the kernel sandbox or for explicitly authorized unsandboxed manager work.
 
 interface SpawnedProc {
   kill(signal?: string): void;
@@ -119,38 +123,50 @@ interface SpawnedProc {
   pid: number;
 }
 
-function spawnSandboxedCommand(
-  command: string,
-  cwd: string,
-  ctx: ToolContext,
-  _isSandboxed: boolean,
-): SpawnedProc {
-  const { argv, needsShell, shellFeatures } = tokenizeCommand(command);
+function wrapDetachedBunProcess(proc: Bun.Subprocess): SpawnedProc {
+  return {
+    kill: (signal = 'SIGTERM') => {
+      if (process.platform !== 'win32' && proc.pid > 0) {
+        try {
+          process.kill(-proc.pid, signal as NodeJS.Signals);
+          return;
+        } catch {
+          // The process group may already be gone; try the direct handle.
+        }
+      }
+      try {
+        proc.kill(signal as NodeJS.Signals);
+      } catch {
+        // The process may already have exited.
+      }
+    },
+    exited: proc.exited,
+    stdout: proc.stdout as ReadableStream<Uint8Array>,
+    stderr: proc.stderr as ReadableStream<Uint8Array>,
+    pid: proc.pid,
+  };
+}
+
+function spawnSandboxedCommand(command: string, cwd: string): SpawnedProc {
+  if (!osSandboxEnabled()) {
+    throw new Error('Sandboxed command cannot run without kernel path confinement');
+  }
+  const { argv, needsShell } = tokenizeCommand(command);
 
   if (needsShell) {
     // The command uses shell features (pipes, redirects, &&). Route through
     // the OS sandbox which confines the shell and its children. If the OS
     // sandbox is not enabled, REJECT — running shell-feature commands
     // without confinement is exactly the bypass the old path allowed.
-    if (!osSandboxEnabled()) {
-      throw new Error(
-        `Sandboxed command uses shell features (${shellFeatures?.join(', ')}) ` +
-          'but OS sandbox is not enabled. Set KORYPHAIOS_OS_SANDBOX=1 to enable ' +
-          'kernel-level confinement, or run the command without shell operators.',
-      );
-    }
     // OS sandbox enabled: run the command through a confined shell.
     const shell = requireBash();
     const roots = defaultAllowedRoots(cwd);
-    const { proc, cleanup } = spawnOsSandboxed(
-      [shell.command, ...shell.args, command],
-      {
-        allowedRoots: roots,
-        cwd,
-        blockNetwork: true,
-        blockSubprocesses: false,
-      },
-    );
+    const { proc, cleanup } = spawnOsSandboxed([shell.command, ...shell.args, command], {
+      allowedRoots: roots,
+      cwd,
+      blockNetwork: true,
+      blockSubprocesses: false,
+    });
     return wrapChildProcess(proc, cleanup);
   }
 
@@ -163,26 +179,14 @@ function spawnSandboxedCommand(
     throw new Error(`Command not found: ${argv[0]}`);
   }
 
-  if (osSandboxEnabled()) {
-    const roots = defaultAllowedRoots(cwd);
-    const { proc, cleanup } = spawnOsSandboxed([resolved, ...argv.slice(1)], {
-      allowedRoots: roots,
-      cwd,
-      blockNetwork: true,
-      blockSubprocesses: false,
-    });
-    return wrapChildProcess(proc, cleanup);
-  }
-
-  // No OS sandbox: argv-only with shell:false. This is still a major
-  // improvement over `bash -c` because no shell interprets the string.
-  const proc = Bun.spawn([resolved, ...argv.slice(1)], {
+  const roots = defaultAllowedRoots(cwd);
+  const { proc, cleanup } = spawnOsSandboxed([resolved, ...argv.slice(1)], {
+    allowedRoots: roots,
     cwd,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    env: { ...process.env, PATH: process.env.PATH },
+    blockNetwork: true,
+    blockSubprocesses: false,
   });
-  return proc as unknown as SpawnedProc;
+  return wrapChildProcess(proc, cleanup);
 }
 
 function spawnUnsandboxedCommand(command: string, cwd: string): SpawnedProc {
@@ -191,9 +195,13 @@ function spawnUnsandboxedCommand(command: string, cwd: string): SpawnedProc {
     cwd,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, PATH: process.env.PATH },
+    detached: true,
+    // Bash is an agent execution surface even when the user explicitly grants
+    // unsandboxed filesystem access. Never turn that grant into ambient access
+    // to backend/provider credentials.
+    env: getSafeSubprocessEnv(),
   });
-  return proc as unknown as SpawnedProc;
+  return wrapDetachedBunProcess(proc);
 }
 
 // Wrap a node:child_process spawn result into the same shape Bun.spawn
@@ -212,7 +220,7 @@ function wrapChildProcess(
     });
     proc.on('error', (err) => {
       cleanup();
-      toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'child process error');
+      toolLog.debug(summarizeToolErrorForAudit(err), 'child process error');
       resolve(1);
     });
   });
@@ -234,7 +242,12 @@ function wrapChildProcess(
 function nodeStreamToWebStream(
   stream: import('node:stream').Readable | null,
 ): ReadableStream<Uint8Array> {
-  if (!stream) return new ReadableStream({ start(c) { c.close(); } });
+  if (!stream)
+    return new ReadableStream({
+      start(c) {
+        c.close();
+      },
+    });
   const reader = stream[Symbol.asyncIterator]();
   return new ReadableStream({
     async pull(controller) {
@@ -324,7 +337,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         return {
           callId: call.id,
           name: this.name,
-          output: `Command blocked by team access policy: ${blocked || notAllowed}`,
+          output: 'Command blocked by the team access policy.',
           isError: true,
           durationMs: 0,
         };
@@ -334,8 +347,10 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     const approvedByPreset = ctx.approvedToolCallIds?.has(call.id) === true;
     const bypassRiskPrompts = bypassLocalRiskPrompts(ctx.permissionPolicy);
     const catastrophic = isCatastrophicBashCommand(command);
-    if (catastrophic && !approvedByPreset && !bypassRiskPrompts) {
-      // Check persisted bash command allowlist/blocklist first.
+    if (catastrophic && !approvedByPreset) {
+      // A catastrophic command always requires an exact per-call host
+      // approval. YOLO/custom presets and persistent allowlists are not broad
+      // authorization to erase a home directory, filesystem, or device.
       const baseCmds = parseBaseCommands(command);
       const settings = loadAgentSettings(ctx.workingDirectory);
       const onBlocklist = baseCmds.some((cmd) =>
@@ -350,12 +365,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
           durationMs: 0,
         };
       }
-      const onAllowlist = baseCmds.length > 0 && baseCmds.every((cmd) =>
-        settings.bashCommandAllowlist.some((pattern) => commandPatternMatches(cmd, pattern)),
-      );
-      if (onAllowlist) {
-        // User previously allowed this command pattern — skip the prompt.
-      } else if (!ctx.waitForUserInput) {
+      if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
           name: this.name,
@@ -366,7 +376,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       } else {
         const selection = await ctx.waitForUserInput(
           `This command can destroy broad system or home-directory data:\n\n${command}\n\nRun it anyway?`,
-          ['Allow and add command to allowlist', 'Block and add command to blocklist', 'Run catastrophic command'],
+          ['Block and add command to blocklist', 'Run catastrophic command'],
           { allowOther: false, allowKeepChatting: false },
         );
         if (selection === 'Block and add command to blocklist') {
@@ -386,16 +396,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
             durationMs: 0,
           };
         }
-        if (selection === 'Allow and add command to allowlist') {
-          // Persist the allowlist decision and continue.
-          const updated = loadAgentSettings(ctx.workingDirectory);
-          for (const cmd of baseCmds) {
-            if (!updated.bashCommandAllowlist.includes(cmd)) {
-              updated.bashCommandAllowlist.push(cmd);
-            }
-          }
-          saveAgentSettings(ctx.workingDirectory, updated);
-        } else if (selection !== 'Run catastrophic command') {
+        if (selection !== 'Run catastrophic command') {
           return {
             callId: call.id,
             name: this.name,
@@ -415,42 +416,47 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     // callers that haven't been wired through the resolver yet.
     const sandbox = ctx.sandboxOptions;
     const effectiveSandboxed = sandbox ? sandbox.isSandboxed : ctx.isSandboxed;
-    const enforcePathConfinement = sandbox ? sandbox.pathConfinement && sandbox.isSandboxed : ctx.isSandboxed;
+    const enforcePathConfinement = sandbox
+      ? sandbox.pathConfinement && sandbox.isSandboxed
+      : ctx.isSandboxed;
 
     // Only enforce project root check if sandboxed (and path confinement enabled)
     if (enforcePathConfinement && !isInsideProject) {
       return {
         callId: call.id,
         name: this.name,
-        output: `Access Denied: Cannot execute commands outside project root in sandbox mode.\nRequested: ${requestedCwd}\nRoot: ${ctx.workingDirectory}`,
+        output: 'Access denied: the command working directory is outside the project boundary.',
         isError: true,
         durationMs: 0,
       };
     }
 
     // 2. Validate Command Content (comprehensive security check)
-    const validation = validateBashCommand(command, sandbox
-      ? {
-          isSandboxed: sandbox.isSandboxed,
-          allowNetwork: !sandbox.isSandboxed,
-          commandWhitelist: sandbox.commandWhitelist,
-          metacharacters: sandbox.metacharacters,
-          network: sandbox.network,
-          containerTools: sandbox.containerTools,
-        }
-      : {
-          isSandboxed: ctx.isSandboxed,
-          allowNetwork: !ctx.isSandboxed, // Only allow network in unsandboxed mode
-        });
+    const validation = validateBashCommand(
+      command,
+      sandbox
+        ? {
+            isSandboxed: sandbox.isSandboxed,
+            allowNetwork: !sandbox.isSandboxed,
+            commandWhitelist: sandbox.commandWhitelist,
+            metacharacters: sandbox.metacharacters,
+            network: sandbox.network,
+            containerTools: sandbox.containerTools,
+          }
+        : {
+            isSandboxed: ctx.isSandboxed,
+            allowNetwork: !ctx.isSandboxed, // Only allow network in unsandboxed mode
+          },
+    );
 
     // Audit log the attempt
     auditBashCommand(command, {
+      cwd: requestedCwd,
+      toolCallId: call.id,
       sessionId: ctx.sessionId,
-      agentId: ctx.agentId,
-      userId: 'system', // TODO: Get from auth context
       isSandboxed: effectiveSandboxed ?? true,
       allowed: validation.safe ?? false,
-      reason: validation.reason,
+      decisionCode: validation.code,
     });
 
     if (!validation.safe && !catastrophic && !approvedByPreset && !bypassRiskPrompts) {
@@ -464,28 +470,34 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         return {
           callId: call.id,
           name: this.name,
-          output: `Command blocked by user-configured blocklist: ${validation.reason}`,
+          output: `Command blocked by the user-configured blocklist. ${bashValidationUserMessage(validation)}`,
           isError: true,
           durationMs: 0,
         };
       }
-      const onAllowlist = baseCmds.length > 0 && baseCmds.every((cmd) =>
-        settings.bashCommandAllowlist.some((pattern) => commandPatternMatches(cmd, pattern)),
-      );
+      const onAllowlist =
+        baseCmds.length > 0 &&
+        baseCmds.every((cmd) =>
+          settings.bashCommandAllowlist.some((pattern) => commandPatternMatches(cmd, pattern)),
+        );
       if (onAllowlist) {
         // User previously allowed this command pattern — skip the prompt.
       } else if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
           name: this.name,
-          output: `Risky command requires approval, but no human approval channel is available: ${validation.reason}`,
+          output: `Risky command requires approval, but no human approval channel is available. ${bashValidationUserMessage(validation)}`,
           isError: true,
           durationMs: 0,
         };
       } else {
         const selection = await ctx.waitForUserInput(
           `This command triggered a safety check (${validation.reason}):\n\n${command}\n\nRun it anyway?`,
-          ['Allow and add command to allowlist', 'Block and add command to blocklist', 'Run risky command'],
+          [
+            'Allow and add command to allowlist',
+            'Block and add command to blocklist',
+            'Run risky command',
+          ],
           { allowOther: false, allowKeepChatting: false },
         );
         if (selection === 'Block and add command to blocklist') {
@@ -524,16 +536,55 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       }
     }
 
+    const resourceRequest = validateResourceRequest(AGENT_RESOURCE_LIMITS);
+    if (!resourceRequest.allowed) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Command blocked because the configured resource policy is invalid.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
+    const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
+
+    // Regex/argv validation is defense in depth, not filesystem or network
+    // confinement. A sandbox-required command must have a working kernel-level
+    // boundary; silently falling back would let absolute operands, package
+    // scripts, and child processes escape the project jail.
+    if (effectiveSandboxed && isBackground) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output:
+          'Sandboxed background processes are unavailable because the process supervisor cannot yet preserve the kernel sandbox boundary. Run it in the foreground, or use an explicitly authorized unsandboxed manager session.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
+    if (effectiveSandboxed && !osSandboxEnabled()) {
+      return {
+        callId: call.id,
+        name: this.name,
+        output:
+          'Sandboxed command blocked: kernel path confinement is unavailable. Enable KORYPHAIOS_OS_SANDBOX=1 with bubblewrap on Linux or sandbox-exec on macOS; Koryphaios will not fall back to an unconfined process.',
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
     // 4. Background Execution (using Process Supervisor)
     if (isBackground) {
-      toolLog.info(
-        { command: command.slice(0, 200), name: processName, sessionId: ctx.sessionId },
-        'Starting supervised background process',
-      );
+      logBashExecutionAudit(command, {
+        cwd: requestedCwd,
+        phase: 'background_start',
+        toolCallId: call.id,
+        sessionId: ctx.sessionId,
+      });
 
-      const bgProc = await processSupervisor.startProcess({
+      const bgProc = await processSupervisor.startAgentBackgroundProcess({
         name: processName || 'bg-proc',
-        command,
+        command: limitedCommand,
         cwd: requestedCwd,
         sessionId: ctx.sessionId,
         // Sandboxed agents can't plant persistent background processes.
@@ -552,7 +603,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       return {
         callId: call.id,
         name: this.name,
-        output: `Supervised background process started.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nRestart Policy: ${bgProc.restartPolicy} (max ${bgProc.maxRestarts} restarts)\n${effectiveSandboxed ? 'Note: sandboxed agents cannot auto-restart background processes.\n' : ''}Use shell_manage or Process Supervisor to view logs or kill the process.`,
+        output: `Supervised background process started.\nExecution boundary: explicitly authorized unsandboxed agent process.\nID: ${bgProc.id}\nName: ${bgProc.name}\nPID: ${bgProc.pid}\nRestart Policy: ${bgProc.restartPolicy} (max ${bgProc.maxRestarts} restarts)\nUse shell_manage or Process Supervisor to view logs or kill the process.`,
         isError: false,
         durationMs: 0,
       };
@@ -560,28 +611,51 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
 
     const timeoutMs = (timeout ?? 120) * 1000;
 
-    toolLog.info(
-      { command: command.slice(0, 200), cwd: requestedCwd, sandboxed: effectiveSandboxed },
-      'Executing bash command',
-    );
+    logBashExecutionAudit(command, {
+      cwd: requestedCwd,
+      phase: 'foreground_start',
+      toolCallId: call.id,
+      sessionId: ctx.sessionId,
+    });
 
-    // Apply resource limits to the command
-    const limitedCommand = buildCommandWithLimits(command, AGENT_RESOURCE_LIMITS);
+    let evidenceBefore: Awaited<ReturnType<typeof captureGitChangeEvidence>> = null;
+    if (ctx.recordChange) {
+      try {
+        // Capture only after every approval gate has passed, immediately before
+        // foreground execution. Rejected commands therefore cannot claim edits.
+        evidenceBefore = await captureGitChangeEvidence(requestedCwd);
+      } catch (err: unknown) {
+        toolLog.debug(
+          {
+            ...summarizeToolErrorForAudit(err),
+            decision: 'git_evidence_before_failed',
+            toolCallId: call.id,
+            sessionId: ctx.sessionId,
+          },
+          'bash: pre-execution Git evidence unavailable',
+        );
+      }
+    }
 
+    let proc: SpawnedProc | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    let toolResult: ToolCallOutput;
     try {
-      // Sandboxed execution path: route through the OS sandbox when enabled,
-      // otherwise argv-only (no shell). The old `bash -c <string>` path is
-      // only used for unsandboxed (manager) commands that legitimately need
-      // shell features (pipes, redirects, &&).
-      const proc = effectiveSandboxed
-        ? spawnSandboxedCommand(limitedCommand, requestedCwd, ctx, effectiveSandboxed)
+      // Sandboxed execution is always kernel-confined at this point. The old
+      // `bash -c <string>` path is also used for explicitly authorized
+      // unsandboxed manager commands that legitimately need shell features.
+      proc = effectiveSandboxed
+        ? spawnSandboxedCommand(limitedCommand, requestedCwd)
         : spawnUnsandboxedCommand(limitedCommand, requestedCwd);
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => {
-          proc.kill();
-          reject(new Error(`Command timed out after ${timeout ?? 120}s`));
-        }, timeoutMs),
+      const timeoutPromise = new Promise<never>(
+        (_, reject) =>
+          (timeoutHandle = setTimeout(() => {
+            timedOut = true;
+            proc?.kill();
+            reject(new Error(`Command timed out after ${timeout ?? 120}s`));
+          }, timeoutMs)),
       );
 
       const outputPromise = (async () => {
@@ -635,16 +709,80 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         };
       })();
 
-      return await Promise.race([outputPromise, timeoutPromise]);
+      toolResult = await Promise.race([outputPromise, timeoutPromise]);
     } catch (err: unknown) {
-      toolLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bash: command execution error');
-      return {
+      const errorAudit = summarizeToolErrorForAudit(err);
+      toolLog.debug(
+        {
+          ...errorAudit,
+          decision: timedOut ? 'timed_out' : 'execution_failed',
+          toolCallId: call.id,
+          sessionId: ctx.sessionId,
+        },
+        'bash: command execution error',
+      );
+      toolResult = {
         callId: call.id,
         name: this.name,
-        output: `Execution error: ${err instanceof Error ? err.message : String(err)}`,
+        output: timedOut
+          ? `Command timed out after ${timeout ?? 120}s.`
+          : `Command execution failed safely (code: ${errorAudit.errorCode}; reference: ${errorAudit.errorFingerprint}).`,
         isError: true,
         durationMs: 0,
       };
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (proc) {
+        if (timedOut) {
+          // Foreground Bun commands own a dedicated process group. Give TERM a
+          // short grace period, then kill descendants that could otherwise keep
+          // editing after the timeout evidence snapshot.
+          await Promise.race([
+            proc.exited.catch(() => 1),
+            new Promise<number>((resolveWait) => setTimeout(() => resolveWait(1), 250)),
+          ]);
+          proc.kill('SIGKILL');
+        }
+        await Promise.race([
+          proc.exited.catch(() => 1),
+          new Promise<number>((resolveWait) => setTimeout(() => resolveWait(1), 500)),
+        ]);
+      }
+
+      if (ctx.recordChange && evidenceBefore) {
+        try {
+          const evidenceAfter = await captureGitChangeEvidence(requestedCwd);
+          const evidence = diffGitChangeEvidence(evidenceBefore, evidenceAfter);
+          // Even a bounded partial capture can contain independently proven
+          // paths. Unknown paths are omitted by the differ; proven paths stay
+          // useful while the warning preserves the completeness truth.
+          for (const change of evidence.changes) ctx.recordChange(change);
+          if (!evidence.complete) {
+            const evidenceError = summarizeToolErrorForAudit(evidence.reason ?? 'incomplete');
+            toolLog.warn(
+              {
+                ...evidenceError,
+                decision: 'git_evidence_incomplete',
+                toolCallId: call.id,
+                sessionId: ctx.sessionId,
+              },
+              'bash: changed-file evidence was degraded; no unproven paths were recorded',
+            );
+          }
+        } catch (err: unknown) {
+          toolLog.debug(
+            {
+              ...summarizeToolErrorForAudit(err),
+              decision: 'git_evidence_after_failed',
+              toolCallId: call.id,
+              sessionId: ctx.sessionId,
+            },
+            'bash: post-execution Git evidence unavailable',
+          );
+        }
+      }
     }
+
+    return toolResult;
   }
 }

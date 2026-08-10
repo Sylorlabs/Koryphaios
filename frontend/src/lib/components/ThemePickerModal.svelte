@@ -1,6 +1,8 @@
 <script lang="ts">
   import { theme } from '$lib/stores/theme.svelte';
-  import { SunMoon, Check, X } from 'lucide-svelte';
+  import SunMoon from 'lucide-svelte/icons/sun-moon';
+  import Check from 'lucide-svelte/icons/check';
+  import X from 'lucide-svelte/icons/x';
 
   interface Props {
     open: boolean;

@@ -9,11 +9,31 @@
 import type { ChangeSummary } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 
+/** Lightweight record of a tool call during a turn (previews only). */
+export interface ToolCallRecord {
+  name: string;
+  inputPreview?: string;
+  resultPreview?: string;
+  durationMs?: number;
+  isError?: boolean;
+}
+
+/** Lightweight record of a shell command during a turn. */
+export interface CommandRecord {
+  command: string;
+  exitCode?: number | null;
+  durationMs?: number;
+}
+
 export interface SessionState {
   abortController: AbortController;
   pendingInputResolver?: (selection: string) => void;
   changes: ChangeSummary[];
   lastKnownGoodHash?: string;
+  /** Tool calls recorded during the current turn. Cleared at turn end. */
+  toolCalls: ToolCallRecord[];
+  /** Shell commands recorded during the current turn. Cleared at turn end. */
+  commands: CommandRecord[];
 }
 
 export interface SessionStateServiceConfig {
@@ -34,6 +54,8 @@ export class SessionStateService {
       session = {
         abortController: new AbortController(),
         changes: [],
+        toolCalls: [],
+        commands: [],
       };
       this.sessions.set(sessionId, session);
     }
@@ -162,6 +184,33 @@ export class SessionStateService {
     }
   }
 
+  // ─── Tool Call / Command Tracking ──────────────────────────────────────────
+
+  recordToolCall(sessionId: string, record: ToolCallRecord): void {
+    this.ensureSession(sessionId).toolCalls.push(record);
+  }
+
+  getToolCalls(sessionId: string): ToolCallRecord[] {
+    return [...(this.sessions.get(sessionId)?.toolCalls ?? [])];
+  }
+
+  recordCommand(sessionId: string, record: CommandRecord): void {
+    this.ensureSession(sessionId).commands.push(record);
+  }
+
+  getCommands(sessionId: string): CommandRecord[] {
+    return [...(this.sessions.get(sessionId)?.commands ?? [])];
+  }
+
+  /** Clear turn-scoped instrumentation (tool calls + commands). Called at turn end. */
+  clearTurnInstrumentation(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.toolCalls = [];
+      session.commands = [];
+    }
+  }
+
   getChangeCount(sessionId: string): number {
     return this.sessions.get(sessionId)?.changes.length ?? 0;
   }
@@ -213,7 +262,10 @@ export class SessionStateService {
           session.abortController.abort();
         }
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Ignoring abort errors during cleanup');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Ignoring abort errors during cleanup',
+        );
       }
     }
     this.sessions.clear();

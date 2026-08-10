@@ -191,15 +191,6 @@ export class BuildErrorDetector extends BaseErrorDetector {
       }
     }
 
-    // Temporarily disable process checking to prevent memory issues
-    // TODO: Re-enable with proper resource limits
-    // try {
-    //   const processErrors = await this.checkBuildProcesses();
-    //   errors.push(...processErrors);
-    // } catch (error) {
-    //   console.warn('Process check failed:', error instanceof Error ? error.message : error);
-    // }
-
     return errors;
   }
 
@@ -907,28 +898,6 @@ export class BuildErrorDetector extends BaseErrorDetector {
 
     return errors;
   }
-
-  // Temporarily disabled to prevent memory issues
-  /*
-  private async checkBuildProcesses(): Promise<DetectedError[]> {
-    const errors: DetectedError[] = [];
-
-    try {
-      // Check for hanging Node.js processes
-      const hangingProcesses = await this.detectHangingProcesses();
-      errors.push(...hangingProcesses);
-
-      // Check for build tool issues
-      const buildToolErrors = await this.checkBuildToolStatus();
-      errors.push(...buildToolErrors);
-
-    } catch (error) {
-      console.warn('Process check error:', error instanceof Error ? error.message : error);
-    }
-
-    return errors;
-  }
-  */
 
   private async checkSyntaxErrors(): Promise<DetectedError[]> {
     const errors: DetectedError[] = [];

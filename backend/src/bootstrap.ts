@@ -66,6 +66,8 @@ import { startBackgroundCleanup } from './memory/background-cleanup';
 import { GoalDriveService } from './kory/goal-drive-service';
 import { SANDBOX_PRESETS } from '@koryphaios/shared';
 import { cliResearchBoundary, hasResearchCitation } from './providers/cli-research';
+import { initEnforcedSpendCapsTable } from './security/spend-caps-enforced';
+import { recoverInterruptedSessionErasures } from './services/session-erasure-service';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -109,12 +111,15 @@ export async function bootstrap(): Promise<AppContext> {
 
   // Initialize DB, Supervisor, and CreditAccountant
   await initDb();
-  await processSupervisor.initialize();
+  await initEnforcedSpendCapsTable();
   initCreditAccountant(join(PROJECT_ROOT, config.dataDirectory), {
     openaiApiKey: process.env.OPENAI_API_KEY,
     githubEnterpriseId: process.env.GITHUB_ENTERPRISE_ID,
     githubToken: process.env.GITHUB_TOKEN,
   });
+  // Reconcile any crash-interrupted delete before providers, Goal recovery,
+  // process supervision, WebSockets, or HTTP readiness can revive the session.
+  await recoverInterruptedSessionErasures();
 
   // Initialize Encryption
   await initEncryption();
@@ -134,7 +139,10 @@ export async function bootstrap(): Promise<AppContext> {
         .listModels()
         .find((m) => m.id === modelId || m.apiModelId === modelId || m.name === modelId);
     } catch (err: unknown) {
-      serverLog.debug({ provider: providerName, modelId, err: err instanceof Error ? err.message : String(err) }, 'Live model resolver lookup failed');
+      serverLog.debug(
+        { provider: providerName, modelId, err: err instanceof Error ? err.message : String(err) },
+        'Live model resolver lookup failed',
+      );
       return undefined;
     }
   });
@@ -183,6 +191,10 @@ export async function bootstrap(): Promise<AppContext> {
   };
 
   setContext(context);
+  // Kory subscribed during construction; initialize only after the WebSocket
+  // broker and AppContext exist so restart-recovery terminal events can be
+  // surfaced and drained without racing bootstrap dependencies.
+  await processSupervisor.initialize();
   await goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
   return context;
@@ -202,16 +214,17 @@ async function initEncryption() {
     }
     serverLog.warn(
       { err: message },
-      'Envelope encryption unavailable; API keys will use legacy encryption',
+      'Envelope encryption unavailable; credential writes and legacy migrations are disabled until secure key management is restored',
     );
   }
 }
 
-import { registerGitTools } from './tools';
+import { registerGitTools, registerCheckpointTools } from './tools';
 import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
 import { noteTools } from './tools/notes';
 
-async function initTools(providers: ProviderRegistry) {
+/** Build the authoritative runtime tool registry without starting the backend. */
+export async function initTools(providers: ProviderRegistry) {
   const tools = new ToolRegistry();
   const defaultTools = [
     new BashTool(),
@@ -235,10 +248,14 @@ async function initTools(providers: ProviderRegistry) {
         allowWebSearch: true,
       };
       const supported = ['grok', 'claude', 'devin'] as const;
-      const preferred = context.activeProvider && supported.includes(context.activeProvider as typeof supported[number])
-        ? context.activeProvider as typeof supported[number]
-        : null;
-      const candidates = [...new Set([preferred, ...supported].filter(Boolean))] as Array<typeof supported[number]>;
+      const preferred =
+        context.activeProvider &&
+        supported.includes(context.activeProvider as (typeof supported)[number])
+          ? (context.activeProvider as (typeof supported)[number])
+          : null;
+      const candidates = [...new Set([preferred, ...supported].filter(Boolean))] as Array<
+        (typeof supported)[number]
+      >;
 
       for (const providerName of candidates) {
         if (!cliResearchBoundary(providerName).eligible) continue;
@@ -249,30 +266,45 @@ async function initTools(providers: ProviderRegistry) {
         if (!model) continue;
         let output = '';
         let failed = false;
-        for await (const event of providers.executeWithRetry({
-          model: model.id,
-          systemPrompt: 'Perform web research only. Use the provider native web search/fetch capability. Do not inspect local files, run shell commands, modify anything, call MCP tools, or delegate. Return concise results with source URLs.',
-          messages: [{ role: 'user', content: `Search the web for: ${query}\nReturn at most ${maxResults} useful results with title, URL, and a short factual snippet.` }],
-          tools: [],
-          maxTokens: 4_000,
-          signal: context.signal,
-          sessionId: `${context.sessionId}:web-search:${providerName}`,
-          harnessRole: 'critic',
-          permissionMode: 'plan',
-          sandbox: researchSandbox,
-          capabilityProfile: 'research-only',
-        }, providerName)) {
+        for await (const event of providers.executeWithRetry(
+          {
+            model: model.id,
+            systemPrompt:
+              'Perform web research only. Use the provider native web search/fetch capability. Do not inspect local files, run shell commands, modify anything, call MCP tools, or delegate. Return concise results with source URLs.',
+            messages: [
+              {
+                role: 'user',
+                content: `Search the web for: ${query}\nReturn at most ${maxResults} useful results with title, URL, and a short factual snippet.`,
+              },
+            ],
+            tools: [],
+            maxTokens: 4_000,
+            signal: context.signal,
+            sessionId: `${context.sessionId}:web-search:${providerName}`,
+            harnessRole: 'critic',
+            permissionMode: 'plan',
+            sandbox: researchSandbox,
+            capabilityProfile: 'research-only',
+          },
+          providerName,
+        )) {
           if (event.type === 'content_delta') output += event.content ?? '';
           if (event.type === 'error') {
             failed = true;
-            serverLog.debug({ provider: providerName, error: event.error }, 'CLI web search candidate failed');
+            serverLog.debug(
+              { provider: providerName, error: event.error },
+              'CLI web search candidate failed',
+            );
           }
         }
         if (!failed && hasResearchCitation(output)) {
           return `Provider: ${providerName}\n\n${output.trim()}`;
         }
         if (!failed && output.trim()) {
-          serverLog.debug({ provider: providerName }, 'CLI web search candidate returned no source URL');
+          serverLog.debug(
+            { provider: providerName },
+            'CLI web search candidate returned no source URL',
+          );
         }
       }
       return null;
@@ -302,6 +334,7 @@ async function initTools(providers: ProviderRegistry) {
   }
 
   registerGitTools(tools);
+  registerCheckpointTools(tools);
 
   for (const tool of noteTools) {
     tools.register(tool);

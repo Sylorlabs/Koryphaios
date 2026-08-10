@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { Provider, StreamRequest } from '../../providers/types';
 import type { IMessageStore, CompactionCommit } from '../../stores/message-store';
 import { db, sessions as sessionRows } from '../../db';
+import { readSessionMemory, writeSessionMemory } from '../../memory/unified-memory';
 
 describe('KoryManager (Original) - Smoke Tests', () => {
   it('should have KoryManager class', () => {
@@ -131,11 +132,18 @@ describe('KoryManager real compaction', () => {
   it('uses the selected model in a fresh provider context and commits only the validated checkpoint', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'koryphaios-compaction-'));
     const sessionId = `compact-manager-${Date.now()}-${Math.random()}`;
-    await db.insert(sessionRows).values({ id: sessionId, title: 'Compact', workingDirectory: dir, createdAt: new Date(), updatedAt: new Date() });
+    await db.insert(sessionRows).values({
+      id: sessionId,
+      title: 'Compact',
+      workingDirectory: dir,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     let request: StreamRequest | undefined;
     let committed: CompactionCommit | undefined;
     const structured = {
-      projectBrief: 'Continue the verified compaction implementation without restoring archived transcript messages.',
+      projectBrief:
+        'Continue the verified compaction implementation without restoring archived transcript messages.',
       decisions: ['Use revisioned active context and preserve old messages locally.'],
       filesAndCodeState: ['backend compaction path is active and awaiting continued verification.'],
       completedWork: ['Selected-model fresh-context summarization is wired.'],
@@ -143,13 +151,28 @@ describe('KoryManager real compaction', () => {
       openIssues: ['None invented.'],
       nextActions: ['Continue from this checkpoint.'],
       criticalContext: ['The source transcript remains in revision zero.'],
-      confidenceAndRisk: 'High confidence in the checkpoint contract; runtime provider behavior still needs integration proof.',
+      confidenceAndRisk:
+        'High confidence in the checkpoint contract; runtime provider behavior still needs integration proof.',
       durableMemory: '# Session Memory\n\nCompaction uses revisioned checkpoints.',
     };
+    const originalMemory = writeSessionMemory(
+      dir,
+      sessionId,
+      '# Session Memory\n\nOriginal user memory.',
+    );
     const provider = {
-      name: 'codex', config: {}, isAvailable: () => true, listModels: () => [],
+      name: 'codex',
+      config: {},
+      isAvailable: () => true,
+      listModels: () => [],
       async *streamResponse(next: StreamRequest) {
         request = next;
+        writeSessionMemory(
+          dir,
+          sessionId,
+          '# Session Memory\n\nConcurrent UI edit must survive.',
+          originalMemory.revision,
+        );
         yield { type: 'content_delta' as const, content: JSON.stringify(structured) };
         yield { type: 'usage_update' as const, tokensIn: 500, tokensOut: 120 };
         yield { type: 'complete' as const };
@@ -157,24 +180,63 @@ describe('KoryManager real compaction', () => {
     } as Provider;
     const messageStore = {
       getContextMessages: async () => [
-        { id: 'u', sessionId, role: 'user' as const, content: 'Implement real compaction.', createdAt: 1 },
-        { id: 'a', sessionId, role: 'assistant' as const, content: 'Implementation is in progress with concrete code changes.', createdAt: 2 },
+        {
+          id: 'u',
+          sessionId,
+          role: 'user' as const,
+          content: 'Implement real compaction.',
+          createdAt: 1,
+        },
+        {
+          id: 'a',
+          sessionId,
+          role: 'assistant' as const,
+          content: 'Implementation is in progress with concrete code changes.',
+          createdAt: 2,
+        },
       ],
-      commitCompaction: async (input: CompactionCommit) => { committed = input; return { sourceRevision: 0, targetRevision: 1 }; },
+      commitCompaction: async (input: CompactionCommit) => {
+        committed = input;
+        return { sourceRevision: 0, targetRevision: 1 };
+      },
     } as IMessageStore;
     const registry = {
-      getStatus: () => [{ name: 'codex', authenticated: true, models: ['gpt-selected'] }],
-      resolveProvider: async (model: string, name: string) => model === 'gpt-selected' && name === 'codex' ? provider : undefined,
+      getStatus: () => [
+        {
+          name: 'codex',
+          authenticated: true,
+          adapterAvailable: true,
+          models: ['gpt-selected'],
+        },
+      ],
+      resolveProvider: async (model: string, name: string) =>
+        model === 'gpt-selected' && name === 'codex' ? provider : undefined,
     } as unknown as ProviderRegistry;
-    const manager = new KoryManager(registry, {} as ToolRegistry, dir, {} as KoryphaiosConfig, undefined, messageStore);
+    const manager = new KoryManager(
+      registry,
+      {} as ToolRegistry,
+      dir,
+      {} as KoryphaiosConfig,
+      undefined,
+      messageStore,
+    );
     try {
       await manager.compactSession({ sessionId, selectedModel: 'codex:gpt-selected' });
       expect(request?.model).toBe('gpt-selected');
       expect(request?.sessionId).toStartWith(`${sessionId}:compaction:`);
       expect(request?.messages).toHaveLength(1);
       expect(request?.sandbox?.preset).toBe('readonly');
-      expect(committed).toMatchObject({ sessionId, provider: 'codex', model: 'gpt-selected', automatic: false, sourceMessageCount: 2 });
+      expect(committed).toMatchObject({
+        sessionId,
+        provider: 'codex',
+        model: 'gpt-selected',
+        automatic: false,
+        sourceMessageCount: 2,
+      });
       expect(committed?.summary).toContain('# Compacted Session Checkpoint');
+      expect(readSessionMemory(dir, sessionId).content).toContain(
+        'Concurrent UI edit must survive.',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -17,6 +17,7 @@
   import PermissionDialog from '$lib/components/PermissionDialog.svelte';
   import QuestionDialog from '$lib/components/QuestionDialog.svelte';
   import RewindDialog from '$lib/components/RewindDialog.svelte';
+  import GitConflictDialog from '$lib/components/GitConflictDialog.svelte';
   import TimeTravelPanel from '$lib/components/TimeTravelPanel.svelte';
   import ChangesSummary from '$lib/components/ChangesSummary.svelte';
   import SettingsDrawer from '$lib/components/SettingsDrawer.svelte';
@@ -36,7 +37,10 @@
   import { gitStore } from '$lib/stores/git.svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { FolderOpen, FolderPlus, Clock } from 'lucide-svelte';
+  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
+  import FolderPlus from 'lucide-svelte/icons/folder-plus';
+  import Clock from 'lucide-svelte/icons/clock';
   import TeamWorkspace from '$lib/components/TeamWorkspace.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import {
@@ -76,13 +80,15 @@
   let showThemeQuickMenu = $state(false);
   let showTimeTravel = $state(false);
   let showWorkflows = $state(false);
+  let showGitConflicts = $state(false);
+  let lastConflictRevision = $state(0);
   let workflowTask = $state('');
   let activeWorkflow = $state<
     { name: string; stage: string; status: string; task: string } | undefined
   >();
   let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
-  let settingsInitialTab = $state<'providers' | 'agent' | 'experimental'>('providers');
+  let settingsInitialTab = $state<'providers' | 'agent' | 'experimental' | undefined>(undefined);
   let settingsInitialAgentSection = $state<'permissions' | undefined>(undefined);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
@@ -192,13 +198,23 @@
             }
           : undefined;
     } catch (err: unknown) {
-      console.warn('Failed to refresh active workflow:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to refresh active workflow:',
+        err instanceof Error ? err.message : String(err),
+      );
       activeWorkflow = undefined;
     }
   }
 
   $effect(() => {
     void refreshActiveWorkflow();
+  });
+
+  $effect(() => {
+    const revision = gitStore.state.conflictRevision;
+    if (revision <= lastConflictRevision) return;
+    lastConflictRevision = revision;
+    showGitConflicts = gitStore.state.conflicts.length > 0;
   });
 
   useSessionSync({
@@ -475,6 +491,8 @@
 
     if (shortcutStore.matches('settings', e)) {
       e.preventDefault();
+      settingsInitialTab = undefined;
+      settingsInitialAgentSection = undefined;
       showSettings = true;
     } else if (shortcutStore.matches('new_session', e)) {
       e.preventDefault();
@@ -531,7 +549,10 @@
         }
       }
     } catch (err: unknown) {
-      console.warn('Failed to fetch workspace file mentions:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to fetch workspace file mentions:',
+        err instanceof Error ? err.message : String(err),
+      );
       // Workspace listing unavailable — use imported project content only
     }
     composerProjectFiles = fromContent;
@@ -631,6 +652,8 @@
     }
 
     if (root === 'settings') {
+      settingsInitialTab = undefined;
+      settingsInitialAgentSection = undefined;
       showSettings = true;
       return true;
     }
@@ -712,7 +735,10 @@
       if (typeof maybe.showSidebar === 'boolean') showSidebar = maybe.showSidebar;
       if (typeof maybe.showAgents === 'boolean') showAgents = maybe.showAgents;
     } catch (err: unknown) {
-      console.debug('Failed to parse layout prefs from localStorage:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse layout prefs from localStorage:',
+        err instanceof Error ? err.message : String(err),
+      );
       // Ignore malformed local prefs and fall back to defaults.
     }
   }
@@ -874,7 +900,10 @@
         toastStore.success(`Imported ${file.name} into a new project`);
       }
     } catch (err: unknown) {
-      console.warn('Failed to read selected project file:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to read selected project file:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Failed to read selected project file');
     } finally {
       input.value = '';
@@ -901,7 +930,10 @@
         `Opened project from folder: ${result.folderName} (${result.fileCount} files)`,
       );
     } catch (err: unknown) {
-      console.warn('Failed to open project from folder:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to open project from folder:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Failed to open project from folder');
     } finally {
       input.value = '';
@@ -1052,7 +1084,10 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ root: selectedPath }),
           }).catch((err: unknown) => {
-            console.warn('Workspace register failed:', err instanceof Error ? err.message : String(err));
+            console.warn(
+              'Workspace register failed:',
+              err instanceof Error ? err.message : String(err),
+            );
           });
           sessionStore.activeSessionId = '';
           toastStore.success(
@@ -1109,6 +1144,8 @@
         }
         break;
       case 'open_settings':
+        settingsInitialTab = undefined;
+        settingsInitialAgentSection = undefined;
         showSettings = true;
         break;
       case 'toggle_palette':
@@ -1160,7 +1197,10 @@
         pending.fastMode,
       );
     } catch (err: unknown) {
-      console.warn('Failed to resolve home folder:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to resolve home folder:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Could not resolve your home folder — open a project instead');
     }
   }
@@ -1219,6 +1259,8 @@
     const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
     if (configurationWarning) {
       toastStore.error(configurationWarning);
+      settingsInitialTab = 'providers';
+      settingsInitialAgentSection = undefined;
       showSettings = true;
       return;
     }
@@ -1278,7 +1320,10 @@
       wsStore.markAgentStopped(agentRail.selectedAgentId);
       apiFetch(apiUrl(`/api/agent/${agentRail.selectedAgentId}/cancel`), { method: 'POST' }).catch(
         (err: unknown) => {
-          console.debug('Failed to cancel agent:', err instanceof Error ? err.message : String(err));
+          console.debug(
+            'Failed to cancel agent:',
+            err instanceof Error ? err.message : String(err),
+          );
         },
       );
       return;
@@ -1305,7 +1350,9 @@
       ? composerProjectFiles
       : extractProjectFiles(currentProjectContent),
   );
-  let connectedProviders = $derived(wsStore.providers.filter((p) => p.authenticated).length);
+  let connectedProviders = $derived(
+    wsStore.providers.filter((provider) => provider.connectionState === 'verified').length,
+  );
   let connectionDot = $derived(
     isDemoMode
       ? 'bg-emerald-500'
@@ -1602,7 +1649,7 @@
           {:else}
             <span
               class="shrink-0"
-              style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.6;"
+              style="font-size: var(--text-xs); color: var(--color-text-muted);"
               title="Waiting for the selected provider or CLI to report an authoritative token count. Local character estimates are intentionally not shown as token truth."
             >
               awaiting provider token report
@@ -1624,7 +1671,7 @@
                 <span class="tabular-nums">~{formatTokenCount(seg.tokens)}</span>
               </span>
             {/each}
-            <span style="font-size: var(--text-xs); color: var(--color-text-muted); opacity: 0.7;">
+            <span style="font-size: var(--text-xs); color: var(--color-text-muted);">
               Free {formatTokenCount(
                 Math.max(0, wsStore.contextUsage.max - wsStore.contextUsage.used),
               )}
@@ -1649,7 +1696,8 @@
         waitingReason={runStateStore.getWaitingReason(sessionStore.activeSessionId)}
         onStop={handleStop}
         onOpenSettings={(section, agentSection) => {
-          settingsInitialTab = section === 'advanced' ? 'experimental' : section === 'agent' ? 'agent' : 'providers';
+          settingsInitialTab =
+            section === 'advanced' ? 'experimental' : section === 'agent' ? 'agent' : 'providers';
           settingsInitialAgentSection = agentSection;
           showSettings = true;
         }}
@@ -1713,6 +1761,30 @@
 />
 <RewindDialog />
 <ChangesSummary />
+{#if !showGitConflicts && gitStore.state.conflicts.length > 0}
+  <button
+    type="button"
+    class="fixed bottom-5 right-5 z-[80] flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold shadow-lg transition-colors hover:bg-[var(--color-surface-3)]"
+    style="background: var(--color-error-bg); border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border)); color: var(--color-error);"
+    aria-label={`Review ${gitStore.state.conflicts.length} unresolved Git conflict${gitStore.state.conflicts.length === 1 ? '' : 's'}`}
+    onclick={() => (showGitConflicts = true)}
+  >
+    <AlertTriangle size={15} aria-hidden="true" />
+    <span>Unresolved Git conflicts</span>
+    <span
+      class="min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px]"
+      style="background: color-mix(in srgb, var(--color-error) 16%, transparent);"
+    >
+      {gitStore.state.conflicts.length}
+    </span>
+  </button>
+{/if}
+{#if showGitConflicts && gitStore.state.conflicts.length > 0}
+  <GitConflictDialog
+    conflicts={gitStore.state.conflicts}
+    onClose={() => (showGitConflicts = false)}
+  />
+{/if}
 <ThemePickerModal open={showThemeQuickMenu} onClose={() => (showThemeQuickMenu = false)} />
 
 {#if noProjectPrompt}
@@ -1867,7 +1939,11 @@
   open={showSettings}
   initialTab={settingsInitialTab}
   initialAgentSection={settingsInitialAgentSection}
-  onClose={() => (showSettings = false)}
+  onClose={() => {
+    showSettings = false;
+    settingsInitialTab = undefined;
+    settingsInitialAgentSection = undefined;
+  }}
 />
 <CommandPalette bind:open={showCommandPalette} onAction={handleMenuAction} />
 <ToastContainer />

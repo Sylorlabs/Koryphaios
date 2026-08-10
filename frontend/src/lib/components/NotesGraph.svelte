@@ -2,7 +2,9 @@
   import * as d3 from 'd3';
   import { onMount, onDestroy } from 'svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
+  import { theme } from '$lib/stores/theme.svelte';
   import type { GraphNode, GraphEdge } from '@koryphaios/shared';
+  import Share2 from 'lucide-svelte/icons/share-2';
 
   interface Props {
     onNodeClick: (noteId: string) => void;
@@ -26,25 +28,37 @@
   let tooltipMeta = $state('');
   let performanceLayout = $state(false);
 
-  const FOLDER_COLORS = [
-    '#8b7ec8', '#6b9bd1', '#5ec4a0', '#d4845c', '#c47fd0',
-    '#62bfcf', '#e8a85a', '#8fbf6b', '#b87fe0', '#e87fa8',
-    '#5ab8e8', '#d5b261',
+  const FOLDER_COLOR_TOKENS = [
+    '--color-accent',
+    '--color-info',
+    '--color-success',
+    '--color-warning',
+    '--color-error',
+    '--color-text-secondary',
   ] as const;
 
-  const folderColorMap = new Map<string, string>();
+  const folderColorMap = new Map<string, (typeof FOLDER_COLOR_TOKENS)[number]>();
   let colorIndex = 0;
 
   type SimNode = d3.SimulationNodeDatum &
     GraphNode & { x: number; y: number; vx: number; vy: number };
   type SimLink = { source: SimNode; target: SimNode };
 
-  function getFolderColor(folderPath: string): string {
+  function themeColor(token: string): string {
+    if (!containerEl) return 'currentColor';
+    return getComputedStyle(containerEl).getPropertyValue(token).trim() || 'currentColor';
+  }
+
+  function getFolderColorToken(folderPath: string): (typeof FOLDER_COLOR_TOKENS)[number] {
     if (!folderColorMap.has(folderPath)) {
-      folderColorMap.set(folderPath, FOLDER_COLORS[colorIndex % FOLDER_COLORS.length]);
+      folderColorMap.set(folderPath, FOLDER_COLOR_TOKENS[colorIndex % FOLDER_COLOR_TOKENS.length]);
       colorIndex++;
     }
     return folderColorMap.get(folderPath)!;
+  }
+
+  function getFolderColor(folderPath: string): string {
+    return themeColor(getFolderColorToken(folderPath));
   }
 
   function getNodeRadius(linkCount: number, includeInContext: boolean): number {
@@ -135,11 +149,8 @@
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(mx, my, t.x, t.y);
-      ctx.strokeStyle = lit
-        ? 'rgba(139, 126, 200, 0.8)'
-        : focusId
-          ? 'rgba(120, 130, 160, 0.10)'
-          : 'rgba(120, 130, 160, 0.22)';
+      ctx.strokeStyle = lit ? themeColor('--color-accent') : themeColor('--color-text-muted');
+      ctx.globalAlpha = lit ? 0.8 : focusId ? 0.1 : 0.3;
       ctx.lineWidth = (lit ? 1.8 : 1) / scale;
       ctx.stroke();
     }
@@ -170,15 +181,15 @@
       ctx.fill();
       ctx.lineWidth = (n.id === focusId ? 2.5 : n.includeInContext ? 2 : 1.2) / scale;
       ctx.strokeStyle = n.includeInContext
-        ? 'rgba(255, 220, 140, 0.9)'
+        ? themeColor('--color-warning')
         : n.id === focusId
-          ? 'rgba(255,255,255,0.7)'
-          : 'rgba(255, 255, 255, 0.15)';
+          ? themeColor('--color-text-primary')
+          : themeColor('--color-border-bright');
       ctx.stroke();
 
       if (drawLabels && !dim) {
         ctx.globalAlpha = 0.85;
-        ctx.fillStyle = 'rgba(220, 225, 240, 0.9)';
+        ctx.fillStyle = themeColor('--color-text-primary');
         ctx.font = `${n.linkCount >= 3 ? '600 ' : ''}${9.5 / Math.max(scale, 0.75)}px ui-sans-serif, system-ui, sans-serif`;
         const label = n.title.length > 24 ? n.title.slice(0, 22) + '…' : n.title;
         ctx.fillText(label, n.x, n.y + r + 9 / Math.max(scale, 0.75));
@@ -272,7 +283,13 @@
     const big = simNodes.length > 800;
     simulation = d3
       .forceSimulation(simNodes)
-      .force('charge', d3.forceManyBody().strength(chargeStrength).distanceMax(big ? 160 : 280))
+      .force(
+        'charge',
+        d3
+          .forceManyBody()
+          .strength(chargeStrength)
+          .distanceMax(big ? 160 : 280),
+      )
       .force(
         'link',
         d3
@@ -289,7 +306,9 @@
     if (!big) {
       simulation.force(
         'collide',
-        d3.forceCollide<SimNode>().radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
+        d3
+          .forceCollide<SimNode>()
+          .radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
       );
     }
     simulation.on('tick', draw);
@@ -399,13 +418,83 @@
     draw();
   }
 
+  function keyboardCandidates(): SimNode[] {
+    const query = searchQuery.trim().toLowerCase();
+    return simNodes.filter((node) => !query || node.title.toLowerCase().includes(query));
+  }
+
+  function selectKeyboardNode(index: number): void {
+    const candidates = keyboardCandidates();
+    if (!candidates.length) return;
+    const normalized = (index + candidates.length) % candidates.length;
+    const node = candidates[normalized];
+    selectedNodeId = node.id;
+    tooltipTitle = node.title;
+    tooltipMeta = `${node.linkCount} links · ${node.folderPath}${node.unresolved ? ' · unresolved' : ''}`;
+    // Keep keyboard navigation visible even when the graph has been panned or
+    // the selected node is outside the current viewport.
+    tx = width / 2 - node.x * scale;
+    ty = height / 2 - node.y * scale;
+    draw();
+  }
+
+  function onCanvasKeydown(event: KeyboardEvent): void {
+    const candidates = keyboardCandidates();
+    if (!candidates.length) return;
+    const current = candidates.findIndex((node) => node.id === selectedNodeId);
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      selectKeyboardNode(current < 0 ? 0 : current + 1);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      selectKeyboardNode(current < 0 ? candidates.length - 1 : current - 1);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      selectKeyboardNode(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      selectKeyboardNode(candidates.length - 1);
+    } else if ((event.key === 'Enter' || event.key === ' ') && selectedNodeId) {
+      event.preventDefault();
+      onNodeClick(selectedNodeId);
+    } else if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      scale = Math.min(6, scale * 1.2);
+      draw();
+    } else if (event.key === '-') {
+      event.preventDefault();
+      scale = Math.max(0.1, scale / 1.2);
+      draw();
+    } else if (event.key === '0') {
+      event.preventDefault();
+      resetView();
+    }
+  }
+
   let resizeObserver: ResizeObserver | null = null;
+  let resizeFrame: number | null = null;
+
+  function scheduleResize(): void {
+    if (resizeFrame !== null) return;
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null;
+      resize();
+    });
+  }
 
   $effect(() => {
     // Redraw when label/search toggles change (no rebuild needed).
     void showLabels;
     void searchQuery;
     draw();
+  });
+
+  $effect(() => {
+    // Canvas paint values are resolved from live theme tokens, so repaint when
+    // either the preset or accent changes instead of keeping old pixel colors.
+    void theme.preset;
+    void theme.accent;
+    requestAnimationFrame(draw);
   });
 
   $effect(() => {
@@ -418,7 +507,11 @@
   onMount(() => {
     void notesStore.fetchGraph().then(() => buildGraph());
     if (containerEl && 'ResizeObserver' in globalThis) {
-      resizeObserver = new ResizeObserver(() => resize());
+      // ResizeObserver callbacks run during layout delivery. Mutating canvas
+      // dimensions in the callback itself can trigger the browser's
+      // undelivered-notification loop warning, so paint on the next frame and
+      // coalesce bursts from panel/tab transitions.
+      resizeObserver = new ResizeObserver(() => scheduleResize());
       resizeObserver.observe(containerEl);
     }
   });
@@ -426,6 +519,7 @@
   onDestroy(() => {
     simulation?.stop();
     resizeObserver?.disconnect();
+    if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
   });
 
   function resetView() {
@@ -437,11 +531,13 @@
 
   let legendEntries = $derived.by(() => {
     const seen = new Set<string>();
-    const entries: { folder: string; color: string }[] = [];
+    const entries: { folder: string; colorToken: string }[] = [];
+    void theme.preset;
+    void theme.accent;
     for (const n of notesStore.graphData.nodes) {
       if (!seen.has(n.folderPath)) {
         seen.add(n.folderPath);
-        entries.push({ folder: n.folderPath, color: getFolderColor(n.folderPath) });
+        entries.push({ folder: n.folderPath, colorToken: getFolderColorToken(n.folderPath) });
       }
     }
     return entries.slice(0, 10);
@@ -451,23 +547,32 @@
     const g = notesStore.graphData;
     return { notes: g.nodes.length, links: g.edges.length };
   });
+  let graphLoadFailed = $derived(
+    Boolean(notesStore.error) &&
+      (notesStore.failedOperation?.kind === 'load-graph' ||
+        (notesStore.failedOperation?.kind === 'sync-project' &&
+          notesStore.graphData.nodes.length === 0)),
+  );
 </script>
 
 <div
   bind:this={containerEl}
   class="relative w-full h-full overflow-hidden"
-  style="background: radial-gradient(ellipse at center, #1a1d2e 0%, #12141f 70%);"
+  style="background: radial-gradient(ellipse at center, var(--color-surface-2) 0%, var(--color-surface-0) 70%);"
+  role="region"
+  aria-label="Note graph"
 >
   <div class="absolute top-3 left-3 z-10 flex flex-wrap items-center gap-2">
     <input
       type="text"
       bind:value={searchQuery}
       placeholder="Filter graph..."
+      aria-label="Filter graph nodes"
       class="h-8 rounded-md border px-3 text-xs backdrop-blur-sm"
       style="
-        background: rgba(22, 25, 38, 0.85);
-        border-color: rgba(120, 130, 160, 0.25);
-        color: rgba(230, 235, 245, 0.95);
+        background: color-mix(in srgb, var(--color-surface-2) 88%, transparent);
+        border-color: var(--color-border);
+        color: var(--color-text-primary);
         width: 180px;
       "
     />
@@ -475,11 +580,12 @@
       type="button"
       class="h-8 px-2.5 rounded-md text-[11px] border transition-colors"
       style="
-        background: {showLabels ? 'rgba(139, 126, 200, 0.25)' : 'rgba(22, 25, 38, 0.85)'};
-        border-color: rgba(120, 130, 160, 0.25);
-        color: rgba(220, 225, 240, 0.9);
+        background: {showLabels ? 'var(--color-info-bg)' : 'var(--color-surface-2)'};
+        border-color: var(--color-border);
+        color: var(--color-text-primary);
       "
       onclick={() => (showLabels = !showLabels)}
+      aria-pressed={showLabels}
     >
       Labels
     </button>
@@ -487,21 +593,23 @@
       type="button"
       class="h-8 px-2.5 rounded-md text-[11px] border transition-colors"
       style="
-        background: {localGraph ? 'rgba(139, 126, 200, 0.25)' : 'rgba(22, 25, 38, 0.85)'};
-        border-color: rgba(120, 130, 160, 0.25);
-        color: rgba(220, 225, 240, 0.9);
+        background: {localGraph ? 'var(--color-info-bg)' : 'var(--color-surface-2)'};
+        border-color: var(--color-border);
+        color: var(--color-text-primary);
       "
       onclick={() => {
         localGraph = !localGraph;
         if (!localGraph) selectedNodeId = null;
       }}
+      aria-pressed={localGraph}
+      title="Show only the selected note and its neighbors"
     >
       Local
     </button>
     <button
       type="button"
-      class="h-8 px-2.5 rounded-md text-[11px] border transition-colors hover:bg-white/5"
-      style="background: rgba(22, 25, 38, 0.85); border-color: rgba(120, 130, 160, 0.25); color: rgba(220, 225, 240, 0.9);"
+      class="h-8 px-2.5 rounded-md text-[11px] border transition-colors hover:bg-[var(--color-surface-3)]"
+      style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
       onclick={resetView}
     >
       Reset view
@@ -510,16 +618,20 @@
 
   <div
     class="absolute top-3 right-3 z-10 flex items-center gap-2 text-[11px]"
-    style="color: rgba(180, 190, 210, 0.75);"
+    style="color: var(--color-text-muted);"
   >
     <span>{stats.notes} notes · {stats.links} links</span>
     {#if performanceLayout}
-      <span class="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider" style="border-color: rgba(94,196,160,0.35); color: #5ec4a0;">Performance layout</span>
+      <span
+        class="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+        style="border-color: var(--color-border); color: var(--color-success);"
+        >Performance layout</span
+      >
     {/if}
     <button
       type="button"
-      class="px-2.5 py-1 rounded-md border transition-colors hover:bg-white/5"
-      style="border-color: rgba(120, 130, 160, 0.25);"
+      class="px-2.5 py-1 rounded-md border transition-colors hover:bg-[var(--color-surface-3)]"
+      style="border-color: var(--color-border);"
       onclick={() => {
         simulation?.stop();
         void notesStore.fetchGraph().then(() => buildGraph());
@@ -536,9 +648,23 @@
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
-    onpointerleave={() => { tooltipVisible = false; }}
+    onpointerleave={() => {
+      tooltipVisible = false;
+    }}
     onwheel={onWheel}
+    onkeydown={onCanvasKeydown}
+    tabindex="0"
+    aria-label="Interactive note graph"
+    aria-describedby="note-graph-instructions note-graph-selection"
   ></canvas>
+
+  <p id="note-graph-instructions" class="sr-only">
+    Use arrow keys to move between filtered notes, Enter or Space to open the selected note, plus
+    and minus to zoom, and zero to reset the view.
+  </p>
+  <p id="note-graph-selection" class="sr-only" aria-live="polite">
+    {selectedNodeId ? `${tooltipTitle}. ${tooltipMeta}` : 'No graph node selected.'}
+  </p>
 
   {#if tooltipVisible}
     <div
@@ -546,14 +672,14 @@
       style="
         left: {tooltipX}px;
         top: {tooltipY}px;
-        background: rgba(22, 25, 38, 0.92);
-        border-color: rgba(139, 126, 200, 0.35);
-        color: rgba(230, 235, 245, 0.95);
+        background: color-mix(in srgb, var(--color-surface-2) 94%, transparent);
+        border-color: var(--color-border-bright);
+        color: var(--color-text-primary);
         max-width: 260px;
       "
     >
       <div class="font-semibold truncate">{tooltipTitle}</div>
-      <div style="color: rgba(160, 170, 190, 0.85);">{tooltipMeta}</div>
+      <div style="color: var(--color-text-muted);">{tooltipMeta}</div>
     </div>
   {/if}
 
@@ -561,13 +687,13 @@
     <div
       class="absolute bottom-4 left-4 z-10 rounded-md border p-3 max-w-[220px] backdrop-blur-sm"
       style="
-        background: rgba(22, 25, 38, 0.88);
-        border-color: rgba(120, 130, 160, 0.2);
+        background: color-mix(in srgb, var(--color-surface-2) 90%, transparent);
+        border-color: var(--color-border);
       "
     >
       <div
         class="text-[10px] font-semibold uppercase tracking-widest mb-2"
-        style="color: rgba(160, 170, 190, 0.7);"
+        style="color: var(--color-text-muted);"
       >
         Vault folders
       </div>
@@ -576,26 +702,56 @@
           <div class="flex items-center gap-2">
             <div
               class="rounded-full shrink-0"
-              style="width: 9px; height: 9px; background: {entry.color}; box-shadow: 0 0 6px {entry.color}55;"
+              style="width: 9px; height: 9px; background: var({entry.colorToken}); box-shadow: 0 0 6px color-mix(in srgb, var({entry.colorToken}) 45%, transparent);"
             ></div>
-            <span class="text-[11px] truncate" style="color: rgba(200, 210, 225, 0.85);">
+            <span class="text-[11px] truncate" style="color: var(--color-text-secondary);">
               {entry.folder === '/' ? 'Root' : entry.folder.split('/').pop() || entry.folder}
             </span>
           </div>
         {/each}
       </div>
-      <div class="mt-2 pt-2 border-t text-[10px]" style="border-color: rgba(120,130,160,0.15); color: rgba(150,160,180,0.7);">
-        Gold ring = pinned in agent context · scroll to zoom, drag to pan
+      <div
+        class="mt-2 pt-2 border-t text-[10px]"
+        style="border-color: var(--color-border); color: var(--color-text-muted);"
+      >
+        Outlined ring = explicitly included in agent context · scroll to zoom, drag to pan
       </div>
     </div>
   {/if}
 
-  {#if notesStore.graphData.nodes.length === 0 && !notesStore.isLoading}
+  {#if graphLoadFailed}
+    <div class="absolute inset-0 flex flex-col items-center justify-center p-6">
+      <div
+        class="max-w-sm rounded-lg border p-4 text-center"
+        style="background: var(--color-error-bg); border-color: var(--color-error); color: var(--color-text-primary);"
+        role="alert"
+      >
+        <Share2 size={28} class="mx-auto mb-3 text-[var(--color-error)]" />
+        <div class="text-sm font-medium">
+          {notesStore.failedOperation?.kind === 'sync-project'
+            ? 'Project index is incomplete'
+            : 'Graph could not be loaded'}
+        </div>
+        <div class="mt-1 text-xs text-[var(--color-text-secondary)]">{notesStore.error}</div>
+        <button
+          type="button"
+          class="mt-3 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-surface-2)]"
+          style="border-color: var(--color-error); color: var(--color-error);"
+          onclick={() => void notesStore.retryFailedOperation()}
+          >{notesStore.failedOperation?.kind === 'sync-project'
+            ? 'Retry indexing'
+            : 'Retry graph'}</button
+        >
+      </div>
+    </div>
+  {:else if notesStore.graphData.nodes.length === 0 && !notesStore.isLoading}
     <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-      <div class="text-center" style="color: rgba(160, 170, 190, 0.6);">
-        <div class="text-4xl mb-3 opacity-40">◎</div>
+      <div class="text-center" style="color: var(--color-text-muted);">
+        <Share2 size={32} class="mx-auto mb-3 opacity-40" />
         <div class="text-sm font-medium">Empty vault</div>
-        <div class="text-xs mt-1 opacity-70">Create notes or ask an agent to build your network</div>
+        <div class="text-xs mt-1 opacity-70">
+          Create notes or ask an agent to build your network
+        </div>
       </div>
     </div>
   {/if}

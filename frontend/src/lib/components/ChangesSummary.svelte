@@ -1,7 +1,13 @@
 <script lang="ts">
   import { wsStore } from "$lib/stores/websocket.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
-  import { FileCode, Check, X, ChevronRight, Plus, Minus, Pencil } from "lucide-svelte";
+  import FileCode from "lucide-svelte/icons/file-code";
+  import Check from "lucide-svelte/icons/check";
+  import X from "lucide-svelte/icons/x";
+  import ChevronRight from "lucide-svelte/icons/chevron-right";
+  import Plus from "lucide-svelte/icons/plus";
+  import Minus from "lucide-svelte/icons/minus";
+  import Pencil from "lucide-svelte/icons/pencil";
   import { slide } from "svelte/transition";
 
   let expanded = $state(false);

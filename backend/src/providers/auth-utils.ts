@@ -124,7 +124,10 @@ export function detectClaudeCodeToken(): { token: string | null; baseUrl?: strin
           }
         } catch (err: unknown) {
           // Ignore malformed config files
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: malformed Claude config file');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'auth-utils: malformed Claude config file',
+          );
         }
       }
 
@@ -153,9 +156,9 @@ export function createClaudeCLIAuthMarker(): string {
 }
 
 /**
- * Detects whether the Claude Code CLI is logged in (Pro/Max subscription or OAuth),
- * without depending on the exact on-disk token format. Returns true if any recognized
- * login signal is present. The CLI remains the source of truth for the actual token.
+ * Detects whether Claude Code left recognized local login material without depending on
+ * the exact token format. This does not prove account authentication, plan, expiry, or
+ * entitlement; the CLI remains the authority when it actually runs.
  */
 export function detectClaudeCodeLogin(): boolean {
   return (
@@ -188,7 +191,10 @@ export function detectClaudeCodeLogin(): boolean {
             if (data?.oauthAccount) return 'yes';
           } catch (err: unknown) {
             // Ignore malformed config
-            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: malformed .claude.json config');
+            serverLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'auth-utils: malformed .claude.json config',
+            );
           }
         }
 
@@ -200,10 +206,9 @@ export function detectClaudeCodeLogin(): boolean {
 }
 
 // ─── Agent-CLI login detection ──────────────────────────────────────────────
-// Koryphaios auto-detects agent CLIs installed + logged-in on the user's machine
-// (Claude Code, Codex, Antigravity CLI, Grok Build, Cursor) so their providers light up
-// with no manual configuration. These helpers detect a login signal WITHOUT holding
-// the raw credential where a CLI/subscription owns it.
+// Koryphaios detects agent CLIs plus local login signals (Claude Code, Codex,
+// Antigravity, Grok Build, Cursor) so their adapters can be configured without
+// copying CLI-owned secrets. These helpers do not verify the remote account.
 
 function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? '';
@@ -282,7 +287,10 @@ export function detectCodexCLILogin(): boolean {
     const data = JSON.parse(readFileSync(authPath, 'utf-8'));
     return !!(data?.tokens?.access_token || data?.OPENAI_API_KEY || data?.access_token);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Codex auth.json parse failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Codex auth.json parse failed',
+    );
     return false;
   }
 }
@@ -316,7 +324,10 @@ export function detectClineCLILogin(): boolean {
     const data = JSON.parse(readFileSync(secrets, 'utf-8')) as Record<string, unknown>;
     return hasClineCLILoginSignal(data, 'secrets');
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Cline secrets.json parse failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Cline secrets.json parse failed',
+    );
     return false;
   }
 }
@@ -341,12 +352,10 @@ export function createDevinCLIAuthMarker(): string {
   return 'devin-cli-session';
 }
 
-// ─── Freebuff (Codebuff free tier) CLI login detection ──────────────────────
-// Freebuff is the free, ad-supported build of Codebuff. Its CLI stores
-// credentials at ~/.config/manicode/credentials.json with an `authToken` field
-// that doubles as the API key for @codebuff/sdk's CodebuffClient. Koryphaios
-// reads that token and calls the Codebuff backend programmatically (no
-// subprocess, no TUI, no ads).
+// ─── Freebuff local-material detection ─────────────────────────────────────
+// Retained only to report whether the user's existing Freebuff installation
+// left local setup material behind. Koryphaios does not interpret this as an
+// authenticated session and does not send the token to an undocumented API.
 
 const FREEBUFF_CLI_AUTH_PREFIX = 'cli:freebuff:';
 
@@ -358,10 +367,9 @@ export function createFreebuffCLIAuthMarker(): string {
 }
 
 /**
- * Detects whether the Freebuff CLI is logged in: a credentials file at
- * ~/.config/manicode/credentials.json with a valid authToken. The token stays
- * on disk and is read lazily at request time — this is a login-signal check
- * only.
+ * Detects Freebuff setup material: a credentials file at
+ * ~/.config/manicode/credentials.json with a non-empty authToken. File
+ * presence cannot prove login validity, entitlement, or protocol support.
  */
 export function detectFreebuffCLILogin(): boolean {
   const home = homeDir();
@@ -383,8 +391,8 @@ export function detectFreebuffCLILogin(): boolean {
 }
 
 /**
- * Reads the Freebuff CLI auth token from ~/.config/manicode/credentials.json.
- * Returns null if not logged in or the file is malformed.
+ * Reads the locally stored Freebuff token for backwards-compatible migration
+ * and diagnostics. No supported provider adapter consumes this value.
  */
 export function readFreebuffAuthToken(): string | null {
   const creds = readFreebuffCredentials();
@@ -392,10 +400,8 @@ export function readFreebuffAuthToken(): string | null {
 }
 
 /**
- * Reads the full Freebuff CLI credentials (authToken + fingerprintId) from
- * ~/.config/manicode/credentials.json. The @codebuff/sdk's CodebuffClient
- * requires both an apiKey (the authToken) and a fingerprintId. Returns null
- * if not logged in or the file is malformed.
+ * Reads the local Freebuff credential fields for backwards-compatible
+ * migration and diagnostics. No supported provider adapter consumes them.
  */
 export function readFreebuffCredentials(): {
   authToken: string;
@@ -457,7 +463,11 @@ export function discoverFreebuffAccounts(): FreebuffAccount[] {
       .filter((name) => name === 'manicode' || name.startsWith('manicode'))
       .map((name) => join(configDir, name))
       .filter((path) => {
-        try { return statSync(path).isDirectory(); } catch { return false; }
+        try {
+          return statSync(path).isDirectory();
+        } catch {
+          return false;
+        }
       });
   } catch (err: unknown) {
     serverLog.debug(
@@ -480,7 +490,8 @@ export function discoverFreebuffAccounts(): FreebuffAccount[] {
       if (!token || !fingerprint) continue;
 
       const dirName = basename(dir);
-      const label = dirName === 'manicode' ? 'freebuff' : `freebuff ${dirName.replace(/^manicode[-_]?/, '')}`;
+      const label =
+        dirName === 'manicode' ? 'freebuff' : `freebuff ${dirName.replace(/^manicode[-_]?/, '')}`;
 
       accounts.push({
         id: `cli:freebuff:${Buffer.from(dir).toString('base64url')}`,
@@ -532,7 +543,10 @@ export function detectCursorCLILogin(): boolean {
     const data = JSON.parse(readFileSync(cfg, 'utf-8'));
     return !!(data?.authInfo && Object.keys(data.authInfo).length > 0);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'auth-utils: Cursor cli-config.json parse failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Cursor cli-config.json parse failed',
+    );
     return false;
   }
 }
@@ -599,7 +613,8 @@ export function createKiloCLIAuthMarker(): string {
  * exists in the kilo data directory (~/.local/share/kilo/ or XDG_DATA_HOME/kilo/).
  */
 export function detectKiloCLILogin(): boolean {
-  const dataHome = process.env.XDG_DATA_HOME?.trim() || (homeDir() ? join(homeDir(), '.local', 'share') : '');
+  const dataHome =
+    process.env.XDG_DATA_HOME?.trim() || (homeDir() ? join(homeDir(), '.local', 'share') : '');
   if (!dataHome) return false;
   return existsSync(join(dataHome, 'kilo', 'auth.json'));
 }

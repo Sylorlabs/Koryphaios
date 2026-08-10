@@ -16,7 +16,7 @@
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
@@ -32,6 +32,22 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
 import { getCliBridge, getKoryphaiosGrokHome } from './cli-bridges';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  createPrivateCliTextArtifact,
+  spawnWithPrivateArtifactCleanup,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  ensureManagedCliDirectory,
+  healManagedCliFile,
+  writeManagedCliFile,
+} from './managed-cli-storage';
 
 const GROK_STREAM_TIMEOUT_MS = 300_000;
 
@@ -115,6 +131,10 @@ export class GrokBuildProvider implements Provider {
     // rules. Writing these before each turn ensures the CLI discovers the
     // kory__ tool catalog and Kory's session rules on startup.
     const grokBridge = getCliBridge('grok');
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'grok' as const,
       role: request.harnessRole ?? 'manager',
@@ -123,16 +143,25 @@ export class GrokBuildProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     const grokHome = researchOnly
       ? join(getKoryphaiosGrokHome(), 'research-only')
       : getKoryphaiosGrokHome();
-    mkdirSync(grokHome, { recursive: true });
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
+    ensureManagedCliDirectory(grokHome);
     if (!researchOnly) try {
       // MCP: write the kory server config so the CLI gets kory__ tools.
       const mcpConfigs = grokBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
         const mcpConfigPath = join(grokHome, 'mcp.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
@@ -144,14 +173,13 @@ export class GrokBuildProvider implements Provider {
             env: srv.env,
           };
         }
-        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
       }
       // Rules: write .grokrules with the Kory session rules.
       const ruleFiles = grokBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
-          mkdirSync(grokHome, { recursive: true });
-          writeFileSync(rule.path, rule.content);
+          writeManagedCliFile(rule.path, rule.content);
         }
       }
     } catch (wiringErr) {
@@ -163,9 +191,10 @@ export class GrokBuildProvider implements Provider {
 
     const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-')) : null;
     const effectiveCwd = researchRoot ?? (request.workingDirectory?.trim() || tmpdir());
+    const promptArtifact = createPrivateCliTextArtifact('grok-prompt', prompt);
     const args = [
-      '-p',
-      prompt,
+      '--prompt-file',
+      promptArtifact.path,
       '--model',
       cliModel,
       // streaming-json streams live 'thought' (reasoning) + 'text' tokens as
@@ -235,17 +264,32 @@ export class GrokBuildProvider implements Provider {
     const cwd = effectiveCwd;
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.grok')]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd,
+          configDirs: [
+            grokHome,
+            promptArtifact.directory,
+            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+          ],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server
     // and .grokrules we just wrote.
     const grokEnv = { ...(jail?.env ?? { ...process.env }) };
     grokEnv.GROK_HOME = grokHome;
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: grokEnv,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: grokEnv,
+        }),
+      [promptArtifact],
+      () => bridgeGrantLease?.cleanup(),
+    );
+    bridgeGrantLease?.bindToChild(child);
 
     const onAbort = () => {
       try {
@@ -329,15 +373,18 @@ export class GrokBuildProvider implements Provider {
         if (!line || line[0] !== '{') continue;
         try {
           handleEvent(JSON.parse(line) as Record<string, unknown>);
-        } catch (err: unknown) {
+        } catch {
           /* banner/progress */
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: skipping non-JSON stdout line (banner/progress)');
+          providerLog.debug(
+            safeProviderDiagnostic('grok', 'stdout', line),
+            'grok-build: skipping non-JSON stdout line (banner/progress)',
+          );
         }
       }
       wake();
     });
     child.stderr.on('data', (c: Buffer) => {
-      stderr += c.toString();
+      stderr = appendPrivateDiagnostic(stderr, c);
     });
 
     let exitCode = 0;
@@ -378,9 +425,12 @@ export class GrokBuildProvider implements Provider {
     if (tail && tail[0] === '{') {
       try {
         handleEvent(JSON.parse(tail) as Record<string, unknown>);
-      } catch (err: unknown) {
+      } catch {
         /* ignore */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grok-build: skipping non-JSON trailing line');
+        providerLog.debug(
+          safeProviderDiagnostic('grok', 'stdout', tail),
+          'grok-build: skipping non-JSON trailing line',
+        );
       }
     }
     while (queue.length) yield queue.shift()!;
@@ -397,11 +447,16 @@ export class GrokBuildProvider implements Provider {
       return;
     }
     if (errorMsg || (!sawContent && !sawThinking && exitCode !== 0)) {
-      const hint = errorMsg || stderr.trim() || `grok CLI exited with status ${exitCode}`;
-      const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
-        ? ' — run "grok login" (or set GROK_CODE_XAI_API_KEY) to authenticate.'
-        : '';
-      yield { type: 'error', error: `Grok Build: ${hint.slice(0, 300)}${loginHint}` };
+      const diagnostic = safeProviderDiagnostic('grok', errorMsg ? 'stdout' : 'stderr', errorMsg || stderr, {
+        exitCode,
+      });
+      providerLog.warn(diagnostic, 'Grok Build CLI reported a request failure');
+      yield {
+        type: 'error',
+        error: safeProviderFailureMessage('grok', diagnostic, {
+          authenticationAction: 'Run "grok login", then reconnect.',
+        }),
+      };
       return;
     }
 
@@ -460,7 +515,10 @@ function refreshModelsInBackground(): void {
       }
     })
     .catch((err) => {
-      providerLog.warn({ provider: 'grok', err }, 'Grok Build model list refresh failed');
+      providerLog.warn(
+        safeProviderDiagnostic('grok', 'stdout', err),
+        'Grok Build model list refresh failed',
+      );
     })
     .finally(() => {
       modelsFetchInProgress = false;

@@ -2,16 +2,34 @@
  * Unit tests for UnifiedFileWatcher
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'fs';
-import { join } from 'path';
 import { tmpdir } from 'os';
+import { join } from 'path';
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   UnifiedFileWatcher,
   type FileChangeEvent,
   type UnifiedFileWatcherConfig,
 } from '@/monitoring/unified-file-watcher.js';
+
+async function waitForCall(
+  mock: { mock: { calls: unknown[][] } },
+  timeoutMs = 2_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (mock.mock.calls.length === 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
+async function waitForCondition(condition: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
 
 describe('UnifiedFileWatcher', () => {
   let tempDir: string;
@@ -95,8 +113,7 @@ describe('UnifiedFileWatcher', () => {
       const testFile = join(tempDir, 'test.ts');
       await fs.writeFile(testFile, 'const x: number = 42;');
 
-      // Wait for file detection
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await waitForCall(fileChanged);
 
       expect(fileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = fileChanged.mock.calls[0][0];
@@ -119,8 +136,7 @@ describe('UnifiedFileWatcher', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       await fs.writeFile(testFile, 'const x = 2;');
 
-      // Wait for change detection
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(fileChanged);
 
       expect(fileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = fileChanged.mock.calls[0][0];
@@ -141,8 +157,7 @@ describe('UnifiedFileWatcher', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       await fs.unlink(testFile);
 
-      // Wait for deletion detection
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(fileChanged);
 
       expect(fileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = fileChanged.mock.calls[0][0];
@@ -159,7 +174,7 @@ describe('UnifiedFileWatcher', () => {
 
       await fs.writeFile(join(tempDir, 'component.tsx'), 'export const Component = () => <div />;');
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(sourceFileChanged);
 
       expect(sourceFileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = sourceFileChanged.mock.calls[0][0];
@@ -175,7 +190,7 @@ describe('UnifiedFileWatcher', () => {
 
       await fs.writeFile(join(tempDir, 'component.test.ts'), 'describe("test", () => {});');
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(testFileChanged);
 
       expect(testFileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = testFileChanged.mock.calls[0][0];
@@ -190,7 +205,7 @@ describe('UnifiedFileWatcher', () => {
 
       await fs.writeFile(join(tempDir, 'tsconfig.json'), '{"compilerOptions": {}}');
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(configFileChanged);
 
       expect(configFileChanged).toHaveBeenCalled();
       const event: FileChangeEvent = configFileChanged.mock.calls[0][0];
@@ -207,7 +222,7 @@ describe('UnifiedFileWatcher', () => {
 
       await fs.writeFile(join(tempDir, 'typescript.ts'), 'interface Test {}');
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await waitForCall(typescriptFileChanged);
 
       expect(typescriptFileChanged).toHaveBeenCalled();
     });
@@ -220,7 +235,7 @@ describe('UnifiedFileWatcher', () => {
 
       await fs.writeFile(join(tempDir, 'javascript.js'), 'const test = {};');
 
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await waitForCall(javascriptFileChanged);
 
       expect(javascriptFileChanged).toHaveBeenCalled();
     });
@@ -239,8 +254,7 @@ describe('UnifiedFileWatcher', () => {
         await fs.writeFile(join(tempDir, fileName), `const ${fileName.replace('.ts', '')} = 1;`);
       }
 
-      // Wait for batching
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await waitForCall(fileBatchChanged);
 
       expect(fileBatchChanged).toHaveBeenCalled();
       const events: FileChangeEvent[] = fileBatchChanged.mock.calls[0][0];
@@ -262,8 +276,7 @@ describe('UnifiedFileWatcher', () => {
         );
       }
 
-      // Wait for batching
-      await new Promise(resolve => setTimeout(resolve, 600));
+      await waitForCall(fileBatchChanged);
 
       expect(fileBatchChanged).toHaveBeenCalled();
       // Should have multiple batches due to max size limit
@@ -285,8 +298,10 @@ describe('UnifiedFileWatcher', () => {
       // Create a file to generate events
       await fs.writeFile(join(tempDir, 'perf-test.ts'), 'const x = 1;');
 
-      // Wait for stats
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await waitForCondition(
+        () => (performanceStats.mock.calls.at(-1)?.[0]?.totalEvents ?? 0) > 0,
+        2_500
+      );
 
       expect(performanceStats).toHaveBeenCalled();
       const stats = performanceStats.mock.calls.at(-1)?.[0];

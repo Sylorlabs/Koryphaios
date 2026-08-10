@@ -54,7 +54,13 @@ export class ApiClient {
 
   /** Creates a session and returns the session ID. */
   async createSession(title = 'E2E test session'): Promise<string> {
-    const body = await this.postJson<{ data: { id: string } }>('/api/sessions', { title });
+    const body = await this.postJson<{ data: { id: string } }>('/api/sessions', {
+      title,
+      // The backend state directory is intentionally isolated under /tmp, but
+      // Time Travel must exercise a real Git worktree rather than treating the
+      // disposable state directory as the user's project.
+      workingDirectory: process.cwd(),
+    });
     return body.data.id;
   }
 

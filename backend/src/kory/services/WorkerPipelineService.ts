@@ -4,21 +4,24 @@
  * Extracted from manager.ts runWorkerPipeline() and routeToWorker() methods.
  */
 
-import type { ProviderName, WorkerDomain } from '@koryphaios/shared';
+import type { ChangeSummary, ProviderName, WorkerDomain } from '@koryphaios/shared';
 import { DOMAIN } from '../../constants';
 import type { ProviderRegistry, Provider } from '../../providers';
 import type { ProviderMessage } from '../../providers/types';
 import { nanoid } from 'nanoid';
+import { realpath, stat } from 'node:fs/promises';
+import { isAbsolute, relative, resolve } from 'node:path';
 import { koryLog, serverLog } from '../../logger';
 import type { SessionStateService } from './SessionStateService';
-import type { GitManager } from '../git-manager';
-import type { WorkspaceManager } from '../workspace-manager';
-import type { SnapshotManager } from '../snapshot-manager';
+import { GitManager } from '../git-manager';
+import { WorkspaceManager } from '../workspace-manager';
+import { SnapshotManager } from '../snapshot-manager';
 import type { ITaskStore } from '../../stores/task-store';
 import { formatMessagesForCritic } from '../critic-util';
 import { classifyTask, createTaskContract, type TaskContract, type TaskKind } from '../prompts';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 import { computeCostUsd } from '../../pricing';
+import type { CheckpointStore } from '../checkpoint-store';
 
 // Keep the provider-native block form intact. Image/tool blocks are valid
 // worker context and must not be narrowed to text merely to cross the service
@@ -60,6 +63,13 @@ interface WorkerPipelineResult {
   tokensOut?: number;
 }
 
+interface ProjectExecutionResources {
+  root: string;
+  git: GitManager;
+  workspaceManager: WorkspaceManager | null;
+  snapshotManager: SnapshotManager | null;
+}
+
 /**
  * The host contract the worker pipeline depends on.
  *
@@ -74,8 +84,10 @@ interface WorkerPipelineResult {
 export interface WorkerPipelineHost {
   getIsYoloMode(): boolean;
   getWorkingDirectory(): string;
+  /** Resolve the project bound to this exact session, or reject if unavailable. */
+  resolveSessionWorkingDirectoryPublic(sessionId: string): Promise<string>;
   getWorkerReasoningLevel(): string;
-  getQualityPolicy(): {
+  getQualityPolicy(workingDirectory?: string): {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   };
@@ -93,6 +105,7 @@ export interface WorkerPipelineHost {
     avoidLegacy?: boolean,
     prompt?: string,
     preferCheap?: boolean,
+    workingDirectory?: string,
   ): { model: string; provider: ProviderName | undefined };
   executeWithProvider(
     sessionId: string,
@@ -117,6 +130,7 @@ export interface WorkerPipelineHost {
     preferredModel?: string,
     task?: string,
     reviewDirectory?: string,
+    producerIdentity?: { provider: ProviderName; model: string },
   ): Promise<{ passed: boolean; feedback?: string }>;
   runDestinationChecks(
     sessionId: string,
@@ -132,6 +146,8 @@ export interface WorkerPipelineServiceDependencies {
   snapshotManager: SnapshotManager;
   tasks?: ITaskStore;
   host: WorkerPipelineHost;
+  /** Publisher injection keeps durable acknowledgement failures testable. */
+  checkpointStoreFactory?: (workingDirectory: string) => Pick<CheckpointStore, 'createGhostCommit'>;
 }
 
 export class WorkerPipelineService {
@@ -142,6 +158,8 @@ export class WorkerPipelineService {
   private snapshotManager: SnapshotManager;
   private tasks?: ITaskStore;
   private host: WorkerPipelineHost;
+  private alternateProjectResources = new Map<string, Promise<ProjectExecutionResources>>();
+  private checkpointStoreFactory?: WorkerPipelineServiceDependencies['checkpointStoreFactory'];
 
   constructor(deps: WorkerPipelineServiceDependencies) {
     this.providers = deps.providers;
@@ -151,6 +169,229 @@ export class WorkerPipelineService {
     this.snapshotManager = deps.snapshotManager;
     this.tasks = deps.tasks;
     this.host = deps.host;
+    this.checkpointStoreFactory = deps.checkpointStoreFactory;
+  }
+
+  private async canonicalDirectory(path: string, label: string): Promise<string> {
+    if (!path?.trim()) throw new Error(`${label} is empty`);
+    const canonical = await realpath(resolve(path));
+    const info = await stat(canonical);
+    if (!info.isDirectory()) throw new Error(`${label} is not a directory: ${canonical}`);
+    return canonical;
+  }
+
+  private async createAlternateProjectResources(root: string): Promise<ProjectExecutionResources> {
+    const git = new GitManager(root);
+    // Delegated writes require a Git baseline. Do not create snapshot storage in
+    // a non-Git session project merely because a delegation was attempted.
+    const snapshotManager = git.isGitRepo() ? new SnapshotManager(root) : null;
+    let workspaceManager: WorkspaceManager | null = null;
+    if (git.isGitRepo()) {
+      const candidate = new WorkspaceManager(root);
+      try {
+        await candidate.init();
+        workspaceManager = candidate;
+      } catch (err: unknown) {
+        koryLog.warn(
+          { root, err: err instanceof Error ? err.message : String(err) },
+          'Session project worktree isolation is unavailable; using that project directly',
+        );
+      }
+    }
+    return { root, git, workspaceManager, snapshotManager };
+  }
+
+  private async prepareRecoveryBaseline(
+    sessionId: string,
+    project: ProjectExecutionResources,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!project.git.isGitRepo()) {
+      return {
+        ok: false,
+        reason:
+          'Delegated project changes require a Git repository so Koryphaios can create a reversible baseline. Initialize Git for this project before delegating write work.',
+      };
+    }
+
+    try {
+      const hash = await project.git.getCurrentHash();
+      if (!hash) {
+        return {
+          ok: false,
+          reason:
+            'Delegated project changes require an existing Git commit so Koryphaios can create a reversible baseline. Commit the initial project state before delegating write work.',
+        };
+      }
+      this.state.saveCheckpoint(sessionId, hash);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `Koryphaios could not verify a reversible Git baseline: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+  }
+
+  private async resolveProjectResources(sessionId: string): Promise<ProjectExecutionResources> {
+    const sessionRoot = await this.canonicalDirectory(
+      await this.host.resolveSessionWorkingDirectoryPublic(sessionId),
+      `Session ${sessionId} project directory`,
+    );
+    const configuredRoot = await this.canonicalDirectory(
+      this.host.getWorkingDirectory(),
+      'Koryphaios configured project directory',
+    );
+    if (sessionRoot === configuredRoot) {
+      return {
+        root: sessionRoot,
+        git: this.git,
+        workspaceManager: this.workspaceManager,
+        snapshotManager: this.snapshotManager,
+      };
+    }
+
+    let pending = this.alternateProjectResources.get(sessionRoot);
+    if (!pending) {
+      pending = this.createAlternateProjectResources(sessionRoot).catch((error) => {
+        this.alternateProjectResources.delete(sessionRoot);
+        throw error;
+      });
+      this.alternateProjectResources.set(sessionRoot, pending);
+    }
+    return pending;
+  }
+
+  private isWithinProject(root: string, path: string): boolean {
+    const target = isAbsolute(path) ? resolve(path) : resolve(root, path);
+    const rel = relative(root, target);
+    return rel === '' || (!rel.startsWith('../') && rel !== '..' && !isAbsolute(rel));
+  }
+
+  private checkpointChanges(
+    changes: ChangeSummary[],
+    projectRoot: string,
+    workerDirectory: string,
+    worktreePaths: string[],
+  ): ChangeSummary[] {
+    const normalized = new Map<string, ChangeSummary>();
+    const add = (change: ChangeSummary, base: string, fallbackOnly = false) => {
+      const source = isAbsolute(change.path) ? resolve(change.path) : resolve(base, change.path);
+      let destination = source;
+      if (workerDirectory !== projectRoot && this.isWithinProject(workerDirectory, source)) {
+        destination = resolve(projectRoot, relative(workerDirectory, source));
+      }
+      if (!this.isWithinProject(projectRoot, destination)) return;
+      const rel = relative(projectRoot, destination).replaceAll('\\', '/');
+      if (
+        !rel ||
+        rel === '.git' ||
+        rel.startsWith('.git/') ||
+        rel === '.koryphaios' ||
+        rel.startsWith('.koryphaios/')
+      ) {
+        return;
+      }
+      if (!fallbackOnly || !normalized.has(rel)) {
+        normalized.set(rel, { ...change, path: resolve(projectRoot, rel) });
+      }
+    };
+
+    for (const change of changes) add(change, workerDirectory);
+    for (const path of worktreePaths) {
+      add({ path, operation: 'edit', linesAdded: 0, linesDeleted: 0 }, workerDirectory, true);
+    }
+    return [...normalized.values()];
+  }
+
+  private markCheckpointDegraded(
+    result: WorkerPipelineResult,
+    reason: string,
+  ): WorkerPipelineResult {
+    const boundedReason = reason.replaceAll(/\s+/g, ' ').trim().slice(0, 280);
+    const notice =
+      'UNVERIFIED RECOVERY: Work completed, but Koryphaios could not persist a durable ' +
+      `project checkpoint${boundedReason ? ` (${boundedReason})` : ''}. Turn evidence was retained.`;
+    return {
+      ...result,
+      verification: 'unverified',
+      criticFeedback: [result.criticFeedback, notice].filter(Boolean).join('\n'),
+    };
+  }
+
+  private async persistCompletionCheckpoint(
+    sessionId: string,
+    task: string,
+    preferredModel: string | undefined,
+    result: WorkerPipelineResult,
+    project: ProjectExecutionResources,
+    workerDirectory: string,
+    worktreePaths: string[],
+  ): Promise<WorkerPipelineResult> {
+    if (!project.git.isGitRepo()) {
+      return this.markCheckpointDegraded(result, 'the session project is not a Git repository');
+    }
+
+    try {
+      const checkpointStore = this.checkpointStoreFactory
+        ? this.checkpointStoreFactory(project.root)
+        : new (await import('../checkpoint-store')).CheckpointStore(project.root);
+      const changes = this.checkpointChanges(
+        this.state.getChanges(sessionId),
+        project.root,
+        workerDirectory,
+        worktreePaths,
+      );
+      const toolCalls = this.state.getToolCalls(sessionId);
+      const commands = this.state.getCommands(sessionId);
+      const hash = await checkpointStore.createGhostCommit(task.slice(0, 72), {
+        agentId: sessionId,
+        model: result.model ?? preferredModel ?? 'unknown',
+        prompt: task,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+        cost:
+          result.provider && result.model
+            ? computeCostUsd(
+                result.provider,
+                result.model,
+                result.tokensIn ?? 0,
+                result.tokensOut ?? 0,
+              )?.costUsd
+            : undefined,
+        checkpointType: 'auto_save',
+        changedFiles: changes,
+        summary: task.slice(0, 120),
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        commands: commands.length > 0 ? commands : undefined,
+        fileEdits:
+          changes.length > 0
+            ? changes.map((file) => ({
+                path: file.path,
+                operation: file.operation,
+                linesAdded: file.linesAdded,
+                linesDeleted: file.linesDeleted,
+              }))
+            : undefined,
+        provider: result.provider,
+      });
+      if (!hash) {
+        return this.markCheckpointDegraded(result, 'checkpoint publication returned no hash');
+      }
+      // Instrumentation is acknowledged only after the checkpoint publication
+      // returned a durable object id. A null/throw keeps it available for retry.
+      this.state.clearTurnInstrumentation(sessionId);
+      koryLog.info({ sessionId, project: project.root, hash }, 'Worker checkpoint persisted');
+      return result;
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      serverLog.warn(
+        { sessionId, project: project.root, err: reason },
+        'Worker completed without a durable checkpoint; instrumentation retained',
+      );
+      return this.markCheckpointDegraded(result, reason);
+    }
   }
 
   /** @internal Used by orchestration tests to stub worker routing. */
@@ -175,6 +416,23 @@ export class WorkerPipelineService {
 
     await this.host.updateWorkflowState(sessionId, 'executing');
 
+    let project: ProjectExecutionResources;
+    try {
+      project = await this.resolveProjectResources(sessionId);
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      koryLog.warn({ sessionId, err: reason }, 'Worker project resolution failed closed');
+      await this.host.updateWorkflowState(sessionId, 'idle');
+      return `Worker was not started because its exact session project could not be resolved: ${reason}`;
+    }
+
+    const baseline = await this.prepareRecoveryBaseline(sessionId, project);
+    if (!baseline.ok) {
+      koryLog.warn({ sessionId, project: project.root }, 'Worker recovery baseline failed closed');
+      await this.host.updateWorkflowState(sessionId, 'idle');
+      return `Worker was not started. ${baseline.reason}`;
+    }
+
     const domainOverride =
       domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
         ? (domainHint as WorkerDomain)
@@ -193,11 +451,12 @@ export class WorkerPipelineService {
       });
     }
 
-    let workerDir = this.host.getWorkingDirectory();
+    const workspaceManager = project.workspaceManager;
+    let workerDir = project.root;
     let worktreeSpawned = false;
-    if (this.workspaceManager) {
+    if (workspaceManager) {
       try {
-        const worktree = await this.workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
+        const worktree = await workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
         if (worktree) {
           workerDir = worktree.path;
           worktreeSpawned = true;
@@ -217,20 +476,37 @@ export class WorkerPipelineService {
       );
     }
 
-    let result = await this.routeToWorker(
-      sessionId,
-      task,
-      preferredModel,
-      reasoningLevel,
-      [workerDir],
-      domainOverride,
-      taskId,
-    );
+    let result: WorkerPipelineResult;
+    try {
+      result = await this.routeToWorker(
+        sessionId,
+        task,
+        preferredModel,
+        reasoningLevel,
+        [workerDir],
+        domainOverride,
+        taskId,
+        project,
+        true,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      koryLog.warn({ taskId, err: message }, 'Worker execution failed safely');
+      result = {
+        success: false,
+        verification: 'unverified',
+        criticFeedback: `Worker execution failed: ${message}`,
+      };
+    }
 
-    if (worktreeSpawned && this.workspaceManager) {
+    let worktreePaths: string[] = [];
+    if (worktreeSpawned && workspaceManager) {
       try {
         if (result.success) {
-          const reconcileResult = await this.workspaceManager.reconcile(taskId);
+          if (typeof workspaceManager.getChangedFiles === 'function') {
+            worktreePaths = await workspaceManager.getChangedFiles(taskId);
+          }
+          const reconcileResult = await workspaceManager.reconcile(taskId);
           if (!reconcileResult.success) {
             koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
             result = {
@@ -239,10 +515,7 @@ export class WorkerPipelineService {
               criticFeedback: `Worktree reconcile failed: ${reconcileResult.message}`,
             };
           } else {
-            const destinationGate = await this.host.runDestinationChecks(
-              sessionId,
-              this.host.getWorkingDirectory(),
-            );
+            const destinationGate = await this.host.runDestinationChecks(sessionId, project.root);
             if (!destinationGate.passed) {
               result = {
                 success: false,
@@ -252,38 +525,33 @@ export class WorkerPipelineService {
               };
               return await this.finishPipeline(sessionId, taskId, result);
             }
-            try {
-              const { CheckpointStore } = await import('../checkpoint-store');
-              const shadowLogger = new CheckpointStore(this.host.getWorkingDirectory());
-              await shadowLogger.createGhostCommit(task.slice(0, 72), {
-                agentId: sessionId,
-                model: result.model ?? preferredModel ?? 'unknown',
-                prompt: task,
-                tokensIn: result.tokensIn,
-                tokensOut: result.tokensOut,
-                cost:
-                  result.provider && result.model
-                    ? computeCostUsd(
-                        result.provider,
-                        result.model,
-                        result.tokensIn ?? 0,
-                        result.tokensOut ?? 0,
-                      )?.costUsd
-                    : undefined,
-                checkpointType: 'auto_save',
-                changedFiles: this.state.getChanges(sessionId),
-              });
-            } catch (err: unknown) {
-              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Shadow logging is non-critical; do not fail the task if it errors');
-            }
           }
         } else {
-          await this.workspaceManager.cleanup(taskId);
+          await workspaceManager.cleanup(taskId);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         koryLog.warn({ taskId, err: message }, 'Worktree cleanup/reconcile error');
+        if (result.success) {
+          result = {
+            ...result,
+            success: false,
+            criticFeedback: `Worktree reconcile failed safely: ${message}`,
+          };
+        }
       }
+    }
+
+    if (result.success) {
+      result = await this.persistCompletionCheckpoint(
+        sessionId,
+        task,
+        preferredModel,
+        result,
+        project,
+        workerDir,
+        worktreePaths,
+      );
     }
 
     if (this.tasks) {
@@ -335,6 +603,8 @@ export class WorkerPipelineService {
     allowedPaths: string[] = [],
     domainOverride?: WorkerDomain,
     taskId?: string,
+    executionProject?: ProjectExecutionResources,
+    recoveryBaselinePrepared = false,
   ): Promise<WorkerPipelineResult> {
     let domain: WorkerDomain;
     if (domainOverride) domain = domainOverride;
@@ -342,26 +612,60 @@ export class WorkerPipelineService {
       try {
         domain = this.classifyDomainLLM(userMessage);
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'LLM domain classification failed, defaulting to general');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'LLM domain classification failed, defaulting to general',
+        );
         domain = 'general';
       }
 
-    const isSandboxed = this.host.getIsYoloMode()
-      ? false
-      : !this.requiresSystemAccess(userMessage);
-    const workingDirectory = this.host.getWorkingDirectory();
-    const effectivePaths = allowedPaths.length > 0 ? allowedPaths : [workingDirectory];
-
-    if (this.git.isGitRepo()) {
-      const hash = await this.git.getCurrentHash();
-      if (hash) this.state.saveCheckpoint(sessionId, hash);
-    } else {
-      await this.snapshotManager.createSnapshot(
-        sessionId,
-        'latest',
-        effectivePaths,
-        workingDirectory,
+    const isSandboxed = this.host.getIsYoloMode() ? false : !this.requiresSystemAccess(userMessage);
+    let project: ProjectExecutionResources;
+    try {
+      project = executionProject ?? (await this.resolveProjectResources(sessionId));
+    } catch (err: unknown) {
+      return {
+        success: false,
+        verification: 'unverified',
+        criticFeedback: `Session project resolution failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+    const workingDirectory = project.root;
+    let effectivePaths: string[];
+    try {
+      effectivePaths = await Promise.all(
+        (allowedPaths.length > 0 ? allowedPaths : [workingDirectory]).map((path, index) =>
+          this.canonicalDirectory(path, `Worker filesystem grant ${index + 1}`),
+        ),
       );
+    } catch (err: unknown) {
+      return {
+        success: false,
+        verification: 'unverified',
+        criticFeedback: `Worker filesystem grant is unavailable: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      };
+    }
+    if (effectivePaths.some((path) => !this.isWithinProject(workingDirectory, path))) {
+      return {
+        success: false,
+        verification: 'unverified',
+        criticFeedback: 'Worker filesystem grants escaped the resolved session project.',
+      };
+    }
+
+    if (!recoveryBaselinePrepared) {
+      const baseline = await this.prepareRecoveryBaseline(sessionId, project);
+      if (!baseline.ok) {
+        return {
+          success: false,
+          verification: 'unverified',
+          criticFeedback: baseline.reason,
+        };
+      }
     }
 
     const immutableContract = createTaskContract(userMessage, {
@@ -377,14 +681,23 @@ export class WorkerPipelineService {
     }
 
     let attempts = 0;
-    const configuredPolicy = this.host.getQualityPolicy();
-    const hardBoundaryTask = classifyTask(userMessage, domain) === 'security-infra';
-    const gateStrictness = hardBoundaryTask ? 'strict' : configuredPolicy.gateStrictness;
+    const configuredPolicy = this.host.getQualityPolicy(workingDirectory);
+    const gateStrictness = resolveGateStrictness(
+      classifyTask(userMessage, domain),
+      configuredPolicy.gateStrictness,
+    );
     const maxAttempts = Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
     while (attempts < maxAttempts) {
       attempts++;
       this.host.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
-      const routing = this.host.resolveActiveRouting(preferredModel, domain);
+      const routing = this.host.resolveActiveRouting(
+        preferredModel,
+        domain,
+        false,
+        userMessage,
+        undefined,
+        workingDirectory,
+      );
       const provider = this.providers.getAvailable().find((p) => p.name === routing.provider);
       if (!provider) {
         const alt = this.providers.getAvailable()[0];
@@ -420,6 +733,7 @@ export class WorkerPipelineService {
             preferredModel,
             userMessage,
             effectivePaths[0],
+            { provider: alt.name, model: routing.model },
           );
           if (criticResult.passed) {
             const harness = getProviderHarnessCapabilities(alt.name);
@@ -484,6 +798,7 @@ export class WorkerPipelineService {
           preferredModel,
           userMessage,
           effectivePaths[0],
+          { provider: provider.name, model: routing.model },
         );
         if (criticResult.passed) {
           const harness = getProviderHarnessCapabilities(provider.name);

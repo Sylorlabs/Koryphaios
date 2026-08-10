@@ -1,19 +1,17 @@
 <script lang="ts">
-  import { 
-    FileText, 
-    FileJson, 
-    File, 
-    Hash, 
-    Terminal, 
-    Layers, 
-    Settings2, 
-    Database, 
-    Lock,
-    Image as ImageIcon,
-    Box,
-    Type,
-    Archive
-  } from 'lucide-svelte';
+  import FileText from 'lucide-svelte/icons/file-text';
+  import FileJson from 'lucide-svelte/icons/file-json';
+  import File from 'lucide-svelte/icons/file';
+  import Hash from 'lucide-svelte/icons/hash';
+  import Terminal from 'lucide-svelte/icons/terminal';
+  import Layers from 'lucide-svelte/icons/layers';
+  import Settings2 from 'lucide-svelte/icons/settings-2';
+  import Database from 'lucide-svelte/icons/database';
+  import Lock from 'lucide-svelte/icons/lock';
+  import ImageIcon from 'lucide-svelte/icons/image';
+  import Box from 'lucide-svelte/icons/box';
+  import Type from 'lucide-svelte/icons/type';
+  import Archive from 'lucide-svelte/icons/archive';
 
   interface Props {
     path: string;

@@ -1,10 +1,9 @@
 // Context-window management tools.
 //
-// Everything an agent does (tool outputs, file reads, terminal runs) is
-// archived locally per session. Old outputs get stubbed out of the LLM
-// context to free the window; these tools let the agent recover exact
-// content on demand (fetch_context) or proactively drop things it no
-// longer needs (prune_context).
+// A bounded, redacted preview of agent activity is archived locally per
+// session. Old outputs get stubbed out of the LLM context to free the window;
+// these tools retrieve the durable preview (fetch_context) or proactively hide
+// entries the model no longer needs (prune_context).
 
 import { getContextArchive } from '../kory/context-archive';
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
@@ -16,7 +15,7 @@ export class FetchContextTool implements Tool {
   readonly description =
     'Recall past activity from this session. With no arguments, lists recent actions (file edits, ' +
     'reads, terminal runs) with their archive ids and timestamps — use this to remember WHAT you did ' +
-    'and when. Pass an id (e.g. "cx_12") to recover the exact content, or a query to search past outputs.';
+    'and when. Pass an id (e.g. "cx_12") to retrieve its bounded, redacted durable preview, or a query to search previews.';
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -49,7 +48,10 @@ export class FetchContextTool implements Tool {
       return {
         callId: call.id,
         name: this.name,
-        output: `[${entry.id}] ${entry.label}\n${entry.content.slice(0, FETCH_MAX_CHARS)}`,
+        output:
+          `[${entry.id}] ${entry.label}\n${entry.content.slice(0, FETCH_MAX_CHARS)}` +
+          `\n\n[Durable preview; original ${entry.originalByteCount} bytes; sha256 ${entry.contentSha256}; ` +
+          `truncated=${entry.truncated}; redacted=${entry.redacted}]`,
         isError: false,
         durationMs: 0,
       };
@@ -60,7 +62,11 @@ export class FetchContextTool implements Tool {
       if (hits.length === 0) return fail(`No archived activity matching "${query}".`);
       const perHit = Math.floor(FETCH_MAX_CHARS / hits.length);
       const output = hits
-        .map((e) => `[${e.id}] ${e.label}\n${e.content.slice(0, perHit)}`)
+        .map(
+          (e) =>
+            `[${e.id}] ${e.label}\n${e.content.slice(0, perHit)}` +
+            `\n[Preview; original ${e.originalByteCount} bytes; truncated=${e.truncated}; redacted=${e.redacted}]`,
+        )
         .join('\n\n---\n\n');
       return { callId: call.id, name: this.name, output, isError: false, durationMs: 0 };
     }
@@ -72,12 +78,12 @@ export class FetchContextTool implements Tool {
     if (recent.length === 0) return fail('No archived activity in this session yet.');
     const lines = recent.map((e) => {
       const t = new Date(e.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return `[${e.id}] ${t} ${e.kind}: ${e.label} (${e.content.length} chars)`;
+      return `[${e.id}] ${t} ${e.kind}: ${e.label} (${e.originalByteCount} original bytes; preview ${Buffer.byteLength(e.content, 'utf8')} bytes; truncated=${e.truncated}; redacted=${e.redacted})`;
     });
     return {
       callId: call.id,
       name: this.name,
-      output: `Recent session activity (newest last):\n${lines.join('\n')}\n\nPass an id to fetch_context to recover full content.`,
+      output: `Recent session activity (newest last):\n${lines.join('\n')}\n\nPass an id to fetch_context to retrieve its bounded, redacted preview.`,
       isError: false,
       durationMs: 0,
     };
@@ -88,8 +94,8 @@ export class PruneContextTool implements Tool {
   readonly name = 'prune_context';
   readonly description =
     'Free context-window space by pruning earlier tool outputs you no longer need (old file reads, ' +
-    'terminal output, search results). Pass their archive ids. Pruned content is replaced by a stub ' +
-    'and stays recoverable via fetch_context — nothing is lost.';
+    'terminal output, search results). Pass their archive ids. Pruned content is replaced by a stub; ' +
+    'its bounded, redacted durable preview stays available through fetch_context.';
   readonly inputSchema = {
     type: 'object',
     properties: {

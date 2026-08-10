@@ -3,72 +3,81 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
 import { DevelopmentEnvironment } from '../../../src/debug/development-environment.js';
 import { SupportedLanguage } from '../../../src/types/languages.js';
 
 // Mock all dependencies
 vi.mock('../../../src/debug/debug-session-manager.js', () => ({
-  DebugSessionManager: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    createSession: vi.fn().mockResolvedValue('test-session-id'),
-    cleanupInactiveSessions: vi.fn().mockResolvedValue(undefined),
-    getStatistics: vi.fn().mockReturnValue({
-      totalSessions: 0,
-      sessionsByStatus: { starting: 0, running: 0, paused: 0, stopped: 0, error: 0 },
-      sessionsByLanguage: {},
-      totalBreakpoints: 0,
-      averageBreakpointsPerSession: 0,
-    }),
-    dispose: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn(),
-    emit: vi.fn(),
-  })),
+  DebugSessionManager: vi.fn().mockImplementation(function MockDebugSessionManager() {
+    return {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      createSession: vi.fn().mockResolvedValue('test-session-id'),
+      cleanupInactiveSessions: vi.fn().mockResolvedValue(undefined),
+      getStatistics: vi.fn().mockReturnValue({
+        totalSessions: 0,
+        sessionsByStatus: { starting: 0, running: 0, paused: 0, stopped: 0, error: 0 },
+        sessionsByLanguage: {},
+        totalBreakpoints: 0,
+        averageBreakpointsPerSession: 0,
+      }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+      emit: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('../../../src/debug/performance-monitor.js', () => ({
-  PerformanceMonitor: vi.fn().mockImplementation(() => ({
-    startMonitoring: vi.fn(),
-    stopMonitoring: vi.fn(),
-    startProfile: vi.fn().mockReturnValue('profile-id'),
-    endProfile: vi.fn(),
-    recordCounter: vi.fn(),
-    cleanup: vi.fn(),
-    getStatistics: vi.fn().mockReturnValue({
-      profiles: { total: 0, active: 0 },
-      system: { memory: { heapUsed: 1024 * 1024 }, cpu: { usage: 10 } },
-      metrics: [],
-    }),
-    dispose: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn(),
-    emit: vi.fn(),
-  })),
+  PerformanceMonitor: vi.fn().mockImplementation(function MockPerformanceMonitor() {
+    return {
+      startMonitoring: vi.fn(),
+      stopMonitoring: vi.fn(),
+      startProfile: vi.fn().mockReturnValue('profile-id'),
+      endProfile: vi.fn(),
+      recordCounter: vi.fn(),
+      cleanup: vi.fn(),
+      getStatistics: vi.fn().mockReturnValue({
+        profiles: { total: 0, active: 0 },
+        system: { memory: { heapUsed: 1024 * 1024 }, cpu: { usage: 10 } },
+        metrics: [],
+      }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+      emit: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('../../../src/languages/language-handler-manager.js', () => ({
-  LanguageHandlerManager: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    getStatistics: vi.fn().mockReturnValue({
-      totalHandlers: 2,
-      availableLanguages: ['typescript', 'javascript'],
-      supportedExtensions: new Map(),
-      configFiles: new Map(),
-    }),
-    detectErrors: vi.fn().mockResolvedValue([]),
-    analyzePerformance: vi.fn().mockResolvedValue({ complexity: 5 }),
-    dispose: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn(),
-    emit: vi.fn(),
-  })),
+  LanguageHandlerManager: vi.fn().mockImplementation(function MockLanguageHandlerManager() {
+    return {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      getStatistics: vi.fn().mockReturnValue({
+        totalHandlers: 2,
+        availableLanguages: ['typescript', 'javascript'],
+        supportedExtensions: new Map(),
+        configFiles: new Map(),
+      }),
+      detectErrors: vi.fn().mockResolvedValue([]),
+      analyzePerformance: vi.fn().mockResolvedValue({ complexity: 5 }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+      emit: vi.fn(),
+    };
+  }),
 }));
 
 vi.mock('../../../src/detectors/error-detector-manager.js', () => ({
-  ErrorDetectorManager: vi.fn().mockImplementation(() => ({
-    initialize: vi.fn().mockResolvedValue(undefined),
-    detectErrors: vi.fn().mockResolvedValue({ errors: [] }),
-    dispose: vi.fn().mockResolvedValue(undefined),
-    on: vi.fn(),
-    emit: vi.fn(),
-  })),
+  ErrorDetectorManager: vi.fn().mockImplementation(function MockErrorDetectorManager() {
+    return {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      detectErrors: vi.fn().mockResolvedValue({ errors: [] }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      on: vi.fn(),
+      emit: vi.fn(),
+    };
+  }),
 }));
 
 describe('DevelopmentEnvironment', () => {

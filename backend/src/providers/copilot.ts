@@ -6,6 +6,7 @@ import { OpenAIProvider } from './openai';
 import OpenAI from 'openai';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
+import { safeProviderDiagnostic } from './provider-diagnostics';
 
 const COPILOT_CHAT_URL = 'https://api.githubcopilot.com';
 
@@ -112,9 +113,9 @@ export async function exchangeGitHubTokenForCopilotAsync(
       },
     });
     if (!resp.ok) {
-      const body = await resp.text();
+      await resp.body?.cancel().catch(() => undefined);
       providerLog.error(
-        { status: resp.status, body: body.slice(0, 200) },
+        safeProviderDiagnostic('copilot', 'http', { status: resp.status }),
         'Copilot token exchange failed',
       );
       return null;
@@ -122,7 +123,7 @@ export async function exchangeGitHubTokenForCopilotAsync(
     const data = (await resp.json()) as { token?: string; expires_at?: number };
     return data.token ?? null;
   } catch (err) {
-    providerLog.error({ err }, 'Copilot token exchange error');
+    providerLog.error(safeProviderDiagnostic('copilot', 'http', err), 'Copilot token exchange error');
     return null;
   }
 }

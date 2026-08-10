@@ -1,14 +1,13 @@
 // Agent-CLI auto-detection.
 //
-// Koryphaios scans the user's machine for installed + logged-in agent CLIs (Claude Code,
-// Codex, Antigravity CLI, Grok Build, Cursor) and surfaces them so their providers light up
-// with zero manual configuration. The registry uses the same signals (via auth-utils) to
-// auto-enable providers on boot; this module is the single, side-effect-free source of the
-// detection picture for the API/UI.
+// Koryphaios scans the user's machine for installed agent CLIs and local login/credential
+// signals. The registry may use the same signals (via auth-utils) to enable a local adapter,
+// but presence does not prove that the remote account accepts the credential. This module is
+// the single, side-effect-free source of the detection picture for the API/UI.
 //
-// "installed" = the CLI binary is on PATH. "loggedIn" = a credential/login signal exists.
-// "autoEnabled" = Koryphaios can drive a working provider from it right now (the rest are
-// detected + surfaced, but chatting through them needs an API key or a dedicated harness).
+// "installed" = the CLI binary is on PATH. "loginDetected" = a local credential/login signal
+// exists. "loggedIn" is retained as a compatibility alias only. "autoEnabled" means the local
+// adapter was enabled from that signal; it is not an authentication verdict.
 
 import { existsSync } from 'node:fs';
 import { join, delimiter } from 'node:path';
@@ -32,29 +31,39 @@ import {
   createClineCLIAuthMarker,
   detectKimiCodeCLILogin,
   detectFreebuffCLILogin,
-  createFreebuffCLIAuthMarker,
   detectKiloCLILogin,
-  createKiloCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'cline' | 'kimi' | 'freebuff' | 'kilo';
+  id:
+    | 'claude'
+    | 'codex'
+    | 'antigravity'
+    | 'grok'
+    | 'cursor'
+    | 'devin'
+    | 'cline'
+    | 'kimi'
+    | 'freebuff'
+    | 'kilo';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
   /** The CLI binary was found on PATH. */
   installed: boolean;
   binaryPath: string | null;
-  /** A login/credential signal for the CLI was found. */
+  /** Legacy alias for loginDetected; never interpret this as remote verification. */
   loggedIn: boolean;
+  /** A local login/credential signal for the CLI was found. */
+  loginDetected: boolean;
   /** Where the login signal came from (for display; never the secret itself). */
   authSource: string | null;
   /** Koryphaios provider this CLI maps to (null = no provider wired yet). */
   provider: ProviderName | null;
-  /** Koryphaios can drive a working provider from this CLI right now. */
+  /** Koryphaios enabled the local adapter from detected setup material. */
   autoEnabled: boolean;
   /** Human-readable status / next step. */
   note: string;
@@ -101,7 +110,7 @@ function firstInstalled(binaries: string[]): string | null {
 
 /**
  * The single gate for auto-enabling a CLI-backed provider: the CLI binary must be
- * INSTALLED and a working credential present. A bare env var is intentionally NOT enough
+ * installed and a local credential signal present. A bare env var is intentionally not enough
  * (matches the registry's "no auto-auth from environment without intent" rule); the CLI's
  * presence on the machine is the intent signal. Honors KORY_DISABLE_CLI_AUTODETECT.
  */
@@ -111,9 +120,10 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'claude':
       return !!whichBinary('claude') && detectClaudeCodeLogin();
     case 'codex':
-      return !!whichBinary('codex') && (
-        detectCodexCLILogin()
-        || discoverCliAccounts().some((account) => account.provider === 'codex')
+      return (
+        !!whichBinary('codex') &&
+        (detectCodexCLILogin() ||
+          discoverCliAccounts().some((account) => account.provider === 'codex'))
       );
     case 'antigravity':
       return !!whichBinary('agy') && detectAntigravityCLILogin();
@@ -132,21 +142,20 @@ export function canAutoEnable(provider: ProviderName): boolean {
       // from a prior `kimi login` is enough (the user may have uninstalled
       // the CLI but kept the credentials). The binary is still the preferred
       // intent signal, so we check it first.
-      return detectKimiCodeCLILogin()
-        || (!!whichBinary('kimi') && discoverCliAccounts().some((account) => account.provider === 'kimicode'));
+      return (
+        detectKimiCodeCLILogin() ||
+        (!!whichBinary('kimi') &&
+          discoverCliAccounts().some((account) => account.provider === 'kimicode'))
+      );
     case 'freebuff':
-      // Freebuff is the free, ad-supported build of Codebuff. Koryphaios
-      // reads the stored authToken from ~/.config/manicode/credentials.json
-      // and calls the Codebuff backend via @codebuff/sdk (no subprocess, no
-      // TUI, no ads). The CLI binary is optional — a prior `freebuff login`
-      // is enough — but its presence is the strongest intent signal.
-      return detectFreebuffCLILogin()
-        || (!!whichBinary('freebuff') && detectFreebuffCLILogin());
+      // Detection remains informational, but the undocumented SDK/backend
+      // adapter is fail-closed and must never be auto-enabled.
+      return false;
     case 'kilocode':
-      // Kilo Code CLI (fork of OpenCode). The CLI owns its own auth
-      // (~/.local/share/kilo/auth.json). Koryphaios drives it as a
-      // headless harness, so both the binary and a login signal are required.
-      return !!whichBinary('kilo') && detectKiloCLILogin();
+      // Detection is informational only. Koryphaios cannot currently enforce
+      // Kilo's tool permissions or workspace sandbox, so it must never be
+      // auto-enabled even when the binary and login are present.
+      return false;
     default:
       return false;
   }
@@ -184,16 +193,14 @@ export function cliAutoEnableCreds(
       // marker so the provider still lights up and the user can sign in
       // via the device flow.
       const account = discoverCliAccounts().find((a) => a.provider === 'kimicode');
-      return { authToken: account ? createKimiCodeCliMarker(account.profileDir) : createKimiCodeAuthMarker() };
+      return {
+        authToken: account
+          ? createKimiCodeCliMarker(account.profileDir)
+          : createKimiCodeAuthMarker(),
+      };
     }
-    case 'freebuff':
-      // The CLI owns the real token (read lazily from
-      // ~/.config/manicode/credentials.json); the marker just signals
-      // "use the Freebuff/Codebuff SDK harness".
-      return { authToken: createFreebuffCLIAuthMarker() };
     case 'kilocode':
-      // The CLI owns the real token; the marker just signals "use the CLI harness".
-      return { authToken: createKiloCLIAuthMarker() };
+      return null;
     default:
       return null;
   }
@@ -210,7 +217,8 @@ export function detectAgentClis(): AgentCliStatus[] {
     loggedIn: claudeLogin,
     authSource: claudeLogin ? '~/.claude (subscription login)' : null,
     autoEnabled: canAutoEnable('claude'),
-    workingNote: 'Chats through the Claude Code CLI harness.',
+    workingNote:
+      'Claude Code login material detected. Chat is routed through the local CLI; account access is verified only when the CLI runs.',
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   });
 
@@ -221,9 +229,9 @@ export function detectAgentClis(): AgentCliStatus[] {
     authSource: machineCodex ? '~/.codex/auth.json' : null,
     autoEnabled: canAutoEnable('codex'),
     workingNote: machineCodex
-      ? 'Chats through the installed Codex CLI; its login stays local to the CLI.'
-      : 'Codex CLI is installed but not logged in.',
-    loggedOutNote: 'Codex CLI is installed but not logged in — run "codex login".',
+      ? 'Codex login material detected. Chat is routed through the installed CLI; account access is verified only when the CLI runs.'
+      : 'Codex CLI is installed; no local login material was detected.',
+    loggedOutNote: 'No Codex login material detected — run "codex login".',
     docsUrl: 'https://developers.openai.com/codex/cli',
   });
 
@@ -243,14 +251,13 @@ export function detectAgentClis(): AgentCliStatus[] {
     // required step (the old note dead-ended users on an env var the GUI
     // has no field for).
     workingNote: antigravityLogin
-      ? 'Chats through the Antigravity CLI harness.'
+      ? 'Antigravity login material detected. Chat is routed through the CLI; account access is verified only when the CLI runs.'
       : antigravityKey
-        ? 'Chats through the Antigravity CLI harness via ANTIGRAVITY_API_KEY.'
+        ? 'ANTIGRAVITY_API_KEY detected. Chat is routed through the CLI; account access is verified only when the CLI runs.'
         : 'Antigravity CLI is installed but not configured.',
-    loggedOutNote: 'Antigravity CLI is installed but not logged in — run "agy login".',
+    loggedOutNote: 'No Antigravity login material detected — run "agy login".',
     docsUrl: 'https://antigravity.google/docs/cli-getting-started',
   });
-
 
   // ── Grok Build → `grok` provider (its own CLI harness, like Claude Code / Codex). ──
   const grokKey = detectGrokXaiKey();
@@ -259,7 +266,8 @@ export function detectAgentClis(): AgentCliStatus[] {
     loggedIn: grokLogin,
     authSource: grokKey ? 'GROK_CODE_XAI_API_KEY' : grokLogin ? '~/.grok/auth.json' : null,
     autoEnabled: canAutoEnable('grok'),
-    workingNote: 'Chats through the Grok Build CLI harness.',
+    workingNote:
+      'Grok Build login material detected. Chat is routed through the CLI; account access is verified only when the CLI runs.',
     docsUrl: 'https://docs.x.ai/build/cli/headless-scripting',
   });
 
@@ -274,8 +282,8 @@ export function detectAgentClis(): AgentCliStatus[] {
       : null,
     autoEnabled: canAutoEnable('cursor'),
     workingNote:
-      'Cursor CLI detected and logged in — chat runs through the cursor-agent harness (no API key needed).',
-    loggedOutNote: 'Cursor CLI is installed but not logged in — run "cursor-agent login".',
+      'Cursor login material detected. Chat is routed through cursor-agent; account access is verified only when the CLI runs.',
+    loggedOutNote: 'No Cursor login material detected — run "cursor-agent login".',
     docsUrl: 'https://cursor.com/docs/cli',
   });
 
@@ -290,8 +298,8 @@ export function detectAgentClis(): AgentCliStatus[] {
       : null,
     autoEnabled: canAutoEnable('devin'),
     workingNote:
-      'Devin CLI detected and logged in — chat runs through the devin harness (no API key needed).',
-    loggedOutNote: 'Devin CLI is installed but not logged in — run "devin auth login".',
+      'Devin login material detected. Chat is routed through the CLI; account access is verified only when the CLI runs.',
+    loggedOutNote: 'No Devin login material detected — run "devin auth login".',
     docsUrl: 'https://docs.devin.ai/',
   });
 
@@ -301,9 +309,9 @@ export function detectAgentClis(): AgentCliStatus[] {
     authSource: clineLogin ? '~/.cline/data/secrets.json' : null,
     autoEnabled: canAutoEnable('cline'),
     workingNote:
-      'Cline CLI detected and signed in — CLI-only, runs through the cline harness (Cline manages its own key).',
+      'Cline credential material detected. Chat is routed through the CLI; provider access is verified only when the CLI runs.',
     loggedOutNote:
-      'Cline CLI is installed but not signed in — run "cline auth --provider <p> --apikey <k>".',
+      'No Cline credential material detected — run "cline auth --provider <p> --apikey <k>".',
     docsUrl: 'https://docs.cline.bot/cli',
   });
 
@@ -321,26 +329,23 @@ export function detectAgentClis(): AgentCliStatus[] {
       : null,
     autoEnabled: canAutoEnable('kimicode'),
     workingNote:
-      'Kimi Code CLI detected and logged in — Koryphaios reads the stored OAuth session and calls the Kimi API directly (no subprocess).',
+      'Kimi Code login material detected. Koryphaios verifies it against the Kimi model API before reporting access as verified.',
     loggedOutNote:
-      'Kimi Code CLI is not logged in — run "kimi login", or sign in from Settings.',
+      'No Kimi Code login material detected — run "kimi login", or sign in from Settings.',
     docsUrl: 'https://kimi.com/docs/cli',
   });
 
-  // ── Freebuff (free Codebuff build) → `freebuff` provider. Koryphaios reads
-  // the stored authToken from ~/.config/manicode/credentials.json and calls
-  // the Codebuff backend via @codebuff/sdk (no subprocess, no TUI, no ads).
-  // The CLI binary is optional — a prior `freebuff login` is enough — but its
-  // presence is the strongest intent signal. ──
+  // ── Freebuff detection is informational only. The prior undocumented
+  // Codebuff SDK/backend adapter is unavailable and never auto-enabled. ──
   const freebuffLogin = detectFreebuffCLILogin();
   const freebuff = mk('freebuff', 'Freebuff CLI', ['freebuff'], 'freebuff', {
     loggedIn: freebuffLogin,
     authSource: freebuffLogin ? '~/.config/manicode/credentials.json' : null,
-    autoEnabled: canAutoEnable('freebuff'),
+    autoEnabled: false,
     workingNote:
-      'Freebuff CLI detected and logged in — Koryphaios reads the stored auth token and calls the Codebuff backend via @codebuff/sdk (no subprocess, no ads).',
+      'Freebuff login material detected. Execution is unavailable because this build has no supportable authenticated Freebuff provider contract.',
     loggedOutNote:
-      'Freebuff CLI is not logged in — run "freebuff login", or sign in from Settings.',
+      'Freebuff integration is unavailable in this build; installation or login detection does not enable execution.',
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 
@@ -353,9 +358,9 @@ export function detectAgentClis(): AgentCliStatus[] {
     authSource: kiloLogin ? '~/.local/share/kilo/auth.json' : null,
     autoEnabled: canAutoEnable('kilocode'),
     workingNote:
-      'Kilo Code CLI detected and logged in — chats through the kilo CLI harness (kilo owns its own auth).',
+      'Kilo Code CLI detected, but Koryphaios cannot yet enforce its tool permissions or workspace sandbox. Chat is unavailable and no Kilo process will be started.',
     loggedOutNote:
-      'Kilo Code CLI is installed but not logged in — run "kilo" and use /connect to sign in.',
+      'No Kilo login material detected — run "kilo" and use /connect to sign in. Execution remains unavailable in this build.',
     docsUrl: 'https://kilo.ai/cli',
   });
 
@@ -372,7 +377,7 @@ function mk(
     authSource: string | null;
     autoEnabled: boolean;
     workingNote: string;
-    /** Shown when installed but not logged in — the "run X login" hint. */
+    /** Shown when installed but no local login material is detected. */
     loggedOutNote?: string;
     docsUrl: string;
   },
@@ -382,7 +387,7 @@ function mk(
   const note = !installed
     ? `${displayName} CLI not found on PATH.`
     : !opts.loggedIn
-      ? (opts.loggedOutNote ?? `${displayName} CLI installed but not logged in.`)
+      ? (opts.loggedOutNote ?? `${displayName} CLI installed; no login material detected.`)
       : opts.workingNote;
   return {
     id,
@@ -391,6 +396,7 @@ function mk(
     installed,
     binaryPath,
     loggedIn: opts.loggedIn,
+    loginDetected: opts.loggedIn,
     authSource: opts.authSource,
     provider,
     // Only claim auto-enabled when the CLI is actually present AND we can drive it.

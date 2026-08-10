@@ -9,12 +9,12 @@ import { PROVIDER_AUTH_MODE } from '../constants';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
 
 // These tests assert auth-MODE acceptance (which credentials a provider accepts), not real
-// connectivity. setCredentials() now verifies over the network, so stub fetch with a 200 so
-// verification succeeds for valid-shaped (but fake) credentials. Restored after this file.
+// connectivity. setCredentials() now verifies over the network, so stub fetch with a
+// provider-shaped, non-empty synthetic model catalog. Restored after this file.
 const realFetch = globalThis.fetch;
 beforeAll(() => {
   globalThis.fetch = (async () =>
-    new Response('{"data":[]}', {
+    new Response('{"data":[{"id":"synthetic-chat-model"}]}', {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })) as unknown as typeof fetch;
@@ -57,11 +57,12 @@ describe('ProviderRegistry auth modes', () => {
     expect(result.success).toBe(true);
   });
 
-  test('azure accepts authToken + endpoint without apiKey', async () => {
+  test('azure accepts authToken + endpoint + explicit deployment without apiKey', async () => {
     const registry = new ProviderRegistry(minimalConfig());
     const result = await registry.setCredentials('azure', {
       authToken: 'azure-token',
       baseUrl: 'https://example.openai.azure.com',
+      deployment: 'production-chat',
     });
     expect(result.success).toBe(true);
   });

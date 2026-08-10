@@ -1,10 +1,5 @@
 import { describe, test, expect, mock } from 'bun:test';
-import {
-  ToolRegistry,
-  type Tool,
-  type ToolContext,
-  type ToolCallInput,
-} from '../registry';
+import { ToolRegistry, type Tool, type ToolContext, type ToolCallInput } from '../registry';
 
 describe('ToolRegistry', () => {
   const defaultCtx: ToolContext = {
@@ -143,6 +138,9 @@ describe('ToolRegistry', () => {
     const result = await registry.execute(defaultCtx, callInput);
 
     expect(result.isError).toBe(true);
-    expect(result.output).toContain('Tool error: Something went wrong');
+    expect(result.output).toMatch(
+      /^Tool execution failed safely \(code: UNKNOWN; reference: [a-f0-9]{64}\)\.$/,
+    );
+    expect(result.output).not.toContain('Something went wrong');
   });
 });

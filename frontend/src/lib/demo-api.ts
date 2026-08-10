@@ -358,7 +358,6 @@ let demoAgentSettings = {
   designDiscovery: true,
   planApproval: 'material',
   modelQualification: 'enforce',
-  feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
@@ -506,7 +505,10 @@ function parseBody(init: RequestInit): Record<string, unknown> {
     if (typeof init.body === 'string') return JSON.parse(init.body);
   } catch (err: unknown) {
     /* ignore */
-    console.debug('Failed to parse demo request body:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse demo request body:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
   return {};
 }
@@ -527,7 +529,8 @@ function canUpdateDemoState(path: string, method: string): boolean {
   return (
     isGoalMutation ||
     (method === 'PUT' && (path === '/api/agent/settings' || path === '/api/memory/settings')) ||
-    (method === 'POST' && (path === '/api/agent/settings/reset' || path === '/api/memory/settings/reset'))
+    (method === 'POST' &&
+      (path === '/api/agent/settings/reset' || path === '/api/memory/settings/reset'))
   );
 }
 
@@ -538,7 +541,10 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   try {
     path = new URL(url, 'http://demo.local').pathname;
   } catch (err: unknown) {
-    console.debug('Failed to parse demo URL, using raw path:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse demo URL, using raw path:',
+      err instanceof Error ? err.message : String(err),
+    );
     path = url;
   }
 
@@ -547,7 +553,10 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   // in-memory state; every other mutation is rejected before it can resemble
   // a real desktop action.
   if (!canUpdateDemoState(path, method)) {
-    return json({ ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' }, 403);
+    return json(
+      { ok: false, error: 'The guided demo is read-only. Download Koryphaios to run a workspace.' },
+      403,
+    );
   }
   // Health: always green so no sentinel/overlay can ever fire in the demo.
   if (path === '/api/health') {

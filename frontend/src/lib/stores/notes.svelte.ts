@@ -24,6 +24,7 @@ import type {
   NoteToolName,
   NotePermissionLevel,
   NotesPermissionPreset,
+  UpdateNoteInput,
 } from '@koryphaios/shared';
 import {
   DEFAULT_NOTES_SETTINGS,
@@ -35,7 +36,6 @@ import {
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
-import { browser } from '$app/environment';
 import { projectStore } from './project.svelte';
 
 // ============================================================================
@@ -43,6 +43,10 @@ import { projectStore } from './project.svelte';
 // ============================================================================
 
 const NOTES_SETTINGS_KEY = 'koryphaios-notes-settings';
+
+function hasBrowserEnvironment(): boolean {
+  return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+}
 
 // ============================================================================
 // State
@@ -61,17 +65,41 @@ let _agentPermissions = $state<NotesAgentPermissions>({ ...DEFAULT_NOTES_AGENT_P
 let _agentPermissionsLoaded = $state(false);
 let _agentPermissionsSaving = $state(false);
 let _isPanelOpen = $state(false);
+let _error = $state<string | null>(null);
+let _conflict = $state<{
+  noteId: string;
+  remote: NoteWithLinks;
+  sourceChanged?: boolean;
+  sourceDeleted?: boolean;
+} | null>(null);
+type FailedNotesOperation =
+  | { kind: 'load-notes'; folder?: string; query?: string }
+  | { kind: 'load-note'; id: string }
+  | { kind: 'save-note'; id: string; input: UpdateNoteInput }
+  | { kind: 'delete-note'; id: string; revision: number }
+  | { kind: 'load-graph' }
+  | { kind: 'load-folders' }
+  | { kind: 'delete-attachment'; noteId: string; attachmentId: string }
+  | { kind: 'import-memory' }
+  | { kind: 'sync-project' };
+let _failedOperation = $state<FailedNotesOperation | null>(null);
+let _settingsRevision = 0;
+let _settingsSaveQueue: Promise<void> = Promise.resolve();
+let _projectGeneration = 0;
+let _notesRequestId = 0;
+let _noteRequestId = 0;
+let _graphRequestId = 0;
+let _folderRequestId = 0;
+let _searchRequestId = 0;
 
-let allTags = $derived(
-  Array.from(new Set(_notes.flatMap((note) => note.tags ?? []))),
-);
+let allTags = $derived(Array.from(new Set(_notes.flatMap((note) => note.tags ?? []))));
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
 function loadSettingsFromStorage(): NotesSettings {
-  if (!browser) return { ...DEFAULT_NOTES_SETTINGS };
+  if (!hasBrowserEnvironment()) return { ...DEFAULT_NOTES_SETTINGS };
   try {
     const raw = localStorage.getItem(NOTES_SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_NOTES_SETTINGS };
@@ -85,19 +113,64 @@ function loadSettingsFromStorage(): NotesSettings {
       },
     };
   } catch (err: unknown) {
-    console.debug('Failed to load notes settings from localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to load notes settings from localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
     return { ...DEFAULT_NOTES_SETTINGS };
   }
 }
 
 function saveSettingsToStorage(s: NotesSettings): void {
-  if (!browser) return;
+  if (!hasBrowserEnvironment()) return;
   try {
     localStorage.setItem(NOTES_SETTINGS_KEY, JSON.stringify(s));
   } catch (err: unknown) {
     // Ignore
-    console.debug('Failed to save notes settings to localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to save notes settings to localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
+}
+
+async function responseMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.clone().json()) as { error?: string; message?: string };
+    return body.error || body.message || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function setError(
+  message: string,
+  showToast = true,
+  operation: FailedNotesOperation | null = null,
+): void {
+  _error = message;
+  _failedOperation = operation;
+  if (showToast) toastStore.error(message);
+}
+
+function clearError(): void {
+  _error = null;
+  _failedOperation = null;
+}
+
+function clearOperationError(...kinds: FailedNotesOperation['kind'][]): void {
+  if (_failedOperation && kinds.includes(_failedOperation.kind)) clearError();
+}
+
+function requestScopeIsCurrent(projectPath: string | null, generation: number): boolean {
+  return generation === _projectGeneration && projectPath === projectStore.currentPath;
+}
+
+function sortNotesForPanel(items: Note[]): Note[] {
+  return [...items].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+  });
 }
 
 // ============================================================================
@@ -119,6 +192,7 @@ const DEMO_NOTES = [
     tags: ['spec'],
     pinned: true,
     includeInContext: true,
+    revision: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -133,6 +207,7 @@ const DEMO_NOTES = [
     tags: ['api'],
     pinned: false,
     includeInContext: false,
+    revision: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -147,6 +222,7 @@ const DEMO_NOTES = [
     tags: ['planning'],
     pinned: false,
     includeInContext: false,
+    revision: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -159,9 +235,36 @@ const DEMO_NOTES = [
       v: 1,
       name: 'Dashboard delivery map',
       cards: [
-        { id: 'c-spec', x: 120, y: 130, w: 190, h: 120, text: 'Dashboard spec', noteId: 'n1', color: '#8b7ec8' },
-        { id: 'c-api', x: 420, y: 250, w: 190, h: 120, text: 'API contract', noteId: 'n2', color: '#6b9bd1' },
-        { id: 'c-roadmap', x: 720, y: 130, w: 190, h: 120, text: 'Roadmap', noteId: 'n3', color: '#5ec4a0' },
+        {
+          id: 'c-spec',
+          x: 120,
+          y: 130,
+          w: 190,
+          h: 120,
+          text: 'Dashboard spec',
+          noteId: 'n1',
+          color: '#8b7ec8',
+        },
+        {
+          id: 'c-api',
+          x: 420,
+          y: 250,
+          w: 190,
+          h: 120,
+          text: 'API contract',
+          noteId: 'n2',
+          color: '#6b9bd1',
+        },
+        {
+          id: 'c-roadmap',
+          x: 720,
+          y: 130,
+          w: 190,
+          h: 120,
+          text: 'Roadmap',
+          noteId: 'n3',
+          color: '#5ec4a0',
+        },
       ],
       edges: [
         { id: 'e-spec-api', from: 'c-spec', to: 'c-api' },
@@ -172,6 +275,7 @@ const DEMO_NOTES = [
     tags: ['canvas'],
     pinned: true,
     includeInContext: false,
+    revision: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -231,7 +335,10 @@ function buildDemoGraph(source: Note[]): GraphData {
           ghosts.set(gid, {
             id: gid,
             title: targetTitle,
-            folderPath: '',
+            // Keep demo/evidence graph grouping identical to the backend:
+            // unresolved wikilinks live at the root instead of producing an
+            // unlabeled legend swatch.
+            folderPath: '/',
             tags: [],
             linkCount: 0,
             includeInContext: false,
@@ -248,7 +355,7 @@ function buildDemoGraph(source: Note[]): GraphData {
 }
 
 let _demoSeeded = false;
-async function fetchNotes(folder?: string, query?: string): Promise<void> {
+async function fetchNotes(folder?: string, query?: string): Promise<boolean> {
   if (isDemoMode) {
     // Seed once. Reassigning on every call would hand $state a fresh reference
     // each time; because fetchGraph() reads _notes synchronously inside the
@@ -259,29 +366,65 @@ async function fetchNotes(folder?: string, query?: string): Promise<void> {
       _demoSeeded = true;
     }
     _isLoading = false;
-    return;
+    return true;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_notesRequestId;
   _isLoading = true;
   try {
     const params = new URLSearchParams();
     if (folder && folder !== '/') params.set('folder', folder);
     if (query) params.set('search', query);
-    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
     const qs = params.toString();
     const res = await apiFetch(apiUrl(`/api/notes${qs ? `?${qs}` : ''}`));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && Array.isArray(data.data)) {
-        _notes = data.data as Note[];
+      if (
+        data.ok &&
+        Array.isArray(data.data) &&
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _notesRequestId
+      ) {
+        _notes = sortNotesForPanel(data.data as Note[]);
+        const sync = data.meta?.projectSync as
+          { state?: string; discovered?: number; error?: string } | undefined;
+        if (sync?.state === 'partial') {
+          setError(
+            `${sync.error ?? 'Project note indexing was partial.'} Indexed ${sync.discovered ?? 0} documents; re-index to retry.`,
+            false,
+            { kind: 'sync-project' },
+          );
+          return true;
+        }
+        clearOperationError('load-notes', 'sync-project');
+        return true;
       }
-    } else {
-      console.error('[notesStore] fetchNotes failed:', res.status);
+    } else if (
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _notesRequestId
+    ) {
+      setError(await responseMessage(res, 'Failed to load notes'), false, {
+        kind: 'load-notes',
+        folder,
+        query,
+      });
     }
   } catch (err) {
     console.error('[notesStore] fetchNotes error:', err);
+    if (requestScopeIsCurrent(requestProject, requestGeneration) && requestId === _notesRequestId) {
+      setError(err instanceof Error ? err.message : 'Failed to load notes', false, {
+        kind: 'load-notes',
+        folder,
+        query,
+      });
+    }
   } finally {
-    _isLoading = false;
+    if (requestScopeIsCurrent(requestProject, requestGeneration) && requestId === _notesRequestId) {
+      _isLoading = false;
+    }
   }
+  return false;
 }
 
 /** Load the note-panel data when the panel opens or its project changes.
@@ -294,12 +437,12 @@ async function refreshOpenPanel(): Promise<void> {
   if (!_isPanelOpen || !projectStore.currentPath) return;
   // The graph is derived from the current note list, so populate notes first.
   // This also avoids racing a freshly selected project against its old graph.
-  await fetchNotes();
+  if (!(await fetchNotes())) return;
   await Promise.all([fetchFolderTree(), fetchGraph()]);
 }
 
 /** Fetch a single note by ID (includes links and attachments) */
-async function fetchNote(id: string): Promise<void> {
+async function fetchNote(id: string): Promise<boolean> {
   if (isDemoMode) {
     // No backend in the full demo — resolve the note from the in-memory list
     // so opening a note actually loads its content (the /api/notes shim only
@@ -309,24 +452,80 @@ async function fetchNote(id: string): Promise<void> {
       ? ({ ...found, outlinks: [], backlinks: [], attachments: [] } as NoteWithLinks)
       : null;
     _isLoading = false;
-    return;
+    return Boolean(found);
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_noteRequestId;
   _isLoading = true;
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${id}`));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && data.data) {
+      if (
+        data.ok &&
+        data.data &&
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _noteRequestId
+      ) {
         _currentNote = data.data as NoteWithLinks;
+        _conflict = null;
+        clearOperationError('load-note');
+        return true;
       }
-    } else {
-      toastStore.error('Failed to load note');
+    } else if (
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _noteRequestId
+    ) {
+      setError(await responseMessage(res, 'Failed to load note'), true, { kind: 'load-note', id });
     }
   } catch (err) {
     console.error('[notesStore] fetchNote error:', err);
-    toastStore.error('Failed to load note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration) && requestId === _noteRequestId) {
+      setError(err instanceof Error ? err.message : 'Failed to load note', true, {
+        kind: 'load-note',
+        id,
+      });
+    }
   } finally {
-    _isLoading = false;
+    if (requestScopeIsCurrent(requestProject, requestGeneration) && requestId === _noteRequestId) {
+      _isLoading = false;
+    }
+  }
+  return false;
+}
+
+/** Read a full note without changing the active editor selection.
+ * List responses intentionally omit bodies for scale, so document consumers
+ * such as Canvas must use this route before parsing persisted content. */
+async function readNote(id: string): Promise<NoteWithLinks | null> {
+  if (isDemoMode) {
+    const found = _notes.find((note) => note.id === id);
+    return found
+      ? ({ ...found, outlinks: [], backlinks: [], attachments: [] } as NoteWithLinks)
+      : null;
+  }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  try {
+    const response = await apiFetch(apiUrl(`/api/notes/${id}`));
+    if (!response.ok) {
+      if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+        setError(await responseMessage(response, 'Failed to load note'));
+      }
+      return null;
+    }
+    const body = (await response.json()) as { ok?: boolean; data?: NoteWithLinks };
+    if (!body.ok || !body.data || !requestScopeIsCurrent(requestProject, requestGeneration)) {
+      return null;
+    }
+    clearError();
+    return body.data;
+  } catch (error) {
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(error instanceof Error ? error.message : 'Failed to load note');
+    }
+    return null;
   }
 }
 
@@ -337,17 +536,11 @@ async function openNoteByTitle(title: string): Promise<void> {
     await fetchNote(found.id);
     return;
   }
-  // Fallback: search then open first match
-  const searchRes = await apiFetch(apiUrl(`/api/notes?q=${encodeURIComponent(title)}&limit=1`));
-  if (searchRes.ok) {
-    const data = await searchRes.json();
-    if (data.ok && Array.isArray(data.data) && data.data.length > 0) {
-      const note = data.data[0] as Note;
-      await fetchNote(note.id);
-    } else {
-      toastStore.error(`Note not found: ${title}`);
-    }
-  }
+  // Fallback through the project/request guarded search path so a response
+  // from the previous workspace can never open under the new project header.
+  const [note] = await searchNotes(title);
+  if (note) await fetchNote(note.id);
+  else toastStore.error(`Note not found: ${title}`);
 }
 
 /** Create a new note */
@@ -371,12 +564,15 @@ async function createNote(input: {
       pinned: input.pinned ?? false,
       includeInContext: input.includeInContext ?? false,
       format: input.format ?? 'markdown',
+      revision: 1,
       createdAt: now,
       updatedAt: now,
     } as Note;
     _notes = [note, ..._notes];
     return note;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   _isSaving = true;
   try {
     const res = await apiFetch(apiUrl('/api/notes'), {
@@ -388,60 +584,100 @@ async function createNote(input: {
       const data = await res.json();
       if (data.ok && data.data) {
         const note = data.data as Note;
-        _notes = [note, ..._notes];
+        if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
+        _notes = sortNotesForPanel([note, ..._notes]);
+        clearError();
         return note;
       }
     }
-    toastStore.error('Failed to create note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to create note'));
+    }
     return null;
   } catch (err) {
     console.error('[notesStore] createNote error:', err);
-    toastStore.error('Failed to create note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to create note');
+    }
     return null;
   } finally {
-    _isSaving = false;
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) _isSaving = false;
   }
 }
 
 /** Update an existing note */
-async function updateNote(
-  id: string,
-  input: {
-    title?: string;
-    content?: string;
-    folderPath?: string;
-    tags?: string[];
-    pinned?: boolean;
-    includeInContext?: boolean;
-    format?: 'markdown' | 'html';
-  },
-): Promise<Note | null> {
+async function updateNote(id: string, input: UpdateNoteInput): Promise<Note | null> {
   if (isDemoMode) {
     // No backend in the demo — edit the in-memory note in place. Without this
     // the /api/notes shim returns [], which would overwrite the note with an
     // empty array and corrupt the list on every autosave.
     const existing = _notes.find((n) => n.id === id) as Note | undefined;
     if (!existing) return null;
-    const updated = { ...existing, ...input, updatedAt: new Date() } as Note;
+    const changes = { ...input };
+    delete changes.expectedRevision;
+    delete changes.restoreDeletedSource;
+    const updated = {
+      ...existing,
+      ...changes,
+      revision: existing.revision + 1,
+      updatedAt: new Date(),
+    } as Note;
     _notes = _notes.map((n) => (n.id === id ? updated : n));
     if (_currentNote && _currentNote.id === id) {
       _currentNote = { ..._currentNote, ...updated };
     }
     return updated;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   _isSaving = true;
   try {
+    const currentRevision =
+      _currentNote?.id === id
+        ? _currentNote.revision
+        : _notes.find((note) => note.id === id)?.revision;
+    const payload: UpdateNoteInput = {
+      ...input,
+      expectedRevision: input.expectedRevision ?? currentRevision,
+    };
     const res = await apiFetch(apiUrl(`/api/notes/${id}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input),
+      body: JSON.stringify(payload),
     });
+    if (res.status === 409) {
+      let conflictDetails: { sourceChanged?: boolean; sourceDeleted?: boolean } = {};
+      try {
+        const conflictBody = (await res.clone().json()) as {
+          details?: { sourceChanged?: boolean; sourceDeleted?: boolean };
+        };
+        conflictDetails = conflictBody.details ?? {};
+      } catch {
+        // The follow-up GET still supplies the authoritative remote revision.
+      }
+      const remoteResponse = await apiFetch(apiUrl(`/api/notes/${id}`));
+      if (remoteResponse.ok && requestScopeIsCurrent(requestProject, requestGeneration)) {
+        const remoteBody = (await remoteResponse.json()) as { ok?: boolean; data?: NoteWithLinks };
+        if (remoteBody.ok && remoteBody.data) {
+          _conflict = { noteId: id, remote: remoteBody.data, ...conflictDetails };
+        }
+      }
+      if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+        setError(
+          conflictDetails.sourceDeleted
+            ? 'The project source file was deleted elsewhere. Recreate it or accept the deletion.'
+            : 'This note changed elsewhere. Review the newer version before saving.',
+        );
+      }
+      return null;
+    }
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.data) {
         const updated = data.data as Note;
+        if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
         // Update in-memory list
-        _notes = _notes.map((n) => (n.id === id ? updated : n));
+        _notes = sortNotesForPanel(_notes.map((n) => (n.id === id ? updated : n)));
         // Update current note if it matches
         if (_currentNote && _currentNote.id === id) {
           _currentNote = {
@@ -449,96 +685,209 @@ async function updateNote(
             ...updated,
           };
         }
+        _conflict = null;
+        clearOperationError('save-note');
         return updated;
       }
     }
-    toastStore.error('Failed to save note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to save note'), true, {
+        kind: 'save-note',
+        id,
+        input: payload,
+      });
+    }
     return null;
   } catch (err) {
     console.error('[notesStore] updateNote error:', err);
-    toastStore.error('Failed to save note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to save note', true, {
+        kind: 'save-note',
+        id,
+        input,
+      });
+    }
     return null;
   } finally {
-    _isSaving = false;
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) _isSaving = false;
   }
 }
 
 /** Delete a note by ID */
-async function deleteNote(id: string): Promise<boolean> {
+async function deleteNote(id: string, expectedRevision?: number): Promise<boolean> {
   if (isDemoMode) {
     _notes = _notes.filter((n) => n.id !== id);
     if (_currentNote?.id === id) _currentNote = null;
     toastStore.success('Note deleted');
     return true;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const revision =
+    expectedRevision ??
+    (_currentNote?.id === id
+      ? _currentNote.revision
+      : _notes.find((note) => note.id === id)?.revision);
+  if (!revision) {
+    setError('Reload this note before deleting it.');
+    return false;
+  }
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${id}`), {
       method: 'DELETE',
+      headers: { 'x-kory-note-revision': String(revision) },
     });
     if (res.ok) {
-      _notes = _notes.filter((n) => n.id !== id);
-      if (_currentNote?.id === id) {
-        _currentNote = null;
+      if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+        _notes = _notes.filter((n) => n.id !== id);
+        if (_currentNote?.id === id) {
+          _currentNote = null;
+        }
+        toastStore.success('Note deleted');
+        clearOperationError('delete-note');
       }
-      toastStore.success('Note deleted');
       return true;
     }
-    toastStore.error('Failed to delete note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to delete note'), true, {
+        kind: 'delete-note',
+        id,
+        revision,
+      });
+    }
     return false;
   } catch (err) {
     console.error('[notesStore] deleteNote error:', err);
-    toastStore.error('Failed to delete note');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to delete note', true, {
+        kind: 'delete-note',
+        id,
+        revision,
+      });
+    }
     return false;
   }
 }
 
 /** Fetch graph data (nodes + edges) */
-async function fetchGraph(): Promise<void> {
+async function fetchGraph(): Promise<boolean> {
   if (isDemoMode) {
     _graphData = buildDemoGraph(_notes);
-    return;
+    return true;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_graphRequestId;
   try {
-    const params = new URLSearchParams();
-    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
-    const res = await apiFetch(apiUrl(`/api/notes/graph?${params.toString()}`));
+    const res = await apiFetch(apiUrl('/api/notes/graph'));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && data.data) {
+      if (
+        data.ok &&
+        data.data &&
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _graphRequestId
+      ) {
         _graphData = data.data as GraphData;
+        const syncState = data.meta?.projectSync?.state as string | undefined;
+        const syncError = data.meta?.projectSync?.error as string | undefined;
+        if (syncState === 'failed' || syncState === 'partial') {
+          setError(
+            syncError ??
+              (syncState === 'failed'
+                ? 'The project note index failed, so the graph may be incomplete.'
+                : 'The project note index is partial, so the graph is incomplete.'),
+            false,
+            { kind: 'sync-project' },
+          );
+        } else {
+          clearOperationError('load-graph', 'sync-project');
+        }
+        return true;
       }
+      if (
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _graphRequestId
+      ) {
+        setError('The graph response was incomplete.', false, { kind: 'load-graph' });
+      }
+    } else if (
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _graphRequestId
+    ) {
+      setError(await responseMessage(res, 'Failed to load note graph'), false, {
+        kind: 'load-graph',
+      });
     }
   } catch (err) {
     console.error('[notesStore] fetchGraph error:', err);
+    if (requestScopeIsCurrent(requestProject, requestGeneration) && requestId === _graphRequestId) {
+      setError(err instanceof Error ? err.message : 'Failed to load note graph', false, {
+        kind: 'load-graph',
+      });
+    }
   }
+  return false;
 }
 
 /** Fetch folder tree */
-async function fetchFolderTree(): Promise<void> {
-  if (isDemoMode) return;
+async function fetchFolderTree(): Promise<boolean> {
+  if (isDemoMode) return true;
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_folderRequestId;
   try {
-    const params = new URLSearchParams();
-    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
-    const res = await apiFetch(apiUrl(`/api/notes/folders?${params.toString()}`));
+    const res = await apiFetch(apiUrl('/api/notes/folders'));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && Array.isArray(data.data)) {
+      if (
+        data.ok &&
+        Array.isArray(data.data) &&
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _folderRequestId
+      ) {
         _folderTree = data.data as FolderNode[];
+        clearOperationError('load-folders');
+        return true;
       }
+    } else if (
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _folderRequestId
+    ) {
+      setError(await responseMessage(res, 'Failed to load note folders'), false, {
+        kind: 'load-folders',
+      });
     }
   } catch (err) {
     console.error('[notesStore] fetchFolderTree error:', err);
+    if (
+      requestScopeIsCurrent(requestProject, requestGeneration) &&
+      requestId === _folderRequestId
+    ) {
+      setError(err instanceof Error ? err.message : 'Failed to load note folders', false, {
+        kind: 'load-folders',
+      });
+    }
   }
+  return false;
 }
 
 /** Search notes by query string */
 async function searchNotes(q: string): Promise<Note[]> {
   if (!q.trim()) return [];
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const requestId = ++_searchRequestId;
   try {
-    const res = await apiFetch(apiUrl(`/api/notes?q=${encodeURIComponent(q)}`));
+    const res = await apiFetch(apiUrl(`/api/notes/search?q=${encodeURIComponent(q)}`));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && Array.isArray(data.data)) {
+      if (
+        data.ok &&
+        Array.isArray(data.data) &&
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        requestId === _searchRequestId
+      ) {
         return data.data as Note[];
       }
     }
@@ -555,6 +904,8 @@ async function uploadAttachment(noteId: string, file: File): Promise<NoteAttachm
     toastStore.error('Attachments are not available in the demo');
     return null;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -566,6 +917,7 @@ async function uploadAttachment(noteId: string, file: File): Promise<NoteAttachm
       const data = await res.json();
       if (data.ok && data.data) {
         const attachment = data.data as NoteAttachment;
+        if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
         // Update current note's attachment list
         if (_currentNote && _currentNote.id === noteId) {
           _currentNote = {
@@ -577,39 +929,69 @@ async function uploadAttachment(noteId: string, file: File): Promise<NoteAttachm
         return attachment;
       }
     }
-    toastStore.error('Failed to upload attachment');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to upload attachment'));
+    }
     return null;
   } catch (err) {
     console.error('[notesStore] uploadAttachment error:', err);
-    toastStore.error('Failed to upload attachment');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to upload attachment');
+    }
     return null;
   }
 }
 
 /** Delete an attachment */
 async function deleteAttachment(noteId: string, attachmentId: string): Promise<boolean> {
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   try {
     const res = await apiFetch(apiUrl(`/api/notes/${noteId}/attachments/${attachmentId}`), {
       method: 'DELETE',
     });
     if (res.ok) {
-      if (_currentNote && _currentNote.id === noteId) {
+      if (
+        requestScopeIsCurrent(requestProject, requestGeneration) &&
+        _currentNote &&
+        _currentNote.id === noteId
+      ) {
         _currentNote = {
           ..._currentNote,
           attachments: (_currentNote.attachments ?? []).filter((a) => a.id !== attachmentId),
         };
       }
+      if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+        clearOperationError('delete-attachment');
+        toastStore.success('Attachment deleted');
+      }
       return true;
+    }
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(await responseMessage(res, 'Failed to delete attachment'), true, {
+        kind: 'delete-attachment',
+        noteId,
+        attachmentId,
+      });
     }
     return false;
   } catch (err) {
     console.error('[notesStore] deleteAttachment error:', err);
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to delete attachment', true, {
+        kind: 'delete-attachment',
+        noteId,
+        attachmentId,
+      });
+    }
     return false;
   }
 }
 
 /** Import memory content as a note */
 async function importMemoryAsNotes(): Promise<void> {
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   try {
     const res = await apiFetch(apiUrl('/api/notes/import-memory'), {
       method: 'POST',
@@ -617,14 +999,28 @@ async function importMemoryAsNotes(): Promise<void> {
     if (res.ok) {
       const data = await res.json();
       if (data.ok) {
-        const imported = Array.isArray(data.data) ? (data.data as Note[]) : [];
-        const count = imported.length;
+        if (!requestScopeIsCurrent(requestProject, requestGeneration)) return;
+        const report = data.data as {
+          entries?: Array<{
+            status: 'created' | 'updated' | 'unchanged' | 'failed';
+            note?: Note;
+            source?: { name?: string };
+            error?: string;
+          }>;
+          counts?: { created?: number; updated?: number; unchanged?: number; failed?: number };
+          partial?: boolean;
+        };
+        const entries = Array.isArray(report.entries) ? report.entries : [];
+        const imported = entries.flatMap((entry) => (entry.note ? [entry.note] : []));
 
         // The import response already contains the authoritative notes. Merge
         // just those records into the visible state; refetching the entire
         // notes table, graph, and folder tree can freeze large local vaults.
         const importedIds = new Set(imported.map((note) => note.id));
-        _notes = [...imported, ..._notes.filter((note) => !importedIds.has(note.id))];
+        _notes = sortNotesForPanel([
+          ...imported,
+          ..._notes.filter((note) => !importedIds.has(note.id)),
+        ]);
 
         const graphNodes = new Map(_graphData.nodes.map((node) => [node.id, node]));
         for (const note of imported) {
@@ -659,16 +1055,34 @@ async function importMemoryAsNotes(): Promise<void> {
         for (const note of imported) ensureFolderPath(nextFolderTree, note.folderPath);
         _folderTree = nextFolderTree;
 
-        toastStore.success(count === 1 ? 'Imported 1 memory note' : `Imported ${count} memory notes`);
+        const created = report.counts?.created ?? 0;
+        const updated = report.counts?.updated ?? 0;
+        const unchanged = report.counts?.unchanged ?? 0;
+        const failed = report.counts?.failed ?? 0;
+        const summary = `${created} created, ${updated} updated, ${unchanged} unchanged`;
+        if (report.partial || failed > 0) {
+          setError(`Memory import was partial: ${summary}, ${failed} failed.`, true, {
+            kind: 'import-memory',
+          });
+        } else {
+          clearError();
+          toastStore.success(`Memory import complete: ${summary}`);
+        }
       } else {
-        toastStore.error(data.error ?? 'Failed to import memory');
+        setError(data.error ?? 'Failed to import memory', true, { kind: 'import-memory' });
       }
     } else {
-      toastStore.error('Failed to import memory');
+      setError(await responseMessage(res, 'Failed to import memory'), true, {
+        kind: 'import-memory',
+      });
     }
   } catch (err) {
     console.error('[notesStore] importMemoryAsNotes error:', err);
-    toastStore.error('Failed to import memory');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to import memory', true, {
+        kind: 'import-memory',
+      });
+    }
   }
 }
 
@@ -678,20 +1092,31 @@ async function syncProjectDocuments(): Promise<void> {
     toastStore.success('Notes are already loaded in the demo');
     return;
   }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
   try {
-    const params = new URLSearchParams();
-    if (projectStore.currentPath) params.set('projectRoot', projectStore.currentPath);
-    const res = await apiFetch(apiUrl(`/api/notes/sync-project?${params.toString()}`), {
+    const res = await apiFetch(apiUrl('/api/notes/sync-project'), {
       method: 'POST',
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    if (!requestScopeIsCurrent(requestProject, requestGeneration)) return;
     await Promise.all([fetchNotes(), fetchGraph(), fetchFolderTree()]);
-    const result = data.data as { discovered?: number };
-    toastStore.success(`Indexed ${result.discovered ?? 0} project documents`);
+    const result = data.data as { discovered?: number; truncated?: boolean };
+    if (result.truncated) {
+      toastStore.warning(
+        `Indexed the first ${result.discovered ?? 0} project documents. The scan was partial, so existing entries were preserved.`,
+      );
+    } else {
+      toastStore.success(`Indexed ${result.discovered ?? 0} project documents`);
+    }
   } catch (err) {
     console.error('[notesStore] syncProjectDocuments error:', err);
-    toastStore.error('Failed to index project documents');
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to index project documents', true, {
+        kind: 'sync-project',
+      });
+    }
   }
 }
 
@@ -801,15 +1226,19 @@ async function fetchSettings(): Promise<void> {
       };
       saveSettingsToStorage(_settings);
       _settingsFetched = true;
+      clearError();
     }
   } catch (err) {
     console.warn('[notesStore] fetchSettings failed:', err);
+    setError('Failed to load Notes settings', false);
   }
 }
 
 /** Update settings — persisted to the BACKEND (which honors them when building
  *  agent context) with localStorage as a fast-boot mirror. */
-function updateSettings(patch: Partial<NotesSettings>): void {
+async function updateSettings(patch: Partial<NotesSettings>): Promise<boolean> {
+  const previous = _settings;
+  const revision = ++_settingsRevision;
   _settings = {
     ..._settings,
     ...patch,
@@ -819,28 +1248,141 @@ function updateSettings(patch: Partial<NotesSettings>): void {
     },
   };
   saveSettingsToStorage(_settings);
-  void apiFetch(apiUrl('/api/notes/settings'), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  })
-    .then(async (res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const persist = async (): Promise<boolean> => {
+    try {
+      const res = await apiFetch(apiUrl('/api/notes/settings'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(await responseMessage(res, 'Failed to save Notes settings'));
       const data = (await res.json()) as { ok?: boolean; data?: NotesSettings };
-      if (data.ok && data.data) {
+      if (!data.ok || !data.data) throw new Error('Failed to save Notes settings');
+      if (revision === _settingsRevision) {
         _settings = { ...data.data };
         saveSettingsToStorage(_settings);
       }
-    })
-    .catch((err) => {
+      clearError();
+      return true;
+    } catch (err) {
       console.warn('[notesStore] failed to persist settings to backend:', err);
-      toastStore.warning('Notes settings saved locally but not synced to the server');
+      if (revision === _settingsRevision) {
+        _settings = previous;
+        saveSettingsToStorage(_settings);
+      }
+      setError(err instanceof Error ? err.message : 'Failed to save Notes settings');
+      return false;
+    }
+  };
+  const operation = _settingsSaveQueue.then(persist, persist);
+  _settingsSaveQueue = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  return operation;
+}
+
+async function importNoteFile(file: File): Promise<Note | null> {
+  if (!/\.(md|markdown|html|htm)$/i.test(file.name)) {
+    setError('Only Markdown and HTML files can be imported');
+    return null;
+  }
+  const requestProject = projectStore.currentPath;
+  const requestGeneration = _projectGeneration;
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await apiFetch(apiUrl('/api/notes/import-file'), {
+      method: 'POST',
+      body: formData,
     });
+    if (!res.ok) throw new Error(await responseMessage(res, 'Failed to import note'));
+    const data = (await res.json()) as { ok?: boolean; data?: Note };
+    if (!data.ok || !data.data) throw new Error('Failed to import note');
+    if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
+    _notes = sortNotesForPanel([data.data, ..._notes.filter((note) => note.id !== data.data!.id)]);
+    clearError();
+    toastStore.success(`Imported ${file.name}`);
+    return data.data;
+  } catch (err) {
+    if (requestScopeIsCurrent(requestProject, requestGeneration)) {
+      setError(err instanceof Error ? err.message : 'Failed to import note');
+    }
+    return null;
+  }
+}
+
+async function exportNote(id: string): Promise<boolean> {
+  if (!hasBrowserEnvironment()) return false;
+  try {
+    const response = await apiFetch(apiUrl(`/api/notes/${id}/export`));
+    if (!response.ok) throw new Error(await responseMessage(response, 'Failed to export note'));
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? 'note.md';
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    clearError();
+    return true;
+  } catch (err) {
+    setError(err instanceof Error ? err.message : 'Failed to export note');
+    return false;
+  }
+}
+
+async function retryFailedOperation(): Promise<void> {
+  const operation = _failedOperation;
+  if (!operation) return;
+  clearError();
+  if (operation.kind === 'load-notes') {
+    await fetchNotes(operation.folder, operation.query);
+  } else if (operation.kind === 'load-note') {
+    await fetchNote(operation.id);
+  } else if (operation.kind === 'save-note') {
+    await updateNote(operation.id, operation.input);
+  } else if (operation.kind === 'delete-note') {
+    await deleteNote(operation.id, operation.revision);
+  } else if (operation.kind === 'load-graph') {
+    await fetchGraph();
+  } else if (operation.kind === 'load-folders') {
+    await fetchFolderTree();
+  } else if (operation.kind === 'delete-attachment') {
+    await deleteAttachment(operation.noteId, operation.attachmentId);
+  } else if (operation.kind === 'import-memory') {
+    await importMemoryAsNotes();
+  } else if (operation.kind === 'sync-project') {
+    await syncProjectDocuments();
+  }
 }
 
 /** Set the active note to null (deselect) */
 function clearCurrentNote(): void {
   _currentNote = null;
+}
+
+/** Clear every project-scoped view before loading a different project.
+ *
+ * Keeping the previous project's list or selected note visible while the next
+ * request is in flight can expose stale content and can make a save target the
+ * wrong project header. The component preserves any dirty draft separately
+ * before calling this transition boundary.
+ */
+function beginProjectTransition(): void {
+  _projectGeneration++;
+  if (isDemoMode) _demoSeeded = false;
+  _notes = [];
+  _currentNote = null;
+  _graphData = { nodes: [], edges: [] };
+  _folderTree = [];
+  _conflict = null;
+  _error = null;
+  _failedOperation = null;
+  _isLoading = false;
+  _isSaving = false;
 }
 
 /** Set search query and re-fetch notes */
@@ -903,6 +1445,15 @@ export const notesStore = {
   get allTags() {
     return allTags;
   },
+  get error() {
+    return _error;
+  },
+  get conflict() {
+    return _conflict;
+  },
+  get failedOperation() {
+    return _failedOperation;
+  },
 
   // Setters
   set currentNote(note: NoteWithLinks | null) {
@@ -917,6 +1468,7 @@ export const notesStore = {
   fetchNotes,
   refreshOpenPanel,
   fetchNote,
+  readNote,
   openNoteByTitle,
   createNote,
   updateNote,
@@ -928,6 +1480,9 @@ export const notesStore = {
   deleteAttachment,
   importMemoryAsNotes,
   syncProjectDocuments,
+  importNoteFile,
+  exportNote,
+  retryFailedOperation,
   updateSettings,
   fetchSettings,
   get settingsFetched() {
@@ -938,6 +1493,11 @@ export const notesStore = {
   setAgentToolPermission,
   resetAgentPermissions,
   clearCurrentNote,
+  beginProjectTransition,
   setSearchQuery,
   selectFolder,
+  clearError,
+  clearConflict() {
+    _conflict = null;
+  },
 };

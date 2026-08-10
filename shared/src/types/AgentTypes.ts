@@ -4,13 +4,7 @@
 import type { ProviderName } from '../providers/ProviderNames';
 
 export type AgentRole =
-  | 'manager'
-  | 'coder'
-  | 'task'
-  | 'reviewer'
-  | 'title'
-  | 'summarizer'
-  | 'critic';
+  'manager' | 'coder' | 'task' | 'reviewer' | 'title' | 'summarizer' | 'critic';
 
 export type AgentStatus =
   | 'idle'

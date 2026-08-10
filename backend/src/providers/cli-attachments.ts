@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { serverLog } from '../logger';
 import type { ProviderContentBlock } from './types';
+import {
+  createPrivateCliBinaryArtifact,
+  type PrivateCliArtifact,
+} from './private-cli-transport';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -83,6 +87,76 @@ export function renderCliContent(content: string | ProviderContentBlock[]): stri
     }
   }
   return parts.join('\n');
+}
+
+export interface CliAttachmentScope {
+  readonly artifacts: readonly PrivateCliArtifact[];
+  materializeImage(imageData: string | undefined, mimeType: string | undefined): string | null;
+  renderContent(content: string | ProviderContentBlock[]): string;
+  cleanup(): void;
+}
+
+/** Per-turn attachment storage. Unlike the legacy content cache, every file is
+ * held under a 0700 run directory, written 0600, and deleted when the provider
+ * subprocess closes. The shared startup pruner in private-cli-transport covers
+ * abrupt parent-process crashes. */
+export function createCliAttachmentScope(): CliAttachmentScope {
+  const artifacts: PrivateCliArtifact[] = [];
+  let cleaned = false;
+
+  const materializeImage = (
+    imageData: string | undefined,
+    mimeType: string | undefined,
+  ): string | null => {
+    if (!imageData || cleaned) return null;
+    try {
+      const bytes = Buffer.from(imageData, 'base64');
+      if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) return null;
+      const artifact = createPrivateCliBinaryArtifact(
+        'attachment',
+        bytes,
+        extensionForMime(mimeType),
+      );
+      artifacts.push(artifact);
+      return artifact.path;
+    } catch {
+      return null;
+    }
+  };
+
+  const renderContent = (content: string | ProviderContentBlock[]): string => {
+    if (typeof content === 'string') return content;
+    const parts: string[] = [];
+    for (const block of content) {
+      if (block.type === 'text' && block.text) parts.push(block.text);
+      else if (block.type === 'tool_use') {
+        parts.push(
+          `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+        );
+      } else if (block.type === 'tool_result') {
+        parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
+      } else if (block.type === 'image') {
+        const path = materializeImage(block.imageData, block.imageMimeType);
+        parts.push(
+          path
+            ? `[Image attachment: ${path}. Inspect this image with your available image/file tool before answering.]`
+            : '[Image attachment unavailable: missing, invalid, or larger than 10 MB.]',
+        );
+      }
+    }
+    return parts.join('\n');
+  };
+
+  return {
+    artifacts,
+    materializeImage,
+    renderContent,
+    cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      for (const artifact of artifacts) artifact.cleanup();
+    },
+  };
 }
 
 export function hasImageContent(

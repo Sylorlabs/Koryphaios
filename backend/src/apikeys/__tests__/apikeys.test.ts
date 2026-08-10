@@ -11,12 +11,11 @@
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import type { ApiKeyService } from '../../apikeys/service';
-import { mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const isolatedTestDir = join(tmpdir(), `koryphaios-apikey-test-${process.pid}-${Date.now()}`);
-mkdirSync(isolatedTestDir, { recursive: true });
+const isolatedTestDir = mkdtempSync(join(tmpdir(), 'koryphaios-apikey-test-'));
 process.env.DATABASE_URL = `sqlite://${join(isolatedTestDir, 'apikeys.sqlite')}`;
 
 const { createApiKeyService } = await import('../service');
@@ -37,7 +36,9 @@ describe('API Key Authentication', () => {
   afterAll(() => {
     try {
       rmSync(testDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      /* ignore cleanup errors in test teardown */
+    }
   });
 
   beforeEach(async () => {

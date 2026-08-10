@@ -4,6 +4,7 @@
 
 import { mcpLog, serverLog } from '../logger';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
+import { ToolRegistry } from '../tools/registry';
 import { VERSION } from '../constants';
 import { registerMCPToolsInRegistry } from './tool-bridge';
 
@@ -51,6 +52,59 @@ interface MCPToolResult {
 
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_IDLE_SHUTDOWN_MS = 2 * 60_000;
+export const MCP_STDIO_MAX_FRAME_BYTES = 8 * 1024 * 1024;
+
+/** MCP servers fully control stderr and may print prompts, credentials, or
+ * unbounded tool diagnostics. Logs record only the byte count. */
+export function mcpStderrLogMetadata(
+  server: string,
+  chunk: Uint8Array,
+): { server: string; stream: 'stderr'; outputBytes: number } {
+  return { server, stream: 'stderr', outputBytes: chunk.byteLength };
+}
+
+/** Malformed stdout is equally server-controlled. A JSON parser error embeds
+ * the rejected input in its message, so neither the line nor Error may cross
+ * the logger boundary. */
+export function mcpMalformedStdoutLogMetadata(
+  server: string,
+  line: string,
+  error: unknown,
+): {
+  server: string;
+  stream: 'stdout';
+  outputBytes: number;
+  errorType: string;
+} {
+  return {
+    server,
+    stream: 'stdout',
+    outputBytes: Buffer.byteLength(line),
+    errorType: error instanceof Error ? error.name : typeof error,
+  };
+}
+
+/** A framing violation is structural transport metadata only. The rejected
+ * frame may contain arbitrary prompts, tool output, or credentials. */
+export function mcpOversizedStdoutLogMetadata(
+  server: string,
+  outputBytes: number,
+  limitBytes = MCP_STDIO_MAX_FRAME_BYTES,
+): {
+  server: string;
+  stream: 'stdout';
+  outputBytes: number;
+  limitBytes: number;
+  reason: 'frame_too_large';
+} {
+  return {
+    server,
+    stream: 'stdout',
+    outputBytes,
+    limitBytes,
+    reason: 'frame_too_large',
+  };
+}
 
 // ─── MCP Client ─────────────────────────────────────────────────────────────
 
@@ -65,6 +119,9 @@ export class MCPClient {
     }
   >();
   private buffer = '';
+  private bufferBytes = 0;
+  private readonly maxStdoutFrameBytes = MCP_STDIO_MAX_FRAME_BYTES;
+  private readonly discardedStdoutProcesses = new WeakSet<object>();
   private tools: MCPToolDef[] = [];
   private connected = false;
   private serverName: string;
@@ -133,54 +190,83 @@ export class MCPClient {
       }
     }
 
-    this.process = Bun.spawn([command, ...args], {
+    const processHandle = Bun.spawn([command, ...args], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...safeEnv, ...env },
     });
+    this.process = processHandle;
 
     // Read stdout asynchronously
-    const stdoutReader = (this.process.stdout as ReadableStream<Uint8Array>).getReader();
+    const stdoutReader = (processHandle.stdout as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     (async () => {
       try {
         while (true) {
           const { done, value } = await stdoutReader.read();
-          if (done) break;
-          this.buffer += decoder.decode(value, { stream: true });
-          this.processBuffer();
+          if (done) {
+            const trailing = decoder.decode();
+            if (trailing) this.acceptStdoutText(processHandle, trailing);
+            break;
+          }
+          this.acceptStdoutText(processHandle, decoder.decode(value, { stream: true }));
         }
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), server: this.serverName }, 'MCP stdout stream closed');
+        serverLog.debug(
+          {
+            errorType: err instanceof Error ? err.name : typeof err,
+            server: this.serverName,
+            stream: 'stdout',
+          },
+          'MCP stdout stream closed',
+        );
+        this.failStdioTransport(
+          processHandle,
+          new Error('MCP stdout transport closed before the request completed'),
+        );
       }
     })();
 
     // Read stderr asynchronously
-    const stderrReader = (this.process.stderr as ReadableStream<Uint8Array>).getReader();
-    const stderrDecoder = new TextDecoder();
+    const stderrReader = (processHandle.stderr as ReadableStream<Uint8Array>).getReader();
     (async () => {
       try {
         while (true) {
           const { done, value } = await stderrReader.read();
           if (done) break;
-          mcpLog.error(
-            { server: this.serverName, output: stderrDecoder.decode(value).trim() },
-            'MCP stderr',
-          );
+          mcpLog.error(mcpStderrLogMetadata(this.serverName, value), 'MCP process emitted stderr');
         }
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), server: this.serverName }, 'MCP stderr stream closed');
+        serverLog.debug(
+          {
+            errorType: err instanceof Error ? err.name : typeof err,
+            server: this.serverName,
+            stream: 'stderr',
+          },
+          'MCP stderr stream closed',
+        );
       }
     })();
 
-    this.process.exited
+    processHandle.exited
       .then((code) => {
         mcpLog.info({ server: this.serverName, code }, 'MCP process exited');
-        this.connected = false;
+        this.failStdioTransport(
+          processHandle,
+          new Error('MCP process exited before the request completed'),
+          false,
+        );
       })
-      .catch((err) => {
-        mcpLog.warn({ server: this.serverName, err }, 'Failed to track MCP process exit');
+      .catch((err: unknown) => {
+        mcpLog.warn(
+          { server: this.serverName, errorType: err instanceof Error ? err.name : typeof err },
+          'Failed to track MCP process exit',
+        );
+        this.failStdioTransport(
+          processHandle,
+          new Error('MCP process exit could not be observed safely'),
+        );
       });
 
     // Initialize
@@ -195,7 +281,13 @@ export class MCPClient {
       },
     });
 
-    this.serverCapabilities = (initResult.result as any).capabilities ?? {};
+    if (this.process !== processHandle) {
+      throw new Error('MCP process exited during initialization');
+    }
+
+    this.serverCapabilities =
+      (initResult.result as { capabilities?: Record<string, unknown> } | undefined)?.capabilities ??
+      {};
 
     // Send initialized notification
     this.notify('notifications/initialized', {});
@@ -204,13 +296,17 @@ export class MCPClient {
     if (this.serverCapabilities.tools) {
       try {
         const toolsResult = await this.request('tools/list', {});
-        this.tools = (toolsResult.result as any)?.tools ?? [];
+        this.tools = (toolsResult.result as { tools?: MCPToolDef[] } | undefined)?.tools ?? [];
       } catch (err: unknown) {
         mcpLog.warn(
           { server: this.serverName, err: err instanceof Error ? err.message : String(err) },
           'Failed to list tools despite capability',
         );
       }
+    }
+
+    if (this.process !== processHandle) {
+      throw new Error('MCP process exited during initialization');
     }
 
     this.connected = true;
@@ -258,7 +354,7 @@ export class MCPClient {
 
     if (toolsResp.ok) {
       const data = (await toolsResp.json()) as MCPResponse;
-      this.tools = (data.result as any)?.tools ?? [];
+      this.tools = (data.result as { tools?: MCPToolDef[] } | undefined)?.tools ?? [];
     }
 
     this.connected = true;
@@ -270,44 +366,44 @@ export class MCPClient {
     if (!this.connected) await this.connect();
     this.clearIdleShutdown();
     try {
-    if (this.config.transport === 'stdio') {
-      const response = await this.request('tools/call', { name, arguments: args });
-      if (response.error) {
-        return {
-          content: [{ type: 'text', text: `MCP Error: ${response.error.message}` }],
-          isError: true,
-        };
-      }
-      return response.result as MCPToolResult;
-    } else {
-      // SSE transport
-      const resp = await fetch(`${this.config.url}/tools/call`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(this.config.headers ?? {}) },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: ++this.requestId,
-          method: 'tools/call',
-          params: { name, arguments: args },
-        }),
-      });
+      if (this.config.transport === 'stdio') {
+        const response = await this.request('tools/call', { name, arguments: args });
+        if (response.error) {
+          return {
+            content: [{ type: 'text', text: `MCP Error: ${response.error.message}` }],
+            isError: true,
+          };
+        }
+        return response.result as MCPToolResult;
+      } else {
+        // SSE transport
+        const resp = await fetch(`${this.config.url}/tools/call`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(this.config.headers ?? {}) },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: ++this.requestId,
+            method: 'tools/call',
+            params: { name, arguments: args },
+          }),
+        });
 
-      if (!resp.ok) {
-        return {
-          content: [{ type: 'text', text: `MCP HTTP Error: ${resp.status}` }],
-          isError: true,
-        };
-      }
+        if (!resp.ok) {
+          return {
+            content: [{ type: 'text', text: `MCP HTTP Error: ${resp.status}` }],
+            isError: true,
+          };
+        }
 
-      const data = (await resp.json()) as MCPResponse;
-      if (data.error) {
-        return {
-          content: [{ type: 'text', text: `MCP Error: ${data.error.message}` }],
-          isError: true,
-        };
+        const data = (await resp.json()) as MCPResponse;
+        if (data.error) {
+          return {
+            content: [{ type: 'text', text: `MCP Error: ${data.error.message}` }],
+            isError: true,
+          };
+        }
+        return data.result as MCPToolResult;
       }
-      return data.result as MCPToolResult;
-    }
     } finally {
       this.scheduleIdleShutdown();
     }
@@ -340,7 +436,10 @@ export class MCPClient {
       this.clearIdleShutdown();
 
       if (this.config.transport === 'stdio') {
-        const stdin = this.process!.stdin as unknown as { write: (chunk: string | Uint8Array) => void, flush: () => void };
+        const stdin = this.process!.stdin as unknown as {
+          write: (chunk: string | Uint8Array) => void;
+          flush: () => void;
+        };
         stdin.write(JSON.stringify(request) + '\n');
         stdin.flush();
       }
@@ -350,17 +449,49 @@ export class MCPClient {
   private notify(method: string, params: unknown): void {
     const notification = { jsonrpc: '2.0', method, params };
     if (this.config.transport === 'stdio' && this.process) {
-      const stdin = this.process!.stdin as unknown as { write: (chunk: string | Uint8Array) => void, flush: () => void };
+      const stdin = this.process!.stdin as unknown as {
+        write: (chunk: string | Uint8Array) => void;
+        flush: () => void;
+      };
       stdin.write(JSON.stringify(notification) + '\n');
       stdin.flush();
     }
   }
 
-  private processBuffer(): void {
-    let newlineIdx: number;
-    while ((newlineIdx = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, newlineIdx).trim();
-      this.buffer = this.buffer.slice(newlineIdx + 1);
+  private acceptStdoutText(processHandle: ReturnType<typeof Bun.spawn>, text: string): void {
+    if (!text || this.discardedStdoutProcesses.has(processHandle)) return;
+
+    let cursor = 0;
+    while (cursor < text.length) {
+      const newlineIdx = text.indexOf('\n', cursor);
+      const end = newlineIdx >= 0 ? newlineIdx : text.length;
+      const segment = text.slice(cursor, end);
+      const frameBytes = this.bufferBytes + Buffer.byteLength(segment, 'utf8');
+      if (frameBytes > this.maxStdoutFrameBytes) {
+        mcpLog.warn(
+          mcpOversizedStdoutLogMetadata(this.serverName, frameBytes, this.maxStdoutFrameBytes),
+          'MCP stdout frame exceeded the transport limit',
+        );
+        this.discardedStdoutProcesses.add(processHandle);
+        this.buffer = '';
+        this.bufferBytes = 0;
+        this.failStdioTransport(
+          processHandle,
+          new Error('MCP stdout frame exceeded the supported size'),
+        );
+        return;
+      }
+
+      if (newlineIdx < 0) {
+        this.buffer += segment;
+        this.bufferBytes = frameBytes;
+        return;
+      }
+
+      const line = `${this.buffer}${segment}`.trim();
+      this.buffer = '';
+      this.bufferBytes = 0;
+      cursor = newlineIdx + 1;
 
       if (!line) continue;
 
@@ -372,19 +503,63 @@ export class MCPClient {
           resolve(response);
         }
       } catch (err) {
-        mcpLog.error({ server: this.serverName, err, line }, 'Failed to parse MCP response');
+        mcpLog.error(
+          mcpMalformedStdoutLogMetadata(this.serverName, line, err),
+          'Failed to parse MCP response',
+        );
       }
+    }
+  }
+
+  private rejectPending(error: Error): void {
+    const pending = [...this.pending.values()];
+    this.pending.clear();
+    for (const request of pending) request.reject(error);
+  }
+
+  private failStdioTransport(
+    processHandle: ReturnType<typeof Bun.spawn>,
+    error: Error,
+    terminate = true,
+  ): void {
+    const ownedProcess = this.process;
+    if (!ownedProcess || ownedProcess !== processHandle) return;
+    if (terminate) this.discardedStdoutProcesses.add(processHandle);
+    this.process = undefined;
+    this.connected = false;
+    this.buffer = '';
+    this.bufferBytes = 0;
+    this.clearIdleShutdown();
+    this.rejectPending(error);
+
+    if (!terminate) return;
+    try {
+      ownedProcess.kill();
+    } catch (killError: unknown) {
+      mcpLog.debug(
+        {
+          server: this.serverName,
+          errorType: killError instanceof Error ? killError.name : typeof killError,
+        },
+        'MCP process termination was already complete',
+      );
     }
   }
 
   async shutdown(): Promise<void> {
     this.clearIdleShutdown();
-    if (this.process) {
-      this.process.kill();
-      this.process = undefined;
+    const processHandle = this.process;
+    if (processHandle) {
+      this.failStdioTransport(
+        processHandle,
+        new Error('MCP client shut down before the request completed'),
+      );
+    } else {
+      this.connected = false;
+      this.buffer = '';
+      this.bufferBytes = 0;
+      this.rejectPending(new Error('MCP client shut down before the request completed'));
     }
-    this.connected = false;
-    this.pending.clear();
   }
 
   private clearIdleShutdown(): void {
@@ -420,13 +595,13 @@ export class MCPToolWrapper implements Tool {
     return this.def.description;
   }
   get inputSchema() {
-    return this.def.inputSchema as any;
+    return this.def.inputSchema;
   }
 
   async run(ctx: ToolContext, input: ToolCallInput): Promise<ToolCallOutput> {
     const start = performance.now();
     try {
-      const result = await this.client.callTool(this.def.name, input.input as any);
+      const result = await this.client.callTool(this.def.name, input.input);
       const text = result.content
         .filter((c) => c.type === 'text')
         .map((c) => c.text)
@@ -465,7 +640,7 @@ export class MCPManager {
     return client;
   }
 
-  async registerAllTools(registry: any): Promise<void> {
+  async registerAllTools(registry: ToolRegistry): Promise<void> {
     for (const client of this.clients.values()) {
       await registerMCPToolsInRegistry(registry, client);
     }
@@ -479,16 +654,20 @@ export class MCPManager {
   }
 }
 
+interface MCPInitConfig {
+  mcpServers?: Record<string, Partial<MCPServerConfig> & { type?: string }>;
+}
+
 /**
  * Initialize MCP servers from configuration.
  */
-export async function initMCP(config: any, tools: any): Promise<MCPManager> {
+export async function initMCP(config: MCPInitConfig, tools: ToolRegistry): Promise<MCPManager> {
   const manager = new MCPManager(process.cwd());
   const servers = config.mcpServers || {};
 
   for (const [name, serverConfig] of Object.entries(servers)) {
     try {
-      const cfg = serverConfig as any;
+      const cfg = serverConfig;
       await manager.connectServer({
         name,
         ...cfg,
@@ -496,7 +675,10 @@ export async function initMCP(config: any, tools: any): Promise<MCPManager> {
         transport: cfg.transport ?? cfg.type ?? 'stdio',
       });
     } catch (err: unknown) {
-      mcpLog.error({ server: name, err: err instanceof Error ? err.message : String(err) }, 'Failed to connect to MCP server');
+      mcpLog.error(
+        { server: name, err: err instanceof Error ? err.message : String(err) },
+        'Failed to connect to MCP server',
+      );
     }
   }
 

@@ -50,3 +50,4 @@ export {
 } from './workflows';
 export { GetResourceBudgetTool } from './resource-budget';
 export { registerGitTools } from './git';
+export { GhostCommitTool, registerCheckpointTools } from './checkpoint';

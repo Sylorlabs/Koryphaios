@@ -313,6 +313,23 @@ describe('TokenBucketRateLimiter', () => {
     // All should succeed (burst capacity)
     results.forEach((r) => expect(r.allowed).toBe(true));
   });
+
+  test('does not over-admit concurrent requests in the in-memory fallback', async () => {
+    const constrained = new TokenBucketRateLimiter({
+      maxRequests: 5,
+      windowMs: 60_000,
+      bucketSize: 5,
+      refillRate: 5 / 60,
+      keyPrefix: 'token-concurrent-test',
+    });
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => constrained.check({ identifier: 'burst-key' })),
+    );
+
+    expect(results.filter((result) => result.allowed)).toHaveLength(5);
+    expect(results.filter((result) => !result.allowed)).toHaveLength(5);
+  });
 });
 
 describe('FixedWindowRateLimiter', () => {
@@ -695,11 +712,7 @@ describe('Rate limit bypass vectors', () => {
     expect(allowed.allowed).toBe(true);
   });
 
-  // NOTE: This test requires a real Redis instance to verify atomicity.
-  // The mock Redis processes operations synchronously, so there's no actual
-  // concurrency and all requests are serialized. This test should be run
-  // against a real Redis in CI.
-  test.skip('concurrent requests do not bypass the rate limit (atomic check)', async () => {
+  test('concurrent requests do not bypass the rate limit (atomic check)', async () => {
     const limiter = new SlidingWindowRateLimiter({
       maxRequests: 5,
       windowMs: 60_000,
@@ -714,10 +727,8 @@ describe('Rate limit bypass vectors', () => {
     const allowedCount = results.filter((r) => r.allowed).length;
     const blockedCount = results.filter((r) => !r.allowed).length;
 
-    // With a real Redis, the sorted set operations are atomic and at most 5
-    // would be allowed. With the mock Redis, there may be a race window.
-    expect(allowedCount, 'Should not allow all concurrent requests through').toBeLessThan(10);
-    expect(blockedCount, 'Should block at least some concurrent requests').toBeGreaterThan(0);
+    expect(allowedCount).toBe(5);
+    expect(blockedCount).toBe(5);
   });
 
   test('empty/null identifier does not crash the limiter', async () => {

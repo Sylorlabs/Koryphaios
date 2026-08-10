@@ -48,7 +48,10 @@ export function isAgenticProvider(name: string): boolean {
 let sharedProviderNames = new Set<string>();
 let sharedModelIds = new Map<string, Set<string>>();
 
-export function setSharedProviders(names: string[], modelSelections: Record<string, string[]> = {}): void {
+export function setSharedProviders(
+  names: string[],
+  modelSelections: Record<string, string[]> = {},
+): void {
   sharedProviderNames = new Set(names);
   sharedModelIds = new Map(
     Object.entries(modelSelections)
@@ -64,7 +67,9 @@ export function getSharedProviders(): string[] {
 }
 
 export function getSharedModels(): Record<string, string[]> {
-  return Object.fromEntries([...sharedModelIds].map(([provider, models]) => [provider, [...models]]));
+  return Object.fromEntries(
+    [...sharedModelIds].map(([provider, models]) => [provider, [...models]]),
+  );
 }
 
 // The host's base sandbox policy for remote CLI turns (a joining guest's tier
@@ -87,7 +92,7 @@ function buildCatalog(hostName: string): SharedProviderCatalog {
 
   for (const p of status) {
     if (!sharedProviderNames.has(p.name)) continue;
-    if (!p.authenticated || !p.enabled) continue;
+    if (!p.adapterAvailable || !p.enabled) continue;
     const enabledIds = new Set(p.models);
     const selectedModelIds = sharedModelIds.get(p.name);
     const models = p.allAvailableModels
@@ -152,7 +157,10 @@ async function applyProjectSync(
     if (isAbsolute(del) || del.includes('..')) continue;
     await rm(join(root, del), { force: true }).catch((err: unknown) => {
       // Best-effort cleanup of stale files — the sync continues regardless.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), path: del }, 'Remote sandbox file delete failed (best-effort cleanup)');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), path: del },
+        'Remote sandbox file delete failed (best-effort cleanup)',
+      );
     });
   }
   for (const file of sync.files) {
@@ -185,7 +193,10 @@ async function cleanupSandbox(guestId: string, provider: string): Promise<void> 
     sandboxes.delete(key);
     await rm(root, { recursive: true, force: true }).catch((err: unknown) => {
       // Best-effort sandbox teardown — the sandbox is already deregistered.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'Remote sandbox teardown failed (best-effort)');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), root },
+        'Remote sandbox teardown failed (best-effort)',
+      );
     });
   }
 }
@@ -322,7 +333,10 @@ export function startProviderHost(relay: RelayClient, hostName: string): () => v
     for (const [key, root] of sandboxes) {
       void rm(root, { recursive: true, force: true }).catch((err: unknown) => {
         // Best-effort cleanup during relay disconnect — sandboxes are already deregistered.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'Remote sandbox cleanup during disconnect failed (best-effort)');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), root },
+          'Remote sandbox cleanup during disconnect failed (best-effort)',
+        );
       });
       sandboxes.delete(key);
     }

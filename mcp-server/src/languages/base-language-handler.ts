@@ -3,6 +3,7 @@
  */
 
 import { EventEmitter } from 'events';
+
 import type {
   LanguageHandler,
   DetectionOptions,
@@ -115,6 +116,33 @@ export abstract class BaseLanguageHandler extends EventEmitter implements Langua
    * Create a debug session for this language
    */
   abstract createDebugSession(config: LanguageDebugConfig): Promise<LanguageDebugSession>;
+
+  /**
+   * Debug adapters are not bundled in this MCP server today. Language
+   * analysis remains available, but callers must never infer debugger support
+   * from tools such as Node, Delve, LLDB, debugpy, or Xdebug being installed.
+   */
+  protected unavailableDebugCapabilities(): LanguageDebugCapabilities {
+    return {
+      supportsBreakpoints: false,
+      supportsConditionalBreakpoints: false,
+      supportsStepInto: false,
+      supportsStepOver: false,
+      supportsStepOut: false,
+      supportsVariableInspection: false,
+      supportsWatchExpressions: false,
+      supportsHotReload: false,
+      supportsRemoteDebugging: false,
+      breakpoints: false,
+      stepDebugging: false,
+      variableInspection: false,
+      callStackInspection: false,
+      conditionalBreakpoints: false,
+      hotReload: false,
+      profiling: false,
+      memoryInspection: false,
+    };
+  }
 
   /**
    * Analyze performance of source code

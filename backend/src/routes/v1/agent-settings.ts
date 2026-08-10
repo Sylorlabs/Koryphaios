@@ -24,6 +24,7 @@ import {
   compareSkillRevisions,
   compareBundledSkill,
   countBundledUpdates,
+  createSkillDraft,
   listSkills,
   resolveSkills,
   saveSkillDraft,
@@ -33,6 +34,7 @@ import {
   getBundledSkillContent,
   saveAgentMergedSkillDraft,
   personalRoot,
+  SkillDraftConflictError,
   type SkillSource,
 } from '../../kory/skills';
 import { createTaskContract } from '../../kory/prompts';
@@ -55,6 +57,7 @@ import {
   stopWorkflow,
 } from '../../kory/workflows';
 import { serverLog } from '../../logger';
+import { hasIndependentGoalEvidence } from '../../stores/goal-store';
 import {
   NotFoundError,
   ValidationError,
@@ -63,35 +66,75 @@ import {
 } from '../../errors/types';
 
 export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
-  .get('/workflows', ({ request, query, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const root = getRequestProjectRoot(request);
-    return { ok: true, data: { definitions: listWorkflowDefinitions(root), drafts: listWorkflowDrafts(root), runs: listWorkflowRuns(root, query.sessionId) } };
-  }, { query: t.Object({ sessionId: t.Optional(t.String()) }) })
-  .post('/workflows/start', ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }) };
-  }, { body: t.Object({ workflowId: t.String(), sessionId: t.String(), task: t.String({ minLength: 1 }), goalId: t.Optional(t.String()) }) })
-  .post('/workflows/:id/advance', ({ request, params, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
-  }, { body: t.Object({ evidence: t.String(), block: t.Optional(t.Boolean()) }) })
+  .get(
+    '/workflows',
+    ({ request, query, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      return {
+        ok: true,
+        data: {
+          definitions: listWorkflowDefinitions(root),
+          drafts: listWorkflowDrafts(root),
+          runs: listWorkflowRuns(root, query.sessionId),
+        },
+      };
+    },
+    { query: t.Object({ sessionId: t.Optional(t.String()) }) },
+  )
+  .post(
+    '/workflows/start',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      return {
+        ok: true,
+        data: startWorkflow(getRequestProjectRoot(request), { ...body, requestedBy: 'human' }),
+      };
+    },
+    {
+      body: t.Object({
+        workflowId: t.String(),
+        sessionId: t.String(),
+        task: t.String({ minLength: 1 }),
+        goalId: t.Optional(t.String()),
+      }),
+    },
+  )
+  .post(
+    '/workflows/:id/advance',
+    ({ request, params, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      return { ok: true, data: advanceWorkflow(getRequestProjectRoot(request), params.id, body) };
+    },
+    { body: t.Object({ evidence: t.String(), block: t.Optional(t.Boolean()) }) },
+  )
   .post('/workflows/:id/stop', ({ request, params, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     return { ok: true, data: stopWorkflow(getRequestProjectRoot(request), params.id) };
   })
-  .post('/workflows/drafts/:id/activate', async ({ request, params, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const root = getRequestProjectRoot(request);
-    const draft = listWorkflowDrafts(root).find((item) => item.id === params.id);
-    if (!draft) throw new NotFoundError('Workflow draft', params.id);
-    const goal = await getContext().goals.get(draft.goalId);
-    const sourceItem = goal?.checklist.find((item) => item.id === draft.goalItemId);
-    if (!sourceItem?.evidence.some((proof) => proof.verified)) throw new ValidationError('Finish and verify the source Goal item before activating this workflow');
-    const activated = activateWorkflowDraft(root, params.id, body.scope);
-    await getContext().goals.addActivity(draft.goalId, 'workflow_activated', `${draft.id}|${body.scope}|${draft.name}`);
-    return { ok: true, data: activated };
-  }, { body: t.Object({ scope: t.Union([t.Literal('project'), t.Literal('personal')]) }) })
+  .post(
+    '/workflows/drafts/:id/activate',
+    async ({ request, params, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      const draft = listWorkflowDrafts(root).find((item) => item.id === params.id);
+      if (!draft) throw new NotFoundError('Workflow draft', params.id);
+      const goal = await getContext().goals.get(draft.goalId);
+      const sourceItem = goal?.checklist.find((item) => item.id === draft.goalItemId);
+      if (!sourceItem || !hasIndependentGoalEvidence(sourceItem))
+        throw new ValidationError(
+          'Finish and verify the source Goal item before activating this workflow',
+        );
+      const activated = activateWorkflowDraft(root, params.id, body.scope);
+      await getContext().goals.addActivity(
+        draft.goalId,
+        'workflow_activated',
+        `${draft.id}|${body.scope}|${draft.name}`,
+      );
+      return { ok: true, data: activated };
+    },
+    { body: t.Object({ scope: t.Union([t.Literal('project'), t.Literal('personal')]) }) },
+  )
   .post(
     '/delegate',
     async ({ request, body, set }) => {
@@ -119,13 +162,15 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         task: t.String({ minLength: 1 }),
         managerModel: t.Optional(t.String()),
         reasoningLevel: t.Optional(t.String()),
-        domain: t.Optional(t.Union([
-          t.Literal('general'),
-          t.Literal('ui'),
-          t.Literal('backend'),
-          t.Literal('test'),
-          t.Literal('review'),
-        ])),
+        domain: t.Optional(
+          t.Union([
+            t.Literal('general'),
+            t.Literal('ui'),
+            t.Literal('backend'),
+            t.Literal('test'),
+            t.Literal('review'),
+          ]),
+        ),
       }),
     },
   )
@@ -251,6 +296,73 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     return { ok: true, data: listSkills(getRequestProjectRoot(request)) };
   })
   .post(
+    '/skills',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      enforceSkillLearningPolicy(
+        loadAgentSettings(root).skillLearningMode,
+        body.actor ?? 'human',
+        'save-draft',
+      );
+      try {
+        return { ok: true, data: createSkillDraft(root, body) };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof SkillDraftConflictError) throw new ConflictError(message);
+        throw new ValidationError(message);
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Union([t.Literal('personal'), t.Literal('project')]),
+        name: t.String({ minLength: 1, maxLength: 64 }),
+        description: t.String({ minLength: 40, maxLength: 360 }),
+        instructions: t.String({ minLength: 40, maxLength: 50_000 }),
+        domains: t.Array(t.String({ minLength: 1, maxLength: 80 }), { minItems: 1, maxItems: 12 }),
+        activation: t.Array(t.String({ minLength: 1, maxLength: 120 }), {
+          minItems: 1,
+          maxItems: 16,
+        }),
+        shouldTrigger: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+          minItems: 2,
+          maxItems: 12,
+        }),
+        shouldNotTrigger: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+          minItems: 2,
+          maxItems: 12,
+        }),
+        evidence: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+          minItems: 1,
+          maxItems: 12,
+        }),
+        broader: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 8 })),
+        facets: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 })),
+        requires: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 })),
+        conflicts: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 })),
+        excludes: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 120 }), { maxItems: 16 })),
+        targetMedia: t.Optional(
+          t.Array(
+            t.Union([
+              t.Literal('any'),
+              t.Literal('web'),
+              t.Literal('native'),
+              t.Literal('mobile'),
+              t.Literal('terminal'),
+              t.Literal('game'),
+              t.Literal('spatial'),
+              t.Literal('embedded'),
+            ]),
+            { minItems: 1, maxItems: 8 },
+          ),
+        ),
+        depth: t.Optional(t.Integer({ minimum: 0, maximum: 32 })),
+        contextBudget: t.Optional(t.Integer({ minimum: 100, maximum: 20_000 })),
+        actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
+      }),
+    },
+  )
+  .post(
     '/skills/validate',
     ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -375,7 +487,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         const stream = provider.streamResponse({
           model: routing.model,
           systemPrompt:
-            'You are an expert at merging skill instruction files. You preserve the user\'s customizations while incorporating the bundled improvements. Output ONLY the merged SKILL.md content — no explanation, no markdown fences.',
+            "You are an expert at merging skill instruction files. You preserve the user's customizations while incorporating the bundled improvements. Output ONLY the merged SKILL.md content — no explanation, no markdown fences.",
           messages: [{ role: 'user', content: mergePrompt }],
         });
 
@@ -417,18 +529,15 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .get(
-    '/skills/:name/compare-bundled',
-    ({ request, params: { name }, set }) => {
-      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      const comparison = compareBundledSkill(name);
-      if (!comparison) {
-        set.status = 404;
-        return { ok: false, error: 'No local skill or bundled version found' };
-      }
-      return { ok: true, data: comparison };
-    },
-  )
+  .get('/skills/:name/compare-bundled', ({ request, params: { name }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const comparison = compareBundledSkill(name);
+    if (!comparison) {
+      set.status = 404;
+      return { ok: false, error: 'No local skill or bundled version found' };
+    }
+    return { ok: true, data: comparison };
+  })
   .get('/skills/bundled-updates/count', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     return { ok: true, data: { count: countBundledUpdates() } };
@@ -438,14 +547,20 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const contract = createTaskContract(body.prompt);
+      const planningResolution = resolveSkills(
+        getRequestProjectRoot(request),
+        body.prompt,
+        contract,
+        body.options ?? {},
+      );
       return {
         ok: true,
-        data: resolveSkills(
-          getRequestProjectRoot(request),
-          body.prompt,
-          contract,
-          body.options ?? {},
-        ),
+        data: {
+          ...planningResolution,
+          planningOnly: true,
+          planningLimit:
+            'Final manager selection is recomputed against authenticated model metadata, occupied context, provider framing, and the actual output limit at run time.',
+        },
       };
     },
     {
@@ -458,7 +573,18 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
             collisionChoices: t.Optional(
               t.Record(t.String(), t.Union([t.Literal('personal'), t.Literal('project')])),
             ),
-            targetMedium: t.Optional(t.String()),
+            targetMedium: t.Optional(
+              t.Union([
+                t.Literal('any'),
+                t.Literal('web'),
+                t.Literal('native'),
+                t.Literal('mobile'),
+                t.Literal('terminal'),
+                t.Literal('game'),
+                t.Literal('spatial'),
+                t.Literal('embedded'),
+              ]),
+            ),
             contextBudget: t.Optional(t.Number({ minimum: 1 })),
           }),
         ),
@@ -554,7 +680,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     return {
       ok: true,
       data: settings,
-      message: 'Rules are always enforced. Critic enforces based on enforcement level.',
+      message: 'Project-scoped agent settings loaded.',
     };
   })
   .put('/settings', async ({ request, body, set }) => {
@@ -566,7 +692,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     return {
       ok: true,
       data: newSettings,
-      message: 'Agent settings updated. Rules remain enforced.',
+      message: 'Project-scoped agent settings updated.',
     };
   })
   .post('/settings/reset', async ({ request, set }) => {
@@ -575,7 +701,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     return {
       ok: true,
       data: settings,
-      message: 'Agent settings reset to defaults. Rules still enforced.',
+      message: 'Project-scoped agent settings reset to defaults.',
     };
   })
   .get('/preferences', async ({ request, set }) => {
@@ -646,7 +772,10 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         rules = readFileSync(join(root, '.koryphaios/rules/rules.md'), 'utf-8');
       } catch (err: unknown) {
         // No rules file is the common case; critic review proceeds without custom rules.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), root }, 'No rules.md found; critic review will use defaults');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), root },
+          'No rules.md found; critic review will use defaults',
+        );
       }
 
       const result = criticReview({
@@ -683,7 +812,11 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
   });
 
 /** Build the prompt for LLM-based skill merge. */
-function buildSkillMergePrompt(skillName: string, localContent: string, bundledContent: string): string {
+function buildSkillMergePrompt(
+  skillName: string,
+  localContent: string,
+  bundledContent: string,
+): string {
   return `Merge these two versions of the "${skillName}" skill (SKILL.md).
 
 ## Rules

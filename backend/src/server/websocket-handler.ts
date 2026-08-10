@@ -77,9 +77,15 @@ export async function handleWSMessage(
   message: string | Buffer,
   deps: WebSocketHandlerDependencies,
 ): Promise<void> {
+  const messageBytes = Buffer.byteLength(message);
+  let messageType: string | undefined;
   try {
     const { wsManager, sessions, kory } = deps;
     const msg = JSON.parse(String(message));
+    messageType =
+      typeof msg?.type === 'string' && /^[a-zA-Z0-9._:-]{1,64}$/.test(msg.type)
+        ? msg.type
+        : undefined;
     // Helper to assert the session exists for this local single-user app.
     const assertSessionAccess = async (sessionId: string): Promise<boolean> => {
       if (!sessionId || !validateSessionId(sessionId)) return false;
@@ -89,6 +95,10 @@ export async function handleWSMessage(
 
     // Route message by type
     switch (msg.type) {
+      case 'pong':
+        wsManager.handlePong(ws.data.id);
+        break;
+
       case 'subscribe_session': {
         const sessionId = msg.sessionId;
         if (sessionId && validateSessionId(sessionId) && (await sessions.get(sessionId))) {
@@ -125,7 +135,7 @@ export async function handleWSMessage(
 
       case 'session.accept_changes':
         if (await assertSessionAccess(msg.sessionId)) {
-          kory.handleSessionResponse(msg.sessionId, true);
+          await kory.handleSessionResponse(msg.sessionId, true);
         } else {
           serverLog.warn(
             { sessionId: msg.sessionId, clientId: ws.data.id },
@@ -136,7 +146,7 @@ export async function handleWSMessage(
 
       case 'session.reject_changes':
         if (await assertSessionAccess(msg.sessionId)) {
-          kory.handleSessionResponse(msg.sessionId, false);
+          await kory.handleSessionResponse(msg.sessionId, false);
         } else {
           serverLog.warn(
             { sessionId: msg.sessionId, clientId: ws.data.id },
@@ -156,10 +166,11 @@ export async function handleWSMessage(
   } catch (err) {
     serverLog.error(
       {
-        err,
         event: 'ws.message',
         clientId: ws?.data?.id,
-        raw: String(message).slice(0, 500),
+        messageBytes,
+        messageType,
+        errorType: err instanceof Error ? err.name : typeof err,
       },
       'WS message error',
     );

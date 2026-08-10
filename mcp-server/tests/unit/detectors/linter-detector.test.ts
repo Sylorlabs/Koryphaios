@@ -3,8 +3,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { LinterErrorDetector } from '../../../src/detectors/linter-detector.js';
+
 import type { ErrorDetectorOptions } from '../../../src/detectors/base-detector.js';
+import { LinterErrorDetector } from '../../../src/detectors/linter-detector.js';
 
 describe('LinterErrorDetector', () => {
   let detector: LinterErrorDetector;
@@ -228,13 +229,16 @@ describe('LinterErrorDetector', () => {
       expect(detector.isRunning).toBe(true);
     });
 
-    it('should handle start errors gracefully', async () => {
+    it('should start in a truthful unavailable state when the linter is missing', async () => {
       vi.spyOn(detector as any, 'verifyLinterAvailable').mockRejectedValue(
         new Error('ESLint not found')
       );
+      const runLintCheck = vi.spyOn(detector as any, 'runLintCheck');
 
-      await expect(detector.start()).rejects.toThrow('ESLint not found');
-      expect(detector.isRunning).toBe(false);
+      await expect(detector.start()).resolves.toBeUndefined();
+      expect(detector.isRunning).toBe(true);
+      expect(runLintCheck).not.toHaveBeenCalled();
+      await expect(detector.detectErrors()).resolves.toEqual([]);
     });
   });
 
@@ -297,9 +301,10 @@ describe('LinterErrorDetector', () => {
       await stoppedPromise;
     });
 
-    it('should emit detector-error event on errors', async () => {
+    it('should emit detector-error when startup fails after availability is verified', async () => {
       const testError = new Error('Test error');
-      vi.spyOn(detector as any, 'verifyLinterAvailable').mockRejectedValue(testError);
+      vi.spyOn(detector as any, 'verifyLinterAvailable').mockResolvedValue(undefined);
+      vi.spyOn(detector as any, 'runLintCheck').mockRejectedValue(testError);
 
       const errorPromise = new Promise<Error>(resolve => {
         detector.once('detector-error', resolve);

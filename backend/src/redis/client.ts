@@ -31,7 +31,7 @@ export interface RedisConfig {
 
 // Simple in-memory fallback for development
 class InMemoryRedis {
-  private data: Map<string, any> = new Map();
+  private data: Map<string, unknown> = new Map();
   private expirations: Map<string, number> = new Map();
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private scripts: Map<string, string> = new Map();
@@ -42,15 +42,15 @@ class InMemoryRedis {
     return value !== undefined ? String(value) : null;
   }
 
-  async set(key: string, value: string, ...args: any[]): Promise<'OK'> {
+  async set(key: string, value: string, ...args: unknown[]): Promise<'OK'> {
     this.data.set(key, value);
 
     // Handle EX/PX arguments
     for (let i = 0; i < args.length; i++) {
       if (args[i] === 'EX' && args[i + 1]) {
-        this.setExpiration(key, args[i + 1] * 1000);
+        this.setExpiration(key, Number(args[i + 1]) * 1000);
       } else if (args[i] === 'PX' && args[i + 1]) {
-        this.setExpiration(key, args[i + 1]);
+        this.setExpiration(key, Number(args[i + 1]));
       }
     }
 
@@ -96,7 +96,7 @@ class InMemoryRedis {
     return Math.ceil((exp - Date.now()) / 1000);
   }
 
-  async zadd(key: string, ...args: any[]): Promise<number> {
+  async zadd(key: string, ...args: unknown[]): Promise<number> {
     this.checkExpiration(key);
     let score: number | undefined;
     const members: { score: number; member: string }[] = [];
@@ -167,7 +167,7 @@ class InMemoryRedis {
     return sliced.map(([member]) => member);
   }
 
-  async hmset(key: string, ...args: any[]): Promise<'OK'> {
+  async hmset(key: string, ...args: unknown[]): Promise<'OK'> {
     this.checkExpiration(key);
     let hash = this.data.get(key) as Map<string, string> | undefined;
     if (!hash) {
@@ -212,52 +212,71 @@ class InMemoryRedis {
     return sha;
   }
 
-  async evalsha(sha: string | null, numKeys: number, ...args: any[]): Promise<any[]> {
+  async evalsha(sha: string | null, numKeys: number, ...args: unknown[]): Promise<unknown[]> {
     const script = sha ? this.scripts.get(sha) : null;
     const keys = args.slice(0, numKeys);
     const argv = args.slice(numKeys);
 
     if (script?.includes('ZREMRANGEBYSCORE')) {
-      return this._execSlidingWindow(keys[0], argv);
+      return this._execSlidingWindow(keys[0] as string, argv);
     }
     if (script?.includes('last_refill')) {
-      return this._execTokenBucket(keys[0], argv);
+      return this._execTokenBucket(keys[0] as string, argv);
     }
     return [1, 10, Date.now() + 60000];
   }
 
-  private async _execSlidingWindow(key: string, argv: any[]): Promise<any[]> {
+  private async _execSlidingWindow(key: string, argv: unknown[]): Promise<unknown[]> {
     const windowMs = Number(argv[0]);
     const maxRequests = Number(argv[1]);
     const now = Number(argv[2]);
+    const member = String(argv[3]);
+    const ttlSeconds = Number(argv[4]);
     const windowStart = now - windowMs;
 
-    await this.zremrangebyscore(key, 0, windowStart);
-    const current = await this.zcard(key);
+    // Keep the in-memory fallback equivalent to Redis Lua: this entire method
+    // executes without an await/yield, so concurrent callers cannot interleave
+    // between the count and insertion steps.
+    this.checkExpiration(key);
+    let set = this.data.get(key) as Map<string, number> | undefined;
+    if (!set) {
+      set = new Map();
+      this.data.set(key, set);
+    }
+    for (const [existingMember, score] of set.entries()) {
+      if (score >= 0 && score <= windowStart) set.delete(existingMember);
+    }
+    const current = set.size;
 
     if (current < maxRequests) {
-      const count = await this.incr(key + ':counter');
-      await this.zadd(key, now, `${now}:${count}`);
-      await this.expire(key, Math.ceil(windowMs / 1000) + 1);
-      const oldest = await this.zrange(key, 0, 0, 'WITHSCORES');
-      const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
+      set.set(member, now);
+      this.setExpiration(key, ttlSeconds * 1000);
+      const oldestScore = Math.min(...set.values());
+      const resetAt = Number.isFinite(oldestScore) ? oldestScore + windowMs : now + windowMs;
       return [1, maxRequests - current - 1, resetAt];
     } else {
-      const oldest = await this.zrange(key, 0, 0, 'WITHSCORES');
-      const resetAt = oldest.length >= 2 ? Number(oldest[1]) + windowMs : now + windowMs;
+      const oldestScore = Math.min(...set.values());
+      const resetAt = Number.isFinite(oldestScore) ? oldestScore + windowMs : now + windowMs;
       return [0, 0, resetAt];
     }
   }
 
-  private async _execTokenBucket(key: string, argv: any[]): Promise<any[]> {
+  private async _execTokenBucket(key: string, argv: unknown[]): Promise<unknown[]> {
     const bucketSize = Number(argv[0]);
     const refillRate = Number(argv[1]);
     const now = Number(argv[2]);
     const cost = Number(argv[3]);
+    const ttlSeconds = Number(argv[4]);
 
-    const bucket = await this.hmget(key, 'tokens', 'last_refill');
-    let tokens = bucket[0] !== null ? parseFloat(bucket[0]) : bucketSize;
-    const lastRefill = bucket[1] !== null ? parseFloat(bucket[1]) : now;
+    // Match the atomic Redis Lua path without yielding between read and write.
+    this.checkExpiration(key);
+    let bucket = this.data.get(key) as Map<string, string> | undefined;
+    if (!bucket) {
+      bucket = new Map();
+      this.data.set(key, bucket);
+    }
+    let tokens = bucket.has('tokens') ? Number(bucket.get('tokens')) : bucketSize;
+    const lastRefill = bucket.has('last_refill') ? Number(bucket.get('last_refill')) : now;
 
     const timePassed = Math.max(0, now - lastRefill) / 1000;
     tokens = Math.min(bucketSize, tokens + timePassed * refillRate);
@@ -274,8 +293,9 @@ class InMemoryRedis {
       retryAfter = Math.ceil((cost - tokens) / refillRate);
     }
 
-    await this.hmset(key, 'tokens', String(tokens), 'last_refill', String(now));
-    await this.expire(key, 3600);
+    bucket.set('tokens', String(tokens));
+    bucket.set('last_refill', String(now));
+    this.setExpiration(key, ttlSeconds * 1000);
     return [allowed, remaining, retryAfter];
   }
 

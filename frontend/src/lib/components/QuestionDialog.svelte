@@ -1,7 +1,10 @@
 <script lang="ts">
   import { wsStore } from "$lib/stores/websocket.svelte";
   import { sessionStore } from "$lib/stores/sessions.svelte";
-  import { MessageSquare, ArrowRight, CornerDownRight, MessagesSquare } from "lucide-svelte";
+  import MessageSquare from "lucide-svelte/icons/message-square";
+  import ArrowRight from "lucide-svelte/icons/arrow-right";
+  import CornerDownRight from "lucide-svelte/icons/corner-down-right";
+  import MessagesSquare from "lucide-svelte/icons/messages-square";
 
   let otherValue = $state("");
   let showOther = $state(false);

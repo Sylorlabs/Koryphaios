@@ -51,15 +51,6 @@ describe('plugin registry', () => {
     reg.unregister(highlightPlugin.id);
     expect(reg.list()).toHaveLength(0);
   });
-
-  it('loads a user plugin from source', () => {
-    const reg = createPluginRegistry();
-    const id = reg.loadUserPlugin(
-      `function(){ return { id: 'user.up', name: 'Upper', markdownTransform: s => s.toUpperCase() }; }`,
-    );
-    expect(id).toBe('user.up');
-    expect(reg.transformMarkdown('hi')).toBe('HI');
-  });
 });
 
 describe('built-in plugins', () => {

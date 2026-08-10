@@ -18,14 +18,23 @@ import {
   unlinkSync,
   readdirSync,
   statSync,
-  copyFileSync,
+  renameSync,
 } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { homedir } from 'node:os';
-import { db } from '../db';
-import { notes } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { createHash, randomUUID } from 'node:crypto';
 import { serverLog } from '../logger';
+import {
+  ConflictError,
+  NotFoundError,
+  PayloadTooLargeError,
+  ValidationError,
+} from '../errors/types';
+import {
+  CONTEXT_BUDGET_MAX_TOKENS,
+  CONTEXT_BUDGET_MIN_TOKENS,
+  DEFAULT_CONTEXT_BUDGET_TOKENS,
+} from '@koryphaios/shared';
 
 // ============================================================================
 // Workspace-shared memory root
@@ -69,7 +78,10 @@ export function registerWorkspaceRoot(root: string): void {
   const markerPath = join(root, WORKSPACE_MARKER);
   mkdirSync(dirname(markerPath), { recursive: true });
   if (!existsSync(markerPath)) {
-    writeFileSync(markerPath, JSON.stringify({ workspace: true, createdAt: Date.now() }, null, 2), 'utf8');
+    atomicWriteText(
+      markerPath,
+      JSON.stringify({ workspace: true, createdAt: Date.now() }, null, 2),
+    );
   }
   memoryRootCache.clear();
 }
@@ -91,8 +103,7 @@ export const MEMORY_CONFIG = {
   SESSION_MEMORY_FILE: 'memory.md',
 
   // Settings
-  MAX_MEMORY_SIZE: 100_000, // 100KB max per memory file
-  MAX_RULES_SIZE: 50_000, // 50KB max for rules
+  HARD_MAX_DOCUMENT_SIZE: 5_000_000,
 } as const;
 
 // ============================================================================
@@ -105,6 +116,8 @@ export interface MemoryFile {
   exists: boolean;
   lastModified: number | null;
   size: number;
+  /** Strong content hash used as an If-Match-style save precondition. */
+  revision: string | null;
 }
 
 export interface MemorySettings {
@@ -122,6 +135,11 @@ export interface MemorySettings {
   autoIncludeInContext: boolean;
   /** Maximum tokens to use for memories in context */
   maxContextTokens: number;
+  maxContextTokensEnabled: boolean;
+  autosaveEnabled: boolean;
+  autosaveDelayMs: number;
+  documentSizeLimitEnabled: boolean;
+  maxDocumentBytes: number;
 }
 
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
@@ -131,8 +149,79 @@ export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   agentMemoryEnabled: true,
   rulesEnabled: true,
   autoIncludeInContext: true,
-  maxContextTokens: 2000,
+  maxContextTokens: DEFAULT_CONTEXT_BUDGET_TOKENS,
+  maxContextTokensEnabled: true,
+  autosaveEnabled: true,
+  autosaveDelayMs: 1500,
+  documentSizeLimitEnabled: true,
+  maxDocumentBytes: 1_000_000,
 };
+
+function contentRevision(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('base64url');
+}
+
+function atomicWriteText(filePath: string, content: string): void {
+  const dir = dirname(filePath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const tempPath = join(dir, `.${basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
+  const mode = existsSync(filePath) ? statSync(filePath).mode : 0o600;
+  try {
+    writeFileSync(tempPath, content, { encoding: 'utf8', mode });
+    renameSync(tempPath, filePath);
+  } finally {
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+  }
+}
+
+function assertExpectedRevision(filePath: string, expectedRevision?: string | null): void {
+  if (expectedRevision === undefined) return;
+  const actualRevision = existsSync(filePath)
+    ? contentRevision(readFileSync(filePath, 'utf8'))
+    : null;
+  if (actualRevision !== expectedRevision) {
+    throw new ConflictError(
+      'This document changed after it was opened. Review the newer version before saving.',
+      {
+        expectedRevision,
+        actualRevision,
+      },
+    );
+  }
+}
+
+function assertDocumentBudget(projectRoot: string, content: string): void {
+  const settings = loadMemorySettings(projectRoot);
+  const maxBytes = settings.documentSizeLimitEnabled
+    ? settings.maxDocumentBytes
+    : MEMORY_CONFIG.HARD_MAX_DOCUMENT_SIZE;
+  const actualBytes = Buffer.byteLength(content, 'utf8');
+  if (actualBytes > maxBytes) {
+    throw new PayloadTooLargeError(`${maxBytes} bytes`, { actualBytes, maxBytes });
+  }
+}
+
+function memoryFile(filePath: string, content: string, lastModified: number): MemoryFile {
+  return {
+    path: filePath,
+    content,
+    exists: true,
+    lastModified,
+    size: Buffer.byteLength(content, 'utf8'),
+    revision: contentRevision(content),
+  };
+}
+
+function missingMemoryFile(filePath: string): MemoryFile {
+  return {
+    path: filePath,
+    content: '',
+    exists: false,
+    lastModified: null,
+    size: 0,
+    revision: null,
+  };
+}
 
 // ============================================================================
 // Path Resolution
@@ -157,7 +246,11 @@ export function getUniversalMemoryPath(): string {
  * Get project memory path
  */
 export function getProjectMemoryPath(projectRoot: string): string {
-  return join(resolveMemoryRoot(projectRoot), MEMORY_CONFIG.PROJECT_MEMORY_DIR, MEMORY_CONFIG.PROJECT_MEMORY_FILE);
+  return join(
+    resolveMemoryRoot(projectRoot),
+    MEMORY_CONFIG.PROJECT_MEMORY_DIR,
+    MEMORY_CONFIG.PROJECT_MEMORY_FILE,
+  );
 }
 
 /**
@@ -181,12 +274,24 @@ export function getRulesPath(projectRoot: string): string {
   return join(projectRoot, MEMORY_CONFIG.RULES_FILE);
 }
 
-export interface ProjectMemoryDocument { name: string; path: string; kind: 'memory' | 'rules' }
+export interface ProjectMemoryDocument {
+  name: string;
+  path: string;
+  kind: 'memory' | 'rules';
+}
 
-function getProjectMemoryDocumentPath(projectRoot: string, name: string, kind: 'memory' | 'rules'): string {
+function getProjectMemoryDocumentPath(
+  projectRoot: string,
+  name: string,
+  kind: 'memory' | 'rules',
+): string {
   const safeName = basename(name);
-  if (!safeName.toLowerCase().endsWith('.md') || safeName !== name || !/^[a-zA-Z0-9._-]+\.md$/i.test(safeName)) {
-    throw new Error('Invalid document name');
+  if (
+    !safeName.toLowerCase().endsWith('.md') ||
+    safeName !== name ||
+    !/^[a-zA-Z0-9._-]+\.md$/i.test(safeName)
+  ) {
+    throw new ValidationError('Invalid memory document name');
   }
   const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
   return join(base, `.koryphaios/${kind}`, safeName);
@@ -206,25 +311,40 @@ export function listProjectMemoryDocuments(projectRoot: string): ProjectMemoryDo
   });
 }
 
-export function createProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): ProjectMemoryDocument {
-  const safe = name.trim().replace(/\.md$/i, '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
-  if (!safe) throw new Error('A valid document name is required');
+export function createProjectMemoryDocument(
+  projectRoot: string,
+  name: string,
+  kind: 'memory' | 'rules',
+): ProjectMemoryDocument {
+  const safe = name
+    .trim()
+    .replace(/\.md$/i, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  if (!safe) throw new ValidationError('A valid document name is required');
+  if (safe.length > 120) {
+    throw new ValidationError('Memory document names cannot exceed 120 characters');
+  }
   const base = kind === 'rules' ? projectRoot : resolveMemoryRoot(projectRoot);
   const dir = join(base, `.koryphaios/${kind}`);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${safe}.md`);
-  if (!existsSync(path)) writeFileSync(path, '', 'utf8');
+  if (!existsSync(path)) atomicWriteText(path, '');
   return { name: `${safe}.md`, path, kind };
 }
 
 /** Read a user-created memory or rules document. The path is resolved from a
  * validated filename, never trusted from the client. */
-export function readProjectMemoryDocument(projectRoot: string, name: string, kind: 'memory' | 'rules'): MemoryFile {
+export function readProjectMemoryDocument(
+  projectRoot: string,
+  name: string,
+  kind: 'memory' | 'rules',
+): MemoryFile {
   const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
-  if (!existsSync(path)) throw new Error('Document not found');
+  if (!existsSync(path)) throw new NotFoundError('Memory document', name);
   const content = readFileSync(path, 'utf-8');
   const stats = statSync(path);
-  return { path, content, exists: true, lastModified: stats.mtimeMs, size: stats.size };
+  return memoryFile(path, content, stats.mtimeMs);
 }
 
 /** Write a user-created memory or rules document without letting a client
@@ -234,14 +354,14 @@ export function writeProjectMemoryDocument(
   name: string,
   kind: 'memory' | 'rules',
   content: string,
+  expectedRevision?: string | null,
 ): MemoryFile {
-  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
-    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
-  }
   const path = getProjectMemoryDocumentPath(projectRoot, name, kind);
-  if (!existsSync(path)) throw new Error('Document not found');
-  writeFileSync(path, content, 'utf-8');
-  return { path, content, exists: true, lastModified: Date.now(), size: content.length };
+  if (!existsSync(path)) throw new NotFoundError('Memory document', name);
+  assertDocumentBudget(projectRoot, content);
+  assertExpectedRevision(path, expectedRevision);
+  atomicWriteText(path, content);
+  return memoryFile(path, content, statSync(path).mtimeMs);
 }
 
 // ============================================================================
@@ -253,7 +373,7 @@ const UNIVERSAL_MEMORY_TEMPLATE = `# Universal Memory
 > This memory is shared across ALL your Koryphaios projects. Use it for:
 > - Personal coding preferences and style guidelines
 > - Frequently used patterns and snippets
-> - API keys and environment setup notes (be careful!)
+> - Non-secret environment setup notes (never store API keys or credentials)
 > - Links to documentation you reference often
 > - Custom instructions for the AI
 
@@ -301,7 +421,7 @@ const UNIVERSAL_MEMORY_TEMPLATE = `# Universal Memory
 *Last updated: {timestamp}*
 `;
 
-export function initializeUniversalMemory(): MemoryFile {
+export function initializeUniversalMemory(projectRoot = getProjectRoot()): MemoryFile {
   const filePath = getUniversalMemoryPath();
 
   if (!existsSync(filePath)) {
@@ -313,15 +433,10 @@ export function initializeUniversalMemory(): MemoryFile {
 
     const content = UNIVERSAL_MEMORY_TEMPLATE.replace('{timestamp}', new Date().toISOString());
 
-    writeFileSync(filePath, content, 'utf-8');
+    assertDocumentBudget(projectRoot, content);
+    atomicWriteText(filePath, content);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: Date.now(),
-      size: content.length,
-    };
+    return memoryFile(filePath, content, statSync(filePath).mtimeMs);
   }
 
   return readUniversalMemory();
@@ -331,33 +446,25 @@ export function readUniversalMemory(): MemoryFile {
   const filePath = getUniversalMemoryPath();
 
   if (!existsSync(filePath)) {
-    return { path: filePath, content: '', exists: false, lastModified: null, size: 0 };
+    return missingMemoryFile(filePath);
   }
 
   try {
     const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: stats.mtimeMs,
-      size: content.length,
-    };
+    return memoryFile(filePath, content, stats.mtimeMs);
   } catch (err) {
     serverLog.error({ err }, 'Failed to read universal memory');
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return missingMemoryFile(filePath);
   }
 }
 
-export function writeUniversalMemory(content: string): MemoryFile {
+export function writeUniversalMemory(
+  content: string,
+  projectRoot = getProjectRoot(),
+  expectedRevision?: string | null,
+): MemoryFile {
   const filePath = getUniversalMemoryPath();
   const dir = dirname(filePath);
 
@@ -365,20 +472,11 @@ export function writeUniversalMemory(content: string): MemoryFile {
     mkdirSync(dir, { recursive: true });
   }
 
-  // Enforce size limit
-  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
-    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
-  }
+  assertDocumentBudget(projectRoot, content);
+  assertExpectedRevision(filePath, expectedRevision);
+  atomicWriteText(filePath, content);
 
-  writeFileSync(filePath, content, 'utf-8');
-
-  return {
-    path: filePath,
-    content,
-    exists: true,
-    lastModified: Date.now(),
-    size: content.length,
-  };
+  return memoryFile(filePath, content, statSync(filePath).mtimeMs);
 }
 
 // ============================================================================
@@ -496,15 +594,10 @@ export function initializeProjectMemory(projectRoot: string): MemoryFile {
 
     const content = PROJECT_MEMORY_TEMPLATE.replace('{timestamp}', new Date().toISOString());
 
-    writeFileSync(filePath, content, 'utf-8');
+    assertDocumentBudget(projectRoot, content);
+    atomicWriteText(filePath, content);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: Date.now(),
-      size: content.length,
-    };
+    return memoryFile(filePath, content, statSync(filePath).mtimeMs);
   }
 
   return readProjectMemory(projectRoot);
@@ -514,33 +607,25 @@ export function readProjectMemory(projectRoot: string): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return writeProjectMemory(projectRoot, '');
+    return missingMemoryFile(filePath);
   }
 
   try {
     const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: stats.mtimeMs,
-      size: content.length,
-    };
+    return memoryFile(filePath, content, stats.mtimeMs);
   } catch (err) {
     serverLog.error({ err }, 'Failed to read project memory');
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return missingMemoryFile(filePath);
   }
 }
 
-export function writeProjectMemory(projectRoot: string, content: string): MemoryFile {
+export function writeProjectMemory(
+  projectRoot: string,
+  content: string,
+  expectedRevision?: string | null,
+): MemoryFile {
   const filePath = getProjectMemoryPath(projectRoot);
   const dir = dirname(filePath);
 
@@ -548,19 +633,11 @@ export function writeProjectMemory(projectRoot: string, content: string): Memory
     mkdirSync(dir, { recursive: true });
   }
 
-  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
-    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
-  }
+  assertDocumentBudget(projectRoot, content);
+  assertExpectedRevision(filePath, expectedRevision);
+  atomicWriteText(filePath, content);
 
-  writeFileSync(filePath, content, 'utf-8');
-
-  return {
-    path: filePath,
-    content,
-    exists: true,
-    lastModified: Date.now(),
-    size: content.length,
-  };
+  return memoryFile(filePath, content, statSync(filePath).mtimeMs);
 }
 
 // ============================================================================
@@ -637,15 +714,10 @@ export function initializeSessionMemory(projectRoot: string, sessionId: string):
       sessionId,
     );
 
-    writeFileSync(filePath, content, 'utf-8');
+    assertDocumentBudget(projectRoot, content);
+    atomicWriteText(filePath, content);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: Date.now(),
-      size: content.length,
-    };
+    return memoryFile(filePath, content, statSync(filePath).mtimeMs);
   }
 
   return readSessionMemory(projectRoot, sessionId);
@@ -655,35 +727,17 @@ export function readSessionMemory(projectRoot: string, sessionId: string): Memor
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
 
   if (!existsSync(filePath)) {
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return missingMemoryFile(filePath);
   }
 
   try {
     const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: stats.mtimeMs,
-      size: content.length,
-    };
+    return memoryFile(filePath, content, stats.mtimeMs);
   } catch (err) {
     serverLog.error({ err, sessionId }, 'Failed to read session memory');
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return missingMemoryFile(filePath);
   }
 }
 
@@ -691,6 +745,7 @@ export function writeSessionMemory(
   projectRoot: string,
   sessionId: string,
   content: string,
+  expectedRevision?: string | null,
 ): MemoryFile {
   const filePath = getSessionMemoryPath(projectRoot, sessionId);
   const dir = dirname(filePath);
@@ -699,19 +754,11 @@ export function writeSessionMemory(
     mkdirSync(dir, { recursive: true });
   }
 
-  if (content.length > MEMORY_CONFIG.MAX_MEMORY_SIZE) {
-    throw new Error(`Memory file exceeds maximum size of ${MEMORY_CONFIG.MAX_MEMORY_SIZE} bytes`);
-  }
+  assertDocumentBudget(projectRoot, content);
+  assertExpectedRevision(filePath, expectedRevision);
+  atomicWriteText(filePath, content);
 
-  writeFileSync(filePath, content, 'utf-8');
-
-  return {
-    path: filePath,
-    content,
-    exists: true,
-    lastModified: Date.now(),
-    size: content.length,
-  };
+  return memoryFile(filePath, content, statSync(filePath).mtimeMs);
 }
 
 export function deleteSessionMemory(projectRoot: string, sessionId: string): boolean {
@@ -733,7 +780,10 @@ export function deleteSessionMemory(projectRoot: string, sessionId: string): boo
         }
       }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Session memory directory cleanup failed');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Session memory directory cleanup failed',
+      );
     }
 
     return true;
@@ -852,15 +902,10 @@ export function initializeRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    writeFileSync(filePath, DEFAULT_RULES_TEMPLATE, 'utf-8');
+    assertDocumentBudget(projectRoot, DEFAULT_RULES_TEMPLATE);
+    atomicWriteText(filePath, DEFAULT_RULES_TEMPLATE);
 
-    return {
-      path: filePath,
-      content: DEFAULT_RULES_TEMPLATE,
-      exists: true,
-      lastModified: Date.now(),
-      size: DEFAULT_RULES_TEMPLATE.length,
-    };
+    return memoryFile(filePath, DEFAULT_RULES_TEMPLATE, statSync(filePath).mtimeMs);
   }
 
   return readRules(projectRoot);
@@ -870,50 +915,34 @@ export function readRules(projectRoot: string): MemoryFile {
   const filePath = getRulesPath(projectRoot);
 
   if (!existsSync(filePath)) {
-    return writeRules(projectRoot, '');
+    return missingMemoryFile(filePath);
   }
 
   try {
     const content = readFileSync(filePath, 'utf-8');
     const stats = statSync(filePath);
 
-    return {
-      path: filePath,
-      content,
-      exists: true,
-      lastModified: stats.mtimeMs,
-      size: content.length,
-    };
+    return memoryFile(filePath, content, stats.mtimeMs);
   } catch (err) {
     serverLog.error({ err }, 'Failed to read rules');
-    return {
-      path: filePath,
-      content: '',
-      exists: false,
-      lastModified: null,
-      size: 0,
-    };
+    return missingMemoryFile(filePath);
   }
 }
 
-export function writeRules(projectRoot: string, content: string): MemoryFile {
+export function writeRules(
+  projectRoot: string,
+  content: string,
+  expectedRevision?: string | null,
+): MemoryFile {
   const filePath = getRulesPath(projectRoot);
   const dir = dirname(filePath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-  if (content.length > MEMORY_CONFIG.MAX_RULES_SIZE) {
-    throw new Error(`Rules file exceeds maximum size of ${MEMORY_CONFIG.MAX_RULES_SIZE} bytes`);
-  }
+  assertDocumentBudget(projectRoot, content);
+  assertExpectedRevision(filePath, expectedRevision);
+  atomicWriteText(filePath, content);
 
-  writeFileSync(filePath, content, 'utf-8');
-
-  return {
-    path: filePath,
-    content,
-    exists: true,
-    lastModified: Date.now(),
-    size: content.length,
-  };
+  return memoryFile(filePath, content, statSync(filePath).mtimeMs);
 }
 
 // ============================================================================
@@ -926,6 +955,78 @@ export function getSettingsPath(projectRoot: string): string {
   return join(projectRoot, SETTINGS_FILE);
 }
 
+function finiteSetting(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+export function normalizeMemorySettings(input?: Partial<MemorySettings> | null): MemorySettings {
+  return {
+    universalMemoryEnabled:
+      typeof input?.universalMemoryEnabled === 'boolean'
+        ? input.universalMemoryEnabled
+        : DEFAULT_MEMORY_SETTINGS.universalMemoryEnabled,
+    projectMemoryEnabled:
+      typeof input?.projectMemoryEnabled === 'boolean'
+        ? input.projectMemoryEnabled
+        : DEFAULT_MEMORY_SETTINGS.projectMemoryEnabled,
+    sessionMemoryEnabled:
+      typeof input?.sessionMemoryEnabled === 'boolean'
+        ? input.sessionMemoryEnabled
+        : DEFAULT_MEMORY_SETTINGS.sessionMemoryEnabled,
+    agentMemoryEnabled:
+      typeof input?.agentMemoryEnabled === 'boolean'
+        ? input.agentMemoryEnabled
+        : DEFAULT_MEMORY_SETTINGS.agentMemoryEnabled,
+    rulesEnabled:
+      typeof input?.rulesEnabled === 'boolean'
+        ? input.rulesEnabled
+        : DEFAULT_MEMORY_SETTINGS.rulesEnabled,
+    autoIncludeInContext:
+      typeof input?.autoIncludeInContext === 'boolean'
+        ? input.autoIncludeInContext
+        : DEFAULT_MEMORY_SETTINGS.autoIncludeInContext,
+    maxContextTokens: Math.round(
+      Math.min(
+        CONTEXT_BUDGET_MAX_TOKENS,
+        Math.max(
+          CONTEXT_BUDGET_MIN_TOKENS,
+          finiteSetting(input?.maxContextTokens, DEFAULT_MEMORY_SETTINGS.maxContextTokens),
+        ),
+      ),
+    ),
+    maxContextTokensEnabled:
+      typeof input?.maxContextTokensEnabled === 'boolean'
+        ? input.maxContextTokensEnabled
+        : DEFAULT_MEMORY_SETTINGS.maxContextTokensEnabled,
+    autosaveEnabled:
+      typeof input?.autosaveEnabled === 'boolean'
+        ? input.autosaveEnabled
+        : DEFAULT_MEMORY_SETTINGS.autosaveEnabled,
+    autosaveDelayMs: Math.round(
+      Math.min(
+        10_000,
+        Math.max(
+          250,
+          finiteSetting(input?.autosaveDelayMs, DEFAULT_MEMORY_SETTINGS.autosaveDelayMs),
+        ),
+      ),
+    ),
+    documentSizeLimitEnabled:
+      typeof input?.documentSizeLimitEnabled === 'boolean'
+        ? input.documentSizeLimitEnabled
+        : DEFAULT_MEMORY_SETTINGS.documentSizeLimitEnabled,
+    maxDocumentBytes: Math.round(
+      Math.min(
+        MEMORY_CONFIG.HARD_MAX_DOCUMENT_SIZE,
+        Math.max(
+          16_384,
+          finiteSetting(input?.maxDocumentBytes, DEFAULT_MEMORY_SETTINGS.maxDocumentBytes),
+        ),
+      ),
+    ),
+  };
+}
+
 export function loadMemorySettings(projectRoot: string): MemorySettings {
   const filePath = getSettingsPath(projectRoot);
 
@@ -936,14 +1037,17 @@ export function loadMemorySettings(projectRoot: string): MemorySettings {
   try {
     const content = readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(content);
-    return { ...DEFAULT_MEMORY_SETTINGS, ...parsed };
+    return normalizeMemorySettings(parsed as Partial<MemorySettings>);
   } catch (err) {
     serverLog.error({ err }, 'Failed to load memory settings');
     return DEFAULT_MEMORY_SETTINGS;
   }
 }
 
-export function saveMemorySettings(projectRoot: string, settings: MemorySettings): void {
+export function saveMemorySettings(
+  projectRoot: string,
+  settings: Partial<MemorySettings>,
+): MemorySettings {
   const filePath = getSettingsPath(projectRoot);
   const dir = dirname(filePath);
 
@@ -951,7 +1055,9 @@ export function saveMemorySettings(projectRoot: string, settings: MemorySettings
     mkdirSync(dir, { recursive: true });
   }
 
-  writeFileSync(filePath, JSON.stringify(settings, null, 2), 'utf-8');
+  const normalized = normalizeMemorySettings({ ...loadMemorySettings(projectRoot), ...settings });
+  atomicWriteText(filePath, JSON.stringify(normalized, null, 2));
+  return normalized;
 }
 
 // ============================================================================
@@ -986,29 +1092,60 @@ export function assembleMemoryContext(
 }
 
 export function formatMemoryForContext(context: MemoryContext): string {
-  const parts: string[] = [];
+  const candidates: string[] = [];
 
   if (context.rules?.exists && context.rules.content) {
-    parts.push(`## Project Rules\n\n${context.rules.content}`);
-  }
-
-  if (context.universal?.exists && context.universal.content) {
-    parts.push(`## Universal Memory\n\n${context.universal.content}`);
-  }
-
-  if (context.project?.exists && context.project.content) {
-    parts.push(`## Project Memory\n\n${context.project.content}`);
+    candidates.push(`## Project Rules\n\n${context.rules.content}`);
   }
 
   if (context.session?.exists && context.session.content) {
-    parts.push(`## Session Memory\n\n${context.session.content}`);
+    candidates.push(`## Session Memory\n\n${context.session.content}`);
   }
 
-  if (parts.length === 0) {
-    return '';
+  if (context.project?.exists && context.project.content) {
+    candidates.push(`## Project Memory\n\n${context.project.content}`);
   }
 
-  return `# Memory Context\n\n${parts.join('\n\n---\n\n')}`;
+  if (context.universal?.exists && context.universal.content) {
+    candidates.push(`## Universal Memory\n\n${context.universal.content}`);
+  }
+
+  if (candidates.length === 0) return '';
+
+  // This is a context-allocation boundary, not a usage claim. Providers own
+  // authoritative token reporting; four characters per token is only used to
+  // keep persisted user budgets bounded before the provider sees the prompt.
+  // Turning the custom limit off uses the shared 100k safety ceiling. It never
+  // turns prompt construction into an unbounded read of long-form documents.
+  const maxTokens = context.settings.maxContextTokensEnabled
+    ? context.settings.maxContextTokens
+    : CONTEXT_BUDGET_MAX_TOKENS;
+  const maxChars = Math.max(
+    CONTEXT_BUDGET_MIN_TOKENS * 4,
+    Math.min(CONTEXT_BUDGET_MAX_TOKENS, maxTokens) * 4,
+  );
+  const prefix = '# Memory Context\n\n';
+  const separator = '\n\n---\n\n';
+  const parts: string[] = [];
+  let used = prefix.length;
+  for (const candidate of candidates) {
+    const separatorLength = parts.length ? separator.length : 0;
+    const remaining = maxChars - used - separatorLength;
+    if (remaining <= 0) break;
+    if (candidate.length <= remaining) {
+      parts.push(candidate);
+      used += separatorLength + candidate.length;
+      continue;
+    }
+    if (remaining >= 160) {
+      parts.push(
+        `${candidate.slice(0, Math.max(0, remaining - 38)).trimEnd()}\n\n[Memory truncated by context budget]`,
+      );
+    }
+    break;
+  }
+
+  return parts.length ? `${prefix}${parts.join(separator)}` : '';
 }
 
 /**
@@ -1023,12 +1160,18 @@ function buildNotesCatalogUsageHint(visibleTools: Set<string>): string {
     hints.push('Use search_notes or list_notes to discover notes.');
   }
   if (visibleTools.has('link_notes') || visibleTools.has('unlink_notes')) {
-    hints.push('Use link_notes / unlink_notes to edit the graph; [[wikilinks]] in content also create edges.');
+    hints.push(
+      'Use link_notes / unlink_notes to edit the graph; [[wikilinks]] in content also create edges.',
+    );
   }
   if (visibleTools.has('render_note')) {
-    hints.unshift('Default to render_note mode="excerpt" with query/heading and a small maxChars; mode="document" renders an HTML/Markdown artifact in chat without copying its source.');
+    hints.unshift(
+      'Default to render_note mode="excerpt" with query/heading and a small maxChars; mode="document" renders an HTML/Markdown artifact in chat without copying its source.',
+    );
   }
-  hints.push('Retrieve and quote only the minimum context needed; do not recommend loading an entire document by default.');
+  hints.push(
+    'Retrieve and quote only the minimum context needed; do not recommend loading an entire document by default.',
+  );
   return hints.join('\n');
 }
 
@@ -1079,7 +1222,10 @@ export async function getNotesCatalogPrompt(
       suffix
     );
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build notes catalog context block');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to build notes catalog context block',
+    );
     return '';
   }
 }
@@ -1088,18 +1234,30 @@ export async function getNotesCatalogPrompt(
  * Build a ## Notes Network context block from notes flagged includeInContext.
  * Returns an empty string when no such notes exist or if the DB is unavailable.
  */
-export async function getNotesContext(maxTokens: number = 2000): Promise<string> {
-  let contextNotes: (typeof notes.$inferSelect)[];
+export async function getNotesContext(
+  maxTokens: number = 2000,
+  projectRoot?: string,
+): Promise<string> {
+  let contextNotes: Array<{
+    title: string;
+    folderPath: string;
+    tags: string[];
+    content: string;
+  }>;
   try {
-    contextNotes = await db.select().from(notes).where(eq(notes.includeInContext, 1));
+    const { getContextNotes } = await import('../notes/notes-service');
+    contextNotes = await getContextNotes(projectRoot);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB not available for context, degrading gracefully');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Notes DB not available for context, degrading gracefully',
+    );
     return '';
   }
 
   if (!contextNotes.length) return '';
 
-  const parts: string[] = ['## Pinned Notes (always in context)\n'];
+  const parts: string[] = ['## Notes explicitly included in agent context\n'];
   let tokenEstimate = 10;
 
   for (const note of contextNotes) {
@@ -1109,12 +1267,14 @@ export async function getNotesContext(maxTokens: number = 2000): Promise<string>
       ']]\nPath: ' +
       note.folderPath +
       '\nTags: ' +
-      note.tags +
+      note.tags.join(', ') +
       '\n\n' +
       note.content +
       '\n\n';
     const blockTokens = Math.ceil(block.length / 4);
-    if (tokenEstimate + blockTokens > maxTokens) break;
+    // One essay-sized note must not starve every smaller selected note that
+    // follows it. Skip that note and continue filling the remaining budget.
+    if (tokenEstimate + blockTokens > maxTokens) continue;
     parts.push(block);
     tokenEstimate += blockTokens;
   }
@@ -1125,7 +1285,7 @@ export async function getNotesContext(maxTokens: number = 2000): Promise<string>
   return parts.join('');
 }
 
-/** Full notes network section for agent system prompts: catalog + pinned note bodies. */
+/** Full notes network section for agent system prompts: catalog + explicitly selected note bodies. */
 export async function buildNotesNetworkPrompt(
   maxContextTokens: number = 2500,
   projectRoot?: string,
@@ -1141,27 +1301,26 @@ export async function buildNotesNetworkPrompt(
     const settings = loadNotesSettings(projectRoot);
     if (!settings.enabled) return '';
     autoInclude = settings.autoIncludeInContext;
-    // When the token budget toggle is off, use a generous default instead of
-    // the user's capped value — they've explicitly disabled the limit.
+    // Turning off the custom budget still uses the shared hard safety ceiling.
     effectiveMaxTokens = settings.maxContextTokensEnabled
       ? settings.maxContextTokens
-      : 100_000;
+      : CONTEXT_BUDGET_MAX_TOKENS;
     visibleTools = getVisibleNoteToolNames(projectRoot);
     if (!visibleTools.length) return '';
   }
 
-  const includePinned =
+  const includeSelectedNotes =
     autoInclude &&
     (!visibleTools?.length ||
       visibleTools.includes('read_note') ||
       visibleTools.includes('recall_notes'));
 
-  const [catalog, pinned] = await Promise.all([
+  const [catalog, selectedNotes] = await Promise.all([
     getNotesCatalogPrompt(150, visibleTools, projectRoot),
-    includePinned ? getNotesContext(effectiveMaxTokens) : Promise.resolve(''),
+    includeSelectedNotes ? getNotesContext(effectiveMaxTokens, projectRoot) : Promise.resolve(''),
   ]);
-  if (!catalog && !pinned) return '';
-  return '\n\n# Knowledge Network\n\n' + [catalog, pinned].filter(Boolean).join('\n\n');
+  if (!catalog && !selectedNotes) return '';
+  return '\n\n# Knowledge Network\n\n' + [catalog, selectedNotes].filter(Boolean).join('\n\n');
 }
 
 // ============================================================================

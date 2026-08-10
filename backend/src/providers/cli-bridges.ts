@@ -20,7 +20,7 @@
 import type { ProviderName } from '@koryphaios/shared';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
-import { mkdirSync, existsSync, symlinkSync, rmSync, lstatSync } from 'node:fs';
+import { existsSync, symlinkSync, rmSync, lstatSync } from 'node:fs';
 import { serverLog } from '../logger';
 import {
   type CliAgentConfig,
@@ -40,128 +40,50 @@ import {
   sandboxToScopes,
 } from './cli-bridge';
 import type { ProviderEvent } from './types';
-import { buildKoryCliMcpConfig, getKoryCliBearer } from './kory-cli-mcp-config';
+import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
+import { getKoryBridgeGrant, type BridgeGrantAction } from './bridge-grant';
+import { toolsForRole } from './kory-mcp-bridge';
+import { ensureManagedCliDirectory } from './managed-cli-storage';
 
 // ─── Shared harness note ───────────────────────────────────────────────────
 
 export const KORY_HARNESS_NOTE =
   'You are running inside the Koryphaios orchestrator. Koryphaios owns ALL tool execution, ' +
   'permissions, and orchestration. Do NOT use your native built-in tools (Read, Edit, Write, ' +
-  'Bash, Grep, Glob, etc.) — they are disabled. Instead, use the kory__ MCP tools exposed by ' +
-  'the "kory" MCP server (kory__read_file, kory__edit_file, kory__write_file, kory__bash, ' +
-  'kory__grep, kory__glob, kory__ls, kory__web_search, kory__web_fetch, kory__get_resource_budget, kory__create_note, ' +
-  'kory__search_notes, kory__delegate_to_worker, etc.). Every kory__ tool call goes through ' +
-  'Koryphaios permission + sandbox policy. Never spawn subagents or delegate to other agents ' +
-  'yourself; use kory__delegate_to_worker and Koryphaios will dispatch its own worker agents.';
+  'Bash, Grep, Glob, etc.) — they are disabled. Use only the role-scoped kory__ tools listed ' +
+  'by the "kory" MCP server. Every kory__ tool call goes through Koryphaios permission + ' +
+  'sandbox policy. Never spawn native subagents; delegate through Koryphaios only when ' +
+  'your advertised role-scoped tool list contains one; otherwise return the need to the manager.';
 
 export const KORY_HARNESS_NOTE_EXTENDED =
   KORY_HARNESS_NOTE +
   ' Do not start background tasks that require a later notification: complete the requested ' +
   'work in this turn and always finish with a concise user-facing answer.';
 
-/**
- * Freebuff-specific harness note. Unlike the subprocess CLI providers where
- * native tools are disabled and the agent must call kory__ MCP tools, the
- * Freebuff SDK provider INTERCEPTS native tools via overrideTools and routes
- * them through Kory's ToolRegistry. The agent calls its native write_file /
- * str_replace / run_terminal_command / etc. as usual, but every call flows
- * through Kory's permission policy, sandbox, approval gate, and change
- * recording — identical to kory__ tools. Web tools (web_search, read_url)
- * stay native because they run server-side on Codebuff's backend with no
- * local side effects.
- */
-export const FREEBUFF_HARNESS_NOTE =
-  'You are running inside the Koryphaios orchestrator via the Codebuff SDK. ' +
-  'Koryphaios owns ALL filesystem and command tool execution — your native ' +
-  'tools (write_file, str_replace, apply_patch, run_terminal_command, ' +
-  'list_directory, glob, code_search, read_files) are intercepted and routed ' +
-  'through Koryphaios\'s permission, sandbox, and approval system. Use them ' +
-  'normally; they will be gated automatically. Your native web tools ' +
-  '(web_search, read_url) remain available for research. Never spawn ' +
-  'subagents or delegate to other agents yourself; ask the user to delegate ' +
-  'via Koryphaios if you need a worker agent.';
+export const KORY_DIRECT_TOOL_HARNESS_NOTE =
+  'You are running inside the Koryphaios orchestrator. Koryphaios owns ALL tool execution, ' +
+  'permissions, and orchestration. Use only the exact role-scoped tool names supplied with this ' +
+  'request; do not invent kory__ aliases or use unsupplied native tools. Never spawn or delegate ' +
+  'to native subagents; use a supplied Koryphaios delegation tool only when your role exposes it.';
 
 // ─── Shared kory tool whitelist ────────────────────────────────────────────
-// The full set of kory__ MCP tools every CLI harness gets. Mirrors the catalog
-// in kory-mcp-bridge.ts. The critic role is restricted to the read-only subset.
+// Derive provider allowlists from the bridge catalog instead of maintaining a
+// second copy that can drift from MCP ListTools role filtering.
+export const KORY_MANAGER_TOOL_WHITELIST = toolsForRole('manager').map((tool) => tool.name);
+export const KORY_WORKER_TOOL_WHITELIST = toolsForRole('worker').map((tool) => tool.name);
+export const KORY_CRITIC_TOOL_WHITELIST = toolsForRole('critic').map((tool) => tool.name);
+export const KORY_CODER_TOOL_WHITELIST = toolsForRole('coder').map((tool) => tool.name);
 
-export const KORY_TOOL_WHITELIST: string[] = [
-  'kory__read_file',
-  'kory__write_file',
-  'kory__edit_file',
-  'kory__batch_edit',
-  'kory__delete_file',
-  'kory__move_file',
-  'kory__diff',
-  'kory__patch',
-  'kory__grep',
-  'kory__glob',
-  'kory__ls',
-  'kory__bash',
-  'kory__shell_manage',
-  'kory__web_search',
-  'kory__web_fetch',
-  'kory__create_note',
-  'kory__read_note',
-  'kory__update_note',
-  'kory__delete_note',
-  'kory__link_notes',
-  'kory__unlink_notes',
-  'kory__recall_notes',
-  'kory__search_notes',
-  'kory__list_notes',
-  'kory__get_note_backlinks',
-  'kory__get_note_graph_summary',
-  'kory__render_note',
-  'kory__fetch_context',
-  'kory__prune_context',
-  'kory__ask_user',
-  'kory__ask_manager',
-  'kory__delegate_to_worker',
-  'kory__delegate_to_jules',
-  'kory__create_goal',
-  'kory__update_goal',
-  'kory__list_workflows',
-  'kory__start_workflow',
-  'kory__update_workflow',
-  'kory__create_workflow_draft',
-  'kory__get_resource_budget',
-  'kory__load_skill_detail',
-  'kory__detect_errors',
-  'kory__analyze_error',
-  'kory__suggest_fixes',
-  'kory__git_status',
-  'kory__git_diff',
-  'kory__git_commit',
-  'kory__commit_and_create_pr',
-  'kory__view_image',
-];
+/** Backwards-compatible name for the manager/full catalog. */
+export const KORY_TOOL_WHITELIST = KORY_MANAGER_TOOL_WHITELIST;
 
-export const KORY_CRITIC_TOOL_WHITELIST: string[] = [
-  'kory__read_file',
-  'kory__grep',
-  'kory__glob',
-  'kory__ls',
-  'kory__diff',
-  'kory__web_search',
-  'kory__web_fetch',
-  'kory__search_notes',
-  'kory__recall_notes',
-  'kory__list_notes',
-  'kory__read_note',
-  'kory__get_note_backlinks',
-  'kory__get_note_graph_summary',
-  'kory__fetch_context',
-  'kory__ask_user',
-  'kory__get_resource_budget',
-  'kory__load_skill_detail',
-  'kory__detect_errors',
-  'kory__analyze_error',
-  'kory__suggest_fixes',
-  'kory__git_status',
-  'kory__git_diff',
-  'kory__view_image',
-];
+export function koryToolWhitelistForRole(role: string): string[] {
+  if (role === 'manager') return KORY_MANAGER_TOOL_WHITELIST;
+  if (role === 'worker') return KORY_WORKER_TOOL_WHITELIST;
+  if (role === 'critic') return KORY_CRITIC_TOOL_WHITELIST;
+  if (role === 'coder') return KORY_CODER_TOOL_WHITELIST;
+  return [];
+}
 
 /** Build the kory MCP server config for a CLI harness. Uses the env vars set
  *  in bootstrap (KORY_MCP_BRIDGE_SCRIPT / KORY_MCP_BRIDGE_COMMAND) so the
@@ -178,16 +100,20 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
   const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
   if (!hookScript) return null;
   if (!ctx.sessionId) return null;
-  const bearer = getKoryCliBearer(ctx.sessionId, ctx.role);
-  const base = `node ${JSON.stringify(hookScript)} --session-id ${JSON.stringify(ctx.sessionId)} --auth ${JSON.stringify(bearer)}`;
-  return [
-    ...(['PreToolUse', 'PostToolUse', 'UserPromptSubmit'] as const).map((event) => ({
-      events: [event],
-      command: `${base} --event ${event}`,
-      matcher: '',
-    })),
-    { events: ['Stop'], command: `${base} --event Stop`, matcher: '' },
-  ];
+  const events = ['PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop'] as const;
+  const actionForEvent: Record<(typeof events)[number], BridgeGrantAction> = {
+    PreToolUse: 'hook:pre-tool',
+    PostToolUse: 'hook:post-tool',
+    UserPromptSubmit: 'hook:prompt-submit',
+    Stop: 'hook:stop',
+  };
+  return events.map((event) => {
+    const grant = ctx.bridgeGrantLease
+      ? ctx.bridgeGrantLease.grant([actionForEvent[event]])
+      : getKoryBridgeGrant(ctx.sessionId!, ctx.role, [actionForEvent[event]]);
+    const command = `node ${JSON.stringify(hookScript)} --auth-file ${JSON.stringify(grant.path)} --event ${event}`;
+    return { events: [event], command, matcher: '' };
+  });
 }
 
 // ─── Session-isolated homes ────────────────────────────────────────────────
@@ -195,34 +121,35 @@ export function buildKoryHookConfigs(ctx: CliBridgeContext): CliHookConfig[] | n
 function makeIsolatedHome(dirName: string, realHome: string, symlinkFiles: string[]): string {
   const dir = join(homedir(), '.koryphaios', dirName);
   try {
-    mkdirSync(dir, { recursive: true });
+    ensureManagedCliDirectory(dir);
     for (const file of symlinkFiles) {
       const src = join(realHome, file);
       const dst = join(dir, file);
       if (!existsSync(src)) continue;
       try {
         if (existsSync(dst) || lstatSync(dst).isSymbolicLink?.()) rmSync(dst, { force: true });
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-bridges: no existing link to remove');
+      } catch {
+        serverLog.debug({}, 'cli-bridges: no existing link to remove');
       }
       try {
         symlinkSync(src, dst);
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-bridges: symlink best-effort failed');
+      } catch {
+        serverLog.debug({}, 'cli-bridges: symlink best-effort failed');
       }
     }
-  } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-bridges: isolated home creation failed — falling back to real home');
-    return realHome;
+  } catch {
+    serverLog.warn({}, 'cli-bridges: private isolated home creation failed');
+    throw new Error('Unable to create a private managed CLI home');
   }
   return dir;
 }
 
 export function getKoryphaiosCodexHome(profileDir = join(homedir(), '.codex')): string {
   const defaultHome = join(homedir(), '.codex');
-  const dirName = profileDir === defaultHome
-    ? 'codex-home'
-    : `codex-home-${basename(profileDir).replace(/[^a-z0-9._-]/gi, '-')}`;
+  const dirName =
+    profileDir === defaultHome
+      ? 'codex-home'
+      : `codex-home-${basename(profileDir).replace(/[^a-z0-9._-]/gi, '-')}`;
   return makeIsolatedHome(dirName, profileDir, ['auth.json']);
 }
 
@@ -289,17 +216,11 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
     // Allow only the kory MCP tools + TodoWrite (planning only).
     // Claude Code prefixes MCP tools with mcp__<server>__.
     const allow = [
-      ...KORY_TOOL_WHITELIST.map((t) => `mcp__kory__${t.replace(/^kory__/, '')}`),
+      ...koryToolWhitelistForRole(ctx.role).map(
+        (tool) => `mcp__kory__${tool.replace(/^kory__/, '')}`,
+      ),
       'TodoWrite', // planning only, no side effects
     ];
-    // Critic role: further restrict to read-only kory tools.
-    if (ctx.role === 'critic') {
-      const criticAllow = [
-        ...KORY_CRITIC_TOOL_WHITELIST.map((t) => `mcp__kory__${t.replace(/^kory__/, '')}`),
-        'TodoWrite',
-      ];
-      return { allow: criticAllow, deny: [...new Set(deny)], ask: [] };
-    }
     return { allow, deny: [...new Set(deny)], ask: [] };
   }
 
@@ -420,7 +341,7 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
     // This configuration advertises the Kory-owned capability surface. The
     // Codex provider renders the current request's role-filtered, unprefixed
     // ToolRegistry names into its envelope protocol.
-    const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
+    const allowedTools = koryToolWhitelistForRole(ctx.role);
     return {
       systemInstructions: [
         ctx.systemPrompt?.trim() ?? '',
@@ -787,77 +708,11 @@ export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
   buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
     // For API providers, the "agent config" is the system prompt + tool defs
     // sent in the API request. Package them so the provider can inject.
-    const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
+    const allowedTools = ctx.tools.map((tool) => tool.name);
     return {
-      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_HARNESS_NOTE].filter(Boolean),
-      allowedTools,
-      permissions: this.buildPermissionScopes(ctx),
-      extensions: koryProvenanceExtensions(ctx),
-    };
-  }
-
-  serializeAgentConfig(_config: CliAgentConfig): string {
-    return '{}';
-  }
-
-  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
-    return null;
-  }
-
-  serializeHooks(_hooks: CliHookConfig[]): string {
-    return '{}';
-  }
-
-  buildMcpConfig(_ctx: CliBridgeContext): CliMcpServerConfig[] | null {
-    return null;
-  }
-
-  buildRules(_ctx: CliBridgeContext): CliRuleFile[] | null {
-    return null;
-  }
-
-  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
-    return null;
-  }
-
-  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
-    return { trajectory: { steps: [] }, events: [] };
-  }
-}
-
-// ─── Freebuff (Codebuff free tier) bridge ──────────────────────────────────
-// API-based (uses @codebuff/sdk's CodebuffClient, no subprocess). The bridge
-// injects the Kory harness note into the prompt and exposes the kory__ tool
-// whitelist so the provider can advertise them as custom tool definitions to
-// the Codebuff backend. No ads — the SDK path has no ad injection.
-
-export class FreebuffCliBridge extends ManagedCliBridge implements CliBridge {
-  readonly provider: ProviderName = 'freebuff' as const;
-  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'legacy';
-
-  getCapabilities(): CliCapabilities {
-    return {
-      ...EMPTY_CLI_CAPABILITIES,
-      // Freebuff is API-based (uses @codebuff/sdk, no CLI subprocess). No
-      // agent-config/sandbox/export/permission-mode/acp/rules/skills/hooks.
-      // The bridge injects Kory context into the prompt and exposes Kory
-      // tools as custom tool definitions to the Codebuff backend.
-      supportsMcp: false, // uses custom tool definitions instead
-      version: null,
-      probedAt: 0,
-    };
-  }
-
-  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
-    return sandboxToScopes(ctx.sandbox, ctx.role);
-  }
-
-  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
-    // For the SDK provider, the "agent config" is the system prompt + tool
-    // defs sent in the run() call. Package them so the provider can inject.
-    const allowedTools = ctx.role === 'critic' ? KORY_CRITIC_TOOL_WHITELIST : KORY_TOOL_WHITELIST;
-    return {
-      systemInstructions: [ctx.systemPrompt?.trim() ?? '', FREEBUFF_HARNESS_NOTE].filter(Boolean),
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', KORY_DIRECT_TOOL_HARNESS_NOTE].filter(
+        Boolean,
+      ),
       allowedTools,
       permissions: this.buildPermissionScopes(ctx),
       extensions: koryProvenanceExtensions(ctx),
@@ -926,9 +781,6 @@ export function getCliBridge(provider: ProviderName): CliBridge | null {
       break;
     case 'kimicode':
       bridge = new KimiCodeCliBridge();
-      break;
-    case 'freebuff':
-      bridge = new FreebuffCliBridge();
       break;
     default:
       return null;

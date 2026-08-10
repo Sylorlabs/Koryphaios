@@ -12,7 +12,7 @@
  *
  * To enable real embeddings:
  *   1. Replace processEmbeddingJob's stub return with a real embedding API call.
- *   2. Set MemoryManagerService.embeddingProviderAvailable = true.
+ *   2. Wire an authenticated embedding provider into the active memory runtime.
  *   3. Update isEmbeddingServiceReady() to reflect real readiness.
  */
 
@@ -55,13 +55,21 @@ export function createEmbeddingWorker(
 
     embeddingWorker.on('completed', (job, result) => {
       serverLog.debug(
-        { jobId: job.id, contentId: job.data.contentId, success: result.success, dimensions: result.dimensions },
+        {
+          jobId: job.id,
+          contentId: job.data.contentId,
+          success: result.success,
+          dimensions: result.dimensions,
+        },
         'Embedding job completed',
       );
     });
 
     embeddingWorker.on('failed', (job, err) => {
-      serverLog.error({ jobId: job?.id, contentId: job?.data?.contentId, error: err.message }, 'Embedding job failed');
+      serverLog.error(
+        { jobId: job?.id, contentId: job?.data?.contentId, error: err.message },
+        'Embedding job failed',
+      );
     });
 
     embeddingWorker.on('progress', (job, progress) => {
@@ -136,7 +144,11 @@ export async function resumeEmbeddingWorker(): Promise<void> {
   }
 }
 
-export function getEmbeddingWorkerStatus(): { running: boolean; concurrency: number; isStub: boolean } {
+export function getEmbeddingWorkerStatus(): {
+  running: boolean;
+  concurrency: number;
+  isStub: boolean;
+} {
   return {
     running: embeddingWorker !== null,
     concurrency: embeddingWorker?.opts?.concurrency ?? 0,

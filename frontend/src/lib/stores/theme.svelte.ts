@@ -14,14 +14,7 @@ export type ThemePreset =
   | 'light'
   | 'system';
 export type AccentColor =
-  | 'gold'
-  | 'indigo'
-  | 'cyan'
-  | 'emerald'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'custom';
+  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
 
 export interface CustomAccent {
   main: string;
@@ -61,7 +54,9 @@ const THEME_PRESETS: Record<Exclude<ThemePreset, 'system'>, Record<string, strin
     '--color-border-bright': 'rgba(213, 178, 97, 0.36)',
     '--color-text-primary': '#F6EFE2',
     '--color-text-secondary': 'rgba(214, 206, 192, 0.74)',
-    '--color-text-muted': 'rgba(214, 206, 192, 0.40)',
+    // Small labels and recovery copy use this token throughout the native UI.
+    // 0.66 keeps the tertiary hierarchy while clearing 4.8:1 on surface-4.
+    '--color-text-muted': 'rgba(214, 206, 192, 0.66)',
     // Semantic status colors
     '--color-success': '#22c55e',
     '--color-success-bg': 'rgba(34, 197, 94, 0.15)',
@@ -403,6 +398,15 @@ function createThemeStore() {
       save();
       // Lazy-load the newly selected font's CSS.
       void loadFont(f);
+    },
+
+    reset() {
+      preset = defaults.preset;
+      accent = defaults.accent;
+      font = defaults.font;
+      customAccent = undefined;
+      save();
+      void loadFont(defaults.font);
     },
 
     get presets(): Array<{ id: ThemePreset; label: string }> {

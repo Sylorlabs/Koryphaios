@@ -162,7 +162,10 @@ export async function validateUrl(url: string): Promise<{
   try {
     parsed = new URL(url);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL format in validateUrl');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Invalid URL format in validateUrl',
+    );
     return { safe: false, reason: 'Invalid URL format' };
   }
 
@@ -312,7 +315,10 @@ export async function validateUrl(url: string): Promise<{
       validatedIps: allIps,
     };
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'DNS resolution failed in validateUrl');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'DNS resolution failed in validateUrl',
+    );
     return {
       safe: false,
       reason: `Blocked: DNS resolution failed for "${hostname}" — fail-closed for safety`,
@@ -508,10 +514,16 @@ export function validatePathAccess(
       resolved = realpathSync(resolved);
     } catch (err: unknown) {
       // File may not exist yet (e.g. write); use resolved path
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'realpathSync failed, file may not exist yet');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'realpathSync failed, file may not exist yet',
+      );
     }
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid path in validatePathAccess');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Invalid path in validatePathAccess',
+    );
     return { allowed: false, reason: 'Invalid path' };
   }
 
@@ -572,8 +584,8 @@ export async function secureEncrypt(plaintext: string): Promise<string> {
 }
 
 /**
- * Decrypt a value (handles both legacy and new envelope formats)
- * Automatically re-encrypts legacy values if needed
+ * Decrypt a value stored in the authenticated envelope format.
+ * Historical credential migration is handled explicitly by UserCredentialsService.
  */
 export async function secureDecrypt(ciphertext: string): Promise<string> {
   // Handle new envelope format
@@ -603,8 +615,8 @@ export function isUsingSecureEncryption(): boolean {
 }
 
 /**
- * Encrypt for storage: uses envelope encryption when initialized.
- * In production, envelope encryption is required; in development, falls back to legacy with a warning.
+ * Encrypt for storage using authenticated envelope encryption.
+ * Every environment fails closed when secure key management cannot initialize.
  */
 export async function encryptForStorage(plaintext: string): Promise<string> {
   if (!envelopeEncryption) {
@@ -632,6 +644,31 @@ const REDACT_KEYS = new Set([
   'baseUrl',
 ]);
 const REDACT_PREFIX = '***';
+
+/** Redact common credentials from bounded free-form text before it is logged,
+ * persisted as evidence, or sent to a model. This is deliberately broader
+ * than object-key redaction because command output and provider diagnostics
+ * often embed credentials inside otherwise ordinary strings. */
+export function redactSecretsInText(value: string, maxLength = 8_000): string {
+  const redacted = value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [REDACTED]')
+    .replace(/\b(?:sk|rk|pk)-(?:proj-)?[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_KEY]')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/g, '[REDACTED_TOKEN]')
+    .replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_KEY]')
+    .replace(
+      /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^\s/@:]+:[^\s/@]+@/gi,
+      '[REDACTED_DSN]@',
+    )
+    .replace(
+      /-----BEGIN [^-]+ PRIVATE KEY-----[\s\S]*?-----END [^-]+ PRIVATE KEY-----/g,
+      '[REDACTED_PRIVATE_KEY]',
+    )
+    .replace(
+      /((?:api[_ -]?key|token|password|secret|authorization|cookie)\s*["']?\s*[:=]\s*["']?)[^\s"',;}]+/gi,
+      '$1[REDACTED]',
+    );
+  return redacted.length > maxLength ? `${redacted.slice(0, maxLength - 1)}…` : redacted;
+}
 
 /**
  * Redact sensitive keys from an object for safe logging.
@@ -720,7 +757,10 @@ export function validateCsrfToken(cookieToken: string | null, headerToken: strin
   try {
     return timingSafeEqual(Buffer.from(cookieToken, 'hex'), Buffer.from(headerToken, 'hex'));
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CSRF token comparison failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'CSRF token comparison failed',
+    );
     return false;
   }
 }
@@ -828,7 +868,10 @@ export async function parseCLIAuthToken(
     try {
       decrypted = await decryptFn(storedValue);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CLI auth token decryption failed');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'CLI auth token decryption failed',
+      );
       return null;
     }
   } else if (storedValue.startsWith('cli:')) {

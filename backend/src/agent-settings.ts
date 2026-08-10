@@ -75,9 +75,6 @@ export interface AgentSettings {
   /** Enforce empirically qualified provider/model roles. */
   modelQualification: 'enforce' | 'warn' | 'off';
 
-  /** Sharing is opt-in and restricted to sanitized categories and ratings. */
-  feedbackSharing: 'local' | 'sanitized-opt-in';
-
   /** Controls whether locally learned workflow changes may be proposed or applied. */
   skillLearningMode: 'human-only' | 'propose-then-verify' | 'automatic';
 
@@ -218,7 +215,6 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   designDiscovery: true,
   planApproval: 'material',
   modelQualification: 'enforce',
-  feedbackSharing: 'local',
   skillLearningMode: 'propose-then-verify',
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
@@ -259,7 +255,10 @@ function loadKoryphaiosConfig(projectRoot: string): Record<string, unknown> {
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8'));
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse koryphaios.json config');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to parse koryphaios.json config',
+    );
     return {};
   }
 }
@@ -474,10 +473,7 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...DEFAULT_AGENT_SETTINGS,
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
-    sandbox: mergeSandboxSettings(
-      DEFAULT_AGENT_SETTINGS.sandbox,
-      persistedSettings?.sandbox,
-    ),
+    sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
   };
 }
 
@@ -523,11 +519,7 @@ export function mergeSandboxSettings(
   for (const layer of layers) {
     if (!layer || typeof layer !== 'object') continue;
     const candidate = layer as Partial<SandboxSettings>;
-    if (
-      candidate.mode === 'auto' ||
-      candidate.mode === 'always' ||
-      candidate.mode === 'off'
-    ) {
+    if (candidate.mode === 'auto' || candidate.mode === 'always' || candidate.mode === 'off') {
       merged.mode = candidate.mode;
     }
     for (const key of [
@@ -553,12 +545,37 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   goalPlanningDepth: ['minimal', 'adaptive', 'structured'],
   planApproval: ['always', 'material', 'never'],
   modelQualification: ['enforce', 'warn', 'off'],
-  feedbackSharing: ['local', 'sanitized-opt-in'],
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
   permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
   subAgentApproval: ['manager', 'user', 'auto'],
 };
+
+const SETTINGS_NUMERIC_RANGES: Partial<Record<keyof AgentSettings, { min: number; max: number }>> =
+  {
+    maxCriticIterations: { min: 1, max: 10 },
+    approvalThresholdFiles: { min: 1, max: 10_000 },
+    approvalThresholdLines: { min: 1, max: 1_000_000 },
+    contextKeepRecentTurns: { min: 1, max: 100 },
+    contextPruneMinChars: { min: 100, max: 1_000_000 },
+  };
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function boundedStringList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return [
+    ...new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0 && item.length <= 256)
+        .slice(0, 200),
+    ),
+  ];
+}
 
 /** Strip unknown or ill-typed API fields rather than persisting arbitrary configuration. */
 export function mergeAgentSettings(current: AgentSettings, patch: unknown): AgentSettings {
@@ -576,6 +593,47 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
       );
       continue;
     }
+    if (typedKey === 'managerModelAccess') {
+      if (!isPlainRecord(value)) continue;
+      const access: Record<string, string[]> = {};
+      for (const [domain, models] of Object.entries(value).slice(0, 20)) {
+        if (!/^[a-z][a-z0-9_-]{0,31}$/i.test(domain)) continue;
+        const bounded = boundedStringList(models);
+        if (bounded) access[domain] = bounded;
+      }
+      next.managerModelAccess = access;
+      continue;
+    }
+    if (typedKey === 'managerNotes') {
+      if (!isPlainRecord(value)) continue;
+      const notes: Record<string, string> = {};
+      let remaining = 60_000;
+      for (const [domain, note] of Object.entries(value).slice(0, 20)) {
+        if (!/^[a-z][a-z0-9_-]{0,31}$/i.test(domain) || typeof note !== 'string') continue;
+        const bounded = note
+          .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ' ')
+          .slice(0, Math.min(20_000, remaining));
+        notes[domain] = bounded;
+        remaining -= bounded.length;
+        if (remaining <= 0) break;
+      }
+      next.managerNotes = notes;
+      continue;
+    }
+    if (typedKey === 'skillCollisionChoices') {
+      if (!isPlainRecord(value)) continue;
+      next.skillCollisionChoices = Object.fromEntries(
+        Object.entries(value)
+          .filter(
+            ([name, choice]) =>
+              name.length > 0 &&
+              name.length <= 128 &&
+              (choice === 'personal' || choice === 'project'),
+          )
+          .slice(0, 200),
+      );
+      continue;
+    }
     const allowed = SETTING_ENUMS[typedKey];
     if (allowed) {
       if (typeof value === 'string' && allowed.includes(value)) next[key] = value;
@@ -583,8 +641,21 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
     }
     const expected = DEFAULT_AGENT_SETTINGS[typedKey];
     // String arrays (toolAllowlist, toolBlocklist): validate each entry is a string.
-    if (Array.isArray(expected) && Array.isArray(value)) {
-      next[key] = value.filter((v): v is string => typeof v === 'string');
+    if (Array.isArray(expected)) {
+      const bounded = boundedStringList(value);
+      if (bounded) next[key] = bounded;
+      continue;
+    }
+    const numericRange = SETTINGS_NUMERIC_RANGES[typedKey];
+    if (numericRange) {
+      if (
+        typeof value === 'number' &&
+        Number.isInteger(value) &&
+        value >= numericRange.min &&
+        value <= numericRange.max
+      ) {
+        next[key] = value;
+      }
       continue;
     }
     if (typeof value === typeof expected) next[key] = value;

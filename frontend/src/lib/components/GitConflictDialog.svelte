@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { AlertTriangle, Send, X, Check } from 'lucide-svelte';
-  import { gitStore } from '$lib/stores/git.svelte';
+  import { onMount } from 'svelte';
+  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
+  import Send from 'lucide-svelte/icons/send';
+  import X from 'lucide-svelte/icons/x';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -11,6 +13,13 @@
   }
 
   let { conflicts, onClose }: Props = $props();
+  let dialogElement = $state<HTMLDivElement>();
+
+  onMount(() => {
+    const previousFocus = document.activeElement as HTMLElement | null;
+    dialogElement?.focus();
+    return () => previousFocus?.focus();
+  });
 
   async function sendToKory() {
     const sessionId = sessionStore.activeSessionId;
@@ -24,73 +33,104 @@
 - ${fileList}
 
 Please help me resolve these conflicts. You can read the files to see the conflict markers.`;
-    
+
     wsStore.sendMessage(sessionId, message);
     toastStore.success('Conflict details sent to Kory');
-    gitStore.clearConflicts();
     onClose();
   }
 </script>
 
-<div 
-  class="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" 
-  onclick={onClose}
-  role="presentation"
->
-  <div 
-    class="w-full max-w-md rounded-xl overflow-hidden bg-[var(--color-surface-1)] border border-red-500/30 shadow-2xl" 
-    onclick={e => e.stopPropagation()}
-    onkeydown={e => { if (e.key === 'Escape') onClose(); }}
+<div class="fixed inset-0 z-[100] flex items-center justify-center p-4">
+  <button
+    type="button"
+    class="absolute inset-0 bg-black/60 backdrop-blur-sm"
+    aria-label="Close merge conflict details"
+    onclick={onClose}
+  ></button>
+  <div
+    bind:this={dialogElement}
+    class="relative w-full max-w-md overflow-hidden rounded-2xl border bg-[var(--color-surface-1)] shadow-2xl"
+    style="border-color: color-mix(in srgb, var(--color-error) 35%, var(--color-border));"
+    onkeydown={(event) => {
+      if (event.key === 'Escape') onClose();
+    }}
     role="dialog"
     aria-modal="true"
     aria-labelledby="conflict-title"
     tabindex="-1"
   >
-    <!-- Header -->
-    <div class="bg-red-500/10 px-4 py-3 border-b border-red-500/20 flex items-center gap-3">
-      <div class="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
+    <div
+      class="flex items-center gap-3 border-b px-4 py-3"
+      style="border-color: color-mix(in srgb, var(--color-error) 25%, var(--color-border)); background: var(--color-error-bg);"
+    >
+      <div
+        class="flex h-8 w-8 items-center justify-center rounded-full"
+        style="background: color-mix(in srgb, var(--color-error) 18%, transparent); color: var(--color-error);"
+      >
         <AlertTriangle size={18} />
       </div>
       <div>
-        <h3 id="conflict-title" class="text-sm font-bold text-red-500">Merge Conflicts Detected</h3>
-        <p class="text-[10px] text-red-400/80 uppercase tracking-wider font-medium">Automatic merge failed</p>
+        <h3 id="conflict-title" class="text-sm font-bold text-[var(--color-error)]">
+          Merge needs attention
+        </h3>
+        <p class="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          Git left unresolved files
+        </p>
       </div>
-      <button class="ml-auto p-1 hover:bg-red-500/10 rounded text-red-500/50" onclick={onClose}>
+      <button
+        type="button"
+        class="ml-auto rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+        aria-label="Close merge conflict details"
+        onclick={onClose}
+      >
         <X size={16} />
       </button>
     </div>
 
-    <!-- Body -->
     <div class="p-4">
-      <p class="text-xs text-[var(--color-text-secondary)] mb-3">
-        Git encountered conflicts in {conflicts.length} file{conflicts.length !== 1 ? 's' : ''}. You need to resolve these markers before committing.
+      <p class="mb-3 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+        Git could not merge {conflicts.length} file{conflicts.length !== 1 ? 's' : ''}. Resolve
+        every conflict before committing; closing this message does not change the files.
       </p>
-      
-      <div class="max-h-40 overflow-y-auto rounded-lg bg-[var(--color-surface-0)] border border-[var(--color-border)] mb-4">
-        {#each conflicts as file}
-          <div class="px-3 py-2 text-[11px] font-mono border-b border-[var(--color-border)] last:border-0 flex items-center gap-2">
-            <div class="w-1.5 h-1.5 rounded-full bg-red-500"></div>
+
+      <div
+        class="mb-4 max-h-40 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]"
+      >
+        {#each conflicts as file (file)}
+          <div
+            class="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 font-mono text-[11px] last:border-0"
+          >
+            <div class="h-1.5 w-1.5 rounded-full bg-[var(--color-error)]"></div>
             <span class="truncate text-[var(--color-text-primary)]">{file}</span>
           </div>
         {/each}
       </div>
 
-      <div class="bg-amber-500/5 rounded-lg border border-amber-500/10 p-3 mb-4">
+      <div
+        class="mb-1 rounded-xl border p-3"
+        style="border-color: color-mix(in srgb, var(--color-warning) 25%, var(--color-border)); background: var(--color-warning-bg);"
+      >
         <div class="flex gap-2">
-          <Send size={14} class="text-amber-500 shrink-0 mt-0.5" />
-          <p class="text-[11px] text-amber-200/70 leading-relaxed">
-            <span class="font-bold text-amber-500">AI Resolution:</span> Would you like to send these conflict details to Kory? Kory can analyze the markers and propose a fix.
+          <Send size={14} class="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+          <p class="text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+            Send the exact file list to Kory to inspect the conflict markers and propose a reviewed
+            resolution. No file is changed by sending the request.
           </p>
         </div>
       </div>
     </div>
 
-    <!-- Footer -->
-    <div class="px-4 py-3 bg-[var(--color-surface-2)] border-t border-[var(--color-border)] flex gap-2">
-      <button class="flex-1 btn btn-secondary text-xs" onclick={onClose}>
-        Resolve Manually
+    <div
+      class="flex gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3"
+    >
+      <button type="button" class="btn btn-secondary flex-1 text-xs" onclick={onClose}>
+        I’ll resolve it
       </button>
-      <button class="flex-1 btn btn-primary bg-amber-600 hover:bg-amber-500 border-none text-xs gap-2" onclick={sendToKory}>
+      <button
+        type="button"
+        class="btn btn-primary flex-1 gap-2 border-none text-xs"
+        onclick={sendToKory}
+      >
         <Send size={12} /> Send to Kory
       </button>
     </div>

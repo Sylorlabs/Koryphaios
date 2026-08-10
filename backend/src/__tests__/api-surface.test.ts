@@ -1,12 +1,15 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
   process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL ?? `sqlite://${join(tmpdir(), 'koryphaios-api-surface.sqlite')}`;
+const apiSurfaceDatabaseDir = process.env.DATABASE_URL
+  ? undefined
+  : mkdtempSync(join(tmpdir(), 'kory-api-surface-db-'));
+process.env.DATABASE_URL ??= `sqlite://${join(apiSurfaceDatabaseDir!, 'api-surface.sqlite')}`;
 
 const { Elysia } = await import('elysia');
 const { sessionRoutes } = await import('../routes/v1/sessions');
@@ -55,6 +58,12 @@ const app = new Elysia()
   .use(billingRoutes)
   .use(processRoutes)
   .use(voiceRoutes);
+
+afterAll(() => {
+  if (apiSurfaceDatabaseDir) {
+    rmSync(apiSurfaceDatabaseDir, { recursive: true, force: true });
+  }
+});
 
 type RouteCheck = {
   method: string;
@@ -120,6 +129,31 @@ const protectedRoutes: RouteCheck[] = [
   },
   { method: 'GET', path: '/api/agent/stats' },
   { method: 'GET', path: '/api/agent/defaults' },
+  {
+    method: 'POST',
+    path: '/api/agent/skills',
+    body: {
+      source: 'project',
+      name: 'auth-surface-check',
+      description:
+        'Verify the protected skill creation surface. Use when API authentication coverage is audited.',
+      instructions:
+        'Require valid local authentication before accepting or validating any structured skill draft payload.',
+      domains: ['verification'],
+      activation: ['auth surface check'],
+      shouldTrigger: [
+        'audit this protected skill route',
+        'verify local skill route authentication',
+      ],
+      shouldNotTrigger: ['write a slogan', 'rename a variable'],
+      evidence: ['Unauthorized request rejected'],
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/agent/skills/resolve',
+    body: { prompt: 'Preview a skill selection' },
+  },
   { method: 'GET', path: '/api/git/repo' },
   { method: 'GET', path: '/api/git/status' },
   { method: 'GET', path: '/api/git/diff?file=src%2Fapp.ts' },

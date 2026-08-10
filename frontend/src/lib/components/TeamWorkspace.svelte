@@ -1,6 +1,10 @@
 <script lang="ts">
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
-  import { Users, ShieldCheck, ArrowLeft, LogOut, Wifi } from 'lucide-svelte';
+  import Users from 'lucide-svelte/icons/users';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import ArrowLeft from 'lucide-svelte/icons/arrow-left';
+  import LogOut from 'lucide-svelte/icons/log-out';
+  import Wifi from 'lucide-svelte/icons/wifi';
   const team = $derived(collaborationStore.activeJoinedSession);
 </script>
 

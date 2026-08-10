@@ -14,8 +14,8 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync, unlinkSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { detectDevinCLILogin } from './auth-utils';
@@ -28,7 +28,20 @@ import {
   type StreamRequest,
 } from './types';
 import { DevinCliBridge, getKoryphaiosDevinHome } from './devin-bridge';
+import { createKoryBridgeGrantLease } from './bridge-grant';
 import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilitiesSync } from './devin-capabilities';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  createPrivateCliTextArtifact,
+  spawnWithPrivateArtifactCleanup,
+  type PrivateCliArtifact,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import { writeManagedCliFile } from './managed-cli-storage';
 
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
@@ -147,7 +160,6 @@ export class DevinProvider implements Provider {
       return;
     }
 
-    const exportPath = join(tmpdir(), `devin-${Date.now()}-${Math.round(performance.now())}.json`);
     const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-devin-')) : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
 
@@ -157,7 +169,12 @@ export class DevinProvider implements Provider {
     // SandboxPolicy is translated into permission scopes. The user messages
     // become the prompt body (no system note stuffed in).
     let agentConfigPath: string | null = null;
+    let agentConfigArtifact: PrivateCliArtifact | null = null;
     let devinHome: string | null = null;
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'devin' as const,
       role: request.harnessRole ?? 'manager',
@@ -168,7 +185,15 @@ export class DevinProvider implements Provider {
       tools: request.tools ?? [],
       promptManifestHash: request.promptManifestHash,
       taskContractHash: request.taskContractHash,
+      bridgeGrantLease,
     };
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
     if (caps.supportsAgentConfig) {
       const agentConfig = bridge.buildAgentConfig(bridgeCtx);
       if (agentConfig) {
@@ -183,7 +208,12 @@ export class DevinProvider implements Provider {
             ask: [],
           };
         }
-        agentConfigPath = bridge.writeAgentConfigFile(agentConfig, request.sessionId);
+        agentConfigArtifact = createPrivateCliTextArtifact(
+          'devin-agent-config',
+          bridge.serializeAgentConfig(agentConfig),
+          'json',
+        );
+        agentConfigPath = agentConfigArtifact.path;
         // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
         devinHome = getKoryphaiosDevinHome(request.sessionId);
 
@@ -205,8 +235,7 @@ export class DevinProvider implements Provider {
           try {
             const hooksJson = bridge.serializeHooks(hookConfigs);
             const hooksPath = join(devinHome, '.devin', 'hooks.v1.json');
-            mkdirSync(dirname(hooksPath), { recursive: true });
-            writeFileSync(hooksPath, hooksJson);
+            writeManagedCliFile(hooksPath, hooksJson);
           } catch (hookErr) {
             providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Devin');
           }
@@ -217,8 +246,7 @@ export class DevinProvider implements Provider {
         if (ruleFiles) {
           for (const rule of ruleFiles) {
             try {
-              mkdirSync(dirname(rule.path), { recursive: true });
-              writeFileSync(rule.path, rule.content);
+              writeManagedCliFile(rule.path, rule.content);
             } catch (ruleErr) {
               providerLog.warn({ err: ruleErr }, 'Failed to write rules file for Devin');
             }
@@ -230,8 +258,7 @@ export class DevinProvider implements Provider {
         if (skillFiles) {
           for (const skill of skillFiles) {
             try {
-              mkdirSync(dirname(skill.path), { recursive: true });
-              writeFileSync(skill.path, skill.content);
+              writeManagedCliFile(skill.path, skill.content);
             } catch (skillErr) {
               providerLog.warn({ err: skillErr }, 'Failed to write skill file for Devin');
             }
@@ -247,13 +274,19 @@ export class DevinProvider implements Provider {
       ? buildPromptBodyOnly(request.messages)
       : buildPrompt(request.systemPrompt, request.messages);
     if (!prompt.trim()) {
+      agentConfigArtifact?.cleanup();
       yield { type: 'error', error: 'Devin: empty prompt' };
       return;
     }
 
+    const promptArtifact = createPrivateCliTextArtifact('devin-prompt', prompt);
+    const exportArtifact = createPrivateCliTextArtifact('devin-export', '', 'json');
+    const exportPath = exportArtifact.path;
+
     const args: string[] = [
       '-p',
-      prompt,
+      '--prompt-file',
+      promptArtifact.path,
       // Non-interactive: auto-approve so a headless run never blocks. With
       // --agent-config the permission scopes govern; the mode is the coarse
       // fallback. Research uses the ordinary auto mode; strict agent-config
@@ -276,8 +309,19 @@ export class DevinProvider implements Provider {
 
     const jail = request.sandbox && !researchOnly ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
     const wrapped = request.sandbox && !researchOnly
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd,
+          configDirs: [
+            ...(devinHome ? [devinHome] : []),
+            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+            promptArtifact.directory,
+            exportArtifact.directory,
+            ...(agentConfigArtifact ? [agentConfigArtifact.directory] : []),
+          ],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     const env: NodeJS.ProcessEnv = { ...process.env };
     // Point the CLI at the isolated per-session home so our rules/skills/hooks
     // and session transcripts stay separate from the user's interactive runs.
@@ -285,11 +329,17 @@ export class DevinProvider implements Provider {
       env.DEVIN_CONFIG_DIR = devinHome;
       env.XDG_CONFIG_HOME = devinHome;
     }
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: jail?.env ?? env,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: jail?.env ?? env,
+        }),
+      [promptArtifact, agentConfigArtifact],
+      () => bridgeGrantLease?.cleanup(),
+    );
+    bridgeGrantLease?.bindToChild(child);
 
     const onAbort = () => {
       try {
@@ -310,14 +360,12 @@ export class DevinProvider implements Provider {
     timeout.unref?.();
 
     let stderr = '';
-    child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
+    child.stderr.on('data', (c: Buffer) => (stderr = appendPrivateDiagnostic(stderr, c)));
 
     // Live text from stdout.
     const stdoutQueue: string[] = [];
-    let fullStdout = '';
     child.stdout.on('data', (c: Buffer) => {
       const t = c.toString();
-      fullStdout += t;
       stdoutQueue.push(t);
     });
 
@@ -343,7 +391,7 @@ export class DevinProvider implements Provider {
         clearTimeout(timeout);
         request.signal?.removeEventListener('abort', onAbort);
         if (request.signal?.aborted) {
-          this.cleanup(exportPath);
+          exportArtifact.cleanup();
           return;
         }
         // Drain any trailing stdout.
@@ -356,22 +404,27 @@ export class DevinProvider implements Provider {
         }
         if (settled.code === -1) {
           yield { type: 'error', error: 'Devin: failed to launch the devin CLI process.' };
-          this.cleanup(exportPath);
+          exportArtifact.cleanup();
           return;
         }
         if (settled.code !== 0 && !sawContent) {
-          const hint = stderr.trim() || `devin exited with status ${settled.code}`;
-          const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
-            ? ' — run "devin auth login".'
-            : '';
-          yield { type: 'error', error: `Devin: ${hint.slice(0, 300)}${loginHint}` };
-          this.cleanup(exportPath);
+          const diagnostic = safeProviderDiagnostic('devin', 'stderr', stderr, {
+            exitCode: settled.code,
+          });
+          providerLog.warn(diagnostic, 'Devin CLI exited unsuccessfully');
+          yield {
+            type: 'error',
+            error: safeProviderFailureMessage('devin', diagnostic, {
+              authenticationAction: 'Run "devin auth login", then reconnect.',
+            }),
+          };
+          exportArtifact.cleanup();
           return;
         }
         // Surface tools + reasoning + usage from the export trajectory.
         yield* this.drainExport(exportPath);
+        exportArtifact.cleanup();
         yield { type: 'complete', finishReason: 'end_turn' };
-        this.cleanup(exportPath);
         return;
       }
     }
@@ -400,13 +453,6 @@ export class DevinProvider implements Provider {
     yield* events;
   }
 
-  private cleanup(exportPath: string): void {
-    try {
-      if (existsSync(exportPath)) unlinkSync(exportPath);
-    } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin export cleanup best-effort failed');
-    }
-  }
 }
 
 // Re-export for detection modules that only need the home dir.

@@ -166,6 +166,13 @@ describe('ErrorDebuggingMCPServer', () => {
     it('should not be running initially', () => {
       expect(server.isServerRunning()).toBe(false);
     });
+
+    it('does not advertise fabricated resources or unsupported change subscriptions', () => {
+      expect(server.listResources()).toEqual([]);
+      expect(server.getCapabilities().resources).toEqual({});
+      expect(server.getCapabilities().prompts).toEqual({});
+      expect(server.getCapabilities().tools).toEqual({});
+    });
   });
 
   describe('configuration', () => {

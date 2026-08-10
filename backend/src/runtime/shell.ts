@@ -1,7 +1,7 @@
 /**
  * Cross-platform shell resolution.
  *
- * Several backend tools (bash, shell-manager, process-supervisor, bash-sandboxed)
+ * Several backend tools (bash, shell-manager, and process-supervisor)
  * spawn shell commands via `['bash', '-c', command]`. On macOS and Linux `bash`
  * is always available. On Windows it is NOT on the default PATH unless the user
  * has installed Git for Windows, WSL, or MSYS2 — spawning `bash` directly fails
@@ -15,7 +15,7 @@
  *     otherwise falls back to `cmd.exe /C` with `isBash = false` so callers
  *     can adjust their command wrapping.
  *
- * Callers that require bash semantics (e.g. bash-sandboxed, which uses bash
+ * Callers that require bash semantics (for example BashTool, which uses bash
  * syntax) should check `shellInfo.isBash` and reject gracefully when false.
  */
 

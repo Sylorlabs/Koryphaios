@@ -43,7 +43,10 @@ export type DetectedCli = {
   id: string;
   displayName: string;
   installed: boolean;
+  /** Legacy compatibility alias for loginDetected. */
   loggedIn: boolean;
+  /** Local login material was detected; remote account access is not implied. */
+  loginDetected?: boolean;
   autoEnabled: boolean;
   provider: string | null;
   authSource: string | null;
@@ -68,9 +71,14 @@ export type ProviderCaps = {
   supportsApiKey: boolean;
   supportsAuthToken: boolean;
   requiresBaseUrl: boolean;
+  requiresDeployment: boolean;
   baseUrlPlaceholder?: string;
   enabled: boolean;
   authenticated: boolean;
+  adapterAvailable: boolean;
+  credentialDetected: boolean;
+  connectionState:
+    'not_configured' | 'detected' | 'verified' | 'failed' | 'unknown' | 'unavailable';
   models: string[];
 };
 
@@ -165,29 +173,48 @@ type CliAccountNotice = { id: string; provider: string };
 
 function cliAccountNoticeFingerprint(accounts: CliAccountNotice[], providers: string[]): string {
   return providers
-    .map((provider) => `${provider}:${accounts.filter((account) => account.provider === provider).map((account) => account.id).sort().join(',')}`)
+    .map(
+      (provider) =>
+        `${provider}:${accounts
+          .filter((account) => account.provider === provider)
+          .map((account) => account.id)
+          .sort()
+          .join(',')}`,
+    )
     .sort()
     .join('|');
 }
 
 function hasDismissedCliAccountNotice(fingerprint: string): boolean {
   try {
-    const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
+    const dismissed = JSON.parse(
+      window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]',
+    );
     return Array.isArray(dismissed) && dismissed.includes(fingerprint);
   } catch (err: unknown) {
-    console.debug('Failed to read CLI account notice dismissals:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to read CLI account notice dismissals:',
+      err instanceof Error ? err.message : String(err),
+    );
     return false;
   }
 }
 
 function dismissCliAccountNotice(fingerprint: string): void {
   try {
-    const dismissed = JSON.parse(window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]');
-    const next = Array.isArray(dismissed) ? [...new Set([...dismissed, fingerprint])].slice(-20) : [fingerprint];
+    const dismissed = JSON.parse(
+      window.localStorage.getItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY) ?? '[]',
+    );
+    const next = Array.isArray(dismissed)
+      ? [...new Set([...dismissed, fingerprint])].slice(-20)
+      : [fingerprint];
     window.localStorage.setItem(CLI_ACCOUNT_NOTICE_DISMISSALS_KEY, JSON.stringify(next));
   } catch (err: unknown) {
     // A private-storage failure must never block provider discovery.
-    console.debug('Failed to persist CLI account notice dismissal:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to persist CLI account notice dismissal:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -205,6 +232,7 @@ function createProvidersStore() {
   let keyInputs = $state<Record<string, string>>({});
   let tokenInputs = $state<Record<string, string>>({});
   let urlInputs = $state<Record<string, string>>({});
+  let deploymentInputs = $state<Record<string, string>>({});
   let accountLabelInputs = $state<Record<string, string>>({});
   let accountKeyInputs = $state<Record<string, string>>({});
   let accountTokenInputs = $state<Record<string, string>>({});
@@ -279,8 +307,9 @@ function createProvidersStore() {
   }
 
   function getLocalCliConnectLabel(name: string): string {
-    const label = { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline' }[name] ?? name;
-    return `Connect ${label} CLI`;
+    const label =
+      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline' }[name] ?? name;
+    return `Check ${label} CLI login`;
   }
 
   function getProviderStatus(name: string): ProviderInfo | undefined {
@@ -297,9 +326,14 @@ function createProvidersStore() {
         supportsApiKey: status.supportsApiKey,
         supportsAuthToken: status.supportsAuthToken,
         requiresBaseUrl: status.requiresBaseUrl,
+        requiresDeployment: status.requiresDeployment === true,
         baseUrlPlaceholder: status.baseUrlPlaceholder,
         enabled: status.enabled,
         authenticated: status.authenticated,
+        adapterAvailable: status.adapterAvailable ?? status.authenticated,
+        credentialDetected: status.credentialDetected ?? status.authenticated,
+        connectionState:
+          status.connectionState ?? (status.authenticated ? 'detected' : 'not_configured'),
         models: status.models ?? [],
       };
     }
@@ -311,9 +345,13 @@ function createProvidersStore() {
       supportsApiKey: authMode === 'api_key' || authMode === 'api_key_or_auth',
       supportsAuthToken: authMode === 'api_key_or_auth' || authMode === 'auth_only',
       requiresBaseUrl,
+      requiresDeployment: name === 'azure' || name === 'azurecognitive' || name === 'sapai',
       baseUrlPlaceholder: requiresBaseUrl ? 'e.g. http://localhost:1234/v1' : undefined,
       enabled: false,
       authenticated: false,
+      adapterAvailable: false,
+      credentialDetected: false,
+      connectionState: 'not_configured',
       models: [],
     };
   }
@@ -360,7 +398,7 @@ function createProvidersStore() {
   function maybeRequestModelSelector(status: ProviderInfo | undefined, request: boolean): void {
     if (
       request &&
-      status?.authenticated &&
+      status?.connectionState === 'verified' &&
       !status.hideModelSelector &&
       (status.allAvailableModels?.length ?? 0) > 0
     ) {
@@ -370,11 +408,15 @@ function createProvidersStore() {
 
   // ─── API: status & catalog ─────────────────────────────────────────────
 
-  async function loadProvidersFromApi(options: { forceRefreshModels?: boolean } = {}): Promise<boolean> {
+  async function loadProvidersFromApi(
+    options: { forceRefreshModels?: boolean } = {},
+  ): Promise<boolean> {
     if (!browser) return false;
 
     const loadOnce = async (refreshModels: '0' | '1'): Promise<boolean> => {
-      const res = await apiFetch(apiUrl(`/api/providers${refreshModels === '1' ? '?refreshModels=1' : ''}`));
+      const res = await apiFetch(
+        apiUrl(`/api/providers${refreshModels === '1' ? '?refreshModels=1' : ''}`),
+      );
       if (!res.ok) {
         if (import.meta.env.DEV) console.warn(`Failed to load providers: HTTP ${res.status}`);
         return false;
@@ -417,17 +459,21 @@ function createProvidersStore() {
         data?: CliAccountNotice[];
         selectionRequired?: string[];
       }>(res);
-      cliAccountSelectionRequired = data.ok && Array.isArray(data.selectionRequired)
-        ? data.selectionRequired
-        : [];
+      cliAccountSelectionRequired =
+        data.ok && Array.isArray(data.selectionRequired) ? data.selectionRequired : [];
       if (cliAccountSelectionRequired.length > 0) {
-        const fingerprint = cliAccountNoticeFingerprint(data.data ?? [], cliAccountSelectionRequired);
+        const fingerprint = cliAccountNoticeFingerprint(
+          data.data ?? [],
+          cliAccountSelectionRequired,
+        );
         if (hasDismissedCliAccountNotice(fingerprint)) return;
         // A setup reminder is non-blocking: once it has been seen, closed, or
         // acted on, do not reintroduce it on every launch. New CLI profiles
         // produce a different fingerprint and can be surfaced once.
         dismissCliAccountNotice(fingerprint);
-        const labels = cliAccountSelectionRequired.map((name) => getProviderDisplayLabel(name)).join(', ');
+        const labels = cliAccountSelectionRequired
+          .map((name) => getProviderDisplayLabel(name))
+          .join(', ');
         toastStore.warning(
           `Multiple CLI accounts detected for ${labels}. Choose which accounts Koryphaios may use.`,
           {
@@ -438,7 +484,10 @@ function createProvidersStore() {
         );
       }
     } catch (err: unknown) {
-      console.warn('Failed to load CLI account ambiguity:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load CLI account ambiguity:',
+        err instanceof Error ? err.message : String(err),
+      );
       cliAccountSelectionRequired = [];
     }
   }
@@ -454,7 +503,10 @@ function createProvidersStore() {
         availableProviderTypes = data.data;
       }
     } catch (err: unknown) {
-      console.warn('Failed to load available providers:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load available providers:',
+        err instanceof Error ? err.message : String(err),
+      );
       availableProviderTypes = [];
     }
   }
@@ -465,7 +517,10 @@ function createProvidersStore() {
       const data = await parseJsonResponse<{ ok?: boolean; data?: DetectedCli[] }>(res);
       if (data?.ok && Array.isArray(data.data)) detectedClis = data.data;
     } catch (err: unknown) {
-      console.warn('Failed to load detected CLIs:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load detected CLIs:',
+        err instanceof Error ? err.message : String(err),
+      );
       detectedClis = [];
     }
   }
@@ -492,19 +547,21 @@ function createProvidersStore() {
     });
     const modelCount = status?.allAvailableModels?.length ?? 0;
     const openModelSelector =
-      !!status?.authenticated &&
+      status?.connectionState === 'verified' &&
       options?.openModelSelector === true &&
       !status.hideModelSelector &&
       modelCount > 0;
 
-    if (status?.authenticated) {
+    if (status?.connectionState === 'verified') {
       maybeRequestModelSelector(status, options?.openModelSelector === true);
       if (options?.successMessage) {
         const suffix = modelCount > 0 ? ` (${modelCount} models ready)` : '';
         toastStore.success(options.successMessage + suffix);
       }
-    } else if (options?.successMessage) {
-      toastStore.success(options.successMessage);
+    } else if (options?.successMessage && status?.connectionState === 'detected') {
+      toastStore.info(
+        `${options.successMessage}: login material detected; provider access is not verified`,
+      );
     }
 
     return { status, openModelSelector, modelCount };
@@ -567,11 +624,15 @@ function createProvidersStore() {
         toastStore.success('OpenAI Codex connected');
         return;
       }
-      browserAuthMessages['codex-auth'] = `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
+      browserAuthMessages['codex-auth'] =
+        `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
     } catch (err: unknown) {
       // Retain the code and retry; a transient status refresh must not lose the login.
-      console.debug('Codex auth poll failed, will retry:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Codex auth poll failed, will retry:',
+        err instanceof Error ? err.message : String(err),
+      );
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
     }
   }
@@ -747,7 +808,10 @@ function createProvidersStore() {
         providerAccounts[name] = [];
       }
     } catch (err: unknown) {
-      console.warn(`Failed to load provider accounts for ${name}:`, err instanceof Error ? err.message : String(err));
+      console.warn(
+        `Failed to load provider accounts for ${name}:`,
+        err instanceof Error ? err.message : String(err),
+      );
       if (force) providerAccounts[name] = [];
     } finally {
       accountsLoading[name] = false;
@@ -785,7 +849,11 @@ function createProvidersStore() {
     }
   }
 
-  async function saveFallbackOrder(name: string, order: string[], enabled = fallbackEnabled[name] ?? false): Promise<void> {
+  async function saveFallbackOrder(
+    name: string,
+    order: string[],
+    enabled = fallbackEnabled[name] ?? false,
+  ): Promise<void> {
     fallbackSaving = name;
     try {
       const res = await apiFetch(apiUrl(`/api/providers/${name}/fallback-order`), {
@@ -811,7 +879,9 @@ function createProvidersStore() {
   }
 
   function getOrderedFallbackAccounts(name: string): StoredProviderAccount[] {
-    const accounts = (providerAccounts[name] ?? []).filter((account) => account.source === 'cli-autodetect');
+    const accounts = (providerAccounts[name] ?? []).filter(
+      (account) => account.source === 'cli-autodetect',
+    );
     if (accounts.length < 2) return [];
     const order = fallbackOrders[name] ?? [];
     const ordered: StoredProviderAccount[] = [];
@@ -854,8 +924,13 @@ function createProvidersStore() {
     fallbackItems[name] = normalizeFallbackItems(name, items);
   }
 
-  function normalizeFallbackItems(name: string, items: StoredProviderAccount[]): StoredProviderAccount[] {
-    const accounts = (providerAccounts[name] ?? []).filter((account) => account.source === 'cli-autodetect');
+  function normalizeFallbackItems(
+    name: string,
+    items: StoredProviderAccount[],
+  ): StoredProviderAccount[] {
+    const accounts = (providerAccounts[name] ?? []).filter(
+      (account) => account.source === 'cli-autodetect',
+    );
     const known = new Map(accounts.map((account) => [account.id, account]));
     const normalized: StoredProviderAccount[] = [];
     const seen = new Set<string>();
@@ -874,7 +949,9 @@ function createProvidersStore() {
 
   function setFallbackEnabled(name: string, enabled: boolean): void {
     const accounts = getOrderedFallbackAccounts(name);
-    const order = fallbackOrders[name]?.length ? fallbackOrders[name] : accounts.map((account) => account.id);
+    const order = fallbackOrders[name]?.length
+      ? fallbackOrders[name]
+      : accounts.map((account) => account.id);
     void saveFallbackOrder(name, order, enabled);
   }
 
@@ -885,15 +962,19 @@ function createProvidersStore() {
     const apiKey = keyInputs[name]?.trim();
     const authToken = tokenInputs[name]?.trim();
     const baseUrl = urlInputs[name]?.trim();
-    if (caps.authMode === 'api_key' && !apiKey) {
+    const deployment = deploymentInputs[name]?.trim();
+    const reuseStoredConfiguration =
+      caps.credentialDetected && !apiKey && !authToken && !baseUrl && !deployment;
+    if (!reuseStoredConfiguration && caps.authMode === 'api_key' && !apiKey) {
       toastStore.error('Enter API key');
       return { ok: false };
     }
-    if (caps.authMode === 'api_key_or_auth' && !apiKey && !authToken) {
+    if (!reuseStoredConfiguration && caps.authMode === 'api_key_or_auth' && !apiKey && !authToken) {
       toastStore.error('Enter API key');
       return { ok: false };
     }
     if (
+      !reuseStoredConfiguration &&
       caps.authMode === 'auth_only' &&
       !authToken &&
       !usesBrowserAuth(name) &&
@@ -902,8 +983,12 @@ function createProvidersStore() {
       toastStore.error('Enter auth token');
       return { ok: false };
     }
-    if (caps.authMode === 'base_url_only' && !baseUrl) {
+    if (!reuseStoredConfiguration && caps.authMode === 'base_url_only' && !baseUrl) {
       toastStore.error('Enter endpoint URL');
+      return { ok: false };
+    }
+    if (!reuseStoredConfiguration && caps.requiresDeployment && !deployment) {
+      toastStore.error('Enter the deployment name used for inference');
       return { ok: false };
     }
 
@@ -914,6 +999,7 @@ function createProvidersStore() {
       if (apiKey) body.apiKey = apiKey;
       if (authToken) body.authToken = authToken;
       if (baseUrl) body.baseUrl = baseUrl;
+      if (deployment) body.deployment = deployment;
       verifying = name;
       const res = await apiFetch(apiUrl(`/api/providers/${name}`), {
         method: 'PUT',
@@ -926,10 +1012,23 @@ function createProvidersStore() {
         keyInputs[name] = '';
         tokenInputs[name] = '';
         urlInputs[name] = '';
+        deploymentInputs[name] = '';
         const status = await refreshProviderStatus(name, { warmModelList: true });
-        toastStore.success(`${getProviderDisplayLabel(name)} connected ✓`);
+        if (status?.connectionState === 'verified') {
+          toastStore.success(
+            usesLocalCliConnection(name)
+              ? `${getProviderDisplayLabel(name)} CLI login verified`
+              : `${getProviderDisplayLabel(name)} credential verified`,
+          );
+        } else {
+          toastStore.info(
+            `${getProviderDisplayLabel(name)} configuration saved; provider access is not verified`,
+          );
+        }
         const openModelSelector =
-          !!status && !status.hideModelSelector && (status.allAvailableModels?.length ?? 0) > 0;
+          status?.connectionState === 'verified' &&
+          !status.hideModelSelector &&
+          (status.allAvailableModels?.length ?? 0) > 0;
         return { ok: true, openModelSelector, status };
       }
       const errMsg = data.error ?? 'Connection failed';
@@ -980,12 +1079,15 @@ function createProvidersStore() {
         return { kind: 'error' };
       }
 
-      if (data.data.status === 'connected') {
+      if (data.data.status === 'connected' || data.data.status === 'detected') {
+        const detectedOnly = data.data.status === 'detected';
         browserAuthPending[name] = false;
         browserAuthMessages[name] = data.data.message ?? '';
         const sync = await syncProviderUi(name, {
           openModelSelector: true,
-          successMessage: `${getProviderDisplayLabel(name)} connected`,
+          successMessage: detectedOnly
+            ? `${getProviderDisplayLabel(name)} CLI setup recorded`
+            : `${getProviderDisplayLabel(name)} connected`,
         });
         return {
           kind: 'connected',
@@ -1054,7 +1156,8 @@ function createProvidersStore() {
           expiresAt: Date.now() + (data.data.expiresIn ?? 900) * 1000,
           intervalMs: Math.max(1000, (data.data.interval ?? 5) * 1000),
         };
-        browserAuthMessages[name] = 'Enter the displayed code in ChatGPT. Koryphaios connects automatically after approval.';
+        browserAuthMessages[name] =
+          'Enter the displayed code in ChatGPT. Koryphaios connects automatically after approval.';
         void pollCodexAuth();
       } else {
         toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
@@ -1084,8 +1187,14 @@ function createProvidersStore() {
       browserAuthPending[name] = false;
       browserAuthMessages[name] = '';
       await loadProvidersFromApi();
-      toastStore.success(`${getProviderDisplayLabel(name)} connected ✓`);
       const status = getProviderStatus(name);
+      if (status?.connectionState === 'verified') {
+        toastStore.success(`${getProviderDisplayLabel(name)} access verified`);
+      } else {
+        toastStore.info(
+          `${getProviderDisplayLabel(name)} CLI setup recorded; account access remains unverified`,
+        );
+      }
       const modelCount = status?.allAvailableModels?.length ?? 0;
       return {
         status,
@@ -1110,7 +1219,10 @@ function createProvidersStore() {
         toastStore.info(`${getProviderDisplayLabel(name)} disconnected`);
       }
     } catch (err: unknown) {
-      console.warn(`Failed to disconnect provider ${name}:`, err instanceof Error ? err.message : String(err));
+      console.warn(
+        `Failed to disconnect provider ${name}:`,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -1428,6 +1540,12 @@ function createProvidersStore() {
     },
     set urlInputs(v: Record<string, string>) {
       urlInputs = v;
+    },
+    get deploymentInputs() {
+      return deploymentInputs;
+    },
+    set deploymentInputs(v: Record<string, string>) {
+      deploymentInputs = v;
     },
     get accountLabelInputs() {
       return accountLabelInputs;

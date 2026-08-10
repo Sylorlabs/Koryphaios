@@ -2,10 +2,11 @@
  * Tool registry for managing MCP tools
  */
 
-import type { MCPTool, MCPToolResult } from '@/types/index.js';
+import type { PlaywrightManager } from './playwright-manager.js';
+
 import type { ErrorDetectorManager } from '@/detectors/error-detector-manager.js';
 import type { LanguageHandlerManager } from '@/languages/language-handler-manager.js';
-import type { PlaywrightManager } from './playwright-manager.js';
+import type { MCPTool, MCPToolResult } from '@/types/index.js';
 import { SupportedLanguage } from '@/types/languages.js';
 import { Logger } from '@/utils/logger.js';
 
@@ -152,18 +153,6 @@ export class ToolRegistry {
 
         case 'suggest-fixes':
           return this.handleSuggestFixes(args);
-
-        case 'set-breakpoint':
-          return this.handleSetBreakpoint(args);
-
-        case 'inspect-variables':
-          return this.handleInspectVariables(args);
-
-        case 'profile-performance':
-          return this.handleProfilePerformance(args);
-
-        case 'track-memory':
-          return this.handleTrackMemory(args);
 
         // Playwright Tools
         case 'navigate':
@@ -419,13 +408,13 @@ export class ToolRegistry {
 
   private async handleAnalyzeError(args: Record<string, unknown>): Promise<MCPToolResult> {
     const errorId = args['errorId'] as string;
-    
+
     if (!this.errorDetectorManager) {
       throw new Error('Error detector manager not initialized');
     }
 
     const analysis = await this.errorDetectorManager.analyzeError(errorId);
-    
+
     if (!analysis) {
       return {
         content: [
@@ -450,7 +439,7 @@ export class ToolRegistry {
 
   private async handleSuggestFixes(args: Record<string, unknown>): Promise<MCPToolResult> {
     const errorId = args['errorId'] as string;
-    
+
     if (!this.errorDetectorManager) {
       throw new Error('Error detector manager not initialized');
     }
@@ -462,127 +451,6 @@ export class ToolRegistry {
         {
           type: 'text',
           text: JSON.stringify(suggestions, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleSetBreakpoint(args: Record<string, unknown>): Promise<MCPToolResult> {
-    const file = args['file'] as string;
-    const line = args['line'] as number;
-    const condition = args['condition'] as string;
-    const logMessage = args['logMessage'] as string;
-    const temporary = (args['temporary'] as boolean) || false;
-
-    // TODO: Implement actual breakpoint setting logic
-    const breakpointId = `bp-${Date.now()}`;
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              breakpointId,
-              file,
-              line,
-              condition,
-              logMessage,
-              temporary,
-              status: 'set',
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  private async handleInspectVariables(args: Record<string, unknown>): Promise<MCPToolResult> {
-    const sessionId = args['sessionId'] as string;
-    const scope = (args['scope'] as string) || 'local';
-    const frameId = (args['frameId'] as number) || 0;
-
-    // TODO: Implement actual variable inspection logic
-    const mockVariables = [
-      { name: 'data', value: 'undefined', type: 'undefined' },
-      { name: 'result', value: 'null', type: 'object' },
-      { name: 'index', value: '0', type: 'number' },
-    ];
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              sessionId,
-              scope,
-              frameId,
-              variables: mockVariables,
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  private async handleProfilePerformance(args: Record<string, unknown>): Promise<MCPToolResult> {
-    const duration = (args['duration'] as number) || 10000;
-    const sampleRate = (args['sampleRate'] as number) || 100;
-    const includeMemory = (args['includeMemory'] as boolean) || true;
-    const includeCpu = (args['includeCpu'] as boolean) || true;
-
-    // TODO: Implement actual performance profiling logic
-    const profileId = `profile-${Date.now()}`;
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              profileId,
-              duration,
-              sampleRate,
-              includeMemory,
-              includeCpu,
-              status: 'started',
-            },
-            null,
-            2
-          ),
-        },
-      ],
-    };
-  }
-
-  private async handleTrackMemory(args: Record<string, unknown>): Promise<MCPToolResult> {
-    const duration = (args['duration'] as number) || 60000;
-    const threshold = (args['threshold'] as number) || 100 * 1024 * 1024; // 100MB
-    const detectLeaks = (args['detectLeaks'] as boolean) || true;
-
-    // TODO: Implement actual memory tracking logic
-    const trackingId = `memory-${Date.now()}`;
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              trackingId,
-              duration,
-              threshold,
-              detectLeaks,
-              status: 'started',
-            },
-            null,
-            2
-          ),
         },
       ],
     };

@@ -16,17 +16,8 @@
  * All filesystem operations use fs/promises — the event loop is never blocked.
  */
 
-import {
-  existsSync,
-} from 'node:fs';
-import {
-  mkdir,
-  readFile,
-  writeFile,
-  appendFile,
-  readdir,
-  symlink,
-} from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, writeFile, appendFile, readdir, symlink } from 'node:fs/promises';
 import { join, resolve, relative } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
@@ -51,6 +42,31 @@ export interface WorktreeStatus {
 
 interface WorktreeManifest {
   worktrees: WorktreeInfo[];
+}
+
+type WorkspaceGitOperation =
+  | 'worktree-add'
+  | 'stash-push'
+  | 'checkout'
+  | 'merge-squash'
+  | 'merge'
+  | 'stash-apply'
+  | 'stash-drop'
+  | 'worktree-remove'
+  | 'worktree-prune';
+
+/** Git output can contain repository-controlled hook/helper text, filenames,
+ * and credential-shaped values. Logs retain only bounded structural facts;
+ * callers may still inspect the in-memory result for control flow. */
+export function workspaceGitLogMetadata(
+  operation: WorkspaceGitOperation,
+  result: { success: boolean; output: string },
+): { gitOperation: WorkspaceGitOperation; success: boolean; outputLength: number } {
+  return {
+    gitOperation: operation,
+    success: result.success,
+    outputLength: result.output.length,
+  };
 }
 
 export class WorkspaceManager {
@@ -120,7 +136,8 @@ export class WorkspaceManager {
       if (!absoluteWtPath.startsWith(worktreeBaseDir)) continue;
 
       const taskId = relative(worktreeBaseDir, absoluteWtPath);
-      if (!taskId || taskId.includes('/') || taskId.includes('\\') || taskId.includes('..')) continue;
+      if (!taskId || taskId.includes('/') || taskId.includes('\\') || taskId.includes('..'))
+        continue;
 
       // Prefer persisted metadata; fall back to git-derived info for orphans
       const persisted = manifestById.get(taskId);
@@ -202,9 +219,19 @@ export class WorkspaceManager {
     const baseSha = baseResult.output.trim() || undefined;
 
     // Create the worktree with a new branch
-    const result = await this.git.execCombined(['worktree', 'add', '-b', branchName, worktreePath, 'HEAD']);
+    const result = await this.git.execCombined([
+      'worktree',
+      'add',
+      '-b',
+      branchName,
+      worktreePath,
+      'HEAD',
+    ]);
     if (!result.success) {
-      koryLog.error({ taskId, output: result.output }, 'Failed to create worktree');
+      koryLog.error(
+        { taskId, ...workspaceGitLogMetadata('worktree-add', result) },
+        'Failed to create worktree',
+      );
       return null;
     }
 
@@ -281,7 +308,10 @@ export class WorkspaceManager {
     // Ignore node_modules in the change check — a symlinked node_modules isn't matched by
     // the dir-only gitignore pattern, so it would otherwise look like a pending change.
     const statusResult = await this.git.execCombined([
-      '-C', worktree.path, 'status', '--porcelain',
+      '-C',
+      worktree.path,
+      'status',
+      '--porcelain',
     ]);
     const hasChanges = statusResult.output
       .split('\n')
@@ -291,11 +321,21 @@ export class WorkspaceManager {
       // Auto-commit any pending changes, explicitly excluding dependency dirs so the
       // symlinked node_modules never get committed onto the user's branch.
       await this.git.execCombined([
-        '-C', worktree.path, 'add', '-A', '--', '.',
-        ':(exclude)node_modules', ':(exclude)**/node_modules',
+        '-C',
+        worktree.path,
+        'add',
+        '-A',
+        '--',
+        '.',
+        ':(exclude)node_modules',
+        ':(exclude)**/node_modules',
       ]);
       const commitResult = await this.git.execCombined([
-        '-C', worktree.path, 'commit', '-m', `[AI] Changes from ${worktree.taskName}`,
+        '-C',
+        worktree.path,
+        'commit',
+        '-m',
+        `[AI] Changes from ${worktree.taskName}`,
         ...commitArgs,
       ]);
 
@@ -305,21 +345,40 @@ export class WorkspaceManager {
     }
 
     // Return to the selected branch and merge the worktree branch into it.
-    const mainBranch = this.targetBranch ?? (await this.getCurrentBranch()) ?? (await this.getMainBranch());
+    const mainBranch =
+      this.targetBranch ?? (await this.getCurrentBranch()) ?? (await this.getMainBranch());
 
     // Check if main repository has uncommitted changes that might block checkout
     const mainStatus = await this.git.execCombined(['status', '--porcelain']);
     const mainHasChanges = mainStatus.output.trim() !== '';
-    let stashed = false;
+    let autoStashHash: string | null = null;
 
     if (mainHasChanges) {
       koryLog.info('Stashing changes in main repo before reconcile');
+      const beforeStash = await this.git.exec(['rev-parse', '--verify', 'refs/stash']);
+      const beforeStashHash = beforeStash.success ? beforeStash.stdout.trim() : null;
       const stashResult = await this.git.execCombined([
-        'stash', 'push', '-m', `[KORY] Auto-stash for reconcile ${taskId}`,
+        'stash',
+        'push',
+        '--include-untracked',
+        '-m',
+        `[KORY] Auto-stash for reconcile ${taskId}`,
       ]);
-      stashed = stashResult.success;
-      if (!stashed) {
-        koryLog.warn({ taskId, output: stashResult.output }, 'Failed to stash main repo changes');
+      const afterStash = await this.git.exec(['rev-parse', '--verify', 'refs/stash']);
+      const afterStashHash = afterStash.success ? afterStash.stdout.trim() : null;
+      if (afterStashHash && afterStashHash !== beforeStashHash) {
+        autoStashHash = afterStashHash;
+      }
+      if (!stashResult.success || !autoStashHash) {
+        if (autoStashHash) await this.restoreAutoStash(taskId, autoStashHash);
+        koryLog.error(
+          { taskId, ...workspaceGitLogMetadata('stash-push', stashResult) },
+          'Failed to create a verifiable reconcile stash',
+        );
+        return {
+          success: false,
+          message: 'Could not safely preserve main-repository changes before reconcile.',
+        };
       }
     }
 
@@ -327,9 +386,13 @@ export class WorkspaceManager {
       // Checkout main
       const checkoutResult = await this.git.execCombined(['checkout', mainBranch]);
       if (!checkoutResult.success) {
+        koryLog.error(
+          { taskId, ...workspaceGitLogMetadata('checkout', checkoutResult) },
+          'Failed to checkout selected reconcile branch',
+        );
         return {
           success: false,
-          message: `Failed to checkout ${mainBranch}: ${checkoutResult.output}`,
+          message: 'Failed to check out the selected reconcile branch.',
         };
       }
 
@@ -338,13 +401,21 @@ export class WorkspaceManager {
         const mergeResult = await this.git.execCombined(['merge', '--squash', worktree.branchName]);
 
         if (!mergeResult.success) {
-          koryLog.error({ taskId, output: mergeResult.output }, 'Squash merge failed');
-          return { success: false, message: 'Merge failed (conflicts?): ' + mergeResult.output };
+          koryLog.error(
+            { taskId, ...workspaceGitLogMetadata('merge-squash', mergeResult) },
+            'Squash merge failed',
+          );
+          return {
+            success: false,
+            message: 'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
+          };
         }
 
         // Commit the squashed changes
         const commitResult = await this.git.execCombined([
-          'commit', '-m', `feat: ${worktree.taskName} [ai-${taskId}]`,
+          'commit',
+          '-m',
+          `feat: ${worktree.taskName} [ai-${taskId}]`,
           ...commitArgs,
         ]);
 
@@ -354,12 +425,21 @@ export class WorkspaceManager {
       } else {
         // Regular merge: Preserve all commits from worktree
         const mergeResult = await this.git.execCombined([
-          'merge', worktree.branchName, '-m', `Merge ${worktree.branchName} into ${mainBranch}`,
+          'merge',
+          worktree.branchName,
+          '-m',
+          `Merge ${worktree.branchName} into ${mainBranch}`,
         ]);
 
         if (!mergeResult.success) {
-          koryLog.error({ taskId, output: mergeResult.output }, 'Merge failed');
-          return { success: false, message: 'Merge failed: ' + mergeResult.output };
+          koryLog.error(
+            { taskId, ...workspaceGitLogMetadata('merge', mergeResult) },
+            'Merge failed',
+          );
+          return {
+            success: false,
+            message: 'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
+          };
         }
       }
 
@@ -373,18 +453,44 @@ export class WorkspaceManager {
           : `Changes reconciled but cleanup failed: ${cleanupResult.message}`,
       };
     } finally {
-      // Always try to restore stashed changes — and surface failures instead of
-      // silently swallowing them. A failed stash pop means the user's uncommitted
-      // work is still in the stash ref, which they can recover with `git stash pop`.
-      if (stashed) {
-        const popResult = await this.git.execCombined(['stash', 'pop']);
-        if (!popResult.success) {
-          koryLog.error(
-            { taskId, output: popResult.output },
-            'stash pop failed after reconcile — user changes are preserved in git stash',
-          );
-        }
-      }
+      // Restore the exact object Kory created. Never `stash pop` the mutable
+      // stack head: another/pre-existing user stash must not be consumed.
+      if (autoStashHash) await this.restoreAutoStash(taskId, autoStashHash);
+    }
+  }
+
+  private async restoreAutoStash(taskId: string, stashHash: string): Promise<void> {
+    const applyResult = await this.git.execCombined(['stash', 'apply', '--index', stashHash]);
+    if (!applyResult.success) {
+      koryLog.error(
+        {
+          taskId,
+          stashHash,
+          ...workspaceGitLogMetadata('stash-apply', applyResult),
+          recovery: `git stash apply --index ${stashHash}`,
+        },
+        'Exact reconcile stash could not be restored; retained for recovery',
+      );
+      return;
+    }
+
+    // Drop only when the current stack head is still exactly Kory's object.
+    // If any other actor changed the stack, leave the applied backup in place
+    // instead of guessing an index and risking unrelated stash deletion.
+    const current = await this.git.exec(['rev-parse', '--verify', 'refs/stash']);
+    if (!current.success || current.stdout.trim() !== stashHash) {
+      koryLog.warn(
+        { taskId, stashHash },
+        'Reconcile stash restored but retained because the stash stack changed concurrently',
+      );
+      return;
+    }
+    const dropResult = await this.git.execCombined(['stash', 'drop', 'stash@{0}']);
+    if (!dropResult.success) {
+      koryLog.warn(
+        { taskId, stashHash, ...workspaceGitLogMetadata('stash-drop', dropResult) },
+        'Reconcile stash restored but its backup could not be dropped',
+      );
     }
   }
 
@@ -400,10 +506,21 @@ export class WorkspaceManager {
     }
 
     // Remove the worktree
-    const removeResult = await this.git.execCombined(['worktree', 'remove', '--force', worktree.path]);
+    const removeResult = await this.git.execCombined([
+      'worktree',
+      'remove',
+      '--force',
+      worktree.path,
+    ]);
     if (!removeResult.success) {
-      koryLog.error({ taskId, output: removeResult.output }, 'Failed to remove worktree');
-      return { success: false, message: 'Failed to remove worktree: ' + removeResult.output };
+      koryLog.error(
+        { taskId, ...workspaceGitLogMetadata('worktree-remove', removeResult) },
+        'Failed to remove worktree',
+      );
+      return {
+        success: false,
+        message: 'Failed to remove the worktree. Inspect Git state and retry cleanup.',
+      };
     }
 
     // Delete the branch
@@ -446,7 +563,11 @@ export class WorkspaceManager {
     }
     // New untracked files (respecting .gitignore, so node_modules symlinks are skipped).
     const untracked = await this.git.execCombined([
-      '-C', worktree.path, 'ls-files', '--others', '--exclude-standard',
+      '-C',
+      worktree.path,
+      'ls-files',
+      '--others',
+      '--exclude-standard',
     ]);
     if (untracked.success) {
       for (const line of untracked.output.split('\n')) {
@@ -505,7 +626,14 @@ export class WorkspaceManager {
     if (result.success) {
       return { success: true, message: 'Stale worktree references pruned' };
     }
-    return { success: false, message: 'Prune failed: ' + result.output };
+    koryLog.warn(
+      workspaceGitLogMetadata('worktree-prune', result),
+      'Failed to prune stale worktree references',
+    );
+    return {
+      success: false,
+      message: 'Failed to prune stale worktree references. Inspect Git state and retry.',
+    };
   }
 
   /**
@@ -613,7 +741,10 @@ export class WorkspaceManager {
         await linkOne(entry.name);
       }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Best-effort directory enumeration failed; root link above is the important one');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Best-effort directory enumeration failed; root link above is the important one',
+      );
     }
   }
 

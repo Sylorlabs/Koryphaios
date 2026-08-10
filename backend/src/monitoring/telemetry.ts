@@ -47,28 +47,30 @@ export async function initTelemetry(config: {
 
   try {
     // Lazy-load heavy SDK packages only when tracing is enabled.
-    const [{ NodeTracerProvider, BatchSpanProcessor }, { Resource }, semconv, { HttpInstrumentation }, { OTLPTraceExporter }, { registerInstrumentations }] =
-      await Promise.all([
-        import('@opentelemetry/sdk-trace-node'),
-        import('@opentelemetry/resources'),
-        import('@opentelemetry/semantic-conventions'),
-        import('@opentelemetry/instrumentation-http'),
-        import('@opentelemetry/exporter-trace-otlp-grpc'),
-        import('@opentelemetry/instrumentation'),
-      ]);
+    const [
+      { NodeTracerProvider, BatchSpanProcessor },
+      { defaultResource, resourceFromAttributes },
+      semconv,
+      { HttpInstrumentation },
+      { OTLPTraceExporter },
+      { registerInstrumentations },
+    ] = await Promise.all([
+      import('@opentelemetry/sdk-trace-node'),
+      import('@opentelemetry/resources'),
+      import('@opentelemetry/semantic-conventions'),
+      import('@opentelemetry/instrumentation-http'),
+      import('@opentelemetry/exporter-trace-otlp-grpc'),
+      import('@opentelemetry/instrumentation'),
+    ]);
 
-    const resource = Resource.default().merge(
-      new Resource({
+    const resource = defaultResource().merge(
+      resourceFromAttributes({
         [semconv.SEMRESATTRS_SERVICE_NAME]: config.serviceName || 'koryphaios',
         [semconv.SEMRESATTRS_SERVICE_VERSION]: process.env.npm_package_version || VERSION,
         [semconv.SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]:
           config.environment || process.env.NODE_ENV || 'production',
       }),
     );
-
-    const provider = new NodeTracerProvider({
-      resource,
-    });
 
     // Configure exporter
     let exporter;
@@ -82,9 +84,10 @@ export async function initTelemetry(config: {
       serverLog.info('OpenTelemetry running in console mode (no OTLP endpoint configured)');
     }
 
-    if (exporter) {
-      provider.addSpanProcessor(new BatchSpanProcessor(exporter));
-    }
+    const provider = new NodeTracerProvider({
+      resource,
+      spanProcessors: exporter ? [new BatchSpanProcessor(exporter)] : [],
+    });
 
     provider.register();
 
@@ -132,19 +135,20 @@ export async function withSpan<T>(
   });
 
   try {
-    context.with(trace.setSpan(context.active(), span), async () => {
-      const result = await fn(span);
-      span.setStatus({ code: SpanStatusCode.OK });
-      return result;
+    return await context.with(trace.setSpan(context.active(), span), async () => {
+      try {
+        const result = await fn(span);
+        span.setStatus({ code: SpanStatusCode.OK });
+        return result;
+      } catch (error) {
+        span.recordException(error as Error);
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: (error as Error).message,
+        });
+        throw error;
+      }
     });
-    return context.with(trace.setSpan(context.active(), span), () => fn(span));
-  } catch (error) {
-    span.recordException(error as Error);
-    span.setStatus({
-      code: SpanStatusCode.ERROR,
-      message: (error as Error).message,
-    });
-    throw error;
   } finally {
     span.end();
   }

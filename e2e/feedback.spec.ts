@@ -24,7 +24,7 @@ test('submits feedback by opening a prefilled GitHub issue without a reply email
   await page.addInitScript(() => {
     window.open = ((url?: string | URL) => {
       (window as any).__openedUrl = url == null ? '' : String(url);
-      return null;
+      return window;
     }) as typeof window.open;
   });
 
@@ -49,10 +49,14 @@ test('submits feedback by opening a prefilled GitHub issue without a reply email
   // Verify the GitHub issue URL was opened with the correct format
   await expect(page.getByText('Opening GitHub issue')).toBeVisible({ timeout: 10_000 });
   const openedUrl = (await page.evaluate(() => (window as any).__openedUrl)) as string;
-  expect(openedUrl).toContain('https://github.com/Sylorlabs/Koryphaios/issues/new');
-  expect(openedUrl).toContain('Add a compact team activity digest.');
+  const issueUrl = new URL(openedUrl);
+  expect(`${issueUrl.origin}${issueUrl.pathname}`).toBe(
+    'https://github.com/Sylorlabs/Koryphaios/issues/new',
+  );
+  expect(issueUrl.searchParams.get('body')).toBe('Add a compact team activity digest.');
+  expect(issueUrl.searchParams.get('title')).toContain('Add a compact team activity digest.');
   // The URL should not contain a reply email field
-  expect(openedUrl).not.toContain('email');
+  expect([...issueUrl.searchParams.keys()]).not.toContain('email');
 });
 
 /**
@@ -81,7 +85,9 @@ test('presents an in-app error when the issue page cannot be opened', async ({ p
   await page.getByRole('textbox', { name: 'What should we know?' }).fill('Cannot open issue');
   await send.click();
 
-  // The dialog should still show the "Opening GitHub issue" notice
-  // (the error handling path)
-  await expect(page.getByText('Opening GitHub issue')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('feedback-dialog').getByRole('alert')).toContainText(
+    'Could not open GitHub to create the report',
+    { timeout: 10_000 },
+  );
+  await expect(page.getByText('Opening GitHub issue')).not.toBeVisible();
 });

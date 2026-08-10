@@ -77,6 +77,12 @@ export interface ProviderConfig {
   /** Whether automatic fallback between selected account profiles is enabled. */
   fallbackEnabled?: boolean;
   headers?: Record<string, string>;
+  /**
+   * User-chosen deployment identifier. Azure and SAP catalogs expose model
+   * metadata separately from runnable deployments; keeping the fields apart
+   * prevents a base model id from being presented as an inference target.
+   */
+  deployment?: string;
 
   // ─── Custom (user-defined / bring-your-own) provider fields ───────────────
   /** True when this is a user-defined custom provider (not a built-in). */

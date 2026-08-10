@@ -1,14 +1,16 @@
-# Koryphaios Redis Job Queue System (Phase 2.1)
+# Koryphaios Redis Job Queue Library (not wired into the product runtime)
 
-A BullMQ-based job queue system for background processing of LLM calls, file operations, and embedding generation.
+This directory contains dormant BullMQ infrastructure for background LLM and file jobs. As of this revision, Koryphaios startup, `KoryManager`, and HTTP routing do not initialize it, and `/admin/queues` is not an exposed product route. The examples below are integration examples, not claims about the running desktop product.
+
+Embedding generation is deliberately unavailable: the worker returns `success: false` with no vector until a real authenticated embedding provider is wired. Redis availability alone does not make embeddings usable.
 
 ## Features
 
 - **LLM Queue**: Rate-limited (10/sec) background LLM calls with priority support
 - **File Queue**: Async file read/write/delete/index operations (5 min timeout)
-- **Embedding Queue**: Code chunk embedding generation for RAG (2 min timeout)
+- **Embedding Queue scaffold**: Accepts jobs but returns an explicit unavailable result; it does not generate vectors
 - **Graceful Fallback**: Works without Redis (logs warning, returns null)
-- **Dashboard**: Built-in web dashboard at `/admin/queues`
+- **Dashboard handler**: Library code exists, but no `/admin/queues` product route is currently registered
 
 ## Quick Start
 
@@ -166,9 +168,9 @@ The LLM queue is rate-limited at both queue and worker levels:
 - File jobs: 5 minutes
 - Embedding jobs: 2 minutes
 
-## Dashboard
+## Dashboard (only after explicit integration)
 
-Access the dashboard at:
+If an integrator registers `handleDashboardRequest`, the intended addresses are:
 
 - `http://127.0.0.1:3001/admin/queues` if you are using the current default `config/app.config.json`
 - `http://<configured-host>:<configured-port>/admin/queues` if your backend config differs
@@ -224,10 +226,10 @@ JSON API: `GET /admin/queues/api`
 
 ### Embedding Worker
 
-- Currently stub implementation (returns mock embeddings)
-- Deterministic mock embeddings based on content hash
-- Ready for integration with real embedding service
-- Batch processing support
+- Explicitly unavailable until a real authenticated embedding provider is wired
+- Returns `success: false`, `isStub: true`, an error, and no embedding vector
+- Never generates mock or deterministic pseudo-embeddings
+- Queue completion means only that the unavailable result was recorded, not that embedding succeeded
 
 ## Graceful Degradation
 

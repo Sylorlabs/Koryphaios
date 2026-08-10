@@ -12,6 +12,7 @@ import {
   deleteNote,
   getNote,
   importMemoryAsNotes,
+  importMemoryAsNotesWithReport,
   listNotes,
   syncProjectDocuments,
   updateNote,
@@ -57,15 +58,21 @@ describe('project documents', () => {
   });
 
   test('writes agent/UI edits through to the authoritative Markdown file', async () => {
-    const note = (await listNotes(undefined, firstProject)).find((entry) => entry.sourcePath === 'plan.md');
+    const note = (await listNotes(undefined, firstProject)).find(
+      (entry) => entry.sourcePath === 'plan.md',
+    );
     expect(note).toBeTruthy();
     await updateNote(note!.id, { content: '# Revised plan\n\nVerified from Koryphaios.\n' });
-    expect(readFileSync(join(firstProject, 'plan.md'), 'utf8')).toContain('Verified from Koryphaios.');
+    expect(readFileSync(join(firstProject, 'plan.md'), 'utf8')).toContain(
+      'Verified from Koryphaios.',
+    );
     expect((await getNote(note!.id))?.content).toContain('Revised plan');
   });
 
   test('deletes the backing Markdown file only for its matching project note', async () => {
-    const note = (await listNotes(undefined, secondProject)).find((entry) => entry.sourcePath === 'plan.md');
+    const note = (await listNotes(undefined, secondProject)).find(
+      (entry) => entry.sourcePath === 'plan.md',
+    );
     expect(note).toBeTruthy();
     await deleteNote(note!.id);
     expect(existsSync(join(secondProject, 'plan.md'))).toBe(false);
@@ -76,28 +83,57 @@ describe('project documents', () => {
     const memoryRoot = join(fixtureRoot, 'memory-import-project');
     mkdirSync(join(memoryRoot, '.koryphaios', 'memory'), { recursive: true });
     writeProjectMemory(memoryRoot, '# Project memory\n\nFirst version.\n');
-    writeFileSync(join(memoryRoot, '.koryphaios', 'memory', 'decisions.md'), '# Decisions\n\nUse local-first storage.\n');
+    writeFileSync(
+      join(memoryRoot, '.koryphaios', 'memory', 'decisions.md'),
+      '# Decisions\n\nUse local-first storage.\n',
+    );
 
-    const unrelated = await createNote({ title: 'Project Memory', content: 'Do not replace this note.' });
-    const imported = await importMemoryAsNotes(memoryRoot);
-    const projectTag = `koryphaios-memory-import:project:${join(memoryRoot, '.koryphaios', 'memory', 'project.md')}`;
-    const decisionTag = `koryphaios-memory-import:project:${join(memoryRoot, '.koryphaios', 'memory', 'decisions.md')}`;
-    const importedProject = imported.find((note) => note.tags.includes(projectTag));
-    const importedDecisions = imported.find((note) => note.tags.includes(decisionTag));
+    const unrelated = await createNote({
+      title: 'Project Memory',
+      content: 'Do not replace this note.',
+    });
+    const fixtureImport = { readUniversalContent: () => '' };
+    const imported = await importMemoryAsNotes(memoryRoot, fixtureImport);
+    const importedProject = imported.find(
+      (note) => note.title === 'Project Memory' && note.folderPath === '/Memory/Project',
+    );
+    const importedDecisions = imported.find((note) => note.title === 'Memory: decisions');
 
     expect(importedProject?.content).toContain('First version');
     expect(importedDecisions?.content).toContain('local-first storage');
+    expect(importedProject?.tags.some((tag) => tag.includes(memoryRoot))).toBe(false);
     expect((await getNote(unrelated.id))?.content).toBe('Do not replace this note.');
 
+    const unchanged = await importMemoryAsNotesWithReport(memoryRoot, fixtureImport);
+    expect(unchanged.counts.created).toBe(0);
+    expect(unchanged.counts.updated).toBe(0);
+    expect(unchanged.counts.unchanged).toBeGreaterThanOrEqual(2);
+    expect(unchanged.partial).toBe(false);
+
+    const retagged = await updateNote(
+      importedProject!.id,
+      { tags: ['reviewed'], expectedRevision: importedProject!.revision },
+      memoryRoot,
+    );
+    expect(retagged.tags).toEqual(['reviewed']);
+    const afterPublicRetag = await importMemoryAsNotesWithReport(memoryRoot, fixtureImport);
+    expect(
+      afterPublicRetag.entries.find((entry) => entry.source.name === 'project.md')?.note?.id,
+    ).toBe(importedProject?.id);
+    expect(afterPublicRetag.counts.created).toBe(0);
+
     writeProjectMemory(memoryRoot, '# Project memory\n\nUpdated version.\n');
-    const reimported = await importMemoryAsNotes(memoryRoot);
-    const updatedProject = reimported.find((note) => note.tags.includes(projectTag));
+    const reimported = await importMemoryAsNotes(memoryRoot, fixtureImport);
+    const updatedProject = reimported.find(
+      (note) => note.title === 'Project Memory' && note.folderPath === '/Memory/Project',
+    );
     expect(updatedProject?.id).toBe(importedProject?.id);
     expect(updatedProject?.content).toContain('Updated version');
 
-    await Promise.all([
-      unrelated,
-      ...reimported.filter((note) => note.tags.includes(projectTag) || note.tags.includes(decisionTag)),
-    ].map((note) => deleteNote(note.id)));
+    await Promise.all(
+      [unrelated, ...reimported.filter((note) => note.folderPath === '/Memory/Project')].map(
+        (note) => deleteNote(note.id),
+      ),
+    );
   });
 });

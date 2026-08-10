@@ -23,6 +23,7 @@
 import type { SandboxPolicy, ProviderName } from '@koryphaios/shared';
 import type { HarnessRole } from './provider-harness';
 import type { ProviderEvent, ProviderToolDef, StreamRequest } from './types';
+import type { KoryBridgeGrantLease } from './bridge-grant';
 
 // ─── Capabilities (Phase 0) ────────────────────────────────────────────────
 
@@ -178,6 +179,8 @@ export interface CliBridgeContext {
   tools: ProviderToolDef[];
   promptManifestHash?: string;
   taskContractHash?: string;
+  /** Per-provider-turn ownership for short-lived MCP/hook capabilities. */
+  bridgeGrantLease?: KoryBridgeGrantLease;
 }
 
 export interface CliBridge {

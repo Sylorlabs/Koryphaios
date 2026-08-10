@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ConfigManager } from '../../../src/utils/config-manager.js';
 import { readFile, writeFile, access } from 'fs/promises';
+
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+import { ConfigManager } from '../../../src/utils/config-manager.js';
 import { validateConfig } from '../../../src/utils/validation.js';
 
 // Mock fs modules and validation
@@ -44,6 +46,43 @@ describe('ConfigManager', () => {
       enabled: true,
       provider: 'openai',
       model: 'gpt-4',
+    },
+  };
+
+  const missingFileError = () => Object.assign(new Error('File not found'), { code: 'ENOENT' });
+
+  const validWorkspaceConfig = {
+    root: '/project',
+    projectName: 'test-project',
+    language: 'typescript' as const,
+    configFiles: {
+      typescript: 'tsconfig.json',
+    },
+    excludePatterns: ['node_modules', 'dist'],
+    includePatterns: ['src/**/*.ts'],
+  };
+
+  const validPreferences = {
+    theme: 'dark' as const,
+    notifications: {
+      enabled: true,
+      types: ['error', 'warning'] as ('error' | 'warning')[],
+      sound: false,
+    },
+    ui: {
+      showLineNumbers: true,
+      showMinimap: false,
+      fontSize: 14,
+      fontFamily: 'Monaco',
+    },
+    debugging: {
+      autoStartSessions: true,
+      showInlineValues: true,
+      showVariableTypes: true,
+    },
+    performance: {
+      enableRealTimeMonitoring: true,
+      showPerformanceHints: false,
     },
   };
 
@@ -93,7 +132,7 @@ describe('ConfigManager', () => {
     });
 
     it('should create default config when file does not exist', async () => {
-      mockAccess.mockRejectedValue(new Error('File not found'));
+      mockAccess.mockRejectedValue(missingFileError());
 
       const config = await configManager.loadConfig();
 
@@ -103,18 +142,17 @@ describe('ConfigManager', () => {
       expect(config.detectors).toBeDefined();
     });
 
-    it('should handle invalid JSON in config file', async () => {
+    it('should reject invalid JSON without overwriting the config file', async () => {
       mockAccess.mockResolvedValue(undefined);
       mockReadFile.mockResolvedValue('invalid json');
 
-      const config = await configManager.loadConfig();
-
-      // Should fall back to default config
-      expect(mockWriteFile).toHaveBeenCalled();
-      expect(config).toBeDefined();
+      await expect(configManager.loadConfig()).rejects.toThrow(
+        'Invalid JSON in /test/config.json; the existing file was preserved'
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
     });
 
-    it('should handle validation errors', async () => {
+    it('should reject validation errors without overwriting the config file', async () => {
       mockAccess.mockResolvedValue(undefined);
       mockReadFile.mockResolvedValue(JSON.stringify(validConfig));
       mockValidateConfig.mockReturnValue({
@@ -122,11 +160,22 @@ describe('ConfigManager', () => {
         errors: [{ message: 'Invalid server port' }],
       });
 
-      const config = await configManager.loadConfig();
+      await expect(configManager.loadConfig()).rejects.toThrow(
+        'Invalid configuration in /test/config.json; the existing file was preserved'
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
 
-      // Should fall back to default config
-      expect(mockWriteFile).toHaveBeenCalled();
-      expect(config).toBeDefined();
+    it('should reject unreadable existing paths without overwriting them', async () => {
+      mockAccess.mockRejectedValue(
+        Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+      );
+
+      await expect(configManager.loadConfig()).rejects.toThrow(
+        'Could not access configuration at /test/config.json; the existing path was preserved'
+      );
+      expect(mockReadFile).not.toHaveBeenCalled();
+      expect(mockWriteFile).not.toHaveBeenCalled();
     });
   });
 
@@ -204,6 +253,17 @@ describe('ConfigManager', () => {
           server: { port: -1 },
         })
       ).rejects.toThrow('Invalid update');
+      expect(mockWriteFile).not.toHaveBeenCalled();
+      expect(configManager.getConfig()).toEqual(validConfig);
+    });
+
+    it('should retain the loaded config when persistence fails', async () => {
+      mockWriteFile.mockRejectedValue(new Error('Disk full'));
+
+      await expect(
+        configManager.updateConfig({ server: { port: 4000, logLevel: 'debug' } })
+      ).rejects.toThrow('Disk full');
+      expect(configManager.getConfig()).toEqual(validConfig);
     });
   });
 
@@ -216,33 +276,38 @@ describe('ConfigManager', () => {
     });
 
     it('should load workspace config', async () => {
-      const workspaceConfig = {
-        projectName: 'test-project',
-        rootPath: '/project/root',
-        excludePatterns: ['node_modules', 'dist'],
-        includePatterns: ['src/**/*.ts'],
-        languageSettings: {
-          typescript: {
-            configFile: 'tsconfig.json',
-            strictMode: true,
-          },
-        },
-      };
+      mockReadFile.mockResolvedValue(JSON.stringify(validWorkspaceConfig));
 
-      mockReadFile.mockResolvedValue(JSON.stringify(workspaceConfig));
+      const config = await configManager.loadWorkspaceConfig('/project');
 
-      const config = await configManager.loadWorkspaceConfig('/project/workspace.json');
-
-      expect(config).toEqual(workspaceConfig);
+      expect(config).toEqual(validWorkspaceConfig);
     });
 
     it('should handle missing workspace config', async () => {
-      mockAccess.mockRejectedValue(new Error('File not found'));
+      mockAccess.mockRejectedValue(missingFileError());
 
-      const config = await configManager.loadWorkspaceConfig('/project/workspace.json');
+      const config = await configManager.loadWorkspaceConfig('/project');
 
       expect(config).toBeDefined();
       expect(config.projectName).toBe('Unnamed Project');
+    });
+
+    it('should preserve malformed workspace config', async () => {
+      mockReadFile.mockResolvedValue('{bad');
+
+      await expect(configManager.loadWorkspaceConfig('/project')).rejects.toThrow(
+        'Invalid JSON in /project/.error-debugging.json; the existing file was preserved'
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('should preserve semantically invalid workspace config', async () => {
+      mockReadFile.mockResolvedValue(JSON.stringify({ projectName: 'missing required fields' }));
+
+      await expect(configManager.loadWorkspaceConfig('/project')).rejects.toThrow(
+        'Invalid workspace configuration in /project/.error-debugging.json'
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
     });
   });
 
@@ -255,45 +320,60 @@ describe('ConfigManager', () => {
     });
 
     it('should load user preferences', async () => {
-      const preferences = {
-        theme: 'dark' as const,
-        notifications: {
-          enabled: true,
-          sound: false,
-          desktop: true,
-        },
-        editor: {
-          fontSize: 14,
-          fontFamily: 'Monaco',
-          tabSize: 2,
-        },
-        debugging: {
-          autoBreakOnError: true,
-          showStackTrace: true,
-          verboseLogging: false,
-        },
-      };
-
-      mockReadFile.mockResolvedValue(JSON.stringify(preferences));
+      mockReadFile.mockResolvedValue(JSON.stringify(validPreferences));
 
       const prefs = await configManager.loadUserPreferences('/user/prefs.json');
 
-      expect(prefs).toEqual(preferences);
+      expect(prefs).toEqual(validPreferences);
     });
 
     it('should save user preferences', async () => {
-      const preferences = {
-        theme: 'light' as const,
-        notifications: { enabled: false, sound: false, desktop: false },
-        editor: { fontSize: 12, fontFamily: 'Arial', tabSize: 4 },
-        debugging: { autoBreakOnError: false, showStackTrace: false, verboseLogging: true },
-      };
+      const preferences = { ...validPreferences, theme: 'light' as const };
 
       await configManager.saveUserPreferences(preferences, '/user/prefs.json');
 
       expect(mockWriteFile).toHaveBeenCalledWith(
         '/user/prefs.json',
         JSON.stringify(preferences, null, 2),
+        'utf-8'
+      );
+    });
+
+    it('should create default user preferences only when the file is absent', async () => {
+      mockAccess.mockRejectedValue(missingFileError());
+
+      const preferences = await configManager.loadUserPreferences('/user/prefs.json');
+
+      expect(preferences.theme).toBe('auto');
+      expect(mockWriteFile).toHaveBeenCalledOnce();
+    });
+
+    it('should preserve malformed user preferences', async () => {
+      mockReadFile.mockResolvedValue(JSON.stringify({ theme: 'dark' }));
+
+      await expect(configManager.loadUserPreferences('/user/prefs.json')).rejects.toThrow(
+        'Invalid user preferences in /user/prefs.json'
+      );
+      expect(mockWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('should not replace loaded preferences when saving fails', async () => {
+      mockReadFile.mockResolvedValue(JSON.stringify(validPreferences));
+      await configManager.loadUserPreferences('/user/prefs.json');
+      mockWriteFile.mockRejectedValue(new Error('Disk full'));
+
+      await expect(
+        configManager.saveUserPreferences(
+          { ...validPreferences, theme: 'light' },
+          '/user/prefs.json'
+        )
+      ).rejects.toThrow('Disk full');
+
+      mockWriteFile.mockResolvedValue(undefined);
+      await configManager.saveUserPreferences(validPreferences, '/user/prefs.json');
+      expect(mockWriteFile).toHaveBeenLastCalledWith(
+        '/user/prefs.json',
+        JSON.stringify(validPreferences, null, 2),
         'utf-8'
       );
     });
@@ -308,30 +388,23 @@ describe('ConfigManager', () => {
     });
 
     it('should merge configs correctly', async () => {
-      const workspaceConfig = {
-        projectName: 'test-project',
-        rootPath: '/project',
-        excludePatterns: ['node_modules'],
-        includePatterns: ['src/**'],
-        languageSettings: {},
-      };
-
-      const userPrefs = {
-        theme: 'dark' as const,
-        notifications: { enabled: true, sound: false, desktop: true },
-        editor: { fontSize: 14, fontFamily: 'Monaco', tabSize: 2 },
-        debugging: { autoBreakOnError: true, showStackTrace: true, verboseLogging: false },
-      };
-
       mockReadFile
-        .mockResolvedValueOnce(JSON.stringify(workspaceConfig))
-        .mockResolvedValueOnce(JSON.stringify(userPrefs));
+        .mockResolvedValueOnce(JSON.stringify(validWorkspaceConfig))
+        .mockResolvedValueOnce(JSON.stringify(validPreferences));
 
       const merged = await configManager.getMergedConfig('/workspace.json', '/prefs.json');
 
       expect(merged.server).toEqual(validConfig.server);
-      expect(merged.workspace).toEqual(workspaceConfig);
-      expect(merged.userPreferences).toEqual(userPrefs);
+      expect(merged.workspace).toEqual(validWorkspaceConfig);
+      expect(merged.userPreferences).toEqual(validPreferences);
+    });
+
+    it('should reject explicitly supplied malformed optional configs', async () => {
+      mockReadFile.mockResolvedValueOnce('{bad');
+
+      await expect(configManager.getMergedConfig('/workspace.json')).rejects.toThrow(
+        'Invalid JSON in /workspace.json; the existing file was preserved'
+      );
     });
   });
 });

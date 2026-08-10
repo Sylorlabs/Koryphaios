@@ -67,6 +67,6 @@ export async function exampleSafeTerminalUsage(): Promise<void> {
   if (res.timedOut) {
     serverLog.warn('Command timed out');
   } else {
-    serverLog.info({ stdout: res.stdout.trim() }, 'Safe terminal command output');
+    serverLog.info({ stdoutLength: res.stdout.length }, 'Example safe terminal command completed');
   }
 }

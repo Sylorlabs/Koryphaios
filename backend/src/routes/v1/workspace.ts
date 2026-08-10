@@ -62,16 +62,20 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     const abs = resolve(root);
     // Only real folders inside the user's home may become workspace roots —
     // and never home itself (that would share memory across everything).
-    if (!abs || abs === home || !abs.startsWith(home + '/') || !existsSync(abs) || !statSync(abs).isDirectory()) {
+    if (
+      !abs ||
+      abs === home ||
+      !abs.startsWith(home + '/') ||
+      !existsSync(abs) ||
+      !statSync(abs).isDirectory()
+    ) {
       set.status = 400;
       return { ok: false, error: 'Invalid workspace root' };
     }
     registerWorkspaceRoot(abs);
     return { ok: true };
   })
-  .get(
-  '/files',
-  async ({ request, query, set }) => {
+  .get('/files', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
 
     const search = String(query.q ?? '')
@@ -89,10 +93,10 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
 
     files.sort((a, b) => a.localeCompare(b));
     return { ok: true, data: files };
-  },
-).get('/home', ({ request, set }) => {
-  // Used by the no-project prompt: lets the user run a quick task scoped to
-  // their home folder instead of being forced to open a project.
-  if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-  return { ok: true, data: homedir() };
-});
+  })
+  .get('/home', ({ request, set }) => {
+    // Used by the no-project prompt: lets the user run a quick task scoped to
+    // their home folder instead of being forced to open a project.
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: homedir() };
+  });

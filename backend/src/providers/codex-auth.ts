@@ -1,10 +1,13 @@
 import { spawn } from 'node:child_process';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
-import { getKoryCodexHome } from './auth-utils';
 import { whichBinary } from './cli-detection';
-import { getManagedCodexAppServer } from './codex-app-server';
+import { getManagedCodexAppServer, type CodexAppServerModel } from './codex-app-server';
 import type { Provider, ProviderContentBlock, ProviderEvent, ProviderMessage, StreamRequest } from './types';
 import { providerLog } from '../logger';
+import { getKoryphaiosCodexHome } from './cli-bridges';
+import { appendPrivateDiagnostic, safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import { assertPrivateValuesAbsentFromArgv, writePrivatePromptToStdin } from './private-cli-transport';
+import { appendBoundedProviderFrames } from './bounded-provider-stream';
 
 const CODEX_TIMEOUT_MS = 300_000;
 /** A non-secret Koryphaios configuration marker; the app-server owns OAuth tokens. */
@@ -34,12 +37,12 @@ function prompt(systemPrompt: string | undefined, messages: ProviderMessage[]): 
   ].filter(Boolean).join('\n\n');
 }
 
-function modelDefinition(model: any): ModelDef | null {
+function modelDefinition(model: CodexAppServerModel): ModelDef | null {
   const id = typeof model?.model === 'string' ? model.model : model?.id;
   if (typeof id !== 'string' || !id.trim()) return null;
   const reasoningLevels = Array.isArray(model?.supportedReasoningEfforts)
     ? model.supportedReasoningEfforts
-      .map((entry: any) => entry?.reasoningEffort)
+      .map((entry) => entry?.reasoningEffort)
       .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
     : [];
   return {
@@ -97,7 +100,9 @@ export class CodexAuthProvider implements Provider {
     try {
       await this.refreshModels();
     } catch (error) {
-      yield { type: 'error', error: error instanceof Error ? error.message : 'Could not read Codex authentication status' };
+      const diagnostic = safeProviderDiagnostic(this.name, 'configuration', error);
+      providerLog.warn(diagnostic, 'Could not read Codex authentication status');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
       return;
     }
     if (!this.isAvailable()) {
@@ -109,27 +114,32 @@ export class CodexAuthProvider implements Provider {
       yield { type: 'error', error: 'Codex CLI (codex) was not found on PATH.' };
       return;
     }
-    const child = spawn(binary, [
+    const privatePrompt = prompt(request.systemPrompt, request.messages);
+    const args = [
       '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
       '--color', 'never', '--sandbox', 'read-only',
       '--model', request.model,
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
       ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
-      prompt(request.systemPrompt, request.messages),
-    ], {
+      '-',
+    ];
+    assertPrivateValuesAbsentFromArgv(args, [privatePrompt, request.systemPrompt]);
+    const child = spawn(binary, args, {
       cwd: request.workingDirectory?.trim() || process.cwd(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CODEX_HOME: getKoryCodexHome() },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, CODEX_HOME: getKoryphaiosCodexHome() },
     });
+    writePrivatePromptToStdin(child, privatePrompt);
     let stderr = '';
     let buffer = '';
     let completed = false;
+    let streamFrameFailure: unknown;
     const events: ProviderEvent[] = [];
     const consume = (line: string) => {
       if (!line.trim()) return;
       try {
-        const event = JSON.parse(line) as Record<string, any>;
-        const item = event.item as Record<string, any> | undefined;
+        const event = JSON.parse(line) as Record<string, unknown>;
+        const item = event.item as Record<string, unknown> | undefined;
         if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
           events.push({ type: 'content_delta', content: String(item.text) });
         } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
@@ -141,14 +151,24 @@ export class CodexAuthProvider implements Provider {
             events.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
           }
         }
-      } catch (err: unknown) { providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex auth: JSONL partial/diagnostic line skipped'); }
+      } catch (err: unknown) {
+        providerLog.debug(
+          safeProviderDiagnostic(this.name, 'stdout', err),
+          'Codex auth: JSONL partial/diagnostic line skipped',
+        );
+      }
     };
-    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr = appendPrivateDiagnostic(stderr, chunk); });
     child.stdout.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) consume(line);
+      if (streamFrameFailure) return;
+      try {
+        const bounded = appendBoundedProviderFrames(buffer, chunk.toString());
+        buffer = bounded.remainder;
+        for (const line of bounded.frames) consume(line);
+      } catch (error) {
+        streamFrameFailure = error;
+        child.kill('SIGTERM');
+      }
     });
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -160,11 +180,19 @@ export class CodexAuthProvider implements Provider {
     });
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
+    if (streamFrameFailure) {
+      const diagnostic = safeProviderDiagnostic(this.name, 'stdout', streamFrameFailure);
+      providerLog.warn(diagnostic, 'OpenAI Codex stream exceeded the structural limit');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
+      return;
+    }
     consume(buffer);
     while (events.length) yield events.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {
-      yield { type: 'error', error: `OpenAI Codex failed: ${(stderr.trim() || `exit status ${exitCode}`).slice(0, 500)}` };
+      const diagnostic = safeProviderDiagnostic(this.name, 'stderr', stderr, { exitCode });
+      providerLog.warn(diagnostic, 'OpenAI Codex CLI request failed');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
       return;
     }
     if (!completed) providerLog.warn({ provider: this.name }, 'Codex auth turn exited without turn.completed');

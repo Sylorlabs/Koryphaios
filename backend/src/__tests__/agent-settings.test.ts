@@ -17,9 +17,13 @@ describe('autonomy limits', () => {
   it('persists only recognized composer permission modes', () => {
     expect(DEFAULT_AGENT_SETTINGS.permissionMode).toBe('guarded');
     for (const permissionMode of ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const) {
-      expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode }).permissionMode).toBe(permissionMode);
+      expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode }).permissionMode).toBe(
+        permissionMode,
+      );
     }
-    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode).toBe('guarded');
+    expect(
+      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode,
+    ).toBe('guarded');
   });
 
   it('are off by default and do not constrain agent instructions', () => {
@@ -77,7 +81,10 @@ describe('autonomy limits', () => {
     );
 
     expect(ran).toBe(false);
-    expect(result).toMatchObject({ isError: true, output: 'Approval required.' });
+    expect(result).toMatchObject({
+      isError: true,
+      output: 'Tool change blocked by the preflight safety policy.',
+    });
   });
 });
 
@@ -121,8 +128,12 @@ describe('sandbox settings', () => {
 
   it('subAgentApproval defaults to manager and accepts valid values', () => {
     expect(DEFAULT_AGENT_SETTINGS.subAgentApproval).toBe('manager');
-    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'user' }).subAgentApproval).toBe('user');
-    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'auto' }).subAgentApproval).toBe('auto');
+    expect(
+      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'user' }).subAgentApproval,
+    ).toBe('user');
+    expect(
+      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { subAgentApproval: 'auto' }).subAgentApproval,
+    ).toBe('auto');
   });
 
   it('rejects an invalid subAgentApproval value and keeps the default', () => {
@@ -136,11 +147,19 @@ describe('explicit preference memory', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-preferences-'));
     try {
       expect(rememberExplicitPreference(root, 'This is a desktop app.')).toBeNull();
-      expect(rememberExplicitPreference(root, 'Remember that this is a desktop app; do not launch it in a browser.'))
-        .toContain('this is a desktop app');
+      expect(
+        rememberExplicitPreference(
+          root,
+          'Remember that this is a desktop app; do not launch it in a browser.',
+        ),
+      ).toContain('this is a desktop app');
       expect(readPreferences(root).content).toContain('do not launch it in a browser');
-      expect(rememberExplicitPreference(root, "this is a desktop app dont launch it in the web browser thats something that should be remembered"))
-        .toContain('desktop app');
+      expect(
+        rememberExplicitPreference(
+          root,
+          'this is a desktop app dont launch it in the web browser thats something that should be remembered',
+        ),
+      ).toContain('desktop app');
       expect(rememberExplicitPreference(root, 'Remember that API key secret-123')).toBeNull();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -174,6 +193,31 @@ describe('tool allowlist and blocklist merging', () => {
       toolAllowlist: ['bash', 42, null, 'grep'] as unknown as string[],
     });
     expect(merged.toolAllowlist).toEqual(['bash', 'grep']);
+  });
+
+  it('bounds numeric and structured settings at the persistence boundary', () => {
+    const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
+      maxCriticIterations: 99,
+      contextKeepRecentTurns: -2,
+      managerModelAccess: {
+        general: ['openai:gpt', 42, 'openai:gpt'],
+        'not a domain': ['ignored'],
+      },
+      managerNotes: {
+        general: `keep this\u0000safe`,
+        bad: null,
+      },
+      skillCollisionChoices: {
+        design: 'project',
+        invalid: 'both',
+      },
+    });
+
+    expect(merged.maxCriticIterations).toBe(DEFAULT_AGENT_SETTINGS.maxCriticIterations);
+    expect(merged.contextKeepRecentTurns).toBe(DEFAULT_AGENT_SETTINGS.contextKeepRecentTurns);
+    expect(merged.managerModelAccess).toEqual({ general: ['openai:gpt'] });
+    expect(merged.managerNotes).toEqual({ general: 'keep this safe' });
+    expect(merged.skillCollisionChoices).toEqual({ design: 'project' });
   });
 
   it('ignores non-array values for list fields', () => {

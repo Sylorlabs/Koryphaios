@@ -32,13 +32,15 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
     {
       body: t.Object({
         enabled: t.Optional(t.Boolean()),
-        sessionHourlyCents: t.Optional(t.Number()),
-        sessionDailyCents: t.Optional(t.Number()),
-        globalHourlyCents: t.Optional(t.Number()),
-        globalDailyCents: t.Optional(t.Number()),
-        perRequestCents: t.Optional(t.Number()),
+        sessionHourlyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
+        sessionDailyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
+        globalHourlyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
+        globalDailyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
+        perRequestCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
         action: t.Optional(t.Enum({ pause: 'pause', warn: 'warn', block: 'block' })),
-        notifyAtPercent: t.Optional(t.Array(t.Number())),
+        notifyAtPercent: t.Optional(
+          t.Array(t.Integer({ minimum: 1, maximum: 100 }), { maxItems: 5 }),
+        ),
       }),
     },
   )
@@ -119,7 +121,7 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
     {
       body: t.Object({
         sessionId: t.String(),
-        estimatedCostCents: t.Optional(t.Number()),
+        estimatedCostCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
       }),
     },
   );

@@ -3,14 +3,12 @@ import { Elysia, t } from 'elysia';
 import { getContext } from '../../context';
 import { PROJECT_ROOT } from '../../runtime/paths';
 import { syncProviderConfigsToConfig, removeProviderFromConfig } from '../../runtime/config';
+import { removeProviderSecrets } from '../../security/secret-store';
 import { customProviderId } from '../../providers/custom';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
-import {
-  ValidationError,
-  InternalError,
-} from '../../errors/types';
+import { ValidationError, InternalError } from '../../errors/types';
 import { db, userCredentials } from '../../db';
 import { createUserCredentialsService, type UserCredential } from '../../services';
 import { pollCopilotDeviceAuth } from '../../providers/copilot';
@@ -62,6 +60,7 @@ const providerConfigBody = t.Object({
   apiKey: t.Optional(t.String()),
   authToken: t.Optional(t.String()),
   baseUrl: t.Optional(t.String()),
+  deployment: t.Optional(t.String()),
   selectedModels: t.Optional(t.Array(t.String())),
   hideModelSelector: t.Optional(t.Boolean()),
 });
@@ -76,6 +75,13 @@ function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
 function syncProviderConfigsSafely(providers: ReturnType<typeof getContext>['providers']): void {
   if (process.env.NODE_ENV === 'test') return;
   syncProviderConfigsToConfig(PROJECT_ROOT, providers.getConfigs());
+}
+
+function providerSecretStoreRoot(): string {
+  // Packaged desktop launches set this to the per-user data directory. Read it
+  // at request time so route tests can prove disk deletion in an isolated
+  // directory without ever touching a developer's real credential store.
+  return process.env.KORYPHAIOS_DATA_DIR?.trim() || PROJECT_ROOT;
 }
 
 function groupStoredAccounts(
@@ -235,7 +241,9 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
           // A saved fallback order is the user's durable CLI-account choice.
           // Ignore stale IDs so a newly discovered set is surfaced once.
           const discoveredIds = new Set(
-            accounts.filter((account) => account.provider === provider).map((account) => account.id),
+            accounts
+              .filter((account) => account.provider === provider)
+              .map((account) => account.id),
           );
           return !(configs[provider]?.fallbackOrder ?? []).some((id) => discoveredIds.has(id));
         })
@@ -267,7 +275,14 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .post('/test-connected', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
-    const connected = providers.getStatus().filter((provider) => provider.authenticated);
+    const connected = providers
+      .getStatus()
+      .filter(
+        (provider) =>
+          provider.enabled &&
+          provider.credentialDetected &&
+          provider.connectionState !== 'unavailable',
+      );
     const results = await Promise.all(
       connected.map(async (provider) => ({
         provider: provider.name,
@@ -332,6 +347,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
     providers.removeCustomProvider(id as ProviderName);
+    removeProviderSecrets(providerSecretStoreRoot(), id);
     if (process.env.NODE_ENV !== 'test') removeProviderFromConfig(PROJECT_ROOT, id);
     return { ok: true };
   })
@@ -592,7 +608,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         const result = await providers.setCredentials(params.name as ProviderName, values);
         if (!result.success) {
           set.status = 400;
-          return { ok: false, error: result.error ?? 'Failed to activate detected Kimi Code account' };
+          return {
+            ok: false,
+            error: result.error ?? 'Failed to activate detected Kimi Code account',
+          };
         }
         syncProviderConfigsSafely(providers);
         return { ok: true, data: { account: discovered, activated: true } };
@@ -633,7 +652,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     if (getDiscoveredCliAccount(params.accountId)) {
       set.status = 400;
-      return { ok: false, error: 'Detected CLI accounts are managed by their CLI profile directory.' };
+      return {
+        ok: false,
+        error: 'Detected CLI accounts are managed by their CLI profile directory.',
+      };
     }
 
     const credentials = await credentialsService.list(LOCAL_USER_ID, {
@@ -778,6 +800,12 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
   .delete('/:name', async ({ request, params: { name }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    const existingConfig = providers.getConfigs()[name];
+
+    // Remove Koryphaios-owned direct credentials even when there is no
+    // koryphaios.json or active registry entry. Do this before provider-owned
+    // logout cleanup so a failed external logout cannot strand the local copy.
+    removeProviderSecrets(providerSecretStoreRoot(), name);
     if (name === 'codex-auth') {
       // The managed app-server, not Koryphaios, persists ChatGPT OAuth tokens.
       await getManagedCodexAppServer().logout();
@@ -787,8 +815,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     // authToken — the user's `kimi login` credentials stay on disk so the
     // provider can be re-activated without another login.
     if (name === 'kimicode') {
-      const config = providers.getConfigs()[name];
-      const authToken = config?.authToken?.trim();
+      const authToken = existingConfig?.authToken?.trim();
       if (!authToken || isKimiCodeAuthMarker(authToken)) {
         clearKimiCodeAuthState();
       }

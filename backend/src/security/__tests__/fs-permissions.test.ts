@@ -1,7 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, statSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  chmodSync,
+  statSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
+import { join, parse, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { ensureSecureDir, hardenFilePermissions } from '../fs-permissions';
 
 // Windows doesn't support POSIX permission modes — chmod only toggles
@@ -18,7 +26,10 @@ describe('ensureSecureDir', () => {
       rmSync(root, { recursive: true, force: true });
     } catch (err: unknown) {
       // Best-effort temp dir cleanup — tests don't need serverLog.
-      console.debug('fs-permissions test cleanup failed:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'fs-permissions test cleanup failed:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   });
 
@@ -60,6 +71,42 @@ describe('ensureSecureDir', () => {
     if (isWindows) return;
     expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
+
+  test.each([
+    ['filesystem root', parse(resolve(tmpdir())).root],
+    ['home directory', homedir()],
+    ['shared temporary root', tmpdir()],
+  ])('refuses %s without changing its permissions', (_label, protectedPath) => {
+    const modeBefore = statSync(protectedPath).mode & 0o7777;
+    expect(() => ensureSecureDir(protectedPath)).toThrow(
+      'Refusing to secure broad filesystem directory',
+    );
+    expect(statSync(protectedPath).mode & 0o7777).toBe(modeBefore);
+  });
+
+  test('validates an existing configured directory without repairing it', () => {
+    if (isWindows) return;
+    const dir = join(root, 'configured-loose');
+    mkdirSync(dir, { mode: 0o755 });
+    chmodSync(dir, 0o755);
+
+    expect(() => ensureSecureDir(dir, { repairExistingPermissions: false })).toThrow(
+      'Configured directory is not private',
+    );
+    expect(statSync(dir).mode & 0o777).toBe(0o755);
+  });
+
+  test('refuses a symbolic-link leaf without touching its target', () => {
+    if (isWindows) return;
+    const target = join(root, 'symlink-target');
+    const link = join(root, 'symlink-leaf');
+    mkdirSync(target, { mode: 0o755 });
+    chmodSync(target, 0o755);
+    symlinkSync(target, link, 'dir');
+
+    expect(() => ensureSecureDir(link)).toThrow('symbolic-link directory');
+    expect(statSync(target).mode & 0o777).toBe(0o755);
+  });
 });
 
 describe('hardenFilePermissions', () => {
@@ -72,7 +119,10 @@ describe('hardenFilePermissions', () => {
       rmSync(root, { recursive: true, force: true });
     } catch (err: unknown) {
       // Best-effort temp dir cleanup — tests don't need serverLog.
-      console.debug('fs-permissions test cleanup failed:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'fs-permissions test cleanup failed:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   });
 

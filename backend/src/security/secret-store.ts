@@ -43,7 +43,10 @@ export function saveProviderSecrets(projectRoot: string, secrets: ProviderSecret
     chmodSync(path, 0o600);
   } catch (err: unknown) {
     /* best effort on exotic filesystems */
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'chmod 0o600 failed on credentials store, best effort');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'chmod 0o600 failed on credentials store, best effort',
+    );
   }
 }
 
@@ -62,12 +65,31 @@ export function upsertProviderSecrets(
   saveProviderSecrets(projectRoot, secrets);
 }
 
-export function removeProviderSecrets(projectRoot: string, provider: string): void {
-  const secrets = loadProviderSecrets(projectRoot);
-  if (secrets[provider]) {
-    delete secrets[provider];
-    saveProviderSecrets(projectRoot, secrets);
+export function removeProviderSecrets(projectRoot: string, provider: string): boolean {
+  const path = secretsPath(projectRoot);
+  if (!existsSync(path)) return false;
+
+  let secrets: ProviderSecrets;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('credentials store root is not an object');
+    }
+    secrets = parsed as ProviderSecrets;
+  } catch (err: unknown) {
+    // A disconnect must never report success after silently treating an
+    // unreadable credential store as empty. Preserve the file for recovery and
+    // force the caller to surface an explicit failure instead.
+    throw new Error(
+      `Cannot remove ${provider} credentials because the direct credential store is unreadable`,
+      { cause: err },
+    );
   }
+
+  if (!Object.prototype.hasOwnProperty.call(secrets, provider)) return false;
+  delete secrets[provider];
+  saveProviderSecrets(projectRoot, secrets);
+  return true;
 }
 
 /** Split secret fields out of a providers map. Returns the cleaned map (safe

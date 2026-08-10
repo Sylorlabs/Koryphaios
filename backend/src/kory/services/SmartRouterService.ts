@@ -41,36 +41,111 @@ interface Candidate {
 // Keywords per task type for prompt classification
 const TASK_KEYWORDS: Record<TaskType, string[]> = {
   architecture: [
-    'design', 'architect', 'system', 'structure', 'plan', 'high-level', 'diagram',
-    'scalab', 'pattern', 'abstraction', 'interface', 'schema', 'modeling',
+    'design',
+    'architect',
+    'system',
+    'structure',
+    'plan',
+    'high-level',
+    'diagram',
+    'scalab',
+    'pattern',
+    'abstraction',
+    'interface',
+    'schema',
+    'modeling',
   ],
   implementation: [
-    'implement', 'write', 'create', 'build', 'add feature', 'add a', 'new function',
-    'make', 'develop', 'code', 'generate',
+    'implement',
+    'write',
+    'create',
+    'build',
+    'add feature',
+    'add a',
+    'new function',
+    'make',
+    'develop',
+    'code',
+    'generate',
   ],
   refactoring: [
-    'refactor', 'restructure', 'improve', 'clean', 'optimize', 'rewrite',
-    'extract', 'rename', 'move', 'simplify', 'reorganize',
+    'refactor',
+    'restructure',
+    'improve',
+    'clean',
+    'optimize',
+    'rewrite',
+    'extract',
+    'rename',
+    'move',
+    'simplify',
+    'reorganize',
   ],
   testing: [
-    'test', 'spec', 'coverage', 'unit test', 'integration test', 'e2e', 'mock',
-    'assert', 'snapshot', 'fixture',
+    'test',
+    'spec',
+    'coverage',
+    'unit test',
+    'integration test',
+    'e2e',
+    'mock',
+    'assert',
+    'snapshot',
+    'fixture',
   ],
   debugging: [
-    'bug', 'fix', 'error', 'crash', 'issue', 'problem', 'failing', 'broken',
-    'exception', 'stack trace', 'undefined', 'null pointer', 'regression',
+    'bug',
+    'fix',
+    'error',
+    'crash',
+    'issue',
+    'problem',
+    'failing',
+    'broken',
+    'exception',
+    'stack trace',
+    'undefined',
+    'null pointer',
+    'regression',
   ],
   documentation: [
-    'doc', 'readme', 'comment', 'document', 'explain', 'describe', 'annotate',
-    'jsdoc', 'changelog', 'guide', 'tutorial',
+    'doc',
+    'readme',
+    'comment',
+    'document',
+    'explain',
+    'describe',
+    'annotate',
+    'jsdoc',
+    'changelog',
+    'guide',
+    'tutorial',
   ],
   review: [
-    'review', 'audit', 'check', 'assess', 'evaluate', 'feedback', 'lgtm',
-    'looks good', 'pull request', 'pr', 'critique',
+    'review',
+    'audit',
+    'check',
+    'assess',
+    'evaluate',
+    'feedback',
+    'lgtm',
+    'looks good',
+    'pull request',
+    'pr',
+    'critique',
   ],
   exploration: [
-    'how does', 'what is', 'where is', 'show me', 'explain', 'understand',
-    'trace', 'walk through', 'which file', 'find', 'locate',
+    'how does',
+    'what is',
+    'where is',
+    'show me',
+    'explain',
+    'understand',
+    'trace',
+    'walk through',
+    'which file',
+    'find',
+    'locate',
   ],
 };
 
@@ -110,7 +185,10 @@ export class SmartRouterService {
     let best: WorkerDomain | undefined;
     let bestScore = 0;
 
-    for (const [domain, keywords] of Object.entries(DOMAIN.KEYWORDS) as unknown as [WorkerDomain, string[]][]) {
+    for (const [domain, keywords] of Object.entries(DOMAIN.KEYWORDS) as unknown as [
+      WorkerDomain,
+      string[],
+    ][]) {
       const score = keywords.filter((kw) => lower.includes(kw)).length;
       if (score > bestScore) {
         bestScore = score;
@@ -184,7 +262,7 @@ export class SmartRouterService {
     const candidates: Candidate[] = [];
 
     for (const status of statuses) {
-      if (!status.authenticated || !status.enabled || status.circuitOpen) continue;
+      if (!status.adapterAvailable || !status.enabled || status.circuitOpen) continue;
 
       for (const def of status.allAvailableModels) {
         if (!status.models.includes(def.id) || def.deprecated) continue;

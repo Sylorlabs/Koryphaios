@@ -1,7 +1,9 @@
 // Bash command sandboxing - Comprehensive security validation
 // Blocks command injection, shell escapes, and dangerous operations
 
-import { toolLog } from '../logger';
+import { createHash } from 'node:crypto';
+
+import { serverLog, toolLog } from '../logger';
 
 // Dangerous shell metacharacters that could be used for injection
 // These are blocked in sandboxed mode
@@ -330,9 +332,20 @@ const CONTAINER_TOOLS = new Set([
 export interface BashValidationResult {
   safe: boolean;
   reason?: string;
+  code?: BashValidationCode;
   requiresNetwork?: boolean;
   requiresUnsandboxed?: boolean;
 }
+
+export type BashValidationCode =
+  | 'DANGEROUS_COMMAND'
+  | 'SHELL_METACHARACTERS'
+  | 'PRIVILEGE_ESCALATION'
+  | 'CONTAINER_TOOL'
+  | 'BLOCKED_NETWORK_TOOL'
+  | 'NETWORK_PERMISSION_REQUIRED'
+  | 'EXECUTABLE_NOT_ALLOWED'
+  | 'POLICY_BLOCKED';
 
 /** Granular sandbox toggles. Each flag only suppresses its check while
  *  `isSandboxed` is true — none can enable a check when unsandboxed.
@@ -371,7 +384,11 @@ export function validateBashCommand(
 
   // Check exact dangerous commands
   if (DANGEROUS_COMMANDS.has(trimmed)) {
-    return { safe: false, reason: 'Blocked: known dangerous command' };
+    return {
+      safe: false,
+      code: 'DANGEROUS_COMMAND',
+      reason: 'Blocked: known dangerous command',
+    };
   }
 
   // Check dangerous patterns
@@ -379,6 +396,7 @@ export function validateBashCommand(
     if (pattern.test(trimmed)) {
       return {
         safe: false,
+        code: 'DANGEROUS_COMMAND',
         reason: `Blocked: command matches dangerous pattern`,
       };
     }
@@ -396,6 +414,7 @@ export function validateBashCommand(
     if (!isSafePattern && isSandboxed) {
       return {
         safe: false,
+        code: 'SHELL_METACHARACTERS',
         reason: `Blocked: shell metacharacters detected (pipes, redirects, command substitution, etc.). In sandboxed mode, only simple commands are allowed.`,
         requiresUnsandboxed: true,
       };
@@ -410,6 +429,7 @@ export function validateBashCommand(
   if (blockedPriv) {
     return {
       safe: false,
+      code: 'PRIVILEGE_ESCALATION',
       reason: `Blocked: privilege escalation command '${blockedPriv}' is not allowed`,
     };
   }
@@ -419,6 +439,7 @@ export function validateBashCommand(
   if (containerTools && containerTool && isSandboxed) {
     return {
       safe: false,
+      code: 'CONTAINER_TOOL',
       reason: `Blocked: container command '${containerTool}' requires unsandboxed mode. The Manager agent can run Docker commands with full permissions.`,
       requiresUnsandboxed: true,
     };
@@ -429,6 +450,7 @@ export function validateBashCommand(
   if (blockedNet) {
     return {
       safe: false,
+      code: 'BLOCKED_NETWORK_TOOL',
       reason: `Blocked: network tool '${blockedNet}' is not allowed`,
     };
   }
@@ -438,6 +460,7 @@ export function validateBashCommand(
   if (network && networkCmd && isSandboxed && !allowNetwork) {
     return {
       safe: false,
+      code: 'NETWORK_PERMISSION_REQUIRED',
       reason: `Blocked: network command '${networkCmd}' requires unsandboxed mode or explicit network permission`,
       requiresNetwork: true,
       requiresUnsandboxed: true,
@@ -450,6 +473,7 @@ export function validateBashCommand(
     if (disallowed) {
       return {
         safe: false,
+        code: 'EXECUTABLE_NOT_ALLOWED',
         reason: `Blocked: command '${disallowed}' is not in the sandbox whitelist`,
         requiresUnsandboxed: true,
       };
@@ -493,28 +517,234 @@ function extractBaseCommands(command: string): string[] {
   return [...new Set(commands)]; // Remove duplicates
 }
 
-/**
- * Sanitize a command for logging (remove potential secrets)
- */
-export function sanitizeCommandForLogging(command: string): string {
-  let sanitized = command;
+const AUDIT_EXECUTABLE_PATTERN = /^[a-zA-Z0-9_.+-]{1,64}$/;
+const SAFE_ERROR_CODES = new Set([
+  'ABORT_ERR',
+  'E2BIG',
+  'EACCES',
+  'EADDRINUSE',
+  'EAGAIN',
+  'EBUSY',
+  'ECANCELED',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EEXIST',
+  'EHOSTUNREACH',
+  'EINTR',
+  'EINVAL',
+  'EIO',
+  'EISDIR',
+  'EMFILE',
+  'ENETUNREACH',
+  'ENFILE',
+  'ENOENT',
+  'ENOMEM',
+  'ENOSPC',
+  'ENOTDIR',
+  'ENOTEMPTY',
+  'ENOTSUP',
+  'EPERM',
+  'EPIPE',
+  'EROFS',
+  'ETIMEDOUT',
+]);
 
-  // Remove potential API keys/tokens from logs
-  sanitized = sanitized
-    .replace(/(\b\w+_API_KEY\s*=\s*)[^\s&|]*/gi, '$1***')
-    .replace(/(\b\w+_TOKEN\s*=\s*)[^\s&|]*/gi, '$1***')
-    .replace(/(\bpassword\s*=\s*)[^\s&|]*/gi, '$1***')
-    .replace(/(\bsecret\s*=\s*)[^\s&|]*/gi, '$1***')
-    // Authorization headers
-    .replace(/(Authorization:\s*(Bearer|Basic|Token)\s+)[^\s'"]+/gi, '$1***')
-    .replace(/(-H\s+['"]Authorization:\s*(Bearer|Basic|Token)\s+)[^\s'"]+/gi, '$1***');
+export interface BashCommandAuditMetadata {
+  executable: string;
+  category:
+    | 'container'
+    | 'filesystem'
+    | 'language-runtime'
+    | 'network'
+    | 'package-build'
+    | 'privilege'
+    | 'shell'
+    | 'version-control'
+    | 'other'
+    | 'unknown';
+  argCount: number;
+  commandBytes: number;
+  commandDigest: string;
+}
 
-  // Truncate long commands
-  if (sanitized.length > 200) {
-    sanitized = sanitized.slice(0, 200) + '... [truncated]';
+export interface ToolErrorAuditMetadata {
+  errorClass: string;
+  errorCode: string;
+  errorFingerprint: string;
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function firstAuditCommand(command: string): { executable: string; leadingTokenCount: number } {
+  const firstSegment =
+    command
+      .slice(0, 4_096)
+      .split(/(?:\|\||&&|[|;\n])/u, 1)[0]
+      ?.trim() ?? '';
+  const tokens = firstSegment.split(/\s+/u).filter(Boolean);
+  let index = 0;
+  while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(tokens[index])) index += 1;
+  if (tokens[index] === 'env' && index + 1 < tokens.length) {
+    let candidate = index + 1;
+    while (candidate < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(tokens[candidate])) {
+      candidate += 1;
+    }
+    if (candidate < tokens.length) index = candidate;
   }
+  const raw = (tokens[index] ?? '').replace(/^[('"`]+|[)'"`]+$/gu, '');
+  const basename = raw.split(/[\\/]/u).filter(Boolean).at(-1)?.toLowerCase() ?? '';
+  return AUDIT_EXECUTABLE_PATTERN.test(basename)
+    ? { executable: basename, leadingTokenCount: index + 1 }
+    : { executable: 'unknown', leadingTokenCount: 0 };
+}
 
-  return sanitized;
+function countWhitespaceTokens(value: string): number {
+  let count = 0;
+  let inToken = false;
+  for (const character of value) {
+    if (/\s/u.test(character)) {
+      inToken = false;
+    } else if (!inToken) {
+      inToken = true;
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function commandCategory(executable: string): BashCommandAuditMetadata['category'] {
+  if (BLOCKED_PRIVILEGE.has(executable)) return 'privilege';
+  if (CONTAINER_TOOLS.has(executable)) return 'container';
+  if (NETWORK_CMDS.has(executable) || BLOCKED_NETWORK_TOOLS.has(executable)) return 'network';
+  if (['git', 'hg', 'svn'].includes(executable)) return 'version-control';
+  if (
+    ['bun', 'cargo', 'cmake', 'gradle', 'make', 'mvn', 'npm', 'npx', 'pnpm', 'yarn'].includes(
+      executable,
+    )
+  ) {
+    return 'package-build';
+  }
+  if (['deno', 'java', 'node', 'perl', 'php', 'python', 'python3', 'ruby'].includes(executable)) {
+    return 'language-runtime';
+  }
+  if (['bash', 'dash', 'fish', 'sh', 'zsh'].includes(executable)) return 'shell';
+  if (
+    [
+      'cat',
+      'chmod',
+      'chown',
+      'cp',
+      'find',
+      'ln',
+      'ls',
+      'mkdir',
+      'mv',
+      'rm',
+      'rmdir',
+      'stat',
+      'touch',
+    ].includes(executable)
+  ) {
+    return 'filesystem';
+  }
+  return executable === 'unknown' ? 'unknown' : 'other';
+}
+
+/** Content-free command identity for persistent audit logs. */
+export function summarizeBashCommandForAudit(command: string): BashCommandAuditMetadata {
+  const { executable, leadingTokenCount } = firstAuditCommand(command);
+  const tokenCount = countWhitespaceTokens(command);
+  return {
+    executable,
+    category: commandCategory(executable),
+    argCount: Math.max(0, tokenCount - leadingTokenCount),
+    commandBytes: Buffer.byteLength(command, 'utf8'),
+    commandDigest: sha256(command),
+  };
+}
+
+function ownString(error: object, key: string): string {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, key);
+    return descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+      ? descriptor.value
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function safeErrorClass(error: unknown): string {
+  if (error === null) return 'null';
+  const builtins: ReadonlyArray<readonly [string, new (...args: never[]) => Error]> = [
+    ['EvalError', EvalError],
+    ['RangeError', RangeError],
+    ['ReferenceError', ReferenceError],
+    ['SyntaxError', SyntaxError],
+    ['TypeError', TypeError],
+    ['URIError', URIError],
+  ];
+  for (const [name, constructor] of builtins) {
+    try {
+      if (error instanceof constructor) return name;
+    } catch {
+      return 'unknown';
+    }
+  }
+  try {
+    return error instanceof Error ? 'Error' : typeof error;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Content-free error identity for logs and bounded UI references. */
+export function summarizeToolErrorForAudit(error: unknown): ToolErrorAuditMetadata {
+  const errorClass = safeErrorClass(error);
+  let message = typeof error === 'string' ? error : '';
+  let candidateCode = '';
+  if (error && typeof error === 'object') {
+    message = ownString(error, 'message');
+    candidateCode = ownString(error, 'code');
+  }
+  const errorCode = SAFE_ERROR_CODES.has(candidateCode) ? candidateCode : 'UNKNOWN';
+  return {
+    errorClass,
+    errorCode,
+    errorFingerprint: sha256(`${errorClass}\0${errorCode}\0${message}`),
+  };
+}
+
+export function bashValidationUserMessage(result: BashValidationResult): string {
+  switch (result.code) {
+    case 'DANGEROUS_COMMAND':
+      return 'Command blocked by the dangerous-command safety policy.';
+    case 'SHELL_METACHARACTERS':
+      return 'Command blocked because shell composition requires a stronger execution boundary.';
+    case 'PRIVILEGE_ESCALATION':
+      return 'Command blocked because privilege escalation is not allowed.';
+    case 'CONTAINER_TOOL':
+      return 'Command blocked because container tools require an explicitly authorized unsandboxed session.';
+    case 'BLOCKED_NETWORK_TOOL':
+      return 'Command blocked because this network tool is not allowed.';
+    case 'NETWORK_PERMISSION_REQUIRED':
+      return 'Command blocked because network access requires explicit permission.';
+    case 'EXECUTABLE_NOT_ALLOWED':
+      return 'Command blocked because its executable is not permitted by the sandbox policy.';
+    case 'POLICY_BLOCKED':
+      return 'Command blocked by the execution safety policy.';
+    default:
+      return result.safe ? 'Command allowed.' : 'Command blocked by the execution safety policy.';
+  }
+}
+
+/** @deprecated Use `summarizeBashCommandForAudit` for structured logs. This
+ * compatibility formatter is also content-free and never returns command text. */
+export function sanitizeCommandForLogging(command: string): string {
+  const audit = summarizeBashCommandForAudit(command);
+  return `${audit.executable} [category=${audit.category}; args=${audit.argCount}; bytes=${audit.commandBytes}; sha256=${audit.commandDigest}]`;
 }
 
 /**
@@ -523,36 +753,87 @@ export function sanitizeCommandForLogging(command: string): string {
 export function auditBashCommand(
   command: string,
   context: {
+    cwd?: string;
+    toolCallId?: string;
     sessionId?: string;
-    agentId?: string;
-    userId?: string;
     isSandboxed: boolean;
     allowed: boolean;
-    reason?: string;
+    decisionCode?: BashValidationCode;
   },
 ): void {
-  const sanitizedCmd = sanitizeCommandForLogging(command);
+  const commandAudit = summarizeBashCommandForAudit(command);
 
   if (context.allowed) {
     toolLog.info(
       {
-        command: sanitizedCmd,
+        ...commandAudit,
+        cwd: context.cwd,
+        toolCallId: context.toolCallId,
         sessionId: context.sessionId,
-        agentId: context.agentId,
-        sandboxed: context.isSandboxed,
+        decision: 'allowed',
       },
       'Bash command allowed',
     );
   } else {
     toolLog.warn(
       {
-        command: sanitizedCmd,
+        ...commandAudit,
+        cwd: context.cwd,
+        toolCallId: context.toolCallId,
         sessionId: context.sessionId,
-        agentId: context.agentId,
-        sandboxed: context.isSandboxed,
-        reason: context.reason,
+        decision: 'blocked',
+        decisionCode: context.decisionCode ?? 'POLICY_BLOCKED',
       },
       'Bash command blocked',
     );
   }
+}
+
+export function logBashExecutionAudit(
+  command: string,
+  context: {
+    cwd: string;
+    phase: 'background_start' | 'foreground_start';
+    toolCallId: string;
+    sessionId: string;
+  },
+): void {
+  toolLog.info(
+    {
+      ...summarizeBashCommandForAudit(command),
+      cwd: context.cwd,
+      decision: context.phase,
+      toolCallId: context.toolCallId,
+      sessionId: context.sessionId,
+    },
+    context.phase === 'background_start'
+      ? 'Starting supervised background process'
+      : 'Executing bash command',
+  );
+}
+
+export function logBackgroundRegistrationFailure(context: {
+  command?: string;
+  cwd?: string;
+  error: unknown;
+  phase: 'input_invalid' | 'registration_failed';
+  sessionId: string;
+  toolCallId?: string;
+}): void {
+  serverLog.debug(
+    {
+      ...(context.command ? summarizeBashCommandForAudit(context.command) : {}),
+      ...summarizeToolErrorForAudit(context.error),
+      cwd: context.cwd,
+      decision:
+        context.phase === 'input_invalid'
+          ? 'background_registration_input_invalid'
+          : 'background_registration_failed',
+      sessionId: context.sessionId,
+      toolCallId: context.toolCallId,
+    },
+    context.phase === 'input_invalid'
+      ? 'Failed to parse background command tool input, keeping tool name'
+      : 'Background process registration failed (non-critical)',
+  );
 }

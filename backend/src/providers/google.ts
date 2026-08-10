@@ -18,6 +18,7 @@ import {
 } from './model-list-cache';
 import { applyModelsDevMetadata, warmModelsDevCache } from './models-dev';
 import { providerLog } from '../logger';
+import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
 // ============================================================================
 // Error classification helpers
@@ -71,7 +72,8 @@ export function formatGoogleProviderError(err: unknown, modelId: string, provide
     return `Google AI Studio has no available quota for ${modelId}. Go to https://aistudio.google.com, open Settings, and enable billing on your Google Cloud project to raise rate limits.`;
   }
 
-  return `Google API error for ${modelId}: ${message}`;
+  const diagnostic = safeProviderDiagnostic(provider, 'sdk', err);
+  return safeProviderFailureMessage(provider, diagnostic);
 }
 
 export class GoogleProvider implements Provider {
@@ -339,7 +341,9 @@ export class GoogleProvider implements Provider {
         if (candidate.finishReason) yield { type: 'complete', finishReason: 'end_turn' };
       }
     } catch (err: unknown) {
-      yield { type: 'error', error: err instanceof Error ? err.message : String(err) };
+      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+      providerLog.error({ ...diagnostic, model: request.model }, 'Google provider stream error');
+      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
     }
   }
 }

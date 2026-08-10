@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 const BACKEND_URL = 'http://127.0.0.1:3011';
+const FRONTEND_ORIGIN = 'http://127.0.0.1:5174';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': FRONTEND_ORIGIN,
+  Vary: 'Origin',
+};
 
 /**
  * Verifies the frontend error boundary shows the backend-unavailable overlay
@@ -18,6 +24,7 @@ test('does not render the application when its backend is unavailable', async ({
     route.fulfill({
       status: 503,
       contentType: 'application/json',
+      headers: corsHeaders,
       body: JSON.stringify({ ok: false, error: 'backend unavailable' }),
     }),
   );
@@ -50,6 +57,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
           ? {
               status: 200,
               contentType: 'application/json',
+              headers: corsHeaders,
               body: JSON.stringify({
                 ok: true,
                 data: {
@@ -63,6 +71,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
           : {
               status: 503,
               contentType: 'application/json',
+              headers: corsHeaders,
               body: JSON.stringify({ ok: false }),
             },
       );
@@ -72,6 +81,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
+        headers: corsHeaders,
         body: JSON.stringify({ ok: true, data: { bearerToken: 'test-local-token' } }),
       });
       return;
@@ -80,6 +90,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
+        headers: corsHeaders,
         body: JSON.stringify({
           ok: true,
           data: { user: { id: 'local-user', username: 'Local User', isAdmin: true } },
@@ -91,6 +102,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
+        headers: corsHeaders,
         body: '{"ok":true,"data":[]}',
       });
       return;
@@ -98,6 +110,7 @@ test('Retry now recovers the UI after the backend returns', async ({ page }) => 
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
+      headers: corsHeaders,
       body: '{"ok":true,"data":[]}',
     });
   });

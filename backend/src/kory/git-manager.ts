@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 /** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
 const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9/_.-]{1,255}$/;
@@ -34,6 +35,7 @@ export class GitManager {
       cwd: this.workingDirectory,
       stdout: 'pipe',
       stderr: 'pipe',
+      env: getSafeSubprocessEnv(),
     });
     const output = proc.stdout.toString() + proc.stderr.toString();
     return { success: proc.exitCode === 0, output };
@@ -198,7 +200,10 @@ export class GitManager {
     try {
       return readFileSync(safePath, 'utf-8');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read file content in git manager');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to read file content in git manager',
+      );
       return null;
     }
   }

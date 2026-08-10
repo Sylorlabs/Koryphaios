@@ -1,6 +1,9 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { Loader, Check, ChevronRight, ChevronDown } from 'lucide-svelte';
+  import Loader from 'lucide-svelte/icons/loader';
+  import Check from 'lucide-svelte/icons/check';
+  import ChevronRight from 'lucide-svelte/icons/chevron-right';
+  import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import { tick } from 'svelte';
   import FileIcon from './icons/FileIcon.svelte';
   import hljs from 'highlight.js/lib/common';

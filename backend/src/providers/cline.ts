@@ -8,7 +8,7 @@
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
@@ -22,6 +22,23 @@ import {
   type StreamRequest,
 } from './types';
 import { getCliBridge, getKoryphaiosClineHome } from './cli-bridges';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  spawnWithPrivateArtifactCleanup,
+  writePrivatePromptToStdin,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  ensureManagedCliDirectory,
+  healManagedCliFile,
+  writeManagedCliFile,
+} from './managed-cli-storage';
+import { appendBoundedProviderFrames } from './bounded-provider-stream';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -325,6 +342,10 @@ export class ClineProvider implements Provider {
     // always-on rules. Writing these before each turn ensures the CLI
     // discovers the kory__ tool catalog and Kory's session rules on startup.
     const clineBridge = getCliBridge('cline');
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'cline' as const,
       role: request.harnessRole ?? 'manager',
@@ -333,16 +354,25 @@ export class ClineProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     const clineHome = researchOnly
       ? join(getKoryphaiosClineHome(), 'research-only')
       : getKoryphaiosClineHome();
-    mkdirSync(clineHome, { recursive: true });
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
+    ensureManagedCliDirectory(clineHome);
     if (!researchOnly) try {
       // MCP: write cline_mcp_settings.json with the kory server.
       const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
         const mcpConfigPath = join(clineHome, 'cline_mcp_settings.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
@@ -354,18 +384,20 @@ export class ClineProvider implements Provider {
             env: srv.env,
           };
         }
-        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
       }
       // Rules: write .clinerules with the Kory session rules.
       const ruleFiles = clineBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
-          mkdirSync(clineHome, { recursive: true });
-          writeFileSync(rule.path, rule.content);
+          writeManagedCliFile(rule.path, rule.content);
         }
       }
     } catch (wiringErr) {
-      providerLog.warn({ err: wiringErr, provider: 'cline' }, 'Failed to wire kory MCP/rules for Cline');
+      providerLog.warn(
+        safeProviderDiagnostic('cline', 'configuration', wiringErr),
+        'Failed to wire kory MCP/rules for Cline',
+      );
     }
 
     const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-cline-')) : null;
@@ -379,7 +411,6 @@ export class ClineProvider implements Provider {
       '--config', clineHome,
       '--data-dir', join(clineHome, 'data'),
       '--hooks-dir', join(clineHome, 'hooks'),
-      prompt,
     ];
     if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
       const lvl = request.reasoningLevel.toLowerCase();
@@ -395,17 +426,29 @@ export class ClineProvider implements Provider {
 
     const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cline')]) : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd, policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd,
+          configDirs: [clineHome, ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : [])],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server
     // and .clinerules we just wrote.
     const clineEnv = { ...(jail?.env ?? { ...process.env }) };
     clineEnv.CLINE_HOME = clineHome;
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: clineEnv,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: clineEnv,
+        }),
+      [],
+      () => bridgeGrantLease?.cleanup(),
+    );
+    bridgeGrantLease?.bindToChild(child);
+    writePrivatePromptToStdin(child, prompt);
 
     const onAbort = () => {
       try {
@@ -426,7 +469,7 @@ export class ClineProvider implements Provider {
     timeout.unref?.();
 
     let stderr = '';
-    child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
+    child.stderr.on('data', (c: Buffer) => (stderr = appendPrivateDiagnostic(stderr, c)));
 
     const decoder = new TextDecoder();
     let buffer = '';
@@ -436,17 +479,22 @@ export class ClineProvider implements Provider {
     try {
       for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
         if (request.signal?.aborted) break;
-        buffer += decoder.decode(chunk, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-        for (const raw of lines) {
+        const bounded = appendBoundedProviderFrames(
+          buffer,
+          decoder.decode(chunk, { stream: true }),
+        );
+        buffer = bounded.remainder;
+        for (const raw of bounded.frames) {
           const line = raw.trim();
           if (!line) continue;
           let ev: ClineEvent;
           try {
             ev = JSON.parse(line) as ClineEvent;
-          } catch (err: unknown) {
-            providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline skipping non-JSON stream line');
+          } catch {
+            providerLog.debug(
+              safeProviderDiagnostic('cline', 'stdout', line),
+              'Cline skipping non-JSON stream line',
+            );
             continue;
           }
           for (const out of this.mapEvent(
@@ -463,9 +511,12 @@ export class ClineProvider implements Provider {
       const aborted =
         request.signal?.aborted || (err instanceof Error && err.name === 'AbortError');
       if (!aborted) {
+        onAbort();
+        const diagnostic = safeProviderDiagnostic('cline', 'stream', err);
+        providerLog.error(diagnostic, 'Cline harness stream failed');
         yield {
           type: 'error',
-          error: `Cline harness error: ${err instanceof Error ? err.message : String(err)}`,
+          error: safeProviderFailureMessage('cline', diagnostic),
         };
       }
       clearTimeout(timeout);
@@ -482,11 +533,14 @@ export class ClineProvider implements Provider {
     if (request.signal?.aborted) return;
 
     if (exitCode !== 0 && !sawContent) {
-      const hint = stderr.trim() || `cline exited with status ${exitCode}`;
-      const loginHint = /sign in|unauthorized|auth|api key/i.test(hint)
-        ? ' — run "cline auth --provider <p> --apikey <k>".'
-        : '';
-      yield { type: 'error', error: `Cline: ${hint.slice(0, 300)}${loginHint}` };
+      const diagnostic = safeProviderDiagnostic('cline', 'stderr', stderr, { exitCode });
+      providerLog.warn(diagnostic, 'Cline CLI exited unsuccessfully');
+      yield {
+        type: 'error',
+        error: safeProviderFailureMessage('cline', diagnostic, {
+          authenticationAction: 'Run "cline auth", then reconnect.',
+        }),
+      };
       return;
     }
     yield { type: 'complete', finishReason: 'end_turn' };
@@ -528,7 +582,9 @@ export class ClineProvider implements Provider {
       return;
     }
     if (ev.type === 'error' && ev.text) {
-      yield { type: 'error', error: ev.text.slice(0, 300) };
+      const diagnostic = safeProviderDiagnostic('cline', 'stdout', ev.text);
+      providerLog.warn(diagnostic, 'Cline CLI reported a request failure');
+      yield { type: 'error', error: safeProviderFailureMessage('cline', diagnostic) };
       return;
     }
   }

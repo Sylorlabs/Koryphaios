@@ -26,6 +26,12 @@ import type {
   KoryAskUserPayload,
   CompactionProgressPayload,
 } from '@koryphaios/shared';
+import {
+  isAgentBackgroundProcess,
+  type ProcessProvenance,
+  type ProcessSupervision,
+  type ProcessTerminalReason,
+} from '@koryphaios/shared';
 import { sessionStore } from './sessions.svelte';
 import { authStore } from './auth.svelte';
 import { browser } from '$app/environment';
@@ -41,6 +47,13 @@ import { goalStore } from './goals.svelte';
 import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { runStateStore } from './run-state.svelte';
+import {
+  createWebSocketPong,
+  isWebSocketPing,
+  nextWebSocketCandidateIndex,
+  prepareAuthenticatedWebSocketUrl,
+  redactWebSocketUrl,
+} from '$lib/utils/websocket-protocol';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -255,7 +268,10 @@ function handleMessage(msg: WSMessage) {
       // applyEvent suppressed it — if the session is stoppedByUser and this
       // is an active status, skip the feed/agent update too.
       const rs = msg.sessionId ? runStateStore.states.get(msg.sessionId) : undefined;
-      if (rs?.stoppedByUser && !['done', 'idle', 'waiting', 'waiting_user', 'error'].includes(p.status)) {
+      if (
+        rs?.stoppedByUser &&
+        !['done', 'idle', 'waiting', 'waiting_user', 'error'].includes(p.status)
+      ) {
         break;
       }
       agentStore.updateAgentStatus(p.agentId, p.status, msg.sessionId ?? undefined);
@@ -327,10 +343,14 @@ function handleMessage(msg: WSMessage) {
           timestamp: msg.timestamp,
           type: 'error',
           agentId: isSubAgent ? p.agentId! : 'kory-manager',
-          agentName: isSubAgent ? agents.get(p.agentId!)?.identity.name ?? 'Worker' : 'Kory',
+          agentName: isSubAgent ? (agents.get(p.agentId!)?.identity.name ?? 'Worker') : 'Kory',
           glowClass: '',
           text: p.error ?? 'Unknown error',
-          metadata: { source: 'agent', sessionId: msg.sessionId, ...(isSubAgent && { isSubAgent: true }) },
+          metadata: {
+            source: 'agent',
+            sessionId: msg.sessionId,
+            ...(isSubAgent && { isSubAgent: true }),
+          },
         });
       }
       break;
@@ -463,7 +483,8 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'process.started':
-    case 'process.exited': {
+    case 'process.exited':
+    case 'process.status': {
       processEventTick++;
       // Background terminals are first-class: show start/exit in the feed as
       // terminal entries so long-running commands never vanish from view.
@@ -474,15 +495,21 @@ function handleMessage(msg: WSMessage) {
         pid?: number;
         exitCode?: number;
         status?: string;
+        provenance: ProcessProvenance;
+        supervision: ProcessSupervision;
+        isBackground: boolean;
+        terminalReason?: ProcessTerminalReason;
+        terminalError?: string;
         willRestart?: boolean;
         logsTail?: string;
       };
-      if (isForActiveSession) {
+      if (isForActiveSession && isAgentBackgroundProcess(p)) {
         const started = msg.type === 'process.started';
         const text = started
           ? `Background terminal started: ${p.name} (pid ${p.pid})\n$ ${p.command}`
-          : `Background terminal ${p.status}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}: ${p.name}` +
+          : `Background terminal ${p.status}${p.exitCode !== undefined ? ` (exit ${p.exitCode})` : ''}${p.terminalReason ? ` [${p.terminalReason}]` : ''}: ${p.name}` +
             (p.willRestart ? ' — restarting' : '') +
+            (p.terminalError ? `\n${p.terminalError}` : '') +
             (p.logsTail ? `\n${p.logsTail}` : '');
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
@@ -496,7 +523,9 @@ function handleMessage(msg: WSMessage) {
               callId: p.id,
               name: 'bash',
               output: text,
-              isError: !started && p.status === 'crashed',
+              isError:
+                !started &&
+                (p.status === 'crashed' || p.status === 'spawn_failed' || p.status === 'orphaned'),
               durationMs: 0,
             },
           },
@@ -862,6 +891,9 @@ let reconnectAttempts = 0;
 let wsCandidates: string[] = [];
 let wsCandidateIndex = 0;
 let candidateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let connectInFlight: Promise<void> | null = null;
+let connectGeneration = 0;
+let shouldReconnect = false;
 
 function ensureWsPath(url: string): string {
   return url.endsWith('/ws') ? url : `${url.replace(/\/?$/, '')}/ws`;
@@ -882,6 +914,7 @@ function buildWsCandidates(preferredUrl?: string): string[] {
 
 function connect(url?: string) {
   if (!browser) return;
+  shouldReconnect = true;
   console.log(
     '[WS] connect() called, current state:',
     wsConnection?.readyState,
@@ -895,15 +928,30 @@ function connect(url?: string) {
     console.log('[WS] Already connected or connecting, skipping');
     return;
   }
+  if (connectInFlight) {
+    console.log('[WS] Authentication refresh already in progress, skipping');
+    return;
+  }
+
+  const generation = connectGeneration;
+  const attempt = connectAuthenticated(url, generation);
+  connectInFlight = attempt;
+  void attempt.finally(() => {
+    if (connectInFlight === attempt) connectInFlight = null;
+  });
+}
+
+async function connectAuthenticated(url: string | undefined, generation: number): Promise<void> {
+  if (!shouldReconnect || generation !== connectGeneration) return;
 
   if (url || wsCandidates.length === 0) {
     wsCandidates = buildWsCandidates(url);
     wsCandidateIndex = 0;
-    console.log('[WS] Built candidates:', wsCandidates);
+    console.log('[WS] Built candidates:', wsCandidates.map(redactWebSocketUrl));
   }
 
   const wsUrl = wsCandidates[wsCandidateIndex];
-  console.log('[WS] Trying URL:', wsUrl, 'index:', wsCandidateIndex);
+  console.log('[WS] Trying URL:', redactWebSocketUrl(wsUrl), 'index:', wsCandidateIndex);
   if (!wsUrl) {
     wsCandidateIndex = 0;
     scheduleReconnect();
@@ -914,16 +962,36 @@ function connect(url?: string) {
 
   try {
     const protocols = ['koryphaios'];
-    let finalWsUrl = wsUrl;
-    if (authStore.token) {
-      const sep = finalWsUrl.includes('?') ? '&' : '?';
-      finalWsUrl = `${finalWsUrl}${sep}auth=${encodeURIComponent(authStore.token)}`;
+    const finalWsUrl = await prepareAuthenticatedWebSocketUrl(
+      wsUrl,
+      () => authStore.ensureSession(),
+      () => authStore.token,
+    );
+    if (!shouldReconnect || generation !== connectGeneration) return;
+    if (!finalWsUrl) {
+      console.warn('[WS] Authentication unavailable; reconnect deferred');
+      connectionStatus = 'error';
+      scheduleReconnect();
+      return;
+    }
+    if (
+      wsConnection?.readyState === WebSocket.OPEN ||
+      wsConnection?.readyState === WebSocket.CONNECTING
+    ) {
+      return;
     }
 
-    console.log('[WS] Creating WebSocket connection to:', finalWsUrl);
+    console.log('[WS] Creating WebSocket connection to:', redactWebSocketUrl(finalWsUrl));
     const ws = new WebSocket(finalWsUrl, protocols);
+    let opened = false;
+    wsConnection = ws;
 
     ws.onopen = () => {
+      if (!shouldReconnect || generation !== connectGeneration || wsConnection !== ws) {
+        ws.close();
+        return;
+      }
+      opened = true;
       console.log('[WS] Connection opened successfully');
       connectionStatus = 'connected';
       reconnectAttempts = 0;
@@ -947,7 +1015,22 @@ function connect(url?: string) {
             hasShownMalformedWsMessage = true;
             feedStore.addClientError('Received malformed realtime update from server.');
           }
-          if (import.meta.env.DEV) console.warn('Discarded malformed websocket payload', parsed);
+          if (import.meta.env.DEV) {
+            console.warn('Discarded malformed websocket payload', {
+              payloadType:
+                parsed === null ? 'null' : Array.isArray(parsed) ? 'array' : typeof parsed,
+              payloadBytes:
+                typeof event.data === 'string'
+                  ? new TextEncoder().encode(event.data).byteLength
+                  : 0,
+            });
+          }
+          return;
+        }
+        if (isWebSocketPing(parsed)) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(createWebSocketPong()));
+          }
           return;
         }
         handleMessage(parsed);
@@ -956,18 +1039,37 @@ function connect(url?: string) {
           hasShownMalformedWsMessage = true;
           feedStore.addClientError('Failed to parse realtime update from server.');
         }
-        if (import.meta.env.DEV) console.warn('Failed to parse websocket message', error);
+        if (import.meta.env.DEV) {
+          console.warn('Failed to parse websocket message', {
+            payloadType:
+              event.data === null
+                ? 'null'
+                : Array.isArray(event.data)
+                  ? 'array'
+                  : typeof event.data,
+            payloadBytes:
+              typeof event.data === 'string' ? new TextEncoder().encode(event.data).byteLength : 0,
+            parseErrorType: error instanceof SyntaxError ? 'SyntaxError' : 'Error',
+          });
+        }
       }
     };
 
     ws.onclose = (event) => {
+      if (wsConnection !== ws) return;
       console.log('[WS] Connection closed:', event.code, event.reason);
       connectionStatus = 'disconnected';
       wsConnection = null;
       sentSessionSubscriptions.clear();
+      if (!shouldReconnect || generation !== connectGeneration) return;
 
-      if (wsCandidateIndex < wsCandidates.length - 1) {
-        wsCandidateIndex++;
+      const nextCandidate = nextWebSocketCandidateIndex(
+        wsCandidateIndex,
+        wsCandidates.length,
+        opened,
+      );
+      if (!opened && nextCandidate !== 0) {
+        wsCandidateIndex = nextCandidate;
         console.log('[WS] Trying next candidate, index:', wsCandidateIndex);
         if (candidateRetryTimer) clearTimeout(candidateRetryTimer);
         candidateRetryTimer = setTimeout(() => connect(), 200);
@@ -989,6 +1091,7 @@ function connect(url?: string) {
 }
 
 function scheduleReconnect(url?: string) {
+  if (!shouldReconnect) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
   reconnectAttempts++;
@@ -1022,6 +1125,9 @@ function subscribeToSession(sessionId: string) {
 }
 
 function disconnect() {
+  shouldReconnect = false;
+  connectGeneration++;
+  connectInFlight = null;
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -1032,8 +1138,9 @@ function disconnect() {
   }
   for (const timer of fileEditTimers.values()) clearTimeout(timer);
   fileEditTimers.clear();
-  wsConnection?.close();
+  const connection = wsConnection;
   wsConnection = null;
+  connection?.close();
   sentSessionSubscriptions.clear();
   connectionStatus = 'disconnected';
 }

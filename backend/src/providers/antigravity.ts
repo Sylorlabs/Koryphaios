@@ -18,11 +18,9 @@
 // Antigravity exposes Gemini, Claude, and GPT models under a single Google subscription.
 
 import type { ProviderConfig, ModelDef, ModelQuota } from '@koryphaios/shared';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   readFileSync,
-  writeFileSync,
-  unlinkSync,
   readdirSync,
   statSync,
   existsSync,
@@ -30,15 +28,13 @@ import {
   readSync,
   closeSync,
   fstatSync,
-  mkdirSync,
   mkdtempSync,
   rmSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import {
   type Provider,
-  type ProviderContentBlock,
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
@@ -49,6 +45,23 @@ import { providerLog } from '../logger';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
 import { fetchAntigravityQuota, fetchAntigravityQuotaGroups, type AntigravityQuotaGroup } from './antigravity-quota';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  createPrivateCliTextArtifact,
+  spawnWithPrivateArtifactCleanup,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  ensureManagedCliDirectory,
+  healManagedCliFile,
+  writeManagedCliFile,
+} from './managed-cli-storage';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -61,6 +74,26 @@ const LOG_POLL_INTERVAL_MS = 150;
 // conversation it created on its first turn and resume it afterwards, sending
 // only the NEW turn — agy keeps its own history.
 const sessionConversations = new Map<string, string>();
+let cachedPrivatePromptFileSupport: boolean | undefined;
+
+export function antigravityHelpSupportsPrivatePromptFile(help: string): boolean {
+  return /(?:^|\s)--prompt-file(?:\s|=|<)/m.test(help);
+}
+
+function supportsPrivatePromptFile(bin: string): boolean {
+  if (cachedPrivatePromptFileSupport !== undefined) return cachedPrivatePromptFileSupport;
+  try {
+    const result = spawnSync(bin, ['--help'], {
+      encoding: 'utf8',
+      timeout: 4_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    cachedPrivatePromptFileSupport = antigravityHelpSupportsPrivatePromptFile(result.stdout ?? '');
+  } catch {
+    cachedPrivatePromptFileSupport = false;
+  }
+  return cachedPrivatePromptFileSupport;
+}
 
 /** Snapshot conversation ids currently on disk. */
 function listConversationIds(): Set<string> {
@@ -429,6 +462,14 @@ export class AntigravityProvider implements Provider {
       };
       return;
     }
+    if (!supportsPrivatePromptFile(bin)) {
+      yield {
+        type: 'error',
+        error:
+          'Antigravity is unavailable securely: this agy version lacks --prompt-file. Update agy; Koryphaios will not expose prompts in process arguments.',
+      };
+      return;
+    }
 
     // Resume the agy conversation tied to this Koryphaios session when we have
     // one — then only the NEW turn is sent (agy holds the prior history), which
@@ -441,20 +482,25 @@ export class AntigravityProvider implements Provider {
     }
     const convsBefore = convId ? null : listConversationIds();
 
+    const attachmentScope = createCliAttachmentScope();
     const prompt = convId
-      ? buildTurnPrompt(request.messages)
-      : buildPrompt(request.systemPrompt, request.messages);
+      ? buildTurnPrompt(request.messages, attachmentScope)
+      : buildPrompt(request.systemPrompt, request.messages, attachmentScope);
     if (!prompt.trim()) {
+      attachmentScope.cleanup();
       yield { type: 'error', error: 'Antigravity: empty prompt' };
       return;
     }
 
     const cliModel = this.resolveCliModel(request.model);
     if (!cliModel) {
+      attachmentScope.cleanup();
       yield { type: 'error', error: 'Antigravity did not report an available model for this account.' };
       return;
     }
-    const logPath = join(tmpdir(), `agy-${Date.now()}.log`);
+    const promptArtifact = createPrivateCliTextArtifact('antigravity-prompt', prompt);
+    const logArtifact = createPrivateCliTextArtifact('antigravity-log', '', 'log');
+    const logPath = logArtifact.path;
 
     // ── Wire kory MCP server, hooks, and rules into the isolated agy home ──
     // Antigravity imports .claude/ config (mcpServers, hooks) and reads
@@ -462,6 +508,10 @@ export class AntigravityProvider implements Provider {
     // CLI discovers the kory__ tool catalog, the PreToolUse enforcement
     // layer, and Kory's session rules on startup.
     const agyBridge = getCliBridge('antigravity');
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'antigravity' as const,
       role: request.harnessRole ?? 'manager',
@@ -470,16 +520,25 @@ export class AntigravityProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     const agyHome = researchOnly
       ? join(getKoryphaiosAntigravityHome(), 'research-only')
       : getKoryphaiosAntigravityHome();
-    mkdirSync(agyHome, { recursive: true });
+    const bridgeGrantDirectory =
+      !researchOnly && bridgeCtx.sessionId
+        ? bridgeGrantLease!.grant([
+            'mcp:catalog',
+            'mcp:execute',
+          ]).directory
+        : null;
+    ensureManagedCliDirectory(agyHome);
     if (!researchOnly) try {
       // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
       const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
       if (mcpConfigs && mcpConfigs.length > 0) {
         const mcpConfigPath = join(agyHome, '.claude.json');
+        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
         const existing = existsSync(mcpConfigPath)
           ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
           : {};
@@ -491,22 +550,21 @@ export class AntigravityProvider implements Provider {
             env: srv.env,
           };
         }
-        writeFileSync(mcpConfigPath, JSON.stringify(existing, null, 2));
+        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
       }
       // Hooks: write .claude/hooks.json for PreToolUse enforcement.
       const hookConfigs = agyBridge?.buildHooks(bridgeCtx);
       if (hookConfigs && hookConfigs.length > 0 && agyBridge) {
         const hooksJson = agyBridge.serializeHooks(hookConfigs);
         const hooksDir = join(agyHome, '.claude');
-        mkdirSync(hooksDir, { recursive: true });
-        writeFileSync(join(hooksDir, 'hooks.json'), hooksJson);
+        ensureManagedCliDirectory(hooksDir);
+        writeManagedCliFile(join(hooksDir, 'hooks.json'), hooksJson);
       }
       // Rules: write AGENTS.md with the Kory session rules.
       const ruleFiles = agyBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
-          mkdirSync(dirname(rule.path), { recursive: true });
-          writeFileSync(rule.path, rule.content);
+          writeManagedCliFile(rule.path, rule.content);
         }
       }
     } catch (wiringErr) {
@@ -521,7 +579,8 @@ export class AntigravityProvider implements Provider {
     // do you have?" should not silently strip the agent's write capability.
     const args = [
       '--print',
-      prompt,
+      '--prompt-file',
+      promptArtifact.path,
       // Current agy releases expose the live response and authoritative token
       // totals directly. Do not wait for sidecar databases or treat a buffered
       // plain-text stdout write as streaming.
@@ -546,18 +605,38 @@ export class AntigravityProvider implements Provider {
       ? buildSoftJail(process.env, [join(homedir(), '.gemini'), join(homedir(), '.antigravity')])
       : null;
     const wrapped = request.sandbox
-      ? wrapCommand(bin, args, { cwd: cwd || tmpdir(), policy: request.sandbox })
+      ? wrapCommand(bin, args, {
+          cwd: cwd || tmpdir(),
+          configDirs: [
+            agyHome,
+            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+            promptArtifact.directory,
+            logArtifact.directory,
+            ...attachmentScope.artifacts.map((artifact) => artifact.directory),
+          ],
+          policy: request.sandbox,
+        })
       : { command: bin, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server,
     // hooks, and rules we just wrote. Antigravity reads .claude/ config from
     // the user home, so we redirect HOME to the isolated dir.
     const agyEnv = { ...(jail?.env ?? { ...process.env }) };
     agyEnv.HOME = agyHome;
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd: cwd || tmpdir(),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: agyEnv,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd: cwd || tmpdir(),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: agyEnv,
+        }),
+      [promptArtifact, ...attachmentScope.artifacts],
+      () => {
+        logArtifact.cleanup();
+        bridgeGrantLease?.cleanup();
+      },
+    );
+    bridgeGrantLease?.bindToChild(child);
 
     const onAbort = () => {
       try {
@@ -589,7 +668,7 @@ export class AntigravityProvider implements Provider {
       stdout += text;
       stdoutLineBuffer += text;
     });
-    child.stderr.on('data', (c: Buffer) => (stderr += c.toString()));
+    child.stderr.on('data', (c: Buffer) => (stderr = appendPrivateDiagnostic(stderr, c)));
 
     const exitPromise = new Promise<number>((resolve) => {
       child.once('error', () => resolve(-1));
@@ -695,12 +774,7 @@ export class AntigravityProvider implements Provider {
         clearTimeout(timeout);
         request.signal?.removeEventListener('abort', onAbort);
 
-        try {
-          unlinkSync(logPath);
-        } catch (err: unknown) {
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'best-effort unlink of agy log file');
-          /* best-effort */
-        }
+        logArtifact.cleanup();
 
         if (request.signal?.aborted) return;
 
@@ -711,11 +785,16 @@ export class AntigravityProvider implements Provider {
 
         const text = stdout.trim();
         if (result.code !== 0 && totalContentEvents === 0) {
-          const hint = stderr.trim() || `agy exited with status ${result.code}`;
-          const loginHint = /not.*logged in|unauthorized|login|authenticate|api key/i.test(hint)
-            ? ' — run "agy auth" (or set ANTIGRAVITY_API_KEY) to authenticate.'
-            : '';
-          yield { type: 'error', error: `Antigravity: ${hint.slice(0, 300)}${loginHint}` };
+          const diagnostic = safeProviderDiagnostic('antigravity', 'stderr', stderr, {
+            exitCode: result.code,
+          });
+          providerLog.warn(diagnostic, 'Antigravity CLI exited unsuccessfully');
+          yield {
+            type: 'error',
+            error: safeProviderFailureMessage('antigravity', diagnostic, {
+              authenticationAction: 'Run "agy auth", then reconnect.',
+            }),
+          };
           return;
         }
 
@@ -1099,7 +1178,11 @@ const HARNESS_SYSTEM_NOTE =
   'tasks that require a later notification: complete the requested work in this turn and ' +
   'always finish with a concise user-facing answer.';
 
-function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
+function buildPrompt(
+  systemPrompt: string | undefined,
+  messages: ProviderMessage[],
+  attachments: CliAttachmentScope,
+): string {
   const lines: string[] = [];
   // Use the AntigravityCliBridge's harness note for consistency (Phase 1).
   const agyBridge = getCliBridge('antigravity');
@@ -1119,11 +1202,11 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
   const turns = messages.filter((m) => m.role !== 'system');
 
   if (turns.length === 1 && turns[0].role === 'user' && lines.length === 0) {
-    return flattenContent(turns[0].content);
+    return attachments.renderContent(turns[0].content);
   }
 
   for (const m of turns) {
-    const text = flattenContent(m.content);
+    const text = attachments.renderContent(m.content);
     if (!text.trim()) continue;
     const label = m.role === 'assistant' ? 'Assistant' : m.role === 'tool' ? 'Tool result' : 'User';
     lines.push(`${label}: ${text}`);
@@ -1133,7 +1216,7 @@ function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage
 
 /** Prompt for a resumed conversation: only the turns since the last assistant
  *  reply — agy already holds the earlier history in its own conversation. */
-function buildTurnPrompt(messages: ProviderMessage[]): string {
+function buildTurnPrompt(messages: ProviderMessage[], attachments: CliAttachmentScope): string {
   const turns = messages.filter((m) => m.role !== 'system');
   let start = 0;
   for (let i = turns.length - 1; i >= 0; i--) {
@@ -1143,52 +1226,15 @@ function buildTurnPrompt(messages: ProviderMessage[]): string {
     }
   }
   const fresh = turns.slice(start);
-  if (fresh.length === 1 && fresh[0].role === 'user') return flattenContent(fresh[0].content);
+  if (fresh.length === 1 && fresh[0].role === 'user')
+    return attachments.renderContent(fresh[0].content);
   return fresh
     .map((m) => {
-      const text = flattenContent(m.content);
+      const text = attachments.renderContent(m.content);
       if (!text.trim()) return '';
       const label = m.role === 'tool' ? 'Tool result' : 'User';
       return `${label}: ${text}`;
     })
     .filter(Boolean)
     .join('\n\n');
-}
-
-/** Persist a pasted image to a temp file so the CLI's own tools can view it —
- *  the piped prompt is text-only, but the agent has file access. */
-function imageBlockToTempFile(imageData: string | undefined, mime: string | undefined): string {
-  if (!imageData) return '[image attachment omitted — no data]';
-  try {
-    const ext =
-      mime === 'image/jpeg'
-        ? 'jpg'
-        : mime === 'image/webp'
-          ? 'webp'
-          : mime === 'image/gif'
-            ? 'gif'
-            : 'png';
-    const file = join(tmpdir(), `kory-attach-${Math.random().toString(36).slice(2, 10)}.${ext}`);
-    writeFileSync(file, Buffer.from(imageData, 'base64'));
-    return `[image attached — saved to ${file}; use your image/file viewing tool to look at it]`;
-  } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'could not persist image attachment to disk');
-    return '[image attachment omitted — could not persist to disk]';
-  }
-}
-
-function flattenContent(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  const parts: string[] = [];
-  for (const block of content) {
-    if (block.type === 'text' && block.text) parts.push(block.text);
-    else if (block.type === 'tool_use')
-      parts.push(
-        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
-      );
-    else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image')
-      parts.push(imageBlockToTempFile(block.imageData, block.imageMimeType));
-  }
-  return parts.join('\n');
 }

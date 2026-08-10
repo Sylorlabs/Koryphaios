@@ -1,5 +1,5 @@
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
-import { shellManager } from './shell-manager';
+import { processSupervisor } from '../process-supervisor/supervisor';
 
 export class ShellManageTool implements Tool {
   readonly name = 'shell_manage';
@@ -30,7 +30,9 @@ export class ShellManageTool implements Tool {
     };
 
     if (action === 'list') {
-      const procs = shellManager.listProcesses();
+      const procs = (
+        await processSupervisor.getAgentBackgroundProcessesBySession(ctx.sessionId)
+      ).filter((process) => process.status === 'starting' || process.status === 'running');
       if (procs.length === 0) {
         return {
           callId: call.id,
@@ -44,7 +46,7 @@ export class ShellManageTool implements Tool {
       const output = procs
         .map(
           (p) =>
-            `ID: ${p.id}\nName: ${p.name}\nCommand: ${p.command}\nStatus: ${p.status}\nPID: ${p.pid}\nStarted: ${new Date(p.startTime).toISOString()}`,
+            `ID: ${p.id}\nName: ${p.name}\nCommand: ${p.command}\nStatus: ${p.status}\nPID: ${p.pid}\nStarted: ${new Date(p.createdAt).toISOString()}`,
         )
         .join('\n---\n');
 
@@ -67,7 +69,9 @@ export class ShellManageTool implements Tool {
       };
     }
 
-    const proc = shellManager.getProcess(processId);
+    const proc = (await processSupervisor.getAgentBackgroundProcessesBySession(ctx.sessionId)).find(
+      (process) => process.id === processId,
+    );
     if (!proc) {
       return {
         callId: call.id,
@@ -79,10 +83,11 @@ export class ShellManageTool implements Tool {
     }
 
     if (action === 'logs') {
+      const logs = await processSupervisor.getProcessLogs(processId);
       let output = `Logs for process ${proc.name} (${proc.id}):\n`;
-      if (proc.stdout) output += `\nSTDOUT:\n${proc.stdout}`;
-      if (proc.stderr) output += `\nSTDERR:\n${proc.stderr}`;
-      if (!proc.stdout && !proc.stderr) output += '\n(No logs available yet)';
+      if (logs?.stdout) output += `\nSTDOUT:\n${logs.stdout}`;
+      if (logs?.stderr) output += `\nSTDERR:\n${logs.stderr}`;
+      if (!logs?.stdout && !logs?.stderr) output += '\n(No logs captured)';
 
       return {
         callId: call.id,
@@ -94,7 +99,10 @@ export class ShellManageTool implements Tool {
     }
 
     if (action === 'kill') {
-      const success = shellManager.killProcess(processId);
+      const success = await processSupervisor.killAgentBackgroundProcessForSession(
+        processId,
+        ctx.sessionId,
+      );
       return {
         callId: call.id,
         name: this.name,

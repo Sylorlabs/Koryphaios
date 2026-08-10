@@ -10,6 +10,8 @@ import { buildKoryHookConfigs, buildKoryMcpServerConfig } from '../cli-bridges';
 import { validateLocalBearerToken } from '../../auth/local-route-auth';
 import { localAuth } from '../../auth/local-auth';
 import { initDb } from '../../db';
+import { db, sessions } from '../../db';
+import { eq } from 'drizzle-orm';
 
 // Ensure the sessions table exists so cli-session-state's queries don't throw.
 // Do NOT mock the db module — mock.module is process-wide in Bun and would
@@ -20,13 +22,35 @@ beforeAll(async () => {
 
 describe('native CLI integration state', () => {
   it('increments the rewrite revision used to invalidate native conversations', async () => {
+    const suffix = `${Date.now()}-${Math.random()}`;
+    const sessionId = `cli-revision-${suffix}`;
+    await db.insert(sessions).values({
+      id: sessionId,
+      title: 'CLI revision test',
+      conversationRevision: 7,
+      providerConversationRevision: 2,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     resetCliConversationRevisions();
-    expect(await getCliConversationRevision('session-a')).toBe(0);
-    // markCliConversationRewritten hits the DB mock (returns 0 → fallback to 1)
-    await markCliConversationRewritten('session-a');
-    // After marking, the cache is set to 1 (the fallback value)
-    expect(await getCliConversationRevision('session-a')).toBe(1);
-    expect(await getCliConversationRevision('session-b')).toBe(0);
+    expect(await getCliConversationRevision(sessionId)).toBe(2);
+    // Simulate another backend process advancing the authoritative row.
+    await db
+      .update(sessions)
+      .set({ providerConversationRevision: 8 })
+      .where(eq(sessions.id, sessionId));
+    expect(await getCliConversationRevision(sessionId)).toBe(8);
+    await markCliConversationRewritten(sessionId);
+    expect(await getCliConversationRevision(sessionId)).toBe(9);
+    const [persisted] = await db
+      .select({
+        contextRevision: sessions.conversationRevision,
+        providerRevision: sessions.providerConversationRevision,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId));
+    expect(persisted).toEqual({ contextRevision: 7, providerRevision: 9 });
+    await db.delete(sessions).where(eq(sessions.id, sessionId));
   });
 
   it('materializes text-transport images securely and reuses the content-addressed path', () => {
@@ -88,11 +112,19 @@ describe('native CLI integration state', () => {
     process.env.KORY_HOOK_BRIDGE_SCRIPT = '/tmp/kory hook bridge.js';
     try {
       const hooks = buildKoryHookConfigs({
-        provider: 'claude', role: 'worker', sandbox: undefined,
-        workingDirectory: '/tmp/workspace', sessionId: 'hook-session', systemPrompt: '', tools: [],
+        provider: 'claude',
+        role: 'worker',
+        sandbox: undefined,
+        workingDirectory: '/tmp/workspace',
+        sessionId: 'hook-session',
+        systemPrompt: '',
+        tools: [],
       });
       expect(hooks?.map((hook) => hook.events[0])).toEqual([
-        'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop',
+        'PreToolUse',
+        'PostToolUse',
+        'UserPromptSubmit',
+        'Stop',
       ]);
       for (const hook of hooks ?? []) {
         expect(hook.command).toContain('--auth "Bearer ');

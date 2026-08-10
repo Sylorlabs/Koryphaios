@@ -1,16 +1,14 @@
 <script lang="ts">
-  import {
-    Settings,
-    Activity,
-    ChevronDown,
-    Download,
-    Search,
-    Minus,
-    Square,
-    X,
-    StickyNote,
-    Flag,
-  } from 'lucide-svelte';
+  import Settings from 'lucide-svelte/icons/settings';
+  import Activity from 'lucide-svelte/icons/activity';
+  import ChevronDown from 'lucide-svelte/icons/chevron-down';
+  import Download from 'lucide-svelte/icons/download';
+  import Search from 'lucide-svelte/icons/search';
+  import Minus from 'lucide-svelte/icons/minus';
+  import Square from 'lucide-svelte/icons/square';
+  import X from 'lucide-svelte/icons/x';
+  import StickyNote from 'lucide-svelte/icons/sticky-note';
+  import Flag from 'lucide-svelte/icons/flag';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
   import { getModKeyName } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
@@ -99,7 +97,10 @@
             });
         })
         .catch((err: unknown) => {
-          console.warn('Window maximized state check failed:', err instanceof Error ? err.message : String(err));
+          console.warn(
+            'Window maximized state check failed:',
+            err instanceof Error ? err.message : String(err),
+          );
         });
     }
 
@@ -351,7 +352,6 @@
           {/if}
         </div>
       </div>
-
     </div>
 
     <div class="flex-1 flex items-center justify-center h-full" data-tauri-drag-region>
@@ -400,27 +400,27 @@
         </button>
       {/if}
       {#if notesEnabled}
-      <button
-        type="button"
-        class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
-        data-tauri-drag-region="false"
-        title="Report feedback via a GitHub issue"
-        onclick={sendFeedback}
-      >
-        <Flag size={14} class="transition-colors group-hover:text-red-400" />
-        <span class="text-xs font-medium">Feedback</span>
-      </button>
-      <button
-        type="button"
-        class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
-        style="color: {showNotes ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
-        onclick={() => action('toggle_notes')}
-        data-tauri-drag-region="false"
-        title="Notes (Ctrl+Shift+N)"
-      >
-        <StickyNote size={14} />
-        <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
-      </button>
+        <button
+          type="button"
+          class="group flex items-center gap-1.5 rounded-lg px-3 py-2 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)]"
+          data-tauri-drag-region="false"
+          title="Report feedback via a GitHub issue"
+          onclick={sendFeedback}
+        >
+          <Flag size={14} class="transition-colors group-hover:text-red-400" />
+          <span class="text-xs font-medium">Feedback</span>
+        </button>
+        <button
+          type="button"
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg transition-colors hover:bg-[var(--color-surface-2)]"
+          style="color: {showNotes ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+          onclick={() => action('toggle_notes')}
+          data-tauri-drag-region="false"
+          title="Notes (Ctrl+Shift+N)"
+        >
+          <StickyNote size={14} />
+          <span class="text-xs font-medium">{showNotes ? 'Notes open' : 'Notes'}</span>
+        </button>
       {/if}
       <button
         type="button"
@@ -432,7 +432,7 @@
       >
         <Search size={14} />
         <span class="text-xs font-medium">Commands</span>
-        <kbd class="kbd opacity-80">{getModKeyName()}K</kbd>
+        <kbd class="kbd">{getModKeyName()}K</kbd>
       </button>
 
       {#if activeAgents.length > 0}

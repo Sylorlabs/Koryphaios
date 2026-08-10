@@ -78,7 +78,7 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
         // Last resort: the first available CLI harness provider.
         const cliProvider = providers
           .getStatus()
-          .find((p) => p.authenticated && isNativeCliProvider(p.name));
+          .find((p) => p.adapterAvailable && isNativeCliProvider(p.name));
         if (cliProvider) providerName = cliProvider.name;
       }
       if (!providerName || !isNativeCliProvider(providerName)) {
@@ -134,7 +134,17 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
             });
           }
         } catch (err: unknown) {
-          serverLog.warn({ err, providerName, command: body.command }, 'Native command failed');
+          // The raw command and provider error may contain credentials or user-authored text.
+          // Preserve enough non-content metadata to correlate the failure without copying that
+          // material into stdout or launcher/watchdog logs.
+          serverLog.warn(
+            {
+              providerName,
+              commandLength: body.command.length,
+              errorType: err instanceof Error ? err.name : typeof err,
+            },
+            'Native command failed',
+          );
           emit(
             `Failed to run /${parsed.command}: ${err instanceof Error ? err.message : String(err)}`,
             { isError: true },

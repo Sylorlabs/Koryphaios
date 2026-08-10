@@ -5,7 +5,9 @@
   import FeedEntry from './FeedEntry.svelte';
   import VirtualList from './VirtualList.svelte';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
-  import { MessageSquare, ArrowDown, Send } from 'lucide-svelte';
+  import MessageSquare from 'lucide-svelte/icons/message-square';
+  import ArrowDown from 'lucide-svelte/icons/arrow-down';
+  import Send from 'lucide-svelte/icons/send';
   import { untrack } from 'svelte';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
 

@@ -9,37 +9,52 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
-import type { UserCredentialsService } from '../../services/user-credentials';
-import { mkdirSync, rmSync } from 'fs';
+import type { CredentialEncryption, UserCredentialsService } from '../../services/user-credentials';
+import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const isolatedTestDir = join(tmpdir(), `koryphaios-creds-test-${process.pid}-${Date.now()}`);
-mkdirSync(isolatedTestDir, { recursive: true });
+const isolatedTestDir = mkdtempSync(join(tmpdir(), 'koryphaios-creds-test-'));
 process.env.DATABASE_URL = `sqlite://${join(isolatedTestDir, 'credentials.sqlite')}`;
 process.env.KORYPHAIOS_MASTER_KEY =
   '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+process.env.KORYPHAIOS_DATA_DIR = join(isolatedTestDir, 'kms');
+process.env.KORYPHAIOS_KMS_PASSPHRASE =
+  'credential-envelope-test-passphrase-that-is-not-used-outside-this-test';
 
 const { UserCredentialsService } = await import('../user-credentials');
 const { createAuditLogService } = await import('../audit');
-const { initDb, getDb, db, users } = await import('../../db');
+const { initializeEncryption } = await import('../../security');
+const { initDb, getDb, db, users, userCredentials } = await import('../../db');
+
+function legacyXor(plaintext: string, masterKey = 'dev-key'): string {
+  const keyBytes = Buffer.from(masterKey.slice(0, 32), 'utf8');
+  const plaintextBytes = Buffer.from(plaintext, 'utf8');
+  const encrypted = Buffer.alloc(plaintextBytes.length);
+  for (let i = 0; i < plaintextBytes.length; i++) {
+    encrypted[i] = plaintextBytes[i] ^ keyBytes[i % keyBytes.length];
+  }
+  return encrypted.toString('base64');
+}
 
 describe('Credentials Service', () => {
   let service: UserCredentialsService;
   let testDir: string;
   let userId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     testDir = isolatedTestDir;
     initDb();
-    // Create service directly with fresh DB connection to avoid singleton issues
-    service = new UserCredentialsService(getDb());
+    await initializeEncryption();
+    service = new UserCredentialsService();
   });
 
   afterAll(() => {
     try {
       rmSync(testDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      /* ignore cleanup errors in test teardown */
+    }
   });
 
   beforeEach(async () => {
@@ -82,10 +97,8 @@ describe('Credentials Service', () => {
 
       expect(row.encrypted_credential).toBeDefined();
       expect(row.encrypted_credential).not.toContain(credential);
-      // Verify it looks like base64-encoded encrypted data (not plaintext JSON)
-      expect(Buffer.from(row.encrypted_credential, 'base64').toString('base64')).toBe(
-        row.encrypted_credential,
-      );
+      expect(row.encrypted_credential).toStartWith('env:');
+      expect(JSON.parse(row.encrypted_credential.slice(4)).algorithm).toBe('aes-256-gcm');
     });
 
     it('should store metadata', async () => {
@@ -141,6 +154,166 @@ describe('Credentials Service', () => {
 
       const result = await service.get(otherUserId, id, 'unauthorized_attempt');
       expect(result).toBeNull();
+    });
+
+    it('migrates a legacy credential written with the historical default key', async () => {
+      const credentialId = `legacy_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const plaintext = 'sk-legacy-default-key-test';
+      const legacyValue = legacyXor(plaintext);
+      await db.insert(userCredentials).values({
+        id: credentialId,
+        userId,
+        provider: 'openai',
+        encryptedCredential: legacyValue,
+        type: 'apiKey',
+        isActive: 1,
+        createdAt: new Date(),
+      });
+
+      const originalMasterKey = process.env.KORYPHAIOS_MASTER_KEY;
+      delete process.env.KORYPHAIOS_MASTER_KEY;
+      try {
+        const result = await service.getCredential(credentialId);
+        expect(result?.plaintext).toBe(plaintext);
+      } finally {
+        process.env.KORYPHAIOS_MASTER_KEY = originalMasterKey;
+      }
+
+      const row = getDb()
+        .prepare('SELECT encrypted_credential FROM user_credentials WHERE id = ?')
+        .get(credentialId) as { encrypted_credential: string };
+      expect(row.encrypted_credential).toStartWith('env:');
+      expect(row.encrypted_credential).not.toBe(legacyValue);
+
+      const secondRead = await service.getCredential(credentialId);
+      expect(secondRead?.plaintext).toBe(plaintext);
+    });
+
+    it('fails closed when an authenticated envelope is tampered with', async () => {
+      const id = await service.create({
+        userId,
+        provider: 'anthropic',
+        credential: 'sk-ant-tamper-test',
+        metadata: {},
+      });
+      const sqlite = getDb();
+      const row = sqlite
+        .prepare('SELECT encrypted_credential FROM user_credentials WHERE id = ?')
+        .get(id) as { encrypted_credential: string };
+      const envelope = JSON.parse(row.encrypted_credential.slice(4));
+      const encryptedData = Buffer.from(envelope.encryptedData, 'base64');
+      encryptedData[encryptedData.length - 1] ^= 1;
+      envelope.encryptedData = encryptedData.toString('base64');
+      sqlite
+        .prepare('UPDATE user_credentials SET encrypted_credential = ? WHERE id = ?')
+        .run(`env:${JSON.stringify(envelope)}`, id);
+
+      await expect(service.getCredential(id)).rejects.toThrow(/Decryption failed/i);
+      expect(await service.get(userId, id, 'tamper-test')).toBeNull();
+    });
+
+    it('does not return or rewrite a legacy credential when envelope encryption is unavailable', async () => {
+      const credentialId = `legacy_unavailable_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const legacyValue = legacyXor('sk-legacy-must-not-leak');
+      await db.insert(userCredentials).values({
+        id: credentialId,
+        userId,
+        provider: 'openai',
+        encryptedCredential: legacyValue,
+        type: 'apiKey',
+        isActive: 1,
+        createdAt: new Date(),
+      });
+      const unavailableEncryption: CredentialEncryption = {
+        async encrypt() {
+          throw new Error('KMS unavailable');
+        },
+        async decryptEnvelope() {
+          throw new Error('KMS unavailable');
+        },
+      };
+      const unavailableService = new UserCredentialsService(unavailableEncryption);
+
+      const originalMasterKey = process.env.KORYPHAIOS_MASTER_KEY;
+      delete process.env.KORYPHAIOS_MASTER_KEY;
+      try {
+        await expect(unavailableService.getCredential(credentialId)).rejects.toThrow(
+          'KMS unavailable',
+        );
+        expect(await unavailableService.get(userId, credentialId, 'unavailable-test')).toBeNull();
+      } finally {
+        process.env.KORYPHAIOS_MASTER_KEY = originalMasterKey;
+      }
+
+      const row = getDb()
+        .prepare('SELECT encrypted_credential FROM user_credentials WHERE id = ?')
+        .get(credentialId) as { encrypted_credential: string };
+      expect(row.encrypted_credential).toBe(legacyValue);
+    });
+
+    it('keeps the legacy row recoverable when a new envelope cannot be verified', async () => {
+      const credentialId = `legacy_unverified_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const legacyValue = legacyXor('sk-legacy-round-trip-check');
+      await db.insert(userCredentials).values({
+        id: credentialId,
+        userId,
+        provider: 'openai',
+        encryptedCredential: legacyValue,
+        type: 'apiKey',
+        isActive: 1,
+        createdAt: new Date(),
+      });
+      const invalidEnvelopeEncryption: CredentialEncryption = {
+        async encrypt() {
+          return 'env:not-a-readable-envelope';
+        },
+        async decryptEnvelope() {
+          throw new Error('Envelope verification unavailable');
+        },
+      };
+      const migrationService = new UserCredentialsService(invalidEnvelopeEncryption);
+
+      const originalMasterKey = process.env.KORYPHAIOS_MASTER_KEY;
+      delete process.env.KORYPHAIOS_MASTER_KEY;
+      try {
+        await expect(migrationService.getCredential(credentialId)).rejects.toThrow(
+          'Envelope verification unavailable',
+        );
+      } finally {
+        process.env.KORYPHAIOS_MASTER_KEY = originalMasterKey;
+      }
+
+      const row = getDb()
+        .prepare('SELECT encrypted_credential FROM user_credentials WHERE id = ?')
+        .get(credentialId) as { encrypted_credential: string };
+      expect(row.encrypted_credential).toBe(legacyValue);
+    });
+
+    it('does not store a credential when envelope encryption is unavailable', async () => {
+      const unavailableEncryption: CredentialEncryption = {
+        async encrypt() {
+          throw new Error('KMS unavailable');
+        },
+        async decryptEnvelope() {
+          throw new Error('KMS unavailable');
+        },
+      };
+      const unavailableService = new UserCredentialsService(unavailableEncryption);
+
+      await expect(
+        unavailableService.create({
+          userId,
+          provider: 'openai',
+          credential: 'sk-never-persisted',
+        }),
+      ).rejects.toThrow('KMS unavailable');
+
+      const row = getDb()
+        .prepare(
+          'SELECT COUNT(*) AS count FROM user_credentials WHERE user_id = ? AND provider = ?',
+        )
+        .get(userId, 'openai') as { count: number };
+      expect(row.count).toBe(0);
     });
   });
 

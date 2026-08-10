@@ -766,6 +766,53 @@ export const MIGRATIONS: Migration[] = [
     up: `ALTER TABLE ordered_session_events ADD COLUMN parent_sequence INTEGER;`,
     down: ``,
   },
+  {
+    version: '0026',
+    description: 'Retain conversation lineage and separate provider transcript revisions',
+    up: `
+      ALTER TABLE sessions ADD COLUMN active_message_id TEXT;
+      ALTER TABLE sessions ADD COLUMN provider_conversation_revision INTEGER DEFAULT 0;
+      ALTER TABLE messages ADD COLUMN parent_message_id TEXT;
+
+      UPDATE sessions
+      SET provider_conversation_revision = COALESCE(conversation_revision, 0);
+
+      WITH ordered_messages AS (
+        SELECT
+          id,
+          LAG(id) OVER (PARTITION BY session_id ORDER BY created_at ASC, rowid ASC) AS parent_id
+        FROM messages
+      )
+      UPDATE messages
+      SET parent_message_id = (
+        SELECT parent_id FROM ordered_messages WHERE ordered_messages.id = messages.id
+      );
+
+      UPDATE sessions
+      SET active_message_id = (
+        SELECT id
+        FROM messages
+        WHERE messages.session_id = sessions.id
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT 1
+      )
+      WHERE EXISTS (SELECT 1 FROM messages WHERE messages.session_id = sessions.id);
+
+      CREATE INDEX IF NOT EXISTS idx_messages_session_parent
+        ON messages(session_id, parent_message_id);
+    `,
+    down: `DROP INDEX IF EXISTS idx_messages_session_parent;`,
+  },
+  {
+    version: '0027',
+    description: 'Scope notes to projects and add optimistic revisions',
+    up: `
+      ALTER TABLE notes ADD COLUMN project_root TEXT;
+      ALTER TABLE notes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+      CREATE INDEX IF NOT EXISTS idx_notes_project_root ON notes(project_root);
+    `,
+    down: `DROP INDEX IF EXISTS idx_notes_project_root;`,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────
@@ -866,14 +913,93 @@ export class MigrationRunner {
         );
       } else if (migration.version === '0025') {
         const table = this.db
-          .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ordered_session_events'")
+          .query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ordered_session_events'",
+          )
           .get();
         if (table) {
-          const columns = this.db.query(`PRAGMA table_info(ordered_session_events)`).all() as Array<{ name: string }>;
+          const columns = this.db
+            .query(`PRAGMA table_info(ordered_session_events)`)
+            .all() as Array<{ name: string }>;
           if (!columns.some((column) => column.name === 'parent_sequence')) {
             this.db.exec(migration.up);
           }
         }
+      } else if (migration.version === '0026') {
+        // Some developer databases are bootstrapped from the current Drizzle
+        // schema before their migration ledger is initialized. Add only the
+        // missing columns, then run the same lossless backfill either way.
+        const sessionColumns = this.db.query(`PRAGMA table_info(sessions)`).all() as Array<{
+          name: string;
+        }>;
+        const messageColumns = this.db.query(`PRAGMA table_info(messages)`).all() as Array<{
+          name: string;
+        }>;
+        const providerRevisionWasMissing = !sessionColumns.some(
+          (column) => column.name === 'provider_conversation_revision',
+        );
+        if (!sessionColumns.some((column) => column.name === 'active_message_id')) {
+          this.db.exec('ALTER TABLE sessions ADD COLUMN active_message_id TEXT;');
+        }
+        if (providerRevisionWasMissing) {
+          this.db.exec(
+            'ALTER TABLE sessions ADD COLUMN provider_conversation_revision INTEGER DEFAULT 0;',
+          );
+        }
+        if (!messageColumns.some((column) => column.name === 'parent_message_id')) {
+          this.db.exec('ALTER TABLE messages ADD COLUMN parent_message_id TEXT;');
+        }
+        this.db.exec(
+          providerRevisionWasMissing
+            ? `UPDATE sessions
+               SET provider_conversation_revision = COALESCE(conversation_revision, 0);`
+            : `UPDATE sessions
+               SET provider_conversation_revision = COALESCE(conversation_revision, 0)
+               WHERE provider_conversation_revision IS NULL;`,
+        );
+        this.db.exec(`
+          WITH ordered_messages AS (
+            SELECT
+              id,
+              LAG(id) OVER (PARTITION BY session_id ORDER BY created_at ASC, rowid ASC) AS parent_id
+            FROM messages
+          )
+          UPDATE messages
+          SET parent_message_id = (
+            SELECT parent_id FROM ordered_messages WHERE ordered_messages.id = messages.id
+          )
+          WHERE messages.session_id IN (
+            SELECT id FROM sessions WHERE active_message_id IS NULL
+          );
+
+          UPDATE sessions
+          SET active_message_id = (
+            SELECT id
+            FROM messages
+            WHERE messages.session_id = sessions.id
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+          )
+          WHERE active_message_id IS NULL
+            AND EXISTS (SELECT 1 FROM messages WHERE messages.session_id = sessions.id);
+
+          CREATE INDEX IF NOT EXISTS idx_messages_session_parent
+            ON messages(session_id, parent_message_id);
+        `);
+      } else if (migration.version === '0027') {
+        // Current-schema bootstrap databases may already have either column.
+        // Finish an interrupted migration one additive step at a time without
+        // rewriting or dropping any existing note content.
+        const noteColumns = this.db.query(`PRAGMA table_info(notes)`).all() as Array<{
+          name: string;
+        }>;
+        if (!noteColumns.some((column) => column.name === 'project_root')) {
+          this.db.exec('ALTER TABLE notes ADD COLUMN project_root TEXT;');
+        }
+        if (!noteColumns.some((column) => column.name === 'revision')) {
+          this.db.exec('ALTER TABLE notes ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;');
+        }
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_notes_project_root ON notes(project_root);');
       } else {
         this.db.exec(migration.up);
       }

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { X, FileText } from 'lucide-svelte';
+  import X from 'lucide-svelte/icons/x';
+  import FileText from 'lucide-svelte/icons/file-text';
   import { gitStore } from '$lib/stores/git.svelte';
 
   // Basic diff parser for display

@@ -1,33 +1,204 @@
-// Error monitoring - logs all console errors for debugging
-// This helps track down issues by sending errors to the backend
+// Frontend error monitoring. Diagnostic transport is structural-only: console
+// arguments, Error messages/stacks, prompts, tool output, and response bodies
+// never cross this persistence boundary.
 
 const ERROR_LOG_ENDPOINT = '/api/debug/log-error';
+
+export const MONITOR_MAX_BATCH_BYTES = 32 * 1024;
+export const MONITOR_MAX_ENTRY_BYTES = 2 * 1024;
+const MONITOR_MAX_BUFFER_ENTRIES = 32;
+const MONITOR_MAX_DEPTH = 3;
+const MONITOR_MAX_OBJECT_KEYS = 12;
+const MONITOR_MAX_ARRAY_ITEMS = 12;
+const MONITOR_MAX_NODES = 64;
 
 interface ErrorLog {
   timestamp: number;
   type: 'error' | 'warn' | 'unhandledrejection';
-  message: string;
-  stack?: string;
-  url?: string;
-  line?: number;
-  column?: number;
-  userAgent?: string;
+  message: 'console.error' | 'console.warn' | 'window.error' | 'unhandledrejection';
+  details: unknown;
+}
+
+interface ShapeState {
+  nodes: number;
+  seen: WeakSet<object>;
 }
 
 let errorBuffer: ErrorLog[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let _originalError: typeof console.error;
+let _originalWarn: typeof console.warn;
+let _initialized = false;
 
-async function flushErrors() {
+// Store the real console methods on globalThis so they survive Vite HMR.
+const _g = globalThis as unknown as {
+  __koryOriginalConsoleError?: typeof console.error;
+  __koryOriginalConsoleWarn?: typeof console.warn;
+};
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function isErrorObject(value: object): value is Error {
+  try {
+    return value instanceof Error;
+  } catch {
+    return false;
+  }
+}
+
+function safeErrorType(value: Error): string {
+  const builtins: ReadonlyArray<readonly [string, new (...args: never[]) => Error]> = [
+    ['EvalError', EvalError],
+    ['RangeError', RangeError],
+    ['ReferenceError', ReferenceError],
+    ['SyntaxError', SyntaxError],
+    ['TypeError', TypeError],
+    ['URIError', URIError],
+  ];
+  for (const [name, constructor] of builtins) {
+    try {
+      if (value instanceof constructor) return name;
+    } catch {
+      return 'Error';
+    }
+  }
+  return 'Error';
+}
+
+function ownStringBytes(value: object, property: string): number {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, property);
+    return descriptor && 'value' in descriptor && typeof descriptor.value === 'string'
+      ? utf8Bytes(descriptor.value)
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Return a bounded structural description without retaining any string value,
+ * object key, Error message/stack, or getter result. */
+export function summarizeMonitorValue(
+  value: unknown,
+  depth = 0,
+  state: ShapeState = { nodes: 0, seen: new WeakSet() },
+): unknown {
+  if (value === null) return { type: 'null' };
+  if (typeof value === 'string') return { type: 'string', bytes: utf8Bytes(value) };
+  if (typeof value === 'number') {
+    return {
+      type: 'number',
+      finite: Number.isFinite(value),
+    };
+  }
+  if (typeof value === 'boolean') return { type: 'boolean' };
+  if (typeof value === 'undefined') return { type: 'undefined' };
+  if (typeof value === 'bigint') return { type: 'bigint', digits: value.toString().length };
+  if (typeof value === 'symbol') return { type: 'symbol' };
+  if (typeof value === 'function') return { type: 'function' };
+  if (depth >= MONITOR_MAX_DEPTH) return { type: 'max-depth' };
+  if (state.nodes >= MONITOR_MAX_NODES) return { type: 'node-limit' };
+
+  const object = value as object;
+  if (state.seen.has(object)) return { type: 'circular' };
+  state.seen.add(object);
+  state.nodes += 1;
+
+  if (isErrorObject(object)) {
+    const error = object;
+    let cause: PropertyDescriptor | undefined;
+    try {
+      cause = Object.getOwnPropertyDescriptor(error, 'cause');
+    } catch {
+      cause = undefined;
+    }
+    return {
+      type: 'error',
+      errorType: safeErrorType(error),
+      messageBytes: ownStringBytes(error, 'message'),
+      stackBytes: ownStringBytes(error, 'stack'),
+      ...(cause && 'value' in cause
+        ? { cause: summarizeMonitorValue(cause.value, depth + 1, state) }
+        : {}),
+    };
+  }
+  if (ArrayBuffer.isView(value)) {
+    return { type: 'binary-view', bytes: value.byteLength };
+  }
+  if (value instanceof ArrayBuffer) return { type: 'array-buffer', bytes: value.byteLength };
+  if (Array.isArray(value)) {
+    return {
+      type: 'array',
+      length: value.length,
+      items: value
+        .slice(0, MONITOR_MAX_ARRAY_ITEMS)
+        .map((item) => summarizeMonitorValue(item, depth + 1, state)),
+      truncated: value.length > MONITOR_MAX_ARRAY_ITEMS,
+    };
+  }
+
+  try {
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const values = Object.values(descriptors)
+      .slice(0, MONITOR_MAX_OBJECT_KEYS)
+      .map((descriptor) =>
+        'value' in descriptor
+          ? summarizeMonitorValue(descriptor.value, depth + 1, state)
+          : { type: 'accessor' },
+      );
+    return {
+      type: 'object',
+      keyCount: Object.keys(descriptors).length,
+      values,
+      truncated: Object.keys(descriptors).length > MONITOR_MAX_OBJECT_KEYS,
+    };
+  } catch {
+    return { type: 'uninspectable-object' };
+  }
+}
+
+function boundedEntry(entry: ErrorLog): ErrorLog {
+  const serialized = JSON.stringify(entry);
+  if (utf8Bytes(serialized) <= MONITOR_MAX_ENTRY_BYTES) return entry;
+  return {
+    timestamp: entry.timestamp,
+    type: entry.type,
+    message: entry.message,
+    details: { type: 'entry-size-limit', originalBytes: utf8Bytes(serialized) },
+  };
+}
+
+function enqueue(entry: ErrorLog): void {
+  errorBuffer.push(boundedEntry(entry));
+  if (errorBuffer.length > MONITOR_MAX_BUFFER_ENTRIES) {
+    errorBuffer.splice(0, errorBuffer.length - MONITOR_MAX_BUFFER_ENTRIES);
+  }
+  scheduleFlush();
+}
+
+function boundedBatch(entries: ErrorLog[]): ErrorLog[] {
+  const bounded: ErrorLog[] = [];
+  for (const entry of entries) {
+    const candidate = [...bounded, entry];
+    if (utf8Bytes(JSON.stringify({ errors: candidate })) > MONITOR_MAX_BATCH_BYTES) break;
+    bounded.push(entry);
+  }
+  return bounded;
+}
+
+async function flushErrors(): Promise<void> {
   if (errorBuffer.length === 0) return;
-  // Demo builds have no backend to receive logs — posting would just 404.
   const { isDemoMode } = await import('$lib/demo-flags');
   if (isDemoMode) {
     errorBuffer = [];
     return;
   }
 
-  const errors = [...errorBuffer];
+  const errors = boundedBatch(errorBuffer);
   errorBuffer = [];
+  if (errors.length === 0) return;
 
   try {
     await fetch(ERROR_LOG_ENDPOINT, {
@@ -35,154 +206,98 @@ async function flushErrors() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ errors }),
     });
-  } catch (err) {
-    // Don't log monitoring errors to avoid infinite loop — use the original
-    // console.warn so we don't re-enter our own wrapper (which would push
-    // to errorBuffer, schedule another flush, and feedback-loop).
-    if (_originalWarn) _originalWarn.call(console, '[ERROR MONITOR] Failed to send error logs', err);
-  }
-}
-
-function scheduleFlush() {
-  if (flushTimer) clearTimeout(flushTimer);
-  flushTimer = setTimeout(flushErrors, 1000); // Batch errors every 1s
-}
-
-let _originalError: typeof console.error;
-let _originalWarn: typeof console.warn;
-let _initialized = false;
-
-// Store the real console methods on globalThis so they survive Vite HMR
-// (which re-evaluates the module and resets module-level variables, while
-// console.error stays wrapped from the previous instance). Without this,
-// a hot-reload would capture the old wrapper as _originalError and create
-// infinite recursion: wrapper → _originalError (old wrapper) → _originalError (itself) → …
-const _g = globalThis as unknown as {
-  __koryOriginalConsoleError?: typeof console.error;
-  __koryOriginalConsoleWarn?: typeof console.warn;
-};
-
-/** Safely serialize a value for the error log message. Never throws —
- *  falls back to a placeholder on circular references or stringify failures. */
-function safeStringify(value: unknown): string {
-  if (value === null) return 'null';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (typeof value === 'function') return `[Function: ${value.name || 'anonymous'}]`;
-  if (value instanceof Error) return `${value.name}: ${value.message}\n${value.stack ?? ''}`;
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch (err: unknown) {
-      // Circular reference or other stringify failure — don't let this
-      // throw out of console.error and trigger a cascading error loop.
-      console.debug('safeStringify: JSON.stringify failed:', err instanceof Error ? err.message : String(err));
-      try {
-        return Object.prototype.toString.call(value);
-      } catch (err2: unknown) {
-        console.debug('safeStringify: Object.prototype.toString also failed:', err2 instanceof Error ? err2.message : String(err2));
-        return '[Unserializable object]';
-      }
+  } catch {
+    // The monitoring path must not recursively log its own transport failure.
+    if (_originalWarn) {
+      _originalWarn.call(console, '[Koryphaios] Error monitor transport unavailable');
     }
   }
-  return String(value);
 }
 
-/** Quick check whether any arg is a string starting with the sentinel prefix.
- *  Used to skip [Koryphaios] messages BEFORE running the (potentially
- *  throwing) serialization map. */
+function scheduleFlush(): void {
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => void flushErrors(), 1_000);
+}
+
+function consoleEntry(type: 'error' | 'warn', args: unknown[]): ErrorLog {
+  return {
+    timestamp: Date.now(),
+    type,
+    message: type === 'error' ? 'console.error' : 'console.warn',
+    details: {
+      argumentCount: args.length,
+      arguments: args
+        .slice(0, MONITOR_MAX_ARRAY_ITEMS)
+        .map((argument) => summarizeMonitorValue(argument)),
+      truncated: args.length > MONITOR_MAX_ARRAY_ITEMS,
+    },
+  };
+}
+
 function argsHaveKoryphaiosSentinel(args: unknown[]): boolean {
-  for (const a of args) {
-    if (typeof a === 'string' && a.includes('[Koryphaios]')) return true;
-  }
-  return false;
+  return args.some((argument) => typeof argument === 'string' && argument.includes('[Koryphaios]'));
 }
 
-function logError(error: ErrorLog) {
-  errorBuffer.push(error);
-  // Use original console so we don't recurse into our own wrapper
-  if (_originalError) _originalError.call(console, '[ERROR MONITOR]', error.message, error);
-  scheduleFlush();
-}
+const onWindowError = (event: ErrorEvent): void => {
+  enqueue({
+    timestamp: Date.now(),
+    type: 'error',
+    message: 'window.error',
+    details: {
+      messageBytes: utf8Bytes(event.message ?? ''),
+      stackBytes: utf8Bytes(event.error instanceof Error ? (event.error.stack ?? '') : ''),
+      sourceBytes: utf8Bytes(event.filename ?? ''),
+      line: event.lineno,
+      column: event.colno,
+      error: summarizeMonitorValue(event.error),
+    },
+  });
+};
 
-export function initErrorMonitoring() {
-  if (typeof window === 'undefined') return;
-  // Guard against double-initialization (e.g. HMR re-mounting the layout).
-  // Without this, the second call captures the already-wrapped console.error
-  // as _originalError, so _originalError.apply() re-enters the wrapper →
-  // infinite recursion → Maximum call stack size exceeded.
-  if (_initialized) return;
+const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
+  enqueue({
+    timestamp: Date.now(),
+    type: 'unhandledrejection',
+    message: 'unhandledrejection',
+    details: { reason: summarizeMonitorValue(event.reason) },
+  });
+};
+
+export function initErrorMonitoring(): void {
+  if (typeof window === 'undefined' || _initialized) return;
   _initialized = true;
 
-  // Always capture the REAL console methods — never a previous wrapper.
-  // On HMR, module-level _originalError is reset, but globalThis survives.
   _originalError = _g.__koryOriginalConsoleError ?? console.error;
   _originalWarn = _g.__koryOriginalConsoleWarn ?? console.warn;
   _g.__koryOriginalConsoleError = _originalError;
   _g.__koryOriginalConsoleWarn = _originalWarn;
 
-  // Capture console errors — must call _originalError so our own logError doesn't recurse
   console.error = (...args: unknown[]) => {
-    // Don't relay the backend-health sentinel's own failures — that creates
-    // a feedback loop where each health-check timeout logs an error, which
-    // triggers a flush to /api/debug/log-error, which adds more concurrent
-    // requests to the same origin, which can cause more health-check timeouts.
-    // Check BEFORE serializing so a circular object in a [Koryphaios] call
-    // doesn't throw out of safeStringify before we get a chance to skip it.
-    const isSentinel = argsHaveKoryphaiosSentinel(args);
-
-    if (!isSentinel) {
-      const message = args.map(safeStringify).join(' ');
-      errorBuffer.push({
-        timestamp: Date.now(),
-        type: 'error',
-        message,
-        userAgent: navigator.userAgent,
-      });
-      scheduleFlush();
-    }
-    if (_originalError) _originalError.apply(console, args);
+    const entry = consoleEntry('error', args);
+    if (!argsHaveKoryphaiosSentinel(args)) enqueue(entry);
+    _originalError.call(console, '[Koryphaios monitor]', entry.message, entry.details);
   };
 
-  // Capture console warnings
   console.warn = (...args: unknown[]) => {
-    const message = args.map((a) => (typeof a === 'string' ? a : safeStringify(a))).join(' ');
-    if (!message.includes('[Koryphaios]') && !message.includes('[ERROR MONITOR]')) {
-      errorBuffer.push({
-        timestamp: Date.now(),
-        type: 'warn',
-        message,
-        userAgent: navigator.userAgent,
-      });
-      scheduleFlush();
-    }
-    if (_originalWarn) _originalWarn.apply(console, args);
+    const entry = consoleEntry('warn', args);
+    if (!argsHaveKoryphaiosSentinel(args)) enqueue(entry);
+    _originalWarn.call(console, '[Koryphaios monitor]', entry.message, entry.details);
   };
 
-  // Capture window errors
-  window.addEventListener('error', (event) => {
-    errorBuffer.push({
-      timestamp: Date.now(),
-      type: 'error',
-      message: event.message,
-      stack: event.error?.stack,
-      url: event.filename,
-      line: event.lineno,
-      column: event.colno,
-      userAgent: navigator.userAgent,
-    });
-    scheduleFlush();
-  });
+  window.addEventListener('error', onWindowError);
+  window.addEventListener('unhandledrejection', onUnhandledRejection);
+}
 
-  // Capture unhandled promise rejections
-  window.addEventListener('unhandledrejection', (event) => {
-    errorBuffer.push({
-      timestamp: Date.now(),
-      type: 'unhandledrejection',
-      message: `Unhandled Promise Rejection: ${event.reason}`,
-      stack: event.reason?.stack,
-      userAgent: navigator.userAgent,
-    });
-    scheduleFlush();
-  });
+/** Also useful for HMR and tests: restore native console functions and drop
+ * any unsent in-memory diagnostics. */
+export function disposeErrorMonitoring(): void {
+  if (!_initialized) return;
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = null;
+  errorBuffer = [];
+  console.error = _originalError;
+  console.warn = _originalWarn;
+  window.removeEventListener('error', onWindowError);
+  window.removeEventListener('unhandledrejection', onUnhandledRejection);
+  _initialized = false;
 }

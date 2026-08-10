@@ -30,6 +30,20 @@ const FONT_PACKAGE: Partial<Record<FontFamily, string>> = {
 
 const WEIGHTS = ['300', '400', '500', '600', '700'];
 
+// Vite cannot safely analyze a package name interpolated into import(). Keep
+// the imports lazy, but give the bundler a finite, statically discoverable
+// module set so selected fonts actually load and dev/build output stays clean.
+const FONT_CSS_LOADERS = import.meta.glob('/node_modules/@fontsource/*/300.css', {
+  import: 'default',
+});
+Object.assign(
+  FONT_CSS_LOADERS,
+  import.meta.glob('/node_modules/@fontsource/*/400.css', { import: 'default' }),
+  import.meta.glob('/node_modules/@fontsource/*/500.css', { import: 'default' }),
+  import.meta.glob('/node_modules/@fontsource/*/600.css', { import: 'default' }),
+  import.meta.glob('/node_modules/@fontsource/*/700.css', { import: 'default' }),
+);
+
 // Track which fonts have been loaded so we don't re-import.
 const loaded = new Set<string>();
 
@@ -37,14 +51,21 @@ const loaded = new Set<string>();
 async function loadPackage(pkg: string): Promise<void> {
   if (loaded.has(pkg)) return;
   loaded.add(pkg);
-  await Promise.all(
-    WEIGHTS.map((w) =>
-      import(`@fontsource/${pkg}/${w}.css`).catch(() => {
-        // Some packages don't ship all weights — silently skip.
-        loaded.delete(pkg);
-      }),
-    ),
-  );
+  const loaders = WEIGHTS.map(
+    (weight) => FONT_CSS_LOADERS[`/node_modules/@fontsource/${pkg}/${weight}.css`],
+  ).filter((loader): loader is () => Promise<unknown> => Boolean(loader));
+
+  if (loaders.length === 0) {
+    loaded.delete(pkg);
+    return;
+  }
+
+  try {
+    await Promise.all(loaders.map((load) => load()));
+  } catch {
+    // A transient chunk failure may recover on the next explicit load.
+    loaded.delete(pkg);
+  }
 }
 
 /** Load the CSS for the selected UI font. Safe to call repeatedly. */

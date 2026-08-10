@@ -281,7 +281,25 @@ export interface KoryVerificationPayload {
 export interface ProviderInfo {
   name: ProviderName;
   enabled: boolean;
+  /**
+   * Compatibility field retained for older clients. True only after a
+   * process-local verification probe succeeds; detection alone is never
+   * serialized as authenticated.
+   */
   authenticated: boolean;
+  /** Whether the configured adapter can attempt work in this process. */
+  adapterAvailable?: boolean;
+  /** Whether credential material, a CLI login file, or a local endpoint was detected. */
+  credentialDetected?: boolean;
+  /** Authoritative distinction between local detection and a completed provider probe. */
+  connectionState?:
+    'not_configured' | 'detected' | 'verified' | 'failed' | 'unknown' | 'unavailable';
+  /** Timestamp for a successful verification performed by this backend process. */
+  verifiedAt?: number;
+  /** Scope of what the latest probe established; catalog scope may remain detected. */
+  verificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
+  /** Last probe failure. Never contains raw credential material. */
+  verificationError?: string;
   authSource?: 'API Key' | 'Subscription' | 'CLI session';
   models: string[];
   allAvailableModels: ModelDef[];
@@ -297,6 +315,12 @@ export interface ProviderInfo {
   supportsApiKey: boolean;
   supportsAuthToken: boolean;
   requiresBaseUrl: boolean;
+  /** Inference requires an explicit provider deployment identifier. */
+  requiresDeployment?: boolean;
+  /** Explicit configured deployment name; not a discovered base model id. */
+  deploymentName?: string;
+  /** True when this build deliberately refuses configuration/execution for the adapter. */
+  configurationBlocked?: boolean;
   baseUrlPlaceholder?: string;
   extraAuthModes?: Array<{ id: string; label: string; description: string }>;
   error?: string;

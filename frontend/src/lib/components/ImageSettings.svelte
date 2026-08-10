@@ -1,14 +1,53 @@
 <script lang="ts">
-  import { Image, ShieldCheck } from 'lucide-svelte';
-  import ProviderConnectionCard from './ProviderConnectionCard.svelte';
-  const providers = [
-    { id: 'openai', name: 'OpenAI', description: 'Image generation and editing through supported OpenAI image models' },
-    { id: 'aistudio', name: 'Google AI Studio', description: 'Google image generation through configured Gemini image models' },
-    { id: 'xai', name: 'xAI', description: 'Image generation through xAI image models' },
-    { id: 'blackforestlabs', name: 'Black Forest Labs', description: 'FLUX image generation models' },
-    { id: 'fal', name: 'fal', description: 'Hosted image generation and editing models' },
-    { id: 'replicate', name: 'Replicate', description: 'Hosted community image models' },
-    { id: 'stabilityai', name: 'Stability AI', description: 'Stable image generation models' },
-  ];
+  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
+  import Eye from 'lucide-svelte/icons/eye';
+  import Image from 'lucide-svelte/icons/image';
 </script>
-<div class="mx-auto w-full max-w-5xl space-y-6 p-6"><div class="flex items-start gap-3"><div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]"><Image size={20}/></div><div><h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Images</h3><p class="mt-1 text-sm text-[var(--color-text-muted)]">Connect image services where they are used. Chat and coding providers remain under AI Models.</p></div></div><div class="grid gap-3 md:grid-cols-2">{#each providers as provider (provider.id)}<ProviderConnectionCard {...provider}/>{/each}</div><div class="flex items-start gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 text-xs text-[var(--color-text-muted)]"><ShieldCheck size={16} class="shrink-0 text-emerald-400"/><span>Credentials are shared by provider, not copied into image settings. Image model discovery and defaults stay capability-specific.</span></div></div>
+
+<div class="mx-auto w-full max-w-4xl space-y-6 p-6">
+  <header class="flex items-start gap-3">
+    <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]">
+      <Image size={20} />
+    </div>
+    <div>
+      <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Images</h3>
+      <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
+        Image viewing is available in chat. Image generation and editing providers are not yet
+        implemented as dedicated Koryphaios capabilities.
+      </p>
+    </div>
+  </header>
+  <section
+    class="flex items-start gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
+  >
+    <Eye size={18} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
+    <div>
+      <h4 class="font-medium text-[var(--color-text-primary)]">Available: inspect local images</h4>
+      <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        Agents can use the scoped image-viewing tool to inspect supported files from the current
+        workspace. Access remains subject to workspace path and size limits.
+      </p>
+    </div>
+  </section>
+  <section
+    class="flex items-start gap-3 rounded-2xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-5"
+  >
+    <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-warning)]" />
+    <div>
+      <div class="flex flex-wrap items-center gap-2">
+        <h4 class="font-medium text-[var(--color-text-primary)]">
+          Generation adapters unavailable
+        </h4>
+        <span
+          class="rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[10px] text-[var(--color-warning)]"
+          >No credential input</span
+        >
+      </div>
+      <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+        OpenAI Images, Google image models, xAI, Black Forest Labs, fal, Replicate, and Stability AI
+        are not exposed here until Koryphaios has real request, response, error, cost, and approval
+        handling for each API. Saving a key alone would not make those paths work.
+      </p>
+    </div>
+  </section>
+</div>

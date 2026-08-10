@@ -5,9 +5,86 @@
 import { readFile, writeFile, access } from 'fs/promises';
 import { join } from 'path';
 
+import { validateConfig } from './validation.js';
+
 import type { ServerConfig, WorkspaceConfig, UserPreferences } from '@/types/index.js';
 import { SupportedLanguage } from '@/types/languages.js';
-import { validateConfig } from './validation.js';
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+function parseJson<T>(contents: string, filePath: string): T {
+  try {
+    return JSON.parse(contents) as T;
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON in ${filePath}; the existing file was preserved: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function assertWorkspaceConfig(value: unknown, filePath: string): asserts value is WorkspaceConfig {
+  if (
+    !isRecord(value) ||
+    typeof value['root'] !== 'string' ||
+    !Object.values(SupportedLanguage).includes(value['language'] as SupportedLanguage) ||
+    !isRecord(value['configFiles']) ||
+    !isStringArray(value['excludePatterns']) ||
+    !isStringArray(value['includePatterns']) ||
+    (value['projectName'] !== undefined && typeof value['projectName'] !== 'string')
+  ) {
+    throw new Error(
+      `Invalid workspace configuration in ${filePath}; the existing file was preserved`
+    );
+  }
+}
+
+function assertUserPreferences(value: unknown, filePath: string): asserts value is UserPreferences {
+  const notifications = isRecord(value) ? value['notifications'] : undefined;
+  const ui = isRecord(value) ? value['ui'] : undefined;
+  const debugging = isRecord(value) ? value['debugging'] : undefined;
+  const performance = isRecord(value) ? value['performance'] : undefined;
+
+  if (
+    !isRecord(value) ||
+    !['light', 'dark', 'auto'].includes(String(value['theme'])) ||
+    !isRecord(notifications) ||
+    typeof notifications['enabled'] !== 'boolean' ||
+    !isStringArray(notifications['types']) ||
+    !notifications['types'].every(type => ['error', 'warning', 'info'].includes(type)) ||
+    typeof notifications['sound'] !== 'boolean' ||
+    !isRecord(ui) ||
+    typeof ui['showLineNumbers'] !== 'boolean' ||
+    typeof ui['showMinimap'] !== 'boolean' ||
+    typeof ui['fontSize'] !== 'number' ||
+    !Number.isFinite(ui['fontSize']) ||
+    typeof ui['fontFamily'] !== 'string' ||
+    !isRecord(debugging) ||
+    typeof debugging['autoStartSessions'] !== 'boolean' ||
+    typeof debugging['showInlineValues'] !== 'boolean' ||
+    typeof debugging['showVariableTypes'] !== 'boolean' ||
+    !isRecord(performance) ||
+    typeof performance['enableRealTimeMonitoring'] !== 'boolean' ||
+    typeof performance['showPerformanceHints'] !== 'boolean'
+  ) {
+    throw new Error(`Invalid user preferences in ${filePath}; the existing file was preserved`);
+  }
+}
 
 export class ConfigManager {
   private config: ServerConfig | null = null;
@@ -34,37 +111,47 @@ export class ConfigManager {
 
   async loadConfig(): Promise<ServerConfig> {
     try {
-      // Try to load existing config
       await access(this.configPath);
-      const configData = await readFile(this.configPath, 'utf-8');
-      const parsedConfig = JSON.parse(configData) as ServerConfig;
-
-      // Validate config
-      const validation = validateConfig(parsedConfig);
-      if (!validation.valid) {
+    } catch (error) {
+      if (!isMissingFileError(error)) {
         throw new Error(
-          `Invalid configuration: ${validation.errors.map(e => e.message).join(', ')}`
+          `Could not access configuration at ${this.configPath}; the existing path was preserved: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
         );
       }
 
-      this.config = parsedConfig;
-    } catch (error) {
-      // Create default config if file doesn't exist
       this.config = this.getDefaultConfig();
-
-      // Try to save config, but don't fail if we can't write
       try {
         await this.saveConfig();
       } catch (saveError) {
-        // Log the warning but continue with default config
         console.warn(
           `Warning: Could not save default config to ${this.configPath}:`,
           saveError instanceof Error ? saveError.message : saveError
         );
       }
+      return this.config;
     }
 
-    return this.config;
+    let configData: string;
+    try {
+      configData = await readFile(this.configPath, 'utf-8');
+    } catch (error) {
+      throw new Error(
+        `Could not read configuration at ${this.configPath}; the existing file was preserved: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+
+    const parsedConfig = parseJson<ServerConfig>(configData, this.configPath);
+    const validation = validateConfig(parsedConfig);
+    if (!validation.valid) {
+      throw new Error(
+        `Invalid configuration in ${this.configPath}; the existing file was preserved: ${validation.errors.map(e => e.message).join(', ')}`
+      );
+    }
+
+    this.config = parsedConfig;
+    return parsedConfig;
   }
 
   async saveConfig(): Promise<void> {
@@ -81,17 +168,19 @@ export class ConfigManager {
       await this.loadConfig();
     }
 
-    this.config = { ...this.config!, ...updates };
+    const updatedConfig = { ...this.config!, ...updates };
 
     // Validate updated config
-    const validation = validateConfig(this.config);
+    const validation = validateConfig(updatedConfig);
     if (!validation.valid) {
       throw new Error(
         `Invalid configuration update: ${validation.errors.map(e => e.message).join(', ')}`
       );
     }
 
-    await this.saveConfig();
+    const configData = JSON.stringify(updatedConfig, null, 2);
+    await writeFile(this.configPath, configData, 'utf-8');
+    this.config = updatedConfig;
   }
 
   getConfig(): ServerConfig {
@@ -106,15 +195,33 @@ export class ConfigManager {
 
     try {
       await access(workspaceConfigPath);
-      const configData = await readFile(workspaceConfigPath, 'utf-8');
-      this.workspaceConfig = JSON.parse(configData) as WorkspaceConfig;
     } catch (error) {
-      // Create default workspace config
+      if (!isMissingFileError(error)) {
+        throw new Error(
+          `Could not access workspace configuration at ${workspaceConfigPath}; the existing path was preserved: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      }
+
       this.workspaceConfig = this.getDefaultWorkspaceConfig(workspaceRoot);
       await writeFile(workspaceConfigPath, JSON.stringify(this.workspaceConfig, null, 2), 'utf-8');
+      return this.workspaceConfig;
     }
 
-    return this.workspaceConfig;
+    let configData: string;
+    try {
+      configData = await readFile(workspaceConfigPath, 'utf-8');
+    } catch (error) {
+      throw new Error(
+        `Could not read workspace configuration at ${workspaceConfigPath}; the existing file was preserved: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+
+    const workspaceConfig = parseJson<WorkspaceConfig>(configData, workspaceConfigPath);
+    assertWorkspaceConfig(workspaceConfig, workspaceConfigPath);
+    this.workspaceConfig = workspaceConfig;
+    return workspaceConfig;
   }
 
   async loadUserPreferences(preferencesPath?: string): Promise<UserPreferences> {
@@ -127,15 +234,33 @@ export class ConfigManager {
 
     try {
       await access(userConfigPath);
-      const configData = await readFile(userConfigPath, 'utf-8');
-      this.userPreferences = JSON.parse(configData) as UserPreferences;
     } catch (error) {
-      // Create default user preferences
+      if (!isMissingFileError(error)) {
+        throw new Error(
+          `Could not access user preferences at ${userConfigPath}; the existing path was preserved: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      }
+
       this.userPreferences = this.getDefaultUserPreferences();
       await writeFile(userConfigPath, JSON.stringify(this.userPreferences, null, 2), 'utf-8');
+      return this.userPreferences;
     }
 
-    return this.userPreferences;
+    let configData: string;
+    try {
+      configData = await readFile(userConfigPath, 'utf-8');
+    } catch (error) {
+      throw new Error(
+        `Could not read user preferences at ${userConfigPath}; the existing file was preserved: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+
+    const userPreferences = parseJson<UserPreferences>(configData, userConfigPath);
+    assertUserPreferences(userPreferences, userConfigPath);
+    this.userPreferences = userPreferences;
+    return userPreferences;
   }
 
   async saveUserPreferences(preferences: UserPreferences, preferencesPath?: string): Promise<void> {
@@ -146,15 +271,16 @@ export class ConfigManager {
         '.error-debugging-preferences.json'
       );
 
-    this.userPreferences = preferences;
+    assertUserPreferences(preferences, userConfigPath);
     const preferencesData = JSON.stringify(preferences, null, 2);
     await writeFile(userConfigPath, preferencesData, 'utf-8');
+    this.userPreferences = preferences;
   }
 
   async getMergedConfig(
     workspaceConfigPath?: string,
     preferencesPath?: string
-  ): Promise<ServerConfig & { workspace?: WorkspaceConfig; preferences?: UserPreferences }> {
+  ): Promise<ServerConfig & { workspace?: WorkspaceConfig; userPreferences?: UserPreferences }> {
     // Load base config if not already loaded
     if (!this.config) {
       await this.loadConfig();
@@ -168,9 +294,13 @@ export class ConfigManager {
       try {
         await access(workspaceConfigPath);
         const configData = await readFile(workspaceConfigPath, 'utf-8');
-        workspaceConfig = JSON.parse(configData) as WorkspaceConfig;
+        const parsedWorkspaceConfig = parseJson<WorkspaceConfig>(configData, workspaceConfigPath);
+        assertWorkspaceConfig(parsedWorkspaceConfig, workspaceConfigPath);
+        workspaceConfig = parsedWorkspaceConfig;
       } catch (error) {
-        // Workspace config is optional
+        if (!isMissingFileError(error)) {
+          throw error;
+        }
       }
     }
 
@@ -179,9 +309,13 @@ export class ConfigManager {
       try {
         await access(preferencesPath);
         const configData = await readFile(preferencesPath, 'utf-8');
-        userPreferences = JSON.parse(configData) as UserPreferences;
+        const parsedUserPreferences = parseJson<UserPreferences>(configData, preferencesPath);
+        assertUserPreferences(parsedUserPreferences, preferencesPath);
+        userPreferences = parsedUserPreferences;
       } catch (error) {
-        // User preferences are optional
+        if (!isMissingFileError(error)) {
+          throw error;
+        }
       }
     }
 
@@ -220,7 +354,9 @@ export class ConfigManager {
           test: true,
           linter: true,
           staticAnalysis: true,
-          ide: true,
+          // External IDE diagnostics can be ingested explicitly, but the MCP
+          // server does not install or impersonate an IDE extension.
+          ide: false,
           buildTools: true,
           processMonitor: true,
           multiLanguage: true,
@@ -239,23 +375,26 @@ export class ConfigManager {
         maxErrorsPerSession: 10000,
       },
       analysis: {
-        enabled: true,
-        aiEnhanced: true,
+        // Reserved compatibility schema. The MCP runtime does not currently
+        // execute an AI analysis provider from these flags.
+        enabled: false,
+        aiEnhanced: false,
         confidenceThreshold: 0.7,
         maxAnalysisTime: 10000,
         enablePatternMatching: true,
         enableSimilaritySearch: true,
         enableRootCauseAnalysis: true,
-        enableImpactPrediction: true,
+        enableImpactPrediction: false,
         customPatterns: [],
         historicalDataRetention: 30, // days
       },
       debugging: {
-        enabled: true,
+        // Language handlers truthfully report debugger sessions unavailable.
+        enabled: false,
         languages: {},
         defaultTimeout: 30000,
         maxConcurrentSessions: 5,
-        enableHotReload: true,
+        enableHotReload: false,
         enableRemoteDebugging: false,
         breakpoints: {
           maxPerSession: 50,
@@ -269,9 +408,9 @@ export class ConfigManager {
         },
       },
       performance: {
-        enabled: true,
+        enabled: false,
         profiling: {
-          enabled: true,
+          enabled: false,
           sampleRate: 100,
           maxDuration: 60000,
           includeMemory: true,
@@ -294,50 +433,50 @@ export class ConfigManager {
       },
       integrations: {
         buildSystems: {
-          webpack: true,
-          vite: true,
-          rollup: true,
-          parcel: true,
-          esbuild: true,
+          webpack: false,
+          vite: false,
+          rollup: false,
+          parcel: false,
+          esbuild: false,
         },
         testRunners: {
-          jest: true,
-          vitest: true,
-          mocha: true,
-          pytest: true,
-          goTest: true,
-          cargoTest: true,
+          jest: false,
+          vitest: false,
+          mocha: false,
+          pytest: false,
+          goTest: false,
+          cargoTest: false,
         },
         linters: {
-          eslint: true,
+          eslint: false,
           tslint: false,
-          pylint: true,
-          flake8: true,
-          golint: true,
-          clippy: true,
+          pylint: false,
+          flake8: false,
+          golint: false,
+          clippy: false,
         },
         versionControl: {
-          git: true,
+          git: false,
           enableCommitHooks: false,
-          enableBranchAnalysis: true,
+          enableBranchAnalysis: false,
         },
         containers: {
-          docker: true,
+          docker: false,
           kubernetes: false,
           enableContainerDebugging: false,
         },
         ides: {
-          vscode: true,
-          cursor: true,
-          windsurf: true,
-          augmentCode: true,
+          vscode: false,
+          cursor: false,
+          windsurf: false,
+          augmentCode: false,
         },
       },
       security: {
-        enableSecurityScanning: true,
-        vulnerabilityDatabases: ['npm-audit', 'snyk'],
-        enableDependencyScanning: true,
-        enableCodeScanning: true,
+        enableSecurityScanning: false,
+        vulnerabilityDatabases: [],
+        enableDependencyScanning: false,
+        enableCodeScanning: false,
         reportingLevel: 'medium-high' as const,
         autoFixVulnerabilities: false,
         excludePatterns: ['test/**', 'tests/**'],

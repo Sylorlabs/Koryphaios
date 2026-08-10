@@ -1,25 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade, fly } from 'svelte/transition';
-  import { 
-    Search, 
-    Plus, 
-    Settings, 
-    Sidebar, 
-    Layout, 
-    SunMoon, 
-    Trash2,
-    FileCode,
-    FolderOpen,
-    Command,
-    Activity,
-    Target,
-    Pause,
-    Play,
-    ArrowUp,
-    Square,
-    RotateCcw,
-  } from 'lucide-svelte';
+  import Search from 'lucide-svelte/icons/search';
+  import Plus from 'lucide-svelte/icons/plus';
+  import Settings from 'lucide-svelte/icons/settings';
+  import Sidebar from 'lucide-svelte/icons/sidebar';
+  import Layout from 'lucide-svelte/icons/layout';
+  import SunMoon from 'lucide-svelte/icons/sun-moon';
+  import Trash2 from 'lucide-svelte/icons/trash-2';
+  import FileCode from 'lucide-svelte/icons/file-code';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
+  import Command from 'lucide-svelte/icons/command';
+  import Activity from 'lucide-svelte/icons/activity';
+  import Target from 'lucide-svelte/icons/target';
+  import Pause from 'lucide-svelte/icons/pause';
+  import Play from 'lucide-svelte/icons/play';
+  import ArrowUp from 'lucide-svelte/icons/arrow-up';
+  import Square from 'lucide-svelte/icons/square';
+  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
   import { getModKeyName } from '$lib/utils/platform';
   import { notesStore } from '$lib/stores/notes.svelte';
 

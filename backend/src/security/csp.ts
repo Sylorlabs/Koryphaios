@@ -1,5 +1,6 @@
-// Complete Content Security Policy and XSS Protection Implementation
-// Production-ready security headers with nonce-based CSP, DOMPurify integration, and CSRF protection
+// Content Security Policy, XSS, and CSRF helpers.
+// These utilities do not by themselves certify a deployment's complete
+// security-header or browser policy.
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { getRedisClient } from '../redis';
@@ -454,7 +455,7 @@ export async function createCSRFToken(sessionId: string): Promise<{
 }
 
 // ============================================================================
-// SECURITY HEADERS - COMPLETE IMPLEMENTATION
+// SECURITY HEADER CONSTRUCTION
 // ============================================================================
 
 export interface SecurityHeadersConfig {
@@ -467,7 +468,7 @@ export interface SecurityHeadersConfig {
 }
 
 /**
- * Build complete security headers for HTTP responses
+ * Build the configured security headers for an HTTP response.
  */
 export function buildSecurityHeaders(config: SecurityHeadersConfig = {}): Record<string, string> {
   const {

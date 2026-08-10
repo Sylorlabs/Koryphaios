@@ -5,13 +5,8 @@
 // returns progress via polled session activities.
 
 import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import {
-  type Provider,
-  type ProviderEvent,
-  type StreamRequest,
-} from './types';
-import { detectJulesApiKey } from './auth-utils';
-import { buildPrompt, runJulesTask } from './jules-runner';
+import { type Provider, type ProviderEvent, type StreamRequest } from './types';
+import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
 
 export class JulesProvider implements Provider {
   readonly name = 'jules' as const;
@@ -19,7 +14,7 @@ export class JulesProvider implements Provider {
   constructor(readonly config: ProviderConfig) {}
 
   isAvailable(): boolean {
-    return !this.config.disabled && !!this.resolveApiKey();
+    return false;
   }
 
   /** Jules v1alpha has no models endpoint — these are virtual cloud agent selectors. */
@@ -27,51 +22,11 @@ export class JulesProvider implements Provider {
     return [];
   }
 
-  private resolveApiKey(): string | null {
-    return this.config.apiKey?.trim() || detectJulesApiKey();
+  getModelDiscoveryError(): string {
+    return JULES_APPROVAL_REQUIRED_ERROR;
   }
 
-  private readHeader(key: string): string | undefined {
-    return this.config.headers?.[key];
-  }
-
-  async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    const apiKey = this.resolveApiKey();
-    if (!apiKey) {
-      yield {
-        type: 'error',
-        error:
-          'Jules API key not configured. Create one at https://jules.google.com/settings#api and add it in Settings.',
-      };
-      return;
-    }
-
-    const prompt = buildPrompt(request.systemPrompt, request.messages);
-    const defaultBranch =
-      this.readHeader('x-kory-jules-default-branch') ??
-      process.env.JULES_DEFAULT_BRANCH ??
-      'main';
-    const automationMode =
-      this.readHeader('x-kory-jules-automation-mode') ??
-      process.env.JULES_AUTOMATION_MODE ??
-      'AUTO_CREATE_PR';
-    // Cloud execution is never an implicit approval boundary. Jules must show
-    // its plan before it may make a remote change or create a PR.
-    const requirePlanApproval = this.readHeader('x-kory-jules-require-plan-approval') !== 'false';
-    const repolessFallback =
-      this.readHeader('x-kory-jules-repoless-fallback') !== 'false' &&
-      process.env.JULES_REPOLESS_FALLBACK !== 'false';
-
-    yield* runJulesTask({
-      apiKey,
-      prompt,
-      workingDirectory: request.workingDirectory,
-      korySessionId: request.sessionId,
-      defaultBranch,
-      automationMode,
-      requirePlanApproval,
-      repolessFallback,
-      signal: request.signal,
-    });
+  async *streamResponse(_request: StreamRequest): AsyncGenerator<ProviderEvent> {
+    yield { type: 'error', error: JULES_APPROVAL_REQUIRED_ERROR };
   }
 }

@@ -71,6 +71,7 @@ interface WSClient {
 
 export class WSManager {
   private clients = new Map<string, WSClient>();
+  private erasedSessions = new Set<string>();
   private readonly maxClients = 1000;
   private heartbeatInterval: Timer | null = null;
   private terminalRetryInterval: Timer | null = null;
@@ -230,6 +231,7 @@ export class WSManager {
   }
 
   broadcast(message: WSMessage) {
+    if (message.sessionId && this.erasedSessions.has(message.sessionId)) return;
     const ordered = this.persist(message);
     const data = JSON.stringify(ordered);
     let successCount = 0;
@@ -242,6 +244,7 @@ export class WSManager {
   }
 
   broadcastToSession(sessionId: string, message: WSMessage) {
+    if (this.erasedSessions.has(sessionId)) return;
     const ordered = this.persist({ ...message, sessionId });
     const data = JSON.stringify(ordered);
     let targetCount = 0;
@@ -255,6 +258,24 @@ export class WSManager {
     if (targetCount > 0) getOrderedEventLog().markDispatched(ordered.eventId);
 
     serverLog.debug({ sessionId, targetCount }, 'Session broadcast complete');
+  }
+
+  /** Deliver a lifecycle notice without recreating a deleted session's event log. */
+  broadcastEphemeral(message: WSMessage): void {
+    const data = JSON.stringify(message);
+    for (const [, client] of this.clients) this.deliverToClient(client, message, data);
+  }
+
+  /** Drop subscriptions and queued payloads, then reject stale post-delete events. */
+  forgetSession(sessionId: string): void {
+    this.erasedSessions.add(sessionId);
+    for (const client of this.clients.values()) {
+      client.subscribedSessions.delete(sessionId);
+      client.pendingTerminalEvents = client.pendingTerminalEvents.filter(
+        (event) => event.sessionId !== sessionId,
+      );
+      if (client.ws.data.sessionId === sessionId) client.ws.data.sessionId = undefined;
+    }
   }
 
   /**
@@ -343,6 +364,7 @@ export class WSManager {
 
     // Clear all clients
     this.clients.clear();
+    this.erasedSessions.clear();
 
     serverLog.info('WebSocket manager shutdown complete');
   }

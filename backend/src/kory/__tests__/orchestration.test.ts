@@ -1,9 +1,10 @@
-import { describe, expect, test, mock, beforeEach } from 'bun:test';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KoryManager } from '../manager';
 import { ProviderRegistry } from '../../providers';
+import { registerLiveModelResolver } from '../../providers/models';
 import {
   ToolRegistry,
   BashTool,
@@ -37,9 +38,23 @@ import {
   mergeAgentSettings,
   resolveAgentSettingsLayers,
 } from '../../agent-settings';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+
+const originalSkillsHome = process.env.KORYPHAIOS_SKILLS_HOME;
+const testSkillsHome = mkdtempSync(join(tmpdir(), 'kory-orchestration-skills-'));
+
+beforeAll(() => {
+  process.env.KORYPHAIOS_SKILLS_HOME = testSkillsHome;
+});
+
+afterAll(() => {
+  registerLiveModelResolver(() => undefined);
+  if (originalSkillsHome === undefined) {
+    delete process.env.KORYPHAIOS_SKILLS_HOME;
+  } else {
+    process.env.KORYPHAIOS_SKILLS_HOME = originalSkillsHome;
+  }
+  rmSync(testSkillsHome, { recursive: true, force: true });
+});
 
 // Mock dependencies
 const mockProviderRegistry = {
@@ -79,7 +94,19 @@ describe('KoryManager Orchestration', () => {
       mockToolRegistry,
       '/tmp',
       mockConfig as any,
-      {} as any,
+      {
+        get: async (id: string) => ({
+          id,
+          title: id,
+          workingDirectory: '/tmp',
+          messageCount: 0,
+          totalTokensIn: 0,
+          totalTokensOut: 0,
+          totalCost: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      } as any,
       { getRecent: () => [], add: () => {}, getContextMessages: () => [] } as any,
     );
   });
@@ -150,6 +177,24 @@ describe('KoryManager Orchestration', () => {
   test('worker tool context uses the granted worktree directory as cwd', async () => {
     const observed: { workingDirectory?: string; allowedPaths?: string[] } = {};
 
+    registerLiveModelResolver((modelId, provider) =>
+      modelId === 'mock-model'
+        ? {
+            id: modelId,
+            name: modelId,
+            provider,
+            contextWindow: 128_000,
+            contextVerified: true,
+            maxOutputTokens: 16_384,
+            costPerMInputTokens: 0,
+            costPerMOutputTokens: 0,
+            canReason: true,
+            supportsAttachments: false,
+            supportsStreaming: true,
+          }
+        : undefined,
+    );
+
     manager['processProviderTurn'] = mock(async (...args: any[]) => {
       const ctx = args[5];
       observed.workingDirectory = ctx.workingDirectory;
@@ -168,6 +213,7 @@ describe('KoryManager Orchestration', () => {
       ['/tmp/worktree-1'],
       true,
     );
+    registerLiveModelResolver(() => undefined);
 
     expect(result.success).toBe(true);
     expect(observed.workingDirectory).toBe('/tmp/worktree-1');
@@ -178,6 +224,7 @@ describe('KoryManager Orchestration', () => {
     const autoCommit = mock(async () => {});
 
     manager.setYoloMode(true);
+    manager['workerPipeline']['prepareRecoveryBaseline'] = mock(async () => ({ ok: true }));
     manager['resolveIndependentRouting'] = mock(() => ({
       model: 'independent-worker',
       provider: 'anthropic',
@@ -213,6 +260,53 @@ describe('KoryManager Orchestration', () => {
       'backend',
     );
     expect(result).toContain('worker:openai:gpt-4o');
+  });
+
+  test('critic gate never lets a producer verify its own work when no distinct model exists', async () => {
+    manager['runHardChecks'] = mock(async () => ({ passed: true, output: 'checks passed' }));
+    manager['resolveActiveRouting'] = mock(() => ({ model: 'producer-model', provider: 'openai' }));
+    manager['resolveIndependentRouting'] = mock(() => null);
+
+    const result = await manager.runCriticGate(
+      'session-critic-truth',
+      [{ role: 'assistant', content: 'I completed the task.' }],
+      'openai:producer-model',
+      'Verify the work',
+      '/tmp',
+    );
+
+    expect(result).toEqual({
+      passed: false,
+      skipped: true,
+      feedback:
+        'No distinct critic model is available. The producer cannot verify its own work, so the result remains unverified.',
+    });
+    expect(mockProviderRegistry.resolveProvider).not.toHaveBeenCalled();
+  });
+
+  test('critic gate rejects a resolver that returns the exact producer identity', async () => {
+    manager['runHardChecks'] = mock(async () => ({ passed: true, output: 'checks passed' }));
+    manager['resolveIndependentRouting'] = mock(() => ({
+      model: 'producer-model',
+      provider: 'openai',
+    }));
+
+    const result = await manager.runCriticGate(
+      'session-critic-self-route',
+      [{ role: 'assistant', content: 'I completed the task.' }],
+      'producer-model',
+      'Verify the work',
+      '/tmp',
+      { provider: 'openai', model: 'producer-model' },
+    );
+
+    expect(result).toEqual({
+      passed: false,
+      skipped: true,
+      feedback:
+        'The configured critic resolves to the producer provider and model. Self-verification is not independent, so the result remains unverified.',
+    });
+    expect(mockProviderRegistry.resolveProvider).not.toHaveBeenCalled();
   });
 
   test('prompt compiler loads repository instructions broad-to-specific with manifest truth', () => {

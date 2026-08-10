@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import {
   ClaudeCodeCliBridge,
   CodexCliBridge,
@@ -11,11 +11,11 @@ import { DevinCliBridge } from '../providers/devin-bridge';
 import {
   buildKoryRules,
   buildKorySkills,
+  resolveManagedCliHomeRoot,
   writeAllCliRulesAndSkills,
 } from '../providers/cli-rules-skills';
-import { existsSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 // ─── Native tool blocking ──────────────────────────────────────────────────
 
@@ -224,7 +224,10 @@ describe('Hooks config generation', () => {
     expect(hooks).not.toBeNull();
     expect(hooks!.length).toBe(4);
     expect(hooks!.map((hook) => hook.events[0])).toEqual([
-      'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Stop',
+      'PreToolUse',
+      'PostToolUse',
+      'UserPromptSubmit',
+      'Stop',
     ]);
     for (const hook of hooks!) {
       expect(hook.command).toContain('--auth "Bearer ');
@@ -285,21 +288,24 @@ describe('Rules & skills mirroring', () => {
   });
 
   test('writeAllCliRulesAndSkills writes rules files for all CLIs', () => {
-    // Write to the real home (the function uses homedir() which is cached).
-    // Clean up the test session dir afterward.
+    const dataDirectory = mkdtempSync(join(tmpdir(), 'kory-cli-rules-'));
     const testSessionId = `test-rules-${Date.now()}`;
-    writeAllCliRulesAndSkills(testSessionId, 'Test system prompt');
-    const home = homedir();
+    const managedRoot = join(dataDirectory, 'cli-homes');
     try {
+      expect(
+        writeAllCliRulesAndSkills(testSessionId, 'Test system prompt', {
+          env: { KORYPHAIOS_DATA_DIR: dataDirectory },
+        }),
+      ).toBe(true);
       // Check that rules files were written for each CLI
       const expected = [
-        join(home, '.koryphaios', 'devin-home', testSessionId, 'AGENTS.md'),
-        join(home, '.koryphaios', 'claude-home', 'CLAUDE.md'),
-        join(home, '.koryphaios', 'antigravity-home', 'AGENTS.md'),
-        join(home, '.koryphaios', 'codex-home', 'AGENTS.md'),
-        join(home, '.koryphaios', 'cline-home', '.clinerules'),
-        join(home, '.koryphaios', 'cursor-home', '.cursorrules'),
-        join(home, '.koryphaios', 'grok-home', '.grokrules'),
+        join(managedRoot, 'devin-home', testSessionId, 'AGENTS.md'),
+        join(managedRoot, 'claude-home', 'CLAUDE.md'),
+        join(managedRoot, 'antigravity-home', 'AGENTS.md'),
+        join(managedRoot, 'codex-home', 'AGENTS.md'),
+        join(managedRoot, 'cline-home', '.clinerules'),
+        join(managedRoot, 'cursor-home', '.cursorrules'),
+        join(managedRoot, 'grok-home', '.grokrules'),
       ];
       for (const path of expected) {
         expect(existsSync(path)).toBe(true);
@@ -308,8 +314,7 @@ describe('Rules & skills mirroring', () => {
       }
       // Check skills were written for Devin
       const devinSkill = join(
-        home,
-        '.koryphaios',
+        managedRoot,
         'devin-home',
         testSessionId,
         '.devin',
@@ -320,8 +325,7 @@ describe('Rules & skills mirroring', () => {
       expect(existsSync(devinSkill)).toBe(true);
       // Check skills were written for Antigravity
       const agySkill = join(
-        home,
-        '.koryphaios',
+        managedRoot,
         'antigravity-home',
         '.claude',
         'skills',
@@ -330,11 +334,25 @@ describe('Rules & skills mirroring', () => {
       );
       expect(existsSync(agySkill)).toBe(true);
     } finally {
-      // Clean up the test session dir
-      rmSync(join(home, '.koryphaios', 'devin-home', testSessionId), {
-        recursive: true,
-        force: true,
-      });
+      rmSync(dataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  test('CLI autodetection opt-out prevents every managed-home write', () => {
+    const isolatedRoot = mkdtempSync(join(tmpdir(), 'kory-cli-rules-disabled-'));
+    try {
+      const options = {
+        env: {
+          KORY_DISABLE_CLI_AUTODETECT: '1',
+          KORYPHAIOS_DATA_DIR: join(isolatedRoot, 'data'),
+        },
+        homeDirectory: join(isolatedRoot, 'home'),
+      };
+      expect(resolveManagedCliHomeRoot(options)).toBeNull();
+      expect(writeAllCliRulesAndSkills('isolated-session', 'Prompt', options)).toBe(false);
+      expect(readdirSync(isolatedRoot)).toEqual([]);
+    } finally {
+      rmSync(isolatedRoot, { recursive: true, force: true });
     }
   });
 });
@@ -342,11 +360,11 @@ describe('Rules & skills mirroring', () => {
 // ─── Harness note content ──────────────────────────────────────────────────
 
 describe('KORY_HARNESS_NOTE content', () => {
-  test('instructs CLI to use kory__ MCP tools', () => {
-    expect(KORY_HARNESS_NOTE).toContain('kory__read_file');
-    expect(KORY_HARNESS_NOTE).toContain('kory__edit_file');
-    expect(KORY_HARNESS_NOTE).toContain('kory__bash');
-    expect(KORY_HARNESS_NOTE).toContain('kory__delegate_to_worker');
+  test('defers to the authoritative role-scoped MCP catalog', () => {
+    expect(KORY_HARNESS_NOTE).toContain('role-scoped kory__ tools');
+    expect(KORY_HARNESS_NOTE).toContain('advertised');
+    expect(KORY_HARNESS_NOTE).toContain('return the need to the manager');
+    expect(KORY_HARNESS_NOTE).not.toContain('kory__read_file');
   });
 
   test('instructs CLI to NOT use native tools', () => {

@@ -15,15 +15,16 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 
-import type { ServerConfig } from '@/types/index.js';
 import { EventEmitter } from './event-emitter.js';
+import { PlaywrightManager } from './playwright-manager.js';
 import { PluginManager } from './plugin-manager.js';
+import { PromptRegistry } from './prompt-registry.js';
 import { ResourceManager } from './resource-manager.js';
 import { ToolRegistry } from './tool-registry.js';
-import { PromptRegistry } from './prompt-registry.js';
-import { PlaywrightManager } from './playwright-manager.js';
+
 import { ErrorDetectorManager } from '@/detectors/error-detector-manager.js';
 import { LanguageHandlerManager } from '@/languages/language-handler-manager.js';
+import type { ServerConfig } from '@/types/index.js';
 import { Logger } from '@/utils/logger.js';
 
 export class KoryphaiosMCPServer extends EventEmitter {
@@ -73,16 +74,9 @@ export class KoryphaiosMCPServer extends EventEmitter {
   private getServerCapabilities() {
     return {
       logging: {},
-      prompts: {
-        listChanged: true,
-      },
-      resources: {
-        subscribe: true,
-        listChanged: true,
-      },
-      tools: {
-        listChanged: true,
-      },
+      prompts: {},
+      resources: {},
+      tools: {},
     };
   }
 

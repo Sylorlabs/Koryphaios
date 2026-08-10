@@ -1,17 +1,31 @@
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 // Test fixtures represent provider-reported discovery; product code ships no list.
 // discoveredCopilotModels was removed — the mock now returns [] to match
 // the real CopilotProvider behavior (no bundled models before discovery).
-const discoveredCodexModels = [{ id: 'codex-test', name: 'Codex test', provider: 'codex' as const, contextWindow: 0, maxOutputTokens: 4096 }];
+const discoveredCodexModels = [
+  {
+    id: 'codex-test',
+    name: 'Codex test',
+    provider: 'codex' as const,
+    contextWindow: 0,
+    maxOutputTokens: 4096,
+  },
+];
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET =
   process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa';
+const previousDataDir = process.env.KORYPHAIOS_DATA_DIR;
+const previousKmsPassphrase = process.env.KORYPHAIOS_KMS_PASSPHRASE;
+const providerRouteDataDir = mkdtempSync(join(tmpdir(), 'kory-provider-route-data-'));
+process.env.KORYPHAIOS_DATA_DIR = providerRouteDataDir;
+process.env.KORYPHAIOS_KMS_PASSPHRASE =
+  'provider-route-test-passphrase-that-is-never-used-outside-this-test';
 
-const dbPath = join(tmpdir(), `koryphaios-provider-routes-${process.pid}.sqlite`);
+const dbPath = join(providerRouteDataDir, 'providers.sqlite');
 process.env.DATABASE_URL = `sqlite://${dbPath}`;
 
 const startCopilotDeviceAuthMock = mock(async () => ({
@@ -199,6 +213,8 @@ const { providerRoutes } = await import('../providers');
 const { setContext } = await import('../../../context');
 const { localAuth } = await import('../../../auth/local-auth');
 const { buildLocalBearerToken } = await import('../../../auth/local-route-auth');
+const { loadProviderSecrets, upsertProviderSecrets } =
+  await import('../../../security/secret-store');
 
 type ProviderStatus = {
   name: string;
@@ -312,6 +328,11 @@ beforeAll(async () => {
 
 afterAll(() => {
   if (existsSync(dbPath)) rmSync(dbPath, { force: true });
+  rmSync(providerRouteDataDir, { recursive: true, force: true });
+  if (previousDataDir === undefined) delete process.env.KORYPHAIOS_DATA_DIR;
+  else process.env.KORYPHAIOS_DATA_DIR = previousDataDir;
+  if (previousKmsPassphrase === undefined) delete process.env.KORYPHAIOS_KMS_PASSPHRASE;
+  else process.env.KORYPHAIOS_KMS_PASSPHRASE = previousKmsPassphrase;
   // Undo the process-wide module mocks so other test files (copilot-models,
   // provider-conformance) see the REAL codex/copilot/auth-utils modules.
   mock.restore();
@@ -403,7 +424,7 @@ describe('provider routes', () => {
 
     expect(start.response.status).toBe(200);
     expect(start.body.ok).toBe(true);
-    expect(start.body.data.status).toBe('connected');
+    expect(start.body.data.status).toBe('detected');
     expect(lastSetCredentials).toEqual({
       name: 'grok',
       body: {
@@ -419,7 +440,7 @@ describe('provider routes', () => {
 
     expect(start.response.status).toBe(200);
     expect(start.body.ok).toBe(true);
-    expect(start.body.data.status).toBe('connected');
+    expect(start.body.data.status).toBe('detected');
     expect(lastSetCredentials).toEqual({
       name: 'antigravity',
       body: {
@@ -508,6 +529,31 @@ describe('provider routes', () => {
     expect(result.response.status).toBe(200);
     expect(result.body).toEqual({ ok: true });
     expect(logoutCodexAppServerMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('disconnect deletes the direct secret on disk even without config or registry state', async () => {
+    const isolatedDataDir = mkdtempSync(join(tmpdir(), 'kory-provider-disconnect-'));
+    const previousDataDir = process.env.KORYPHAIOS_DATA_DIR;
+    process.env.KORYPHAIOS_DATA_DIR = isolatedDataDir;
+    try {
+      expect(existsSync(join(isolatedDataDir, 'koryphaios.json'))).toBe(false);
+      upsertProviderSecrets(isolatedDataDir, 'openai', { apiKey: 'synthetic-route-secret' });
+      upsertProviderSecrets(isolatedDataDir, 'anthropic', {
+        apiKey: 'synthetic-preserved-secret',
+      });
+
+      const result = await request('/api/providers/openai', { method: 'DELETE' });
+
+      expect(result.response.status).toBe(200);
+      expect(result.body).toEqual({ ok: true });
+      const stored = loadProviderSecrets(isolatedDataDir);
+      expect(stored.openai).toBeUndefined();
+      expect(stored.anthropic).toBeDefined();
+    } finally {
+      if (previousDataDir === undefined) delete process.env.KORYPHAIOS_DATA_DIR;
+      else process.env.KORYPHAIOS_DATA_DIR = previousDataDir;
+      rmSync(isolatedDataDir, { recursive: true, force: true });
+    }
   });
 
   test('Copilot browser auth returns device flow details and activates on poll', async () => {

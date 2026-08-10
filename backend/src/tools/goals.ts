@@ -1,6 +1,7 @@
 import { getContext } from '../context';
 import type { GoalScope } from '@koryphaios/shared';
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
+import { sanitizeGoalEvidence } from '../stores/goal-store';
 
 /** Manager-only, explicit-intent boundary for agent-created durable goals. */
 export class CreateGoalTool implements Tool {
@@ -13,6 +14,7 @@ export class CreateGoalTool implements Tool {
     properties: {
       objective: {
         type: 'string',
+        maxLength: 2000,
         description: 'Concrete objective the user explicitly requested as a goal',
       },
       scope: {
@@ -33,15 +35,20 @@ export class CreateGoalTool implements Tool {
     const objective = typeof call.input.objective === 'string' ? call.input.objective.trim() : '';
     const scope = (call.input.scope ?? 'workspace') as GoalScope;
     const planningDepth = call.input.planningDepth as
-      | 'minimal'
-      | 'adaptive'
-      | 'structured'
-      | undefined;
+      'minimal' | 'adaptive' | 'structured' | undefined;
     if (!objective)
       return {
         callId: call.id,
         name: this.name,
         output: 'Error: objective is required.',
+        isError: true,
+        durationMs: 0,
+      };
+    if (objective.length > 2_000)
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: objective cannot exceed 2000 characters.',
         isError: true,
         durationMs: 0,
       };
@@ -111,6 +118,7 @@ export class UpdateGoalTool implements Tool {
       status: { type: 'string', enum: ['evidence', 'blocked'] },
       message: {
         type: 'string',
+        maxLength: 8000,
         description:
           'Concrete check/artifact result, or the exact blocker after exhausting safe alternatives',
       },
@@ -137,11 +145,35 @@ export class UpdateGoalTool implements Tool {
         isError: true,
         durationMs: 0,
       };
+    if (message.length > 8_000)
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: Goal evidence and blocker previews cannot exceed 8000 characters.',
+        isError: true,
+        durationMs: 0,
+      };
+    const { goals } = getContext();
+    const goal = await goals.get(ctx.goalId);
+    const item = goal?.checklist.find((entry) => entry.id === ctx.goalItemId);
+    if (
+      !goal ||
+      goal.status !== 'running' ||
+      item?.status !== 'running' ||
+      goal.execution?.sessionId !== ctx.sessionId
+    )
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: this Goal Mode turn is no longer active; evidence was not recorded.',
+        isError: true,
+        durationMs: 0,
+      };
     const type = status === 'blocked' ? 'blocker_candidate' : 'evidence_candidate';
-    await getContext().goals.addActivity(
+    await goals.addActivity(
       ctx.goalId,
       type,
-      `${ctx.goalItemId}|${message}`,
+      `${ctx.goalItemId}|${sanitizeGoalEvidence(message)}`,
       ctx.sessionId,
     );
     return {

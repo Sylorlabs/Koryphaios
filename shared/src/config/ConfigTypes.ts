@@ -61,7 +61,6 @@ export interface AgentSettings {
   designDiscovery?: boolean;
   planApproval?: 'always' | 'material' | 'never';
   modelQualification?: 'enforce' | 'warn' | 'off';
-  feedbackSharing?: 'local' | 'sanitized-opt-in';
   skillLearningMode?: 'human-only' | 'propose-then-verify' | 'automatic';
   /** Critic enforces preferences.md workflow strictly */
   criticEnforcesPreferences: boolean;

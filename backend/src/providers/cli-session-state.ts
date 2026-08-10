@@ -4,30 +4,23 @@
 // generation before reusing it, otherwise an edited message can remain in the
 // provider-owned transcript after Koryphaios has pruned its own history.
 //
-// The revision is persisted in the sessions table (conversation_revision
-// column) so it survives server restarts and is consistent across all
-// processes. An in-memory cache avoids a DB round-trip on every
-// getCliConversationRevision call (hot path during streaming).
+// The revision is persisted independently from the active context-compaction
+// revision so invalidating a provider transcript cannot accidentally hide or
+// expose a different set of local messages. Reads intentionally consult
+// SQLite so a rewrite performed by another backend process is observed.
 
 import { db } from '../db';
 import { sessions } from '../db/schema';
 import { eq, sql } from 'drizzle-orm';
 
-const cache = new Map<string, number>();
-
-export async function getCliConversationRevision(
-  sessionId: string | undefined,
-): Promise<number> {
+export async function getCliConversationRevision(sessionId: string | undefined): Promise<number> {
   if (!sessionId) return 0;
-  const cached = cache.get(sessionId);
-  if (cached !== undefined) return cached;
   const row = await db
-    .select({ revision: sessions.conversationRevision })
+    .select({ revision: sessions.providerConversationRevision })
     .from(sessions)
     .where(eq(sessions.id, sessionId))
     .limit(1);
   const revision = row[0]?.revision ?? 0;
-  cache.set(sessionId, revision);
   return revision;
 }
 
@@ -35,18 +28,18 @@ export async function markCliConversationRewritten(sessionId: string): Promise<n
   const row = await db
     .update(sessions)
     .set({
-      conversationRevision: sql`${sessions.conversationRevision} + 1`,
+      providerConversationRevision: sql`COALESCE(${sessions.providerConversationRevision}, 0) + 1`,
       updatedAt: new Date(),
     })
     .where(eq(sessions.id, sessionId))
-    .returning({ revision: sessions.conversationRevision })
+    .returning({ revision: sessions.providerConversationRevision })
     .limit(1);
-  const next = row[0]?.revision ?? 1;
-  cache.set(sessionId, next);
+  if (!row[0]) throw new Error('Session not found');
+  const next = row[0].revision ?? 1;
   return next;
 }
 
-/** Test-only reset; deliberately not used by runtime code. */
+/** Backward-compatible test helper; revisions no longer use process-local state. */
 export function resetCliConversationRevisions(): void {
-  cache.clear();
+  // Intentionally empty.
 }

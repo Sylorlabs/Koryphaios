@@ -6,6 +6,7 @@ import { WorkspaceManager } from '../workspace-manager';
 import { GitManager } from '../git-manager';
 import { AutoCommitService } from '../auto-commit-service';
 import { CheckpointStore } from '../checkpoint-store';
+import { ShadowRepo } from '../shadow-repo';
 import { TimeTravelService } from '../../services/timetravel';
 import type { IMessageStore } from '../../stores/message-store';
 import { SnapshotManager } from '../snapshot-manager';
@@ -17,6 +18,18 @@ const TEST_DIR = join(process.cwd(), '.test-git-workflow');
 
 function gitOutput(...args: string[]): string {
   const result = spawnSync(['git', ...args], { cwd: TEST_DIR, stdout: 'pipe', stderr: 'pipe' });
+  return new TextDecoder().decode(result.stdout).trim();
+}
+
+/** Run git in the shadow repo context (for checking shadow refs/objects). */
+function gitOutputShadow(...args: string[]): string {
+  const env = { ...process.env, ...ShadowRepo.shadowEnv(TEST_DIR) };
+  const result = spawnSync(['git', ...args], {
+    cwd: TEST_DIR,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env,
+  });
   return new TextDecoder().decode(result.stdout).trim();
 }
 
@@ -197,6 +210,17 @@ describe('Git Workflow Integration Tests', () => {
         stderr: 'pipe',
       });
 
+      // Seed an unrelated user stash, then leave only an untracked file dirty.
+      // Reconcile must restore its own exact stash without popping the user's.
+      writeFileSync(join(TEST_DIR, 'preexisting-stash.txt'), 'pre-existing user stash');
+      spawnSync(['git', 'stash', 'push', '--include-untracked', '-m', 'user-stash'], {
+        cwd: TEST_DIR,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const userStashHash = gitOutput('rev-parse', 'refs/stash');
+      writeFileSync(join(TEST_DIR, 'untracked-user-work.txt'), 'must survive reconcile');
+
       // Reconcile back to main
       const result = await workspace.reconcile('test-task-3', true); // squash = true
       expect(result.success).toBe(true);
@@ -206,6 +230,17 @@ describe('Git Workflow Integration Tests', () => {
 
       // Verify worktree is cleaned up
       expect(existsSync(worktree!.path)).toBe(false);
+      expect(readFileSync(join(TEST_DIR, 'untracked-user-work.txt'), 'utf8')).toBe(
+        'must survive reconcile',
+      );
+      expect(gitOutput('rev-parse', 'refs/stash')).toBe(userStashHash);
+
+      rmSync(join(TEST_DIR, 'untracked-user-work.txt'));
+      spawnSync(['git', 'stash', 'drop', 'stash@{0}'], {
+        cwd: TEST_DIR,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
     });
 
     test('should cleanup worktree without reconciling', async () => {
@@ -321,9 +356,9 @@ describe('Git Workflow Integration Tests', () => {
       expect(gitOutput('branch', '--show-current')).toBe(branchBefore);
       expect(gitOutput('diff', '--cached', '--binary')).toBe(indexBefore);
       expect(gitOutput('log', '--format=%H')).toBe(normalLogBefore);
-      expect(gitOutput('for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints')).toContain(
-        'refs/kory/checkpoints/test-agent/',
-      );
+      expect(
+        gitOutputShadow('for-each-ref', '--format=%(refname)', 'refs/kory/checkpoints'),
+      ).toContain('refs/kory/checkpoints/test-agent-');
       const metadata = await checkpointStore.getMetadata(hash!);
       expect(metadata?.prompt).toBeUndefined();
       expect(metadata?.promptHash).toHaveLength(64);
@@ -348,9 +383,15 @@ describe('Git Workflow Integration Tests', () => {
       writeFileSync(join(TEST_DIR, 'ghost-test.txt'), 'Later session content');
       writeFileSync(join(TEST_DIR, 'post-ghost.txt'), 'Unrelated user content');
       expect(existsSync(join(TEST_DIR, 'post-ghost.txt'))).toBe(true);
+      const laterHash = await checkpointStore.createGhostCommit('Later ghost state', {
+        agentId: 'test-agent',
+        changedFiles: [{ path: 'ghost-test.txt', operation: 'edit' }],
+      });
+      expect(laterHash).toBeTruthy();
 
       const result = await checkpointStore.recover(targetHash, {
         agentId: 'test-agent',
+        expectedCurrentHash: laterHash,
         changedFiles: [{ path: 'ghost-test.txt', operation: 'create' }],
       });
       expect(result.success).toBe(true);
@@ -373,8 +414,19 @@ describe('Git Workflow Integration Tests', () => {
       add: async () => {},
       getAll: async () => [],
       getRecent: async () => [],
+      getContextMessages: async () => [],
+      commitCompaction: async () => ({ sourceRevision: 0, targetRevision: 1 }),
+      getActiveBoundary: async () => ({ messageId: null, contextRevision: 0 }),
+      setActiveBoundary: async (sessionId: string, messageId: string) => ({
+        sessionId,
+        previous: { messageId: null, contextRevision: 0, updatedAt: 0 },
+        current: { messageId, contextRevision: 0, updatedAt: 1 },
+      }),
+      restoreActiveBoundary: async () => {},
       truncateAfter: async () => {},
       assignVariantGroup: async () => {},
+      replaceAndTruncate: async () => 0,
+      deleteMessage: async () => false,
     } satisfies IMessageStore;
 
     test('uses a session cursor and restores only the session file manifest', async () => {

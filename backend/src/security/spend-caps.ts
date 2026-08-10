@@ -1,9 +1,9 @@
 // Spend Caps and Quota Enforcement
 // Tracks usage per session and enforces automatic shutoff when limits are reached
 
-import { db, sessionUsage as sessionUsageTable } from '../db';
+import { db, messages, sessionUsage as sessionUsageTable } from '../db';
 import { serverLog } from '../logger';
-import { eq, gt, sql } from 'drizzle-orm';
+import { eq, gte, sql } from 'drizzle-orm';
 
 export interface SessionUsage {
   sessionId: string;
@@ -98,29 +98,34 @@ export async function recordSessionUsage(
 }
 
 export async function getSessionUsage(sessionId: string): Promise<SessionUsage | null> {
-  const cached = usageCache.get(sessionId);
-  if (cached) return cached;
   try {
     const [row] = await db
-      .select()
-      .from(sessionUsageTable)
-      .where(eq(sessionUsageTable.sessionId, sessionId))
-      .limit(1);
-    if (!row) return null;
-    const usage: SessionUsage = {
-      sessionId: row.sessionId,
-      inputTokens: row.inputTokens || 0,
-      outputTokens: row.outputTokens || 0,
-      totalCost: row.totalCostCents || 0,
-      commandCount: row.commandCount || 0,
-      startTime: row.startTime.getTime(),
-      lastActivity: row.lastActivity.getTime(),
+      .select({
+        messageCount: sql<number>`COUNT(*)`,
+        inputTokens: sql<number>`COALESCE(SUM(${messages.tokensIn}), 0)`,
+        outputTokens: sql<number>`COALESCE(SUM(${messages.tokensOut}), 0)`,
+        totalCostUsd: sql<number>`COALESCE(SUM(${messages.cost}), 0)`,
+        providerTurns: sql<number>`COALESCE(SUM(CASE WHEN ${messages.role} = 'assistant' AND ${messages.provider} IS NOT NULL THEN 1 ELSE 0 END), 0)`,
+        startTime: sql<number>`MIN(${messages.createdAt})`,
+        lastActivity: sql<number>`MAX(${messages.createdAt})`,
+      })
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId));
+    if (!row || Number(row.messageCount) === 0) return null;
+    return {
+      sessionId,
+      inputTokens: Number(row.inputTokens) || 0,
+      outputTokens: Number(row.outputTokens) || 0,
+      totalCost: Math.round((Number(row.totalCostUsd) || 0) * 100),
+      // This legacy field now represents recorded provider turns. Durable
+      // tool-command counts do not exist in this table, so we do not invent them.
+      commandCount: Number(row.providerTurns) || 0,
+      startTime: Number(row.startTime),
+      lastActivity: Number(row.lastActivity),
     };
-    usageCache.set(sessionId, usage);
-    return usage;
   } catch (err) {
     serverLog.error({ err, sessionId }, 'Failed to get session usage');
-    return null;
+    throw err;
   }
 }
 
@@ -159,34 +164,46 @@ export async function getGlobalSpendStats(
 }> {
   try {
     const now = Date.now();
-    let cutoff = 0;
-    if (timeframe === 'hour') cutoff = now - 60 * 60 * 1000;
-    else if (timeframe === 'day') cutoff = now - 24 * 60 * 60 * 1000;
-    const cutoffDate = new Date(cutoff);
-    const [row] = await db
+    const durations: Partial<Record<typeof timeframe, number>> = {
+      hour: 60 * 60 * 1000,
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+    };
+    const cutoff = durations[timeframe] ? new Date(now - durations[timeframe]!) : null;
+    let query = db
       .select({
-        total_cost: sql<number>`SUM(total_cost_cents)`,
-        total_tokens: sql<number>`SUM(input_tokens + output_tokens)`,
-        total_commands: sql<number>`SUM(command_count)`,
-        active_sessions: sql<number>`COUNT(DISTINCT session_id)`,
+        totalCostUsd: sql<number>`COALESCE(SUM(${messages.cost}), 0)`,
+        totalTokens: sql<number>`COALESCE(SUM(${messages.tokensIn} + ${messages.tokensOut}), 0)`,
+        providerTurns: sql<number>`COALESCE(SUM(CASE WHEN ${messages.role} = 'assistant' AND ${messages.provider} IS NOT NULL THEN 1 ELSE 0 END), 0)`,
+        activeSessions: sql<number>`COUNT(DISTINCT ${messages.sessionId})`,
       })
-      .from(sessionUsageTable)
-      .where(gt(sessionUsageTable.lastActivity, cutoffDate));
+      .from(messages);
+    if (cutoff) query = query.where(gte(messages.createdAt, cutoff)) as typeof query;
+    const [row] = await query;
     return {
-      totalCostCents: row?.total_cost || 0,
-      totalTokens: row?.total_tokens || 0,
-      totalCommands: row?.total_commands || 0,
-      activeSessions: row?.active_sessions || 0,
+      totalCostCents: Math.round((Number(row?.totalCostUsd) || 0) * 100),
+      totalTokens: Number(row?.totalTokens) || 0,
+      // Kept for API compatibility; this is the number of recorded provider
+      // turns, not a guessed count of shell/tool commands.
+      totalCommands: Number(row?.providerTurns) || 0,
+      activeSessions: Number(row?.activeSessions) || 0,
     };
   } catch (err) {
-    return { totalCostCents: 0, totalTokens: 0, totalCommands: 0, activeSessions: 0 };
+    serverLog.error({ err, timeframe }, 'Failed to read recorded provider usage');
+    throw err;
   }
 }
 
 export async function checkGlobalSpendCaps(): Promise<{
   allowed: boolean;
   reason?: string;
-  stats?: any;
+  stats?: {
+    totalCostCents: number;
+    totalTokens: number;
+    totalCommands: number;
+    activeSessions: number;
+  };
 }> {
   const dailyStats = await getGlobalSpendStats('day');
   const caps = getSpendCaps();

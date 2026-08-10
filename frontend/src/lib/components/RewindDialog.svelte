@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { GitCompareArrows, RotateCcw, X } from 'lucide-svelte';
+  import GitCompareArrows from 'lucide-svelte/icons/git-compare-arrows';
+  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
+  import X from 'lucide-svelte/icons/x';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
 

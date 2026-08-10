@@ -9,6 +9,8 @@ export interface Note {
   userId?: string;
   createdAt: Date;
   updatedAt: Date;
+  /** Monotonic revision used for optimistic save/conflict detection. */
+  revision: number;
   /** Project-relative path when this note mirrors a real .md or .html file. */
   sourcePath?: string;
   format?: 'markdown' | 'html';
@@ -25,7 +27,6 @@ export interface NoteAttachment {
   filename: string;
   mimeType: string;
   size: number;
-  storagePath: string;
   createdAt: Date;
 }
 
@@ -48,6 +49,11 @@ export interface UpdateNoteInput {
   pinned?: boolean;
   includeInContext?: boolean;
   format?: 'markdown' | 'html';
+  /** Reject the write when another editor has already saved a newer revision. */
+  expectedRevision?: number;
+  /** Explicit acknowledgement that a project-backed source was deleted outside
+   * Koryphaios and should be recreated from the reviewed local draft. */
+  restoreDeletedSource?: boolean;
 }
 
 export interface NoteWithLinks extends Note {
@@ -90,9 +96,19 @@ export interface FolderNode {
 export interface NotesSettings {
   enabled: boolean;
   autoIncludeInContext: boolean;
-  /** When false, no token limit is applied to notes in agent context. */
+  /** When false, the product-wide hard safety ceiling is used instead of the custom limit. */
   maxContextTokensEnabled: boolean;
   maxContextTokens: number;
+  /** Autosave is explicit and configurable for long-form editing. */
+  autosaveEnabled: boolean;
+  autosaveDelayMs: number;
+  /** Per-note persistence budget. A hard safety ceiling still applies when disabled. */
+  noteSizeLimitEnabled: boolean;
+  maxNoteBytes: number;
+  /** Per-file attachment budget and count boundary. */
+  attachmentSizeLimitEnabled: boolean;
+  maxAttachmentBytes: number;
+  maxAttachmentsPerNote: number;
   graphPhysics: {
     gravity: number;
     linkDistance: number;
@@ -101,11 +117,27 @@ export interface NotesSettings {
   defaultFolderPath: string;
 }
 
+/**
+ * Product-wide context allocation contract. Memory and Notes use the same
+ * bounds so disabling a custom budget means "use the safety ceiling", not
+ * "send an unbounded prompt".
+ */
+export const CONTEXT_BUDGET_MIN_TOKENS = 100;
+export const CONTEXT_BUDGET_MAX_TOKENS = 100_000;
+export const DEFAULT_CONTEXT_BUDGET_TOKENS = 2_000;
+
 export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
   enabled: true,
   autoIncludeInContext: true,
   maxContextTokensEnabled: true,
-  maxContextTokens: 2000,
+  maxContextTokens: DEFAULT_CONTEXT_BUDGET_TOKENS,
+  autosaveEnabled: true,
+  autosaveDelayMs: 1500,
+  noteSizeLimitEnabled: true,
+  maxNoteBytes: 1_000_000,
+  attachmentSizeLimitEnabled: true,
+  maxAttachmentBytes: 25_000_000,
+  maxAttachmentsPerNote: 50,
   graphPhysics: {
     gravity: -30,
     linkDistance: 90,

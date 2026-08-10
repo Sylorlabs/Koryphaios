@@ -1,10 +1,14 @@
-// Integration tests for provider API endpoints
-// Tests actual API calls to verify all providers work correctly
+// Explicitly opted-in live probes for the Anthropic and OpenAI adapters.
+// These are not part of the closed-transport core gate and do not certify the
+// rest of the provider catalog.
 
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { AnthropicProvider } from '../anthropic';
 import { OpenAIProvider } from '../openai';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
+
+const LIVE_PROVIDER_TESTS_ENABLED = process.env.KORY_RUN_LIVE_PROVIDER_TESTS === '1';
+const liveDescribe = LIVE_PROVIDER_TESTS_ENABLED ? describe : describe.skip;
 
 // Test configuration - use environment variables for real API keys
 const getConfig = (provider: string): ProviderConfig => ({
@@ -23,7 +27,7 @@ const skipIfNoKey = (provider: string) => {
   return false;
 };
 
-describe('Provider Integration Tests', () => {
+liveDescribe('Provider Integration Tests (explicit live opt-in)', () => {
   describe('Anthropic Provider', () => {
     if (skipIfNoKey('anthropic')) return;
 

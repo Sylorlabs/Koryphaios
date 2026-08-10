@@ -26,6 +26,14 @@ export function parseProviderModelSelection(value?: string): { provider?: string
   };
 }
 
+export function canAttemptProvider(provider: ProviderInfo): boolean {
+  return (
+    provider.enabled &&
+    (provider.adapterAvailable ?? provider.authenticated) &&
+    provider.connectionState !== 'unavailable'
+  );
+}
+
 /**
  * A manual selection is valid only while the provider reports that exact model
  * as enabled.  Keep this separate from Auto: Auto is resolved by the backend,
@@ -35,16 +43,20 @@ export function isEnabledModelSelection(providers: ProviderInfo[], value?: strin
   const { provider, model } = parseProviderModelSelection(value);
   if (!provider || !model) return false;
   const selectedProvider = providers.find((item) => item.name === provider);
-  return !!selectedProvider?.authenticated && selectedProvider.models.includes(model);
+  return (
+    !!selectedProvider &&
+    canAttemptProvider(selectedProvider) &&
+    selectedProvider.models.includes(model)
+  );
 }
 
 export function getModelConfigurationWarning(
   providers: ProviderInfo[],
   preferredModel?: string,
 ): string | null {
-  const authenticatedProviders = providers.filter((provider) => provider.authenticated);
-  if (authenticatedProviders.length === 0) {
-    return 'No provider connected. Open Settings → Providers and connect one before chatting.';
+  const configuredProviders = providers.filter(canAttemptProvider);
+  if (configuredProviders.length === 0) {
+    return 'No provider is configured. Open Settings → Providers and configure one before chatting.';
   }
 
   const { provider, model } = parseProviderModelSelection(preferredModel);
@@ -54,7 +66,7 @@ export function getModelConfigurationWarning(
     }
   }
 
-  const enabledModelCount = authenticatedProviders.reduce(
+  const enabledModelCount = configuredProviders.reduce(
     (count, current) => count + current.models.length,
     0,
   );

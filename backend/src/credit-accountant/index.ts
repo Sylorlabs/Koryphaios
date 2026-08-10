@@ -29,6 +29,7 @@ export {
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
   getKoryAccountUsage,
+  getCreditDbPath,
 } from './db';
 export { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
 export { createUsageInterceptingFetch } from './usage-interceptor';

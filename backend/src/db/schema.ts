@@ -29,7 +29,12 @@ export const sessions = sqliteTable('sessions', {
   tokensOut: integer('tokens_out').default(0),
   totalCost: real('total_cost').default(0),
   workflowState: text('workflow_state').default('idle'),
+  /** Active compaction revision used to assemble the model context. */
   conversationRevision: integer('conversation_revision').default(0),
+  /** Durable head of the active message lineage. Null means an empty conversation. */
+  activeMessageId: text('active_message_id'),
+  /** Provider-owned transcript generation. Kept separate from context compaction. */
+  providerConversationRevision: integer('provider_conversation_revision').default(0),
   workingDirectory: text('working_directory'), // project folder this chat is scoped to
   metadata: text('metadata'), // JSON string
   tags: text('tags'), // JSON string
@@ -53,12 +58,16 @@ export const messages = sqliteTable('messages', {
   variantGroupId: text('variant_group_id'),
   variantIndex: integer('variant_index').default(0),
   contextRevision: integer('context_revision').notNull().default(0),
+  /** Previous message in this retained conversation branch. */
+  parentMessageId: text('parent_message_id'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
 export const sessionCompactions = sqliteTable('session_compactions', {
   id: text('id').primaryKey(),
-  sessionId: text('session_id').notNull().references(() => sessions.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
   sourceRevision: integer('source_revision').notNull(),
   targetRevision: integer('target_revision').notNull(),
   provider: text('provider').notNull(),
@@ -374,6 +383,7 @@ export const supervisedProcesses = sqliteTable('supervised_processes', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   command: text('command').notNull(),
+  commandReplayable: integer('command_replayable').notNull().default(0),
   cwd: text('cwd').notNull(),
   pid: integer('pid').notNull(),
   sessionId: text('session_id').notNull(),
@@ -387,6 +397,13 @@ export const supervisedProcesses = sqliteTable('supervised_processes', {
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   endedAt: integer('ended_at', { mode: 'timestamp' }),
+  provenance: text('provenance').notNull().default('legacy-unknown'),
+  supervision: text('supervision').notNull().default('legacy-unknown'),
+  isBackground: integer('is_background').notNull().default(0),
+  terminalReason: text('terminal_reason'),
+  terminalError: text('terminal_error'),
+  stdoutSnapshot: text('stdout_snapshot'),
+  stderrSnapshot: text('stderr_snapshot'),
   metadata: text('metadata'), // JSON string
 });
 
@@ -468,6 +485,8 @@ export const notes = sqliteTable('notes', {
   pinned: integer('pinned').notNull().default(0), // boolean 0/1
   includeInContext: integer('include_in_context').notNull().default(0), // auto-inject into agent context
   format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
+  projectRoot: text('project_root'), // null means a legacy note owned by the launch project
+  revision: integer('revision').notNull().default(1),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),

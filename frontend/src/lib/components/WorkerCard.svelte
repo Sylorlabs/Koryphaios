@@ -2,7 +2,8 @@
   import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
-  import { Square, RotateCcw } from 'lucide-svelte';
+  import Square from 'lucide-svelte/icons/square';
+  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
   import { fade } from 'svelte/transition';
   import { apiFetch } from '$lib/api.svelte';
 

@@ -39,17 +39,21 @@ function titleForSession(sessionId: string): string {
 export async function ensurePlanNote(
   sessionId: string,
   objective: string,
+  projectRoot?: string,
 ): Promise<{ id: string; title: string }> {
   const title = titleForSession(sessionId);
-  const existing = await notes.getNoteByTitle(title);
+  const existing = await notes.getNoteByTitle(title, projectRoot);
   if (existing) return { id: existing.id, title: existing.title };
-  const note = await notes.createNote({
-    title,
-    folderPath: '/Plans',
-    tags: ['kory-plan', `session:${sessionId}`],
-    includeInContext: true,
-    content: `# ${title}\n\nSession: ${sessionId}\n\n## Objective\n\n${objective.trim() || 'To be established.'}\n\n## Confirmed decisions\n\nNone yet.\n\n## Current plan\n\nPlanning is in progress.`,
-  });
+  const note = await notes.createNote(
+    {
+      title,
+      folderPath: '/Plans',
+      tags: ['kory-plan', `session:${sessionId}`],
+      includeInContext: true,
+      content: `# ${title}\n\nSession: ${sessionId}\n\n## Objective\n\n${objective.trim() || 'To be established.'}\n\n## Confirmed decisions\n\nNone yet.\n\n## Current plan\n\nPlanning is in progress.`,
+    },
+    projectRoot,
+  );
   return { id: note.id, title: note.title };
 }
 
@@ -57,13 +61,18 @@ export async function syncPlanNote(
   sessionId: string,
   objective: string,
   plan: string,
+  projectRoot?: string,
 ): Promise<string> {
-  const note = await ensurePlanNote(sessionId, objective);
+  const note = await ensurePlanNote(sessionId, objective, projectRoot);
   const decisions = await listQuestionDecisions(sessionId);
   const readiness = validatePlanReadiness(plan);
-  await notes.updateNote(note.id, {
-    includeInContext: true,
-    content: `# ${note.title}\n\nSession: ${sessionId}\n\n## Objective\n\n${objective.trim() || 'To be established.'}\n\n## Confirmed decisions\n\n${decisions.length ? decisions.map((item) => `- ${item.replace(/\n/g, ' — ')}`).join('\n') : 'None recorded.'}\n\n## Readiness\n\n${readiness.ready ? 'Ready for explicit handoff.' : `Not ready. Missing: ${readiness.missing.join(', ')}.`}\n\n## Current plan\n\n${plan.trim() || 'Planning is in progress.'}`,
-  });
+  await notes.updateNote(
+    note.id,
+    {
+      includeInContext: true,
+      content: `# ${note.title}\n\nSession: ${sessionId}\n\n## Objective\n\n${objective.trim() || 'To be established.'}\n\n## Confirmed decisions\n\n${decisions.length ? decisions.map((item) => `- ${item.replace(/\n/g, ' — ')}`).join('\n') : 'None recorded.'}\n\n## Readiness\n\n${readiness.ready ? 'Ready for explicit handoff.' : `Not ready. Missing: ${readiness.missing.join(', ')}.`}\n\n## Current plan\n\n${plan.trim() || 'Planning is in progress.'}`,
+    },
+    projectRoot,
+  );
   return note.id;
 }

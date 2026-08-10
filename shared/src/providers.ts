@@ -166,14 +166,12 @@ export interface ProviderConfig {
   /** Whether to skip the model selection dialog in the future. */
   hideModelSelector?: boolean;
   headers?: Record<string, string>;
+  /** Explicit provider deployment identifier; never inferred from a base-model catalog. */
+  deployment?: string;
 }
 
 export type ProviderAuthMode =
-  | 'api_key'
-  | 'auth_only'
-  | 'api_key_or_auth'
-  | 'base_url_only'
-  | 'env_auth';
+  'api_key' | 'auth_only' | 'api_key_or_auth' | 'base_url_only' | 'env_auth';
 
 /** Maps provider names to their authentication modes */
 export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {

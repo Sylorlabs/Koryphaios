@@ -1,9 +1,10 @@
 import type { Session as SharedSession } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
-import { db, sessions, type Session as DbSession } from '../db';
+import { db, getDb, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc } from 'drizzle-orm';
 import { serverLog } from '../logger';
+import { eraseSessionDataTransaction } from './session-erasure';
 
 export interface ISessionStore {
   create(
@@ -186,14 +187,17 @@ export class SessionStore implements ISessionStore {
   }
 
   async delete(id: string): Promise<void> {
-    await db.delete(sessions).where(eq(sessions.id, id));
+    eraseSessionDataTransaction(getDb(), { kind: 'selected', sessionIds: [id] });
   }
 
   async deleteForUser(id: string, userId: string): Promise<void> {
-    await db.delete(sessions).where(and(eq(sessions.id, id), eq(sessions.userId, userId)));
+    const owned = await db.query.sessions.findFirst({
+      where: and(eq(sessions.id, id), eq(sessions.userId, userId)),
+    });
+    if (owned) eraseSessionDataTransaction(getDb(), { kind: 'selected', sessionIds: [id] });
   }
 
   async clear(): Promise<void> {
-    await db.delete(sessions);
+    eraseSessionDataTransaction(getDb(), { kind: 'all' });
   }
 }

@@ -18,6 +18,8 @@ export interface GitState {
   branch: string;
   branches: string[];
   conflicts: string[];
+  /** Monotonic local event counter so an identical conflict list can still reopen recovery UI. */
+  conflictRevision: number;
   loading: boolean;
   selectedFile: string | null;
   currentDiff: string | null;
@@ -33,6 +35,7 @@ let state = $state<GitState>({
   branch: '',
   branches: [],
   conflicts: [],
+  conflictRevision: 0,
   loading: false,
   selectedFile: null,
   currentDiff: null,
@@ -75,7 +78,10 @@ async function refreshStatus() {
     try {
       data = JSON.parse(text);
     } catch (err: unknown) {
-      console.debug('Failed to parse git status response:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse git status response:',
+        err instanceof Error ? err.message : String(err),
+      );
       state.status = [];
       state.branch = '';
       state.isRepo = false;
@@ -151,6 +157,7 @@ async function merge(branch: string) {
       state.conflicts = [];
     } else if (data.data?.hasConflicts) {
       state.conflicts = data.data.conflicts;
+      state.conflictRevision += 1;
       toastStore.warning('Merge conflicts occurred');
     } else {
       toastStore.error('Merge failed');
@@ -296,6 +303,7 @@ async function pull() {
       state.conflicts = [];
     } else if (data.data?.hasConflicts) {
       state.conflicts = data.data.conflicts;
+      state.conflictRevision += 1;
       toastStore.warning('Conflicts during pull');
     } else {
       toastStore.error('Pull failed: ' + (data.error || 'Unknown error'));

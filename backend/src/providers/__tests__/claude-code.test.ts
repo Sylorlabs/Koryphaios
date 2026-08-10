@@ -2,7 +2,8 @@
 //
 // The deterministic tests prove the `claude` provider is now wired into the registry
 // and model catalog (it was dead code before — createProvider had no 'claude' case).
-// The live test (gated behind KORY_LIVE_CLAUDE=1) proves the compliance requirement:
+// The live test (gated behind KORY_RUN_LIVE_PROVIDER_TESTS=1 and
+// KORY_LIVE_CLAUDE=1) proves the compliance requirement:
 // a Claude subscription is served through the official `claude` CLI harness, never a
 // direct API call.
 
@@ -16,7 +17,10 @@ import type { ProviderEvent } from '../types';
 // parallel test load.
 setDefaultTimeout(30000);
 
-const live = process.env.KORY_LIVE_CLAUDE ? it : it.skip;
+const live =
+  process.env.KORY_RUN_LIVE_PROVIDER_TESTS === '1' && process.env.KORY_LIVE_CLAUDE === '1'
+    ? it
+    : it.skip;
 
 // Reset the module-level model cache before each test to prevent state
 // leakage from other test files that trigger refreshModelsInBackground().
@@ -25,21 +29,28 @@ beforeEach(() => {
 });
 
 describe('Claude Code provider — plumbing', () => {
-  it('registry instantiates a claude provider (previously null)', () => {
-    const registry = new ProviderRegistry();
+  it('registry instantiates an explicitly enabled Claude provider', () => {
+    const registry = new ProviderRegistry({
+      server: { host: '127.0.0.1', port: 3001 },
+      providers: {
+        claude: { name: 'claude', authToken: 'cli:claude:test', disabled: false },
+      },
+    });
     const provider = registry.get('claude');
     expect(provider).toBeDefined();
     expect(provider?.name).toBe('claude');
   });
 
-  it('every declared provider instantiates without throwing', () => {
-    // The constructor runs createProvider() for every PROVIDER_AUTH_MODE name.
-    expect(() => new ProviderRegistry()).not.toThrow();
-    const registry = new ProviderRegistry();
-    // claude, anthropic, codex should always produce an instance.
-    for (const name of ['claude', 'anthropic', 'codex'] as const) {
-      expect(registry.get(name), `missing provider: ${name}`).toBeDefined();
-    }
+  it('keeps declared but disabled providers inert without losing catalog wiring', () => {
+    const registry = new ProviderRegistry({
+      server: { host: '127.0.0.1', port: 3001 },
+      providers: {
+        anthropic: { name: 'anthropic', disabled: true },
+        codex: { name: 'codex', disabled: true },
+      },
+    });
+    expect(registry.get('anthropic')).toBeUndefined();
+    expect(registry.get('codex')).toBeUndefined();
     // No name in the auth-mode map should be missing from the catalog wiring.
     expect(Object.keys(PROVIDER_AUTH_MODE)).toContain('claude');
   });

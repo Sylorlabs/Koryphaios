@@ -15,6 +15,8 @@ import type {
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import type { StreamRequest, ProviderEvent } from '../types';
 import { providerLog } from '../../logger';
+import { safeProviderDiagnostic, safeProviderFailureMessage } from '../provider-diagnostics';
+import { appendBoundedProviderFrames } from '../bounded-provider-stream';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -172,7 +174,7 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
       }));
     } catch (error) {
       providerLog.error(
-        { provider: this.name, error: (error as Error).message },
+        safeProviderDiagnostic(this.name, 'http', error),
         'Failed to fetch models',
       );
       return [];
@@ -228,9 +230,10 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
         issues: [`HTTP ${response.status}`],
       };
     } catch (error) {
+      const diagnostic = safeProviderDiagnostic(this.name, 'http', error);
       return {
         status: 'unavailable',
-        reason: (error as Error).message,
+        reason: safeProviderFailureMessage(this.name, diagnostic),
       };
     }
   }
@@ -262,10 +265,16 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
+        await response.body?.cancel().catch(() => undefined);
+        const diagnostic = safeProviderDiagnostic(
+          this.name,
+          'http',
+          { status: response.status },
+        );
+        providerLog.warn(diagnostic, 'OpenAI-compatible provider request failed');
         yield {
           type: 'error',
-          error: `HTTP ${response.status}: ${errorText}`,
+          error: safeProviderFailureMessage(this.name, diagnostic),
         };
         return;
       }
@@ -284,11 +293,19 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
           const { done, value } = await reader.read();
           if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
+          let bounded: ReturnType<typeof appendBoundedProviderFrames>;
+          try {
+            bounded = appendBoundedProviderFrames(
+              buffer,
+              decoder.decode(value, { stream: true }),
+            );
+          } catch (error) {
+            this.abortController?.abort();
+            throw error;
+          }
+          buffer = bounded.remainder;
 
-          for (const line of lines) {
+          for (const line of bounded.frames) {
             const event = this.parseSSELine(line);
             if (event) {
               const transformed = this.transforms.transformResponse
@@ -310,7 +327,9 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
       if ((error as Error).name === 'AbortError') {
         yield { type: 'error', error: 'Request aborted' };
       } else {
-        yield { type: 'error', error: (error as Error).message };
+        const diagnostic = safeProviderDiagnostic(this.name, 'http', error);
+        providerLog.warn(diagnostic, 'OpenAI-compatible provider stream failed');
+        yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
       }
     }
   }

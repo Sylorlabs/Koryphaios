@@ -253,6 +253,7 @@ src/utils.ts(25,12): warning TS6133: 'unused' is declared but its value is never
 
       // Trigger an error by calling runBuildCheck directly with a mock that throws
       vi.spyOn(detector as any, 'runBuildCheck').mockRejectedValue(testError);
+      vi.spyOn(detector as any, 'runStaticAnalysis').mockResolvedValue([]);
 
       // Trigger the error by calling detectErrors which will call runBuildCheck
       await detector.detectErrors();

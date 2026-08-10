@@ -13,7 +13,7 @@
  */
 
 import { Elysia, t } from 'elysia';
-import { requireLocalRouteAuth, validateLocalBearerToken } from '../../auth/local-route-auth';
+import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../../notes/notes-events';
 import {
@@ -22,6 +22,8 @@ import {
   resetNotesAgentPermissions,
   loadNotesSettings,
   saveNotesSettings,
+  NOTES_HARD_MAX_ATTACHMENT_BYTES,
+  NOTES_HARD_MAX_BYTES,
 } from '../../notes/notes-settings';
 import {
   DEFAULT_NOTES_AGENT_PERMISSIONS,
@@ -29,29 +31,41 @@ import {
   type NotesSettings,
 } from '@koryphaios/shared';
 import { readFileSync, existsSync } from 'fs';
-import { PROJECT_ROOT } from '../../runtime/paths';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { traceBlockingOp } from '../../monitoring/event-loop-monitor';
-import { AuthenticationError, NotFoundError, ValidationError } from '../../errors/types';
+import {
+  AuthenticationError,
+  NotFoundError,
+  PayloadTooLargeError,
+  ValidationError,
+} from '../../errors/types';
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
+  .onBeforeHandle(({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+  })
 
   // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
-  .get('/', async ({ query }) => {
+  .get('/', async ({ request, query }) => {
     const notesList = await notesService.listNotes(
       {
         folderPath: query.folder as string | undefined,
         search: query.search as string | undefined,
       },
-      (query.projectRoot as string | undefined) || PROJECT_ROOT,
+      getRequestProjectRoot(request),
     );
-    return { ok: true, data: notesList };
+    return {
+      ok: true,
+      data: notesList,
+      meta: {
+        projectSync: notesService.getProjectSyncStatus(getRequestProjectRoot(request)),
+      },
+    };
   })
 
   .post('/sync-project', async ({ request }) => {
-    const url = new URL(request.url);
     const result = await traceBlockingOp('syncProjectDocuments', () =>
-      notesService.syncProjectDocuments(url.searchParams.get('projectRoot') || PROJECT_ROOT),
+      notesService.syncProjectDocuments(getRequestProjectRoot(request)),
     );
     broadcastNotesNetworkUpdate('update');
     return { ok: true, data: result };
@@ -60,8 +74,8 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Create note ───────────────────────────────────────────────────────────
   .post(
     '/',
-    async ({ body }) => {
-      const note = await notesService.createNote(body);
+    async ({ request, body }) => {
+      const note = await notesService.createNote(body, getRequestProjectRoot(request));
       broadcastNotesNetworkUpdate('create', note.id);
       return { ok: true, data: note };
     },
@@ -87,7 +101,10 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .put(
     '/settings',
     async ({ request, body }) => {
-      const merged = saveNotesSettings(getRequestProjectRoot(request), body as Partial<NotesSettings>);
+      const merged = saveNotesSettings(
+        getRequestProjectRoot(request),
+        body as Partial<NotesSettings>,
+      );
       return { ok: true, data: merged };
     },
     {
@@ -96,6 +113,13 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         autoIncludeInContext: t.Optional(t.Boolean()),
         maxContextTokensEnabled: t.Optional(t.Boolean()),
         maxContextTokens: t.Optional(t.Number()),
+        autosaveEnabled: t.Optional(t.Boolean()),
+        autosaveDelayMs: t.Optional(t.Number()),
+        noteSizeLimitEnabled: t.Optional(t.Boolean()),
+        maxNoteBytes: t.Optional(t.Number()),
+        attachmentSizeLimitEnabled: t.Optional(t.Boolean()),
+        maxAttachmentBytes: t.Optional(t.Number()),
+        maxAttachmentsPerNote: t.Optional(t.Number()),
         defaultFolderPath: t.Optional(t.String()),
         graphPhysics: t.Optional(
           t.Object({
@@ -147,48 +171,88 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Graph data ────────────────────────────────────────────────────────────
-  .get('/graph', async ({ query }) => {
+  .get('/graph', async ({ request }) => {
     const graph = await traceBlockingOp('getGraphData', () =>
-      notesService.getGraphData(query.projectRoot as string | undefined),
+      notesService.getGraphData(getRequestProjectRoot(request)),
     );
-    return { ok: true, data: graph };
+    return {
+      ok: true,
+      data: graph,
+      meta: {
+        projectSync: notesService.getProjectSyncStatus(getRequestProjectRoot(request)),
+      },
+    };
   })
 
   // ── Folder tree ───────────────────────────────────────────────────────────
-  .get('/folders', async ({ query }) => {
+  .get('/folders', async ({ request }) => {
     const tree = await traceBlockingOp('getFolderTree', () =>
-      notesService.getFolderTree(query.projectRoot as string | undefined),
+      notesService.getFolderTree(getRequestProjectRoot(request)),
     );
     return { ok: true, data: tree };
   })
 
   // ── Full-text search ──────────────────────────────────────────────────────
-  .get('/search', async ({ query }) => {
-    const results = await notesService.searchNotes((query.q as string) ?? '');
+  .get('/search', async ({ request, query }) => {
+    const results = await notesService.searchNotes(
+      (query.q as string) ?? '',
+      50,
+      getRequestProjectRoot(request),
+    );
     return { ok: true, data: results };
   })
 
   // ── Import memory files as notes (must come before /:id to avoid collision) ─
   .post('/import-memory', async ({ request }) => {
-    const notes = await traceBlockingOp('importMemoryAsNotes', () =>
-      notesService.importMemoryAsNotes(getRequestProjectRoot(request)),
+    const report = await traceBlockingOp('importMemoryAsNotes', () =>
+      notesService.importMemoryAsNotesWithReport(getRequestProjectRoot(request)),
     );
-    // The caller receives every imported note and merges them directly.
+    // The caller receives per-source outcomes. Imports are intentionally
+    // independent, so a partial batch is explicit instead of masquerading as
+    // an all-or-nothing transaction.
     // Broadcasting the generic mutation event would make that same client
     // reload the entire vault, graph, and folder tree a second time.
-    return { ok: true, data: notes };
+    return { ok: true, data: report };
+  })
+
+  // ── Import one Markdown/HTML document as a project-scoped note ───────────
+  .post('/import-file', async ({ request }) => {
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) throw new ValidationError('No file provided');
+    const extension = file.name.toLowerCase().match(/\.(md|markdown|html|htm)$/)?.[1];
+    if (!extension) throw new ValidationError('Only Markdown and HTML note files can be imported');
+    const settings = loadNotesSettings(getRequestProjectRoot(request));
+    const maxBytes = settings.noteSizeLimitEnabled ? settings.maxNoteBytes : NOTES_HARD_MAX_BYTES;
+    if (file.size > maxBytes) {
+      throw new PayloadTooLargeError(`${maxBytes} bytes`, {
+        actualBytes: file.size,
+        maxBytes,
+      });
+    }
+    const content = await file.text();
+    if (content.includes('\0')) throw new ValidationError('Imported note contains binary data');
+    const title = file.name.replace(/\.(md|markdown|html|htm)$/i, '');
+    const note = await notesService.createNote(
+      {
+        title,
+        content,
+        folderPath: '/Imported',
+        format: extension === 'html' || extension === 'htm' ? 'html' : 'markdown',
+        tags: ['imported-file'],
+      },
+      getRequestProjectRoot(request),
+    );
+    broadcastNotesNetworkUpdate('create', note.id);
+    return { ok: true, data: note };
   })
 
   // ── Serve attachment (must come before /:id to avoid path collision) ──────
-  .get('/attachments/:attachmentId', async ({ request, params, query, set }) => {
-    // <img src> can't send Authorization headers — accept the token via ?auth=.
-    const authed =
-      requireLocalRouteAuth(request) ??
-      validateLocalBearerToken(String((query as { auth?: string })?.auth ?? ''));
-    if (!authed) {
-      throw new AuthenticationError('Unauthorized');
-    }
-    const att = await notesService.getAttachment(params.attachmentId);
+  .get('/attachments/:attachmentId', async ({ request, params, set }) => {
+    const att = await notesService.getAttachment(
+      params.attachmentId,
+      getRequestProjectRoot(request),
+    );
     if (!att || !existsSync(att.storagePath)) {
       throw new NotFoundError('Attachment', params.attachmentId);
     }
@@ -196,14 +260,37 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     // Elysia's Set.headers type is a strict literal in some versions; cast to
     // a writable record to set dynamic Content-Type/Disposition headers.
     const headers = set.headers as Record<string, string>;
+    const inlineImage = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(
+      att.mimeType,
+    );
     headers['Content-Type'] = att.mimeType;
-    headers['Content-Disposition'] = 'inline; filename="' + att.filename + '"';
+    headers['Content-Disposition'] =
+      `${inlineImage ? 'inline' : 'attachment'}; filename="${att.filename}"`;
+    headers['X-Content-Type-Options'] = 'nosniff';
+    headers['Content-Security-Policy'] = "sandbox; default-src 'none'";
+    headers['Cache-Control'] = 'private, no-store';
     return data;
   })
 
+  // ── Export one note without leaking server storage metadata ──────────────
+  .get('/:id/export', async ({ request, params, set }) => {
+    const note = await notesService.getNote(params.id, getRequestProjectRoot(request));
+    if (!note) throw new NotFoundError('Note', params.id);
+    const extension = note.format === 'html' ? 'html' : 'md';
+    const filename =
+      note.title.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '') || 'note';
+    const headers = set.headers as Record<string, string>;
+    headers['Content-Type'] =
+      note.format === 'html' ? 'text/html; charset=utf-8' : 'text/markdown; charset=utf-8';
+    headers['Content-Disposition'] = `attachment; filename="${filename}.${extension}"`;
+    headers['X-Content-Type-Options'] = 'nosniff';
+    headers['Content-Security-Policy'] = "sandbox; default-src 'none'";
+    return note.content;
+  })
+
   // ── Get single note with links ────────────────────────────────────────────
-  .get('/:id', async ({ params }) => {
-    const note = await notesService.getNoteWithLinks(params.id);
+  .get('/:id', async ({ request, params }) => {
+    const note = await notesService.getNoteWithLinks(params.id, getRequestProjectRoot(request));
     if (!note) {
       throw new NotFoundError('Note', params.id);
     }
@@ -213,8 +300,11 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   // ── Update note ───────────────────────────────────────────────────────────
   .put(
     '/:id',
-    async ({ params, body }) => {
-      const note = await notesService.updateNote(params.id, body);
+    async ({ request, params, body }) => {
+      if (body.expectedRevision === undefined) {
+        throw new ValidationError('expectedRevision is required for note updates');
+      }
+      const note = await notesService.updateNote(params.id, body, getRequestProjectRoot(request));
       broadcastNotesNetworkUpdate('update', note.id);
       return { ok: true, data: note };
     },
@@ -227,29 +317,49 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
         pinned: t.Optional(t.Boolean()),
         includeInContext: t.Optional(t.Boolean()),
         format: t.Optional(t.Union([t.Literal('markdown'), t.Literal('html')])),
+        expectedRevision: t.Optional(t.Number()),
+        restoreDeletedSource: t.Optional(t.Boolean()),
       }),
     },
   )
 
   // ── Delete note ───────────────────────────────────────────────────────────
-  .delete('/:id', async ({ params }) => {
-    await notesService.deleteNote(params.id);
+  .delete('/:id', async ({ request, params }) => {
+    const revisionHeader = request.headers.get('x-kory-note-revision');
+    const expectedRevision = revisionHeader ? Number(revisionHeader) : Number.NaN;
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ValidationError('x-kory-note-revision is required for note deletion');
+    }
+    await notesService.deleteNote(params.id, getRequestProjectRoot(request), expectedRevision);
     broadcastNotesNetworkUpdate('delete', params.id);
     return { ok: true };
   })
 
   // ── Get backlinks ─────────────────────────────────────────────────────────
-  .get('/:id/backlinks', async ({ params }) => {
-    const backlinks = await notesService.getNoteBacklinks(params.id);
+  .get('/:id/backlinks', async ({ request, params }) => {
+    const backlinks = await notesService.getNoteBacklinks(
+      params.id,
+      getRequestProjectRoot(request),
+    );
     return { ok: true, data: backlinks };
   })
 
   // ── Upload attachment (multipart form) ────────────────────────────────────
   .post('/:id/attachments', async ({ request, params }) => {
     const formData = await request.formData();
-    const file = formData.get('file') as File | null;
-    if (!file) {
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
       throw new ValidationError('No file provided');
+    }
+    const settings = loadNotesSettings(getRequestProjectRoot(request));
+    const maxBytes = settings.attachmentSizeLimitEnabled
+      ? settings.maxAttachmentBytes
+      : NOTES_HARD_MAX_ATTACHMENT_BYTES;
+    if (file.size > maxBytes) {
+      throw new PayloadTooLargeError(`${maxBytes} bytes`, {
+        actualBytes: file.size,
+        maxBytes,
+      });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
     const attachment = await notesService.saveAttachment(
@@ -257,12 +367,18 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       file.name,
       file.type || 'application/octet-stream',
       buffer,
+      getRequestProjectRoot(request),
     );
     return { ok: true, data: attachment };
   })
 
   // ── Delete attachment ─────────────────────────────────────────────────────
-  .delete('/:id/attachments/:attachmentId', async ({ params }) => {
-    await notesService.deleteAttachment(params.attachmentId);
+  .delete('/:id/attachments/:attachmentId', async ({ request, params }) => {
+    const projectRoot = getRequestProjectRoot(request);
+    const attachment = await notesService.getAttachment(params.attachmentId, projectRoot);
+    if (!attachment || attachment.noteId !== params.id) {
+      throw new NotFoundError('Attachment', params.attachmentId);
+    }
+    await notesService.deleteAttachment(params.attachmentId, projectRoot);
     return { ok: true };
   });

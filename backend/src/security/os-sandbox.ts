@@ -5,27 +5,30 @@
 // trust boundary moves here.
 //
 // Platform support:
-//   - Linux:  Landlock (path confinement) + seccomp network filter when
-//             network is disabled. Landlock is available on kernel >= 5.13.
-//   - macOS:  sandbox-exec profile generated from allowed roots.
-//   - Windows / unsupported: falls back to argv-only execution with a
-//             logged warning. Callers MUST still run via shell-argv.ts
-//             (no shell string) so the regex layer is the only string
-//             interpreter.
+//   - Linux: bubblewrap mount/PID/network namespaces.
+//   - macOS: sandbox-exec profile generated from allowed roots.
+//   - Windows / unsupported: unavailable. Sandbox-required callers must
+//     reject the command instead of silently running it without confinement.
 //
-// Opt-in: set KORYPHAIOS_OS_SANDBOX=1 to activate. Until validated on a
-// given host, the OS sandbox is off by default and the argv-only path in
-// shell-argv.ts is the trust boundary (still a major improvement over the
-// old `bash -c <string>` path because no shell interprets the command).
+// Set KORYPHAIOS_OS_SANDBOX=1 to activate. Both the opt-in and a concrete,
+// executable platform engine are required; this module fails closed otherwise.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
-import { join, resolve, isAbsolute, delimiter } from 'node:path';
+import {
+  accessSync,
+  constants as fsConstants,
+  existsSync,
+  mkdtempSync,
+  realpathSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, relative, isAbsolute, delimiter } from 'node:path';
 import { serverLog } from '../logger';
 
 export interface OsSandboxOptions {
-  /** Roots the child is allowed to read/write. Always includes a temp dir. */
+  /** Host roots the child is allowed to read/write. */
   allowedRoots: string[];
   /** Working directory for the child. Must be inside allowedRoots. */
   cwd: string;
@@ -58,24 +61,29 @@ export function detectOsSandbox(): OsSandboxAvailability {
 
   const seccomp =
     process.platform === 'linux' &&
-    (existsSync('/proc/self/status') &&
-      // seccomp support is indicated by "Seccomp:" in /proc/self/status on
-      // kernels that support it. Even without it, prctl(PR_SET_SECCOMP)
-      // exists on any modern kernel.
-      true);
+    existsSync('/proc/self/status') &&
+    // seccomp support is indicated by "Seccomp:" in /proc/self/status on
+    // kernels that support it. Even without it, prctl(PR_SET_SECCOMP)
+    // exists on any modern kernel.
+    true;
 
-  const sandboxExec =
-    process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
+  const sandboxExec = process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec');
 
   availabilityCache = { landlock, seccomp, sandboxExec };
   return availabilityCache;
 }
 
-/** True when the OS sandbox is enabled and supported on this host. */
+/** True only when a concrete enforcement engine is installed. Linux header
+ * support is not sufficient until Koryphaios ships a native Landlock shim. */
+export function osSandboxAvailable(): boolean {
+  if (process.platform === 'linux') return findOnPath('bwrap') !== null;
+  if (process.platform === 'darwin') return detectOsSandbox().sandboxExec;
+  return false;
+}
+
+/** True when path confinement was explicitly enabled and can actually bind. */
 export function osSandboxEnabled(): boolean {
-  if (process.env.KORYPHAIOS_OS_SANDBOX !== '1') return false;
-  const a = detectOsSandbox();
-  return a.landlock || a.sandboxExec;
+  return process.env.KORYPHAIOS_OS_SANDBOX === '1' && osSandboxAvailable();
 }
 
 /** Resolve a path to its canonical form, tolerating non-existent files. */
@@ -95,28 +103,21 @@ function normalizeRoots(roots: string[]): string[] {
     const canonical = safeRealpath(r);
     out.add(canonical);
   }
-  // Always allow the system temp dir so the child can write to TMPDIR.
-  try {
-    out.add(safeRealpath(tmpdir()));
-  } catch {
-    /* ignore */
-  }
   return [...out];
 }
 
 /**
  * Spawn a command inside the OS sandbox.
  *
- * On Linux with Landlock: the child is confined to `allowedRoots` via
- * landlock_restrict_self(2). Network is blocked by intercepting socket(2)
- * through a seccomp filter when `blockNetwork` is true.
+ * On Linux with bubblewrap: the child is confined to bind-mounted
+ * `allowedRoots`. Network is blocked with a private network namespace when
+ * `blockNetwork` is true.
  *
  * On macOS: the child is launched through `sandbox-exec -p <profile>` with
  * a generated profile that allows the listed roots and denies network when
  * requested.
  *
- * On unsupported platforms: spawns directly with shell:false. Callers MUST
- * pass an argv array (never a shell string) — use shell-argv.ts to build it.
+ * On unsupported or disabled platforms: throws without spawning.
  */
 export function spawnSandboxed(
   argv: string[],
@@ -125,24 +126,56 @@ export function spawnSandboxed(
   if (!Array.isArray(argv) || argv.length === 0) {
     throw new Error('spawnSandboxed: argv must be a non-empty array');
   }
-
-  const roots = normalizeRoots(opts.allowedRoots);
-  const cwd = safeRealpath(opts.cwd);
-  const cwdInRoots = roots.some((r) => {
-    const rel = resolve(cwd).replace(r, '');
-    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-  });
-  if (!cwdInRoots) {
+  if (!osSandboxEnabled()) {
     throw new Error(
-      `spawnSandboxed: cwd ${cwd} is not inside any allowed root. ` +
-        `Roots: ${roots.join(', ')}`,
+      'OS sandbox enforcement is unavailable. Enable KORYPHAIOS_OS_SANDBOX=1 and install bubblewrap on Linux, or use sandbox-exec on macOS.',
     );
   }
 
-  const env = {
-    ...process.env,
+  // A private scratch root provides normal TMPDIR semantics without granting
+  // the child write access to the host-wide temporary directory.
+  const scratch = mkdtempSync(join(tmpdir(), 'kory-sandbox-runtime-'));
+  const roots = normalizeRoots([...opts.allowedRoots, scratch]);
+  const cwd = safeRealpath(opts.cwd);
+  const cwdInRoots = roots.some((r) => {
+    const rel = relative(r, cwd);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  });
+  if (!cwdInRoots) {
+    rmSync(scratch, { recursive: true, force: true });
+    throw new Error(
+      `spawnSandboxed: cwd ${cwd} is not inside any allowed root. ` + `Roots: ${roots.join(', ')}`,
+    );
+  }
+
+  // Sandboxed tools never inherit provider keys, database URLs, or backend
+  // credentials. Callers can add only explicitly scoped values through env.
+  const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? '',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    LC_ALL: process.env.LC_ALL,
+    TERM: process.env.TERM,
+    HOME: scratch,
+    TMPDIR: scratch,
+    TMP: scratch,
+    TEMP: scratch,
     ...(opts.env ?? {}),
+  };
+
+  const attachScratchCleanup = (spawned: {
+    proc: ReturnType<typeof spawn>;
+    cleanup: () => void;
+  }): { proc: ReturnType<typeof spawn>; cleanup: () => void } => {
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      spawned.cleanup();
+      rmSync(scratch, { recursive: true, force: true });
+    };
+    spawned.proc.on('exit', cleanup);
+    spawned.proc.on('error', cleanup);
+    return { proc: spawned.proc, cleanup };
   };
 
   // ─── Linux: Landlock via a small C shim ──────────────────────────────
@@ -151,28 +184,27 @@ export function spawnSandboxed(
   // back to `bwrap` (bubblewrap) when available — bwrap is the standard
   // unprivileged sandbox on modern Linux distros and is what flatpak uses.
   if (process.platform === 'linux' && osSandboxEnabled()) {
-    return spawnLinuxSandbox(argv, opts, roots, env, cwd);
+    try {
+      return attachScratchCleanup(spawnLinuxSandbox(argv, opts, roots, env, cwd));
+    } catch (error) {
+      rmSync(scratch, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   // ─── macOS: sandbox-exec ─────────────────────────────────────────────
   if (process.platform === 'darwin' && osSandboxEnabled()) {
-    return spawnMacSandbox(argv, opts, roots, env, cwd);
+    try {
+      return attachScratchCleanup(spawnMacSandbox(argv, opts, roots, env, cwd));
+    } catch (error) {
+      rmSync(scratch, { recursive: true, force: true });
+      throw error;
+    }
   }
 
-  // ─── Unsupported / not enabled: argv-only, no shell ──────────────────
-  if (osSandboxEnabled()) {
-    serverLog.warn(
-      { platform: process.platform, argv: argv[0] },
-      'OS sandbox requested but unavailable on this platform; falling back to argv-only execution',
-    );
-  }
-  const proc = spawn(argv[0], argv.slice(1), {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    cwd,
-    env,
-    shell: false,
-  });
-  return { proc, cleanup: () => {} };
+  // ─── Unsupported / not enabled: fail closed ──────────────────────────
+  rmSync(scratch, { recursive: true, force: true });
+  throw new Error(`OS sandbox enforcement is unavailable on ${process.platform}`);
 }
 
 // ─── Linux: bubblewrap (bwrap) ────────────────────────────────────────
@@ -188,8 +220,7 @@ export function spawnSandboxed(
 //   2. it handles path confinement + network in one tool
 //   3. it doesn't require compiling a native addon at install time
 //
-// If bwrap is not on PATH, we fall back to landlock via a compiled shim
-// (spawnLinuxLandlock) and finally to argv-only with a warning.
+// If bwrap is not executable on PATH, sandbox-required execution is rejected.
 
 function spawnLinuxSandbox(
   argv: string[],
@@ -203,23 +234,7 @@ function spawnLinuxSandbox(
     return spawnBwrap(bwrapPath, argv, opts, roots, env, cwd);
   }
 
-  // No bwrap — try landlock via a shim. We don't ship a precompiled shim
-  // (that would require a per-arch binary), so this path logs a warning and
-  // falls back to argv-only. Users who want full Landlock confinement can
-  // install bwrap (`apt install bubblewrap` / `dnf install bubblewrap`).
-  serverLog.warn(
-    'OS sandbox enabled but bwrap not found on PATH. ' +
-      'Install bubblewrap for full Landlock confinement: ' +
-      'apt install bubblewrap (Debian/Ubuntu) or dnf install bubblewrap (Fedora). ' +
-      'Falling back to argv-only execution.',
-  );
-  const proc = spawn(argv[0], argv.slice(1), {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    cwd,
-    env,
-    shell: false,
-  });
-  return { proc, cleanup: () => {} };
+  throw new Error('bubblewrap is required for Linux path confinement');
 }
 
 function spawnBwrap(
@@ -230,11 +245,13 @@ function spawnBwrap(
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
-  // Build the bwrap argument list. We create a new mount namespace, bind
-  // each allowed root read-write, share /dev, /proc, and /tmp (the temp
-  // dir is already in roots), and optionally unshare the network namespace.
+  // Build the bwrap argument list. We create new mount and PID namespaces,
+  // bind each allowed root read-write, create private /dev and /proc mounts,
+  // and optionally unshare the network namespace. The private scratch root is
+  // bound at its host path and exposed through HOME/TMPDIR; host /tmp is not.
   const args: string[] = [
     '--die-with-parent',
+    '--clearenv',
     '--unshare-user',
     '--unshare-pid',
     // /proc is mounted in a new PID namespace via --unshare-pid, so the
@@ -366,7 +383,10 @@ function spawnMacSandbox(
 
   const macArgs = ['-p', profilePath, ...argv];
 
-  serverLog.debug({ sandboxExec: '/usr/bin/sandbox-exec', roots, blockNetwork: opts.blockNetwork }, 'spawning sandbox-exec');
+  serverLog.debug(
+    { sandboxExec: '/usr/bin/sandbox-exec', roots, blockNetwork: opts.blockNetwork },
+    'spawning sandbox-exec',
+  );
 
   const proc = spawn('/usr/bin/sandbox-exec', macArgs, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -398,30 +418,24 @@ function findOnPath(bin: string): string | null {
   for (const dir of PATH.split(delimiter)) {
     if (!dir) continue;
     const full = join(dir, bin);
-    if (existsSync(full)) return full;
+    try {
+      accessSync(full, fsConstants.X_OK);
+      return full;
+    } catch {
+      // Keep searching: an existing but non-executable file is not an
+      // enforceable sandbox engine.
+    }
   }
   return null;
 }
 
 /**
  * Compute the default allowed roots for a sandboxed command.
- * Always includes the working directory and the user's home .koryphaios
- * data dir (so the agent can read/write its own session state).
+ * Includes only the working directory. Global Koryphaios data can contain
+ * other sessions and provider credentials and is never an implicit Bash grant.
  */
 export function defaultAllowedRoots(workdir: string): string[] {
   const roots = new Set<string>();
   roots.add(safeRealpath(workdir));
-  // The agent's data dir holds session state, notes, etc.
-  try {
-    roots.add(safeRealpath(join(homedir(), '.koryphaios')));
-  } catch {
-    /* ignore */
-  }
-  // Project-local .koryphaios (relative to workdir).
-  try {
-    roots.add(safeRealpath(join(workdir, '.koryphaios')));
-  } catch {
-    /* ignore */
-  }
   return [...roots];
 }

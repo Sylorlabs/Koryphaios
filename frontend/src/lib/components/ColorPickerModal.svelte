@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { theme, type CustomAccent } from '$lib/stores/theme.svelte';
-  import { X, Check, Pipette, RotateCcw } from 'lucide-svelte';
+  import X from 'lucide-svelte/icons/x';
+  import Check from 'lucide-svelte/icons/check';
+  import Pipette from 'lucide-svelte/icons/pipette';
+  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
+  import NumberStepper from './NumberStepper.svelte';
 
   interface Props {
     open: boolean;
@@ -34,7 +38,9 @@
     const c = v * s;
     const hp = h / 60;
     const x = c * (1 - Math.abs((hp % 2) - 1));
-    let r = 0, g = 0, b = 0;
+    let r = 0,
+      g = 0,
+      b = 0;
     if (hp >= 0 && hp < 1) [r, g, b] = [c, x, 0];
     else if (hp < 2) [r, g, b] = [x, c, 0];
     else if (hp < 3) [r, g, b] = [0, c, x];
@@ -46,8 +52,11 @@
   }
 
   function rgbToHsv(r: number, g: number, b: number): [number, number, number] {
-    r /= 255; g /= 255; b /= 255;
-    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    r /= 255;
+    g /= 255;
+    b /= 255;
+    const max = Math.max(r, g, b),
+      min = Math.min(r, g, b);
     const d = max - min;
     let h = 0;
     if (d !== 0) {
@@ -65,7 +74,11 @@
     return (
       '#' +
       [r, g, b]
-        .map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0'))
+        .map((n) =>
+          Math.max(0, Math.min(255, Math.round(n)))
+            .toString(16)
+            .padStart(2, '0'),
+        )
         .join('')
     ).toUpperCase();
   }
@@ -74,12 +87,12 @@
     const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(hex.trim());
     if (!m) return null;
     let h = m[1];
-    if (h.length === 3) h = h.split('').map((c) => c + c).join('');
-    return [
-      parseInt(h.slice(0, 2), 16),
-      parseInt(h.slice(2, 4), 16),
-      parseInt(h.slice(4, 6), 16),
-    ];
+    if (h.length === 3)
+      h = h
+        .split('')
+        .map((c) => c + c)
+        .join('');
+    return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
   }
 
   // Relative luminance per WCAG
@@ -113,6 +126,15 @@
   // Derived RGB triplet for the readout inputs
   let currentRgb = $derived.by(() => hsvToRgb(hue, sat, val));
 
+  function setRgbChannel(channel: 0 | 1 | 2, nextValue: number) {
+    const next: [number, number, number] = [...currentRgb];
+    next[channel] = nextValue;
+    const [h, s, v] = rgbToHsv(next[0], next[1], next[2]);
+    hue = h;
+    sat = s;
+    val = v;
+  }
+
   // Auto-derive a hover color: lighten the main by mixing toward white.
   function deriveHover(main: string): string {
     const rgb = hexToRgb(main);
@@ -125,14 +147,12 @@
 
   // Contrast against current surface background tokens
   let surfaceBg = $derived(
-    getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-surface-0')
-      .trim() || '#0D0B0A',
+    getComputedStyle(document.documentElement).getPropertyValue('--color-surface-0').trim() ||
+      '#0D0B0A',
   );
   let textPrimary = $derived(
-    getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-text-primary')
-      .trim() || '#F6EFE2',
+    getComputedStyle(document.documentElement).getPropertyValue('--color-text-primary').trim() ||
+      '#F6EFE2',
   );
   let contrastOnBg = $derived(contrastRatio(currentHex, surfaceBg).toFixed(2));
   let contrastOnAccent = $derived(contrastRatio(textPrimary, currentHex).toFixed(2));
@@ -145,7 +165,8 @@
     if (!ctx) return;
     const size = wheelSize;
     const radius = size / 2;
-    const cx = radius, cy = radius;
+    const cx = radius,
+      cy = radius;
     const imageData = ctx.createImageData(size, size);
     const data = imageData.data;
     for (let y = 0; y < size; y++) {
@@ -175,7 +196,8 @@
     if (!valueBar) return;
     const ctx = valueBar.getContext('2d');
     if (!ctx) return;
-    const w = barWidth, h = barHeight;
+    const w = barWidth,
+      h = barHeight;
     const grad = ctx.createLinearGradient(0, 0, 0, h);
     // Top = current hue at full value, bottom = black
     const [r, g, b] = hsvToRgb(hue, sat, 1);
@@ -246,7 +268,9 @@
     const rgb = hexToRgb(hexInput);
     if (rgb) {
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
-      hue = h; sat = s; val = v;
+      hue = h;
+      sat = s;
+      val = v;
     } else {
       hexInput = currentHex; // reset on invalid
     }
@@ -267,7 +291,10 @@
       hexInput = picked;
       commitHexInput();
     } catch (err: unknown) {
-      console.debug('EyeDropper cancelled or unavailable:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'EyeDropper cancelled or unavailable:',
+        err instanceof Error ? err.message : String(err),
+      );
       /* user cancelled */
     }
   }
@@ -279,7 +306,9 @@
     const rgb = hexToRgb(cur.main);
     if (rgb) {
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
-      hue = h; sat = s; val = v;
+      hue = h;
+      sat = s;
+      val = v;
     }
     hexInput = cur.main.toUpperCase();
     hoverHex = cur.hover.toUpperCase();
@@ -288,7 +317,9 @@
 
   // Redraw whenever HSV changes
   $effect(() => {
-    hue; sat; val;
+    hue;
+    sat;
+    val;
     if (open) redrawAll();
   });
 
@@ -304,7 +335,9 @@
     const rgb = hexToRgb(defaultAccent.color);
     if (rgb) {
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
-      hue = h; sat = s; val = v;
+      hue = h;
+      sat = s;
+      val = v;
     }
     hexInput = defaultAccent.color.toUpperCase();
     hoverAuto = true;
@@ -346,16 +379,23 @@
     <div
       class="w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden"
       style="background: var(--color-surface-1); border-color: var(--color-border);"
-      onmousedown={e => e.stopPropagation()}
+      onmousedown={(e) => e.stopPropagation()}
       role="presentation"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color: var(--color-border);">
+      <div
+        class="flex items-center justify-between px-5 py-4 border-b"
+        style="border-color: var(--color-border);"
+      >
         <div class="flex items-center gap-2.5">
           <Pipette size={16} style="color: var(--color-accent);" />
           <div>
-            <div class="text-sm font-bold" style="color: var(--color-text-primary);">Custom Accent Color</div>
-            <div class="text-[11px]" style="color: var(--color-text-muted);">Pick any color with the wheel, hex, or eyedropper</div>
+            <div class="text-sm font-bold" style="color: var(--color-text-primary);">
+              Custom Accent Color
+            </div>
+            <div class="text-[11px]" style="color: var(--color-text-muted);">
+              Pick any color with the wheel, hex, or eyedropper
+            </div>
           </div>
         </div>
         <button
@@ -386,7 +426,8 @@
             <!-- Indicator -->
             <div
               class="absolute pointer-events-none rounded-full border-2 border-white shadow-md"
-              style="width:14px;height:14px;left:{indicator.x - 7}px;top:{indicator.y - 7}px;background:{currentHex};box-shadow:0 0 0 1px rgba(0,0,0,0.4);"
+              style="width:14px;height:14px;left:{indicator.x - 7}px;top:{indicator.y -
+                7}px;background:{currentHex};box-shadow:0 0 0 1px rgba(0,0,0,0.4);"
             ></div>
           </div>
           <div class="relative" style={barStyle}>
@@ -410,15 +451,26 @@
         <!-- Hex + eyedropper -->
         <div class="flex items-center gap-3">
           <div class="flex-1">
-            <label for="cp-hex" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Hex</label>
+            <label
+              for="cp-hex"
+              class="block text-[10px] font-bold uppercase tracking-wider mb-1.5"
+              style="color: var(--color-text-muted);">Hex</label
+            >
             <div class="flex items-center gap-2">
               <input
                 type="text"
                 id="cp-hex"
                 bind:value={hexInput}
                 onfocus={() => (typingHex = true)}
-                onblur={() => { typingHex = false; commitHexInput(); }}
-                onkeydown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+                onblur={() => {
+                  typingHex = false;
+                  commitHexInput();
+                }}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter') {
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
                 class="flex-1 px-3 py-2 rounded-lg text-sm font-mono border outline-none transition-colors"
                 style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
                 maxlength="7"
@@ -435,48 +487,57 @@
               </button>
             </div>
           </div>
-          <div class="w-16 h-16 rounded-xl border shadow-inner" style="background:{currentHex};border-color: var(--color-border);"></div>
+          <div
+            class="w-16 h-16 rounded-xl border shadow-inner"
+            style="background:{currentHex};border-color: var(--color-border);"
+          ></div>
         </div>
 
         <!-- RGB readout -->
         <div class="grid grid-cols-3 gap-3">
           <div>
-            <label for="cp-r" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">R</label>
-            <input
-              type="number" min="0" max="255" id="cp-r" value={currentRgb[0]}
-              oninput={(e) => {
-                const r = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(r, currentRgb[1], currentRgb[2]);
-                hue = h; sat = s; val = v;
-              }}
-              class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+            <div
+              class="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
+              R
+            </div>
+            <NumberStepper
+              compact
+              value={currentRgb[0]}
+              min={0}
+              max={255}
+              label="Red channel"
+              onchange={(value) => setRgbChannel(0, value)}
             />
           </div>
           <div>
-            <label for="cp-g" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">G</label>
-            <input
-              type="number" min="0" max="255" id="cp-g" value={currentRgb[1]}
-              oninput={(e) => {
-                const g = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(currentRgb[0], g, currentRgb[2]);
-                hue = h; sat = s; val = v;
-              }}
-              class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+            <div
+              class="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
+              G
+            </div>
+            <NumberStepper
+              compact
+              value={currentRgb[1]}
+              min={0}
+              max={255}
+              label="Green channel"
+              onchange={(value) => setRgbChannel(1, value)}
             />
           </div>
           <div>
-            <label for="cp-b" class="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">B</label>
-            <input
-              type="number" min="0" max="255" id="cp-b" value={currentRgb[2]}
-              oninput={(e) => {
-                const b = Math.max(0, Math.min(255, Number((e.target as HTMLInputElement).value) || 0));
-                const [h, s, v] = rgbToHsv(currentRgb[0], currentRgb[1], b);
-                hue = h; sat = s; val = v;
-              }}
-              class="w-full px-2.5 py-1.5 rounded-lg text-sm font-mono border outline-none"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
+            <div
+              class="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
+            >
+              B
+            </div>
+            <NumberStepper
+              compact
+              value={currentRgb[2]}
+              min={0}
+              max={255}
+              label="Blue channel"
+              onchange={(value) => setRgbChannel(2, value)}
             />
           </div>
         </div>
@@ -484,11 +545,16 @@
         <!-- Hover color -->
         <div class="pt-3 border-t" style="border-color: var(--color-border);">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-[10px] font-bold uppercase tracking-wider" style="color: var(--color-text-muted);">Hover Color</span>
+            <span
+              class="text-[10px] font-bold uppercase tracking-wider"
+              style="color: var(--color-text-muted);">Hover Color</span
+            >
             <button
               type="button"
               class="text-[10px] px-2 py-1 rounded-md border transition-colors flex items-center gap-1"
-              style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto ? 'var(--color-accent)' : 'var(--color-text-secondary)'};"
+              style="background: var(--color-surface-2); border-color: var(--color-border); color: {hoverAuto
+                ? 'var(--color-accent)'
+                : 'var(--color-text-secondary)'};"
               onclick={() => {
                 hoverAuto = !hoverAuto;
                 if (hoverAuto) hoverHex = deriveHover(currentHex).toUpperCase();
@@ -499,13 +565,26 @@
             </button>
           </div>
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-lg border shadow-inner shrink-0" style="background:{effectiveHover};border-color: var(--color-border);"></div>
+            <div
+              class="w-10 h-10 rounded-lg border shadow-inner shrink-0"
+              style="background:{effectiveHover};border-color: var(--color-border);"
+            ></div>
             <input
               type="text"
               bind:value={hoverHex}
-              onfocus={() => { typingHover = true; hoverAuto = false; }}
-              onblur={() => { typingHover = false; commitHoverHex(); }}
-              onkeydown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+              onfocus={() => {
+                typingHover = true;
+                hoverAuto = false;
+              }}
+              onblur={() => {
+                typingHover = false;
+                commitHoverHex();
+              }}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') {
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
               class="flex-1 px-3 py-2 rounded-lg text-sm font-mono border outline-none transition-colors"
               style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
               maxlength="7"
@@ -513,41 +592,125 @@
             />
           </div>
           {#if hoverAuto}
-            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">Auto-derived from main (+35% toward white). Click the hex field or toggle to Manual to customize.</p>
+            <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">
+              Auto-derived from main (+35% toward white). Click the hex field or toggle to Manual to
+              customize.
+            </p>
           {/if}
         </div>
 
         <!-- Contrast checker -->
         <div class="pt-3 border-t" style="border-color: var(--color-border);">
-          <div class="text-[10px] font-bold uppercase tracking-wider mb-2" style="color: var(--color-text-muted);">Contrast (WCAG)</div>
+          <div
+            class="text-[10px] font-bold uppercase tracking-wider mb-2"
+            style="color: var(--color-text-muted);"
+          >
+            Contrast (WCAG)
+          </div>
           <div class="grid grid-cols-3 gap-2">
-            <div class="rounded-lg p-2.5 border" style="background: var(--color-surface-2); border-color: var(--color-border);">
+            <div
+              class="rounded-lg p-2.5 border"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+            >
               <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">On surface</div>
-              <div class="text-base font-bold font-mono" style="color: {Number(contrastOnBg) >= 4.5 ? 'var(--color-success)' : Number(contrastOnBg) >= 3 ? 'var(--color-warning)' : 'var(--color-error)'};">{contrastOnBg}</div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">{Number(contrastOnBg) >= 4.5 ? 'AAA' : Number(contrastOnBg) >= 3 ? 'AA Large' : 'Fail'}</div>
+              <div
+                class="text-base font-bold font-mono"
+                style="color: {Number(contrastOnBg) >= 4.5
+                  ? 'var(--color-success)'
+                  : Number(contrastOnBg) >= 3
+                    ? 'var(--color-warning)'
+                    : 'var(--color-error)'};"
+              >
+                {contrastOnBg}
+              </div>
+              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+                {Number(contrastOnBg) >= 4.5
+                  ? 'AAA'
+                  : Number(contrastOnBg) >= 3
+                    ? 'AA Large'
+                    : 'Fail'}
+              </div>
             </div>
-            <div class="rounded-lg p-2.5 border" style="background: var(--color-surface-2); border-color: var(--color-border);">
-              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">Text on accent</div>
-              <div class="text-base font-bold font-mono" style="color: {Number(contrastOnAccent) >= 4.5 ? 'var(--color-success)' : Number(contrastOnAccent) >= 3 ? 'var(--color-warning)' : 'var(--color-error)'};">{contrastOnAccent}</div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">{Number(contrastOnAccent) >= 4.5 ? 'AAA' : Number(contrastOnAccent) >= 3 ? 'AA Large' : 'Fail'}</div>
+            <div
+              class="rounded-lg p-2.5 border"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+            >
+              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                Text on accent
+              </div>
+              <div
+                class="text-base font-bold font-mono"
+                style="color: {Number(contrastOnAccent) >= 4.5
+                  ? 'var(--color-success)'
+                  : Number(contrastOnAccent) >= 3
+                    ? 'var(--color-warning)'
+                    : 'var(--color-error)'};"
+              >
+                {contrastOnAccent}
+              </div>
+              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+                {Number(contrastOnAccent) >= 4.5
+                  ? 'AAA'
+                  : Number(contrastOnAccent) >= 3
+                    ? 'AA Large'
+                    : 'Fail'}
+              </div>
             </div>
-            <div class="rounded-lg p-2.5 border" style="background: var(--color-surface-2); border-color: var(--color-border);">
-              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">Hover on surf.</div>
-              <div class="text-base font-bold font-mono" style="color: {Number(contrastHoverOnBg) >= 4.5 ? 'var(--color-success)' : Number(contrastHoverOnBg) >= 3 ? 'var(--color-warning)' : 'var(--color-error)'};">{contrastHoverOnBg}</div>
-              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">{Number(contrastHoverOnBg) >= 4.5 ? 'AAA' : Number(contrastHoverOnBg) >= 3 ? 'AA Large' : 'Fail'}</div>
+            <div
+              class="rounded-lg p-2.5 border"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
+            >
+              <div class="text-[10px] mb-1" style="color: var(--color-text-muted);">
+                Hover on surf.
+              </div>
+              <div
+                class="text-base font-bold font-mono"
+                style="color: {Number(contrastHoverOnBg) >= 4.5
+                  ? 'var(--color-success)'
+                  : Number(contrastHoverOnBg) >= 3
+                    ? 'var(--color-warning)'
+                    : 'var(--color-error)'};"
+              >
+                {contrastHoverOnBg}
+              </div>
+              <div class="text-[9px] mt-0.5" style="color: var(--color-text-muted);">
+                {Number(contrastHoverOnBg) >= 4.5
+                  ? 'AAA'
+                  : Number(contrastHoverOnBg) >= 3
+                    ? 'AA Large'
+                    : 'Fail'}
+              </div>
             </div>
           </div>
           <!-- Live preview -->
-          <div class="mt-3 rounded-lg p-3 flex items-center gap-3" style="background: var(--color-surface-0);">
-            <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold" style="background:{currentHex};color:{Number(contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};">Primary</button>
-            <button type="button" class="px-3 py-1.5 rounded-lg text-xs font-bold" style="background:{effectiveHover};color:{Number(contrastHoverOnBg) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};">Hover</button>
+          <div
+            class="mt-3 rounded-lg p-3 flex items-center gap-3"
+            style="background: var(--color-surface-0);"
+          >
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold"
+              style="background:{currentHex};color:{Number(contrastOnAccent) >= 3
+                ? 'var(--color-surface-0)'
+                : 'var(--color-text-primary)'};">Primary</button
+            >
+            <button
+              type="button"
+              class="px-3 py-1.5 rounded-lg text-xs font-bold"
+              style="background:{effectiveHover};color:{Number(contrastHoverOnBg) >= 3
+                ? 'var(--color-surface-0)'
+                : 'var(--color-text-primary)'};">Hover</button
+            >
             <span class="text-xs ml-auto" style="color: var(--color-text-secondary);">Preview</span>
           </div>
         </div>
       </div>
 
       <!-- Footer -->
-      <div class="flex items-center justify-between px-5 py-4 border-t" style="border-color: var(--color-border);">
+      <div
+        class="flex items-center justify-between px-5 py-4 border-t"
+        style="border-color: var(--color-border);"
+      >
         <button
           type="button"
           class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
@@ -568,7 +731,9 @@
           <button
             type="button"
             class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-transform active:scale-95"
-            style="background:{currentHex};color:{Number(contrastOnAccent) >= 3 ? 'var(--color-surface-0)' : 'var(--color-text-primary)'};"
+            style="background:{currentHex};color:{Number(contrastOnAccent) >= 3
+              ? 'var(--color-surface-0)'
+              : 'var(--color-text-primary)'};"
             onclick={apply}
           >
             <Check size={13} strokeWidth={3} /> Apply

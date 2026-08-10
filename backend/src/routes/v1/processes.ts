@@ -9,12 +9,18 @@ import {
   listProcesses,
 } from '../../process-supervisor/database';
 import { serializeProcess } from '../../process-supervisor/serialize';
-import { AuthenticationError, ConflictError, NotFoundError, ValidationError } from '../../errors/types';
+import { getContext } from '../../context';
+import {
+  AuthenticationError,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from '../../errors/types';
 
-function buildLogs(processId: string, lines: number) {
-  const live = processSupervisor.getProcess(processId);
-  const stdout = live?.stdout ?? '';
-  const stderr = live?.stderr ?? '';
+async function buildLogs(processId: string, lines: number) {
+  const logs = await processSupervisor.getProcessLogs(processId);
+  const stdout = logs?.stdout ?? '';
+  const stderr = logs?.stderr ?? '';
 
   const tail = (text: string) => {
     const split = text.split('\n');
@@ -58,7 +64,12 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
       if (!validation.safe) {
         throw new ValidationError(`Unsafe command: ${validation.reason}`);
       }
-      const process = await processSupervisor.startProcess(body);
+      if (!(await getContext().sessions.get(body.sessionId))) {
+        throw new NotFoundError('Session', body.sessionId);
+      }
+      // This user/API surface is always a manual service. Provenance is
+      // server-assigned and cannot be forged in the request body.
+      const process = await processSupervisor.startManualProcess(body);
       return {
         ok: true,
         process: await serializeProcess(process),
@@ -70,7 +81,9 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
         command: t.String(),
         cwd: t.Optional(t.String()),
         sessionId: t.String(),
-        restartPolicy: t.Optional(t.Enum({ never: 'never', 'on-failure': 'on-failure', always: 'always' })),
+        restartPolicy: t.Optional(
+          t.Enum({ never: 'never', 'on-failure': 'on-failure', always: 'always' }),
+        ),
         maxRestarts: t.Optional(t.Number()),
       }),
     },
@@ -103,17 +116,34 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
     if (!allowedSignals.includes(signal)) {
       throw new ValidationError('Invalid signal');
     }
+    const known = processSupervisor.getProcess(id) ?? (await getProcessById(id));
+    if (!known) throw new NotFoundError('Process', id);
     const success = await processSupervisor.killProcess(id, signal);
     if (!success) {
-      throw new NotFoundError('Process', id);
+      if (processSupervisor.getProcess(id)) {
+        throw new ConflictError(
+          'Process termination could not be verified; it remains monitored as active/degraded.',
+        );
+      }
+      throw new ConflictError('Process is not running or termination could not be verified.');
     }
     return { ok: true };
   })
   .post('/:id/restart', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const persisted = await getProcessById(id);
+    const known = processSupervisor.getProcess(id) ?? persisted;
+    if (!known) throw new NotFoundError('Process', id);
+    if (persisted && persisted.commandReplayable !== true) {
+      throw new ConflictError(
+        'Process restart was refused because its durable command was redacted or truncated. Start a fresh process with the intended command.',
+      );
+    }
     const restarted = await processSupervisor.restartProcess(id);
     if (!restarted) {
-      throw new NotFoundError('Process', id);
+      throw new ConflictError(
+        'Process restart was refused because the existing process remains active/degraded or its termination could not be verified.',
+      );
     }
     return { ok: true, process: await serializeProcess(restarted) };
   })
@@ -138,7 +168,7 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
         throw new NotFoundError('Process', id);
       }
       const lines = Number(query.lines ?? 100);
-      return { ok: true, logs: buildLogs(id, Number.isFinite(lines) ? lines : 100) };
+      return { ok: true, logs: await buildLogs(id, Number.isFinite(lines) ? lines : 100) };
     },
     {
       query: t.Object({

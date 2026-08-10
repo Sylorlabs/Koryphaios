@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { PHPHandler } from '../../../src/languages/php-handler.js';
 import { SupportedLanguage } from '../../../src/types/languages.js';
 
@@ -40,12 +41,15 @@ describe('PHPHandler', () => {
   });
 
   describe('Debug Capabilities', () => {
-    it('should return correct debug capabilities', () => {
+    it('reports debugger capabilities as unavailable until an adapter is implemented', async () => {
       const capabilities = handler.getDebugCapabilities();
-      expect(capabilities.supportsBreakpoints).toBe(true);
-      expect(capabilities.supportsVariableInspection).toBe(true);
-      expect(capabilities.supportsRemoteDebugging).toBe(true);
+      expect(capabilities.supportsBreakpoints).toBe(false);
+      expect(capabilities.supportsVariableInspection).toBe(false);
+      expect(capabilities.supportsRemoteDebugging).toBe(false);
       expect(capabilities.supportsHotReload).toBe(false);
+      await expect(handler.createDebugSession({ type: 'launch' })).rejects.toThrow(
+        'PHP debug sessions are unavailable in this build'
+      );
     });
   });
 

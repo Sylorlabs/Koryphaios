@@ -28,14 +28,17 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
+
+const BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
 
 // ─── CLI arg parsing ───────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): {
+export function parseArgs(argv: string[]): {
   sessionId: string;
   role: string;
-  workingDir: string;
   backendUrl: string;
+  authFile: string;
 } {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i++) {
@@ -47,23 +50,23 @@ function parseArgs(argv: string[]): {
     }
   }
   return {
-    sessionId: args['session-id'] || args.sessionId || '',
-    role: args['role'] || 'manager',
-    workingDir: args['working-dir'] || args.workingDir || process.cwd(),
+    sessionId: '',
+    role: '',
     backendUrl:
       args['backend-url'] ||
       args.backendUrl ||
       process.env.KORY_BACKEND_URL ||
       'http://127.0.0.1:3001',
+    authFile:
+      args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
   };
 }
 
-const config = parseArgs(process.argv);
-
 // ─── Kory tool catalog ────────────────────────────────────────────────────
-// The full set of Koryphaios tools exposed to CLI harnesses. Each entry maps
-// to a tool registered in backend/src/tools/. The backend's /api/v1/mcp-bridge/execute
-// endpoint dispatches by name through the ToolRegistry.
+// The name/role capability index for Koryphaios tools exposed to CLI harnesses.
+// Every entry must map to backend/src/tools/. Runtime ListTools descriptions and
+// schemas come from the authenticated /api/v1/mcp-bridge/catalog ToolRegistry
+// endpoint, while /execute dispatches through that same registry.
 
 export interface KoryToolDef {
   name: string;
@@ -147,7 +150,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: { a: { type: 'string' }, b: { type: 'string' } },
       required: ['a', 'b'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__patch',
@@ -211,7 +214,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: { action: { type: 'string' }, shell_id: { type: 'string' } },
       required: ['action'],
     },
-    role: 'worker',
+    role: 'manager',
   },
 
   // ── Web ──
@@ -219,13 +222,13 @@ export const KORY_TOOLS: KoryToolDef[] = [
     name: 'kory__web_search',
     description: 'Search the web.',
     inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__web_fetch',
     description: 'Fetch a URL and return its content.',
     inputSchema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] },
-    role: 'any',
+    role: 'worker',
   },
 
   // ── Notes (Obsidian-style knowledge graph) ──
@@ -241,7 +244,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       },
       required: ['title', 'content'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__read_note',
@@ -266,13 +269,13 @@ export const KORY_TOOLS: KoryToolDef[] = [
       },
       required: ['id'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__delete_note',
     description: 'Delete a note.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__link_notes',
@@ -282,7 +285,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: { from: { type: 'string' }, to: { type: 'string' }, type: { type: 'string' } },
       required: ['from', 'to'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__unlink_notes',
@@ -292,7 +295,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: { from: { type: 'string' }, to: { type: 'string' } },
       required: ['from', 'to'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
     name: 'kory__recall_notes',
@@ -358,7 +361,19 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: { segments: { type: 'array', items: { type: 'string' } } },
       required: ['segments'],
     },
-    role: 'any',
+    role: 'manager',
+  },
+
+  // ── Checkpoints ──
+  {
+    name: 'kory__ghost_commit',
+    description: 'Create a private Time Travel checkpoint of the current working state.',
+    inputSchema: {
+      type: 'object',
+      properties: { label: { type: 'string' } },
+      required: ['label'],
+    },
+    role: 'worker',
   },
 
   // ── Interaction ──
@@ -373,7 +388,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       },
       required: ['question'],
     },
-    role: 'any',
+    role: 'manager',
   },
   {
     name: 'kory__ask_manager',
@@ -532,58 +547,33 @@ export const KORY_TOOLS: KoryToolDef[] = [
 
   // ── MCP diagnostics ──
   {
-    name: 'kory__detect_errors',
+    name: 'kory__detect-errors',
     description: 'Detect MCP server errors from logs or runtime state.',
     inputSchema: { type: 'object', properties: { serverName: { type: 'string' } }, required: [] },
-    role: 'any',
+    role: 'worker',
   },
   {
-    name: 'kory__analyze_error',
+    name: 'kory__analyze-error',
     description: 'Analyze an MCP error and return a structured diagnosis.',
     inputSchema: {
       type: 'object',
       properties: { error: { type: 'string' }, serverName: { type: 'string' } },
       required: ['error'],
     },
-    role: 'any',
+    role: 'worker',
   },
   {
-    name: 'kory__suggest_fixes',
+    name: 'kory__suggest-fixes',
     description: 'Suggest fixes for a detected MCP error.',
     inputSchema: {
       type: 'object',
       properties: { error: { type: 'string' }, diagnosis: { type: 'string' } },
       required: ['error'],
     },
-    role: 'any',
+    role: 'worker',
   },
 
   // ── Git ──
-  {
-    name: 'kory__git_status',
-    description: 'Get git status of the working directory.',
-    inputSchema: { type: 'object', properties: {} },
-    role: 'any',
-  },
-  {
-    name: 'kory__git_diff',
-    description: 'Get git diff (staged or unstaged).',
-    inputSchema: { type: 'object', properties: { staged: { type: 'boolean' } } },
-    role: 'any',
-  },
-  {
-    name: 'kory__git_commit',
-    description: 'Stage and commit changes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string' },
-        files: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['message'],
-    },
-    role: 'worker',
-  },
   {
     name: 'kory__commit_and_create_pr',
     description: 'Commit changes and create a pull request.',
@@ -596,7 +586,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       },
       required: ['message'],
     },
-    role: 'manager',
+    role: 'worker',
   },
 
   // ── Image ──
@@ -604,26 +594,71 @@ export const KORY_TOOLS: KoryToolDef[] = [
     name: 'kory__view_image',
     description: 'View an image file.',
     inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-    role: 'any',
+    role: 'worker',
   },
 ];
 
 /** Filter tools by role. Critic gets read-only; worker gets build tools; manager gets all. */
 export function toolsForRole(role: string): KoryToolDef[] {
   const r = role === 'coder' ? 'worker' : role;
+  if (r !== 'manager' && r !== 'worker' && r !== 'critic') return [];
   return KORY_TOOLS.filter((t) => {
     const tr = t.role as string | undefined;
     if (!tr || tr === 'any') return true;
     if (r === 'critic') return tr === 'critic' || tr === 'any';
     if (r === 'manager') return tr === 'manager' || tr === 'worker' || tr === 'any';
     if (r === 'worker') return tr === 'worker' || tr === 'any';
-    return true;
+    return false;
   });
 }
 
 // ─── Backend proxy ─────────────────────────────────────────────────────────
 
+type RuntimeKoryToolDef = Omit<KoryToolDef, 'role'>;
+
+async function fetchAuthoritativeToolCatalog(
+  config: ReturnType<typeof parseArgs>,
+): Promise<RuntimeKoryToolDef[]> {
+  if (!config.sessionId || toolsForRole(config.role).length === 0) return [];
+  try {
+    if (!config.authFile) return [];
+    const path = '/api/v1/mcp-bridge/catalog';
+    const body = { sessionId: config.sessionId, role: config.role };
+    const response = await fetch(`${config.backendUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...signedBridgeHeadersFromFile(config.authFile, 'mcp', 'POST', path, body),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      process.stderr.write(
+        `[kory-mcp-bridge] authoritative catalog unavailable (${response.status})\n`,
+      );
+      return [];
+    }
+    const payload = (await response.json()) as { tools?: unknown };
+    if (!Array.isArray(payload.tools)) return [];
+    return payload.tools.filter(
+      (tool): tool is RuntimeKoryToolDef =>
+        !!tool &&
+        typeof tool === 'object' &&
+        typeof (tool as RuntimeKoryToolDef).name === 'string' &&
+        (tool as RuntimeKoryToolDef).name.startsWith('kory__') &&
+        typeof (tool as RuntimeKoryToolDef).description === 'string' &&
+        !!(tool as RuntimeKoryToolDef).inputSchema &&
+        typeof (tool as RuntimeKoryToolDef).inputSchema === 'object',
+    );
+  } catch {
+    process.stderr.write('[kory-mcp-bridge] authoritative catalog unreachable\n');
+    return [];
+  }
+}
+
 async function proxyToolCall(
+  config: ReturnType<typeof parseArgs>,
   toolName: string,
   input: Record<string, unknown>,
 ): Promise<{ content: string; isError: boolean }> {
@@ -636,76 +671,93 @@ async function proxyToolCall(
   // Strip the kory__ prefix to get the Kory tool name.
   const koryName = toolName.replace(/^kory__/, '');
   try {
-    const resp = await fetch(`${config.backendUrl}/api/v1/mcp-bridge/execute`, {
+    if (!config.authFile) {
+      return { content: 'Kory MCP bridge authorization is unavailable.', isError: true };
+    }
+    const path = '/api/v1/mcp-bridge/execute';
+    const body = {
+      sessionId: config.sessionId,
+      toolName: koryName,
+      input,
+      role: config.role,
+    };
+    const resp = await fetch(`${config.backendUrl}${path}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        ...(process.env.KORY_LOCAL_AUTH ? { authorization: process.env.KORY_LOCAL_AUTH } : {}),
+        ...signedBridgeHeadersFromFile(config.authFile, 'mcp', 'POST', path, body),
       },
-      body: JSON.stringify({
-        sessionId: config.sessionId,
-        toolName: koryName,
-        input,
-        role: config.role,
-        workingDirectory: config.workingDir,
-      }),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
     });
     if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
       return {
-        content: `Kory backend error (${resp.status}): ${text.slice(0, 500)}`,
+        content: `Kory backend rejected the tool request (HTTP ${resp.status}).`,
         isError: true,
       };
     }
     const data = (await resp.json()) as { output?: string; isError?: boolean };
     return { content: data.output ?? '', isError: data.isError ?? false };
-  } catch (err: unknown) {
-    return { content: `Kory backend unreachable: ${err instanceof Error ? err.message : String(err)}`, isError: true };
+  } catch {
+    return {
+      content: 'Kory backend or private authorization is unavailable.',
+      isError: true,
+    };
   }
 }
-
-// ─── MCP server ────────────────────────────────────────────────────────────
-
-const server = new Server(
-  { name: 'kory-control-plane', version: '1.0.0' },
-  { capabilities: { tools: {} } },
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: toolsForRole(config.role).map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema,
-  })),
-}));
-
-server.setRequestHandler(
-  CallToolRequestSchema,
-  async (req: { params: { name: string; arguments?: Record<string, unknown> } }) => {
-    const { name, arguments: args } = req.params;
-    if (!name?.startsWith('kory__')) {
-      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-    }
-    const result = await proxyToolCall(name, (args ?? {}) as Record<string, unknown>);
-    return {
-      content: [{ type: 'text', text: result.content }],
-      isError: result.isError,
-    };
-  },
-);
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  const config = parseArgs(process.argv);
+  try {
+    const scope = readBridgeGrantScopeFromFile(config.authFile);
+    config.sessionId = scope.sessionId;
+    config.role = scope.role;
+  } catch {
+    process.stderr.write('[kory-mcp-bridge] private authorization unavailable\n');
+    process.exitCode = 1;
+    return;
+  }
+  const allowedTools = await fetchAuthoritativeToolCatalog(config);
+  const allowedToolNames = new Set(allowedTools.map((tool) => tool.name));
+  const server = new Server(
+    { name: 'kory-control-plane', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: allowedTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
+  }));
+
+  server.setRequestHandler(
+    CallToolRequestSchema,
+    async (req: { params: { name: string; arguments?: Record<string, unknown> } }) => {
+      const { name, arguments: args } = req.params;
+      if (!name?.startsWith('kory__') || !allowedToolNames.has(name)) {
+        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+      }
+      const result = await proxyToolCall(config, name, (args ?? {}) as Record<string, unknown>);
+      return {
+        content: [{ type: 'text', text: result.content }],
+        isError: result.isError,
+      };
+    },
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  // Log to stderr only (stdout is the MCP channel).
-  process.stderr.write(
-    `[kory-mcp-bridge] session=${config.sessionId} role=${config.role} backend=${config.backendUrl}\n`,
-  );
+  // stdout is reserved for the MCP channel; do not echo session or endpoint
+  // metadata to inherited diagnostics.
 }
 
-main().catch((err) => {
-  process.stderr.write(`[kory-mcp-bridge] fatal: ${err}\n`);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(() => {
+    process.stderr.write('[kory-mcp-bridge] fatal error\n');
+    process.exit(1);
+  });
+}

@@ -1,6 +1,10 @@
 <script lang="ts">
   import { toastStore } from '$lib/stores/toast.svelte';
-  import { X, CheckCircle, AlertCircle, Info, AlertTriangle } from 'lucide-svelte';
+  import X from 'lucide-svelte/icons/x';
+  import CheckCircle from 'lucide-svelte/icons/check-circle';
+  import AlertCircle from 'lucide-svelte/icons/alert-circle';
+  import Info from 'lucide-svelte/icons/info';
+  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
 
   const MAX_EXPANDED_TOASTS = 1;
 

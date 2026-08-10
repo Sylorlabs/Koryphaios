@@ -23,7 +23,14 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
 
   // Open settings via keyboard shortcut
   await page.keyboard.press('Control+,');
-  await expect(page.getByText('Keyboard Shortcuts')).toBeVisible({ timeout: 10_000 });
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
+  await settingsDialog.getByRole('button', { name: 'Keyboard shortcuts This device' }).click();
+  const shortcutsHeading = settingsDialog.getByRole('heading', {
+    name: 'Keyboard Shortcuts',
+    exact: true,
+  });
+  await expect(shortcutsHeading).toBeVisible({ timeout: 10_000 });
 
   // Find the "Open settings" shortcut group and reassign it
   const openSettings = page.locator('.group').filter({ hasText: 'Open settings' });
@@ -33,19 +40,17 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await page.keyboard.press('Control+Alt+O');
 
   // Verify the new binding is displayed
-  await expect(openSettings.getByText('Ctrl')).toBeVisible();
-  await expect(openSettings.getByText('Alt')).toBeVisible();
-  await expect(openSettings.getByText('O')).toBeVisible();
+  await expect(openSettings.getByRole('button', { name: 'Ctrl + Alt + O' })).toBeVisible();
 
   // Close settings
   await page.keyboard.press('Escape');
-  await expect(page.getByText('Keyboard Shortcuts')).not.toBeVisible({ timeout: 5_000 });
+  await expect(shortcutsHeading).not.toBeVisible({ timeout: 5_000 });
 
   // The old shortcut should no longer open settings
   await page.keyboard.press('Control+,');
-  await expect(page.getByText('Keyboard Shortcuts')).not.toBeVisible({ timeout: 2_000 });
+  await expect(shortcutsHeading).not.toBeVisible({ timeout: 2_000 });
 
   // The new shortcut should open settings
   await page.keyboard.press('Control+Alt+O');
-  await expect(page.getByText('Keyboard Shortcuts')).toBeVisible({ timeout: 5_000 });
+  await expect(shortcutsHeading).toBeVisible({ timeout: 5_000 });
 });

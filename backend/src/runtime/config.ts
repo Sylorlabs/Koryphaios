@@ -1,4 +1,4 @@
-import type { KoryphaiosConfig, AppConfig, ServerConfig } from '@koryphaios/shared';
+import type { KoryphaiosConfig, AppConfig, ServerConfig, AgentSettings } from '@koryphaios/shared';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -82,7 +82,10 @@ export function loadConfig(projectRoot: string): BackendConfig {
   const config: KoryphaiosConfig = {
     // Runtime gets real keys from the 0600 secret store; the on-disk
     // koryphaios.json stays credential-free.
-    providers: hydrateProviderSecrets(projectRoot, (fileConfig.providers ?? {}) as Record<string, unknown>) as KoryphaiosConfig['providers'],
+    providers: hydrateProviderSecrets(
+      projectRoot,
+      (fileConfig.providers ?? {}) as Record<string, unknown>,
+    ) as KoryphaiosConfig['providers'],
     agents: fileConfig.agents ?? {
       manager: {
         model: AGENT.DEFAULT_MANAGER_MODEL,
@@ -120,7 +123,7 @@ export function loadConfig(projectRoot: string): BackendConfig {
       worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,
       copyEnvFiles: fileConfig.workspace?.copyEnvFiles ?? WORKSPACE.DEFAULT_COPY_ENV_FILES,
     },
-    mode: fileConfig.mode ?? (process.env.KORYPHAIOS_MODE as any) ?? 'beginner',
+    mode: fileConfig.mode ?? (process.env.KORYPHAIOS_MODE as 'beginner' | 'advanced' | undefined) ?? 'beginner',
     enableCritic: fileConfig.enableCritic,
     agentSettings: fileConfig.agentSettings,
   };
@@ -159,7 +162,7 @@ export function syncModeToConfig(projectRoot: string, mode: 'beginner' | 'advanc
 
     // Broadcast update via WebSocket broker
     wsBroker.publish('custom', {
-      type: 'system.config_updated' as any,
+      type: 'system.config_updated',
       payload: { source: 'mode-sync', mode, updatedAt },
       timestamp: updatedAt,
       sessionId: 'global',
@@ -174,7 +177,7 @@ export function syncModeToConfig(projectRoot: string, mode: 'beginner' | 'advanc
  * Sync agent settings back to koryphaios.json atomically.
  * This keeps UI settings and config file in sync without corruption.
  */
-export function syncAgentSettingsToConfig(projectRoot: string, settings: any): void {
+export function syncAgentSettingsToConfig(projectRoot: string, settings: AgentSettings): void {
   const configPath = join(projectRoot, 'koryphaios.json');
 
   if (!existsSync(configPath)) {
@@ -205,7 +208,7 @@ export function syncAgentSettingsToConfig(projectRoot: string, settings: any): v
 
     // Broadcast update via WebSocket broker
     wsBroker.publish('custom', {
-      type: 'system.config_updated' as any,
+      type: 'system.config_updated',
       payload: { source: 'config-sync', updatedAt },
       timestamp: updatedAt,
       sessionId: 'global',
@@ -251,10 +254,13 @@ export function syncAssignmentsToConfig(
     writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
     renameSync(tempPath, configPath);
 
-    serverLog.info({ updatedAt, assignments: cleaned }, 'Synced category assignments to koryphaios.json');
+    serverLog.info(
+      { updatedAt, assignments: cleaned },
+      'Synced category assignments to koryphaios.json',
+    );
 
     wsBroker.publish('custom', {
-      type: 'system.config_updated' as any,
+      type: 'system.config_updated',
       payload: { source: 'assignments-sync', updatedAt },
       timestamp: updatedAt,
       sessionId: 'global',
@@ -270,6 +276,10 @@ export function syncAssignmentsToConfig(
  * syncProviderConfigsToConfig only merges, so deletions need an explicit removal.
  */
 export function removeProviderFromConfig(projectRoot: string, providerId: string): void {
+  // Credential deletion is authoritative and independent of the settings
+  // file. A missing koryphaios.json (or a provider entry already removed from
+  // it) must not strand a reusable direct secret on disk.
+  removeProviderSecrets(projectRoot, providerId);
   const configPath = join(projectRoot, 'koryphaios.json');
   if (!existsSync(configPath)) return;
   const tempPath = `${configPath}.${process.pid}.tmp`;
@@ -277,7 +287,6 @@ export function removeProviderFromConfig(projectRoot: string, providerId: string
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
     if (config.providers && config.providers[providerId]) {
       delete config.providers[providerId];
-      removeProviderSecrets(projectRoot, providerId);
       config.updatedAt = Date.now();
       writeFileSync(tempPath, JSON.stringify(config, null, 2), 'utf-8');
       renameSync(tempPath, configPath);
@@ -293,7 +302,7 @@ export function removeProviderFromConfig(projectRoot: string, providerId: string
  */
 export function syncProviderConfigsToConfig(
   projectRoot: string,
-  providers: Record<string, any>,
+  providers: Record<string, unknown>,
 ): void {
   const configPath = join(projectRoot, 'koryphaios.json');
 
@@ -314,8 +323,12 @@ export function syncProviderConfigsToConfig(
     }
     const merged: Record<string, unknown> = { ...(config.providers || {}) };
     for (const [name, cfg] of Object.entries(clean)) {
-      merged[name] = { ...((merged[name] as Record<string, unknown>) ?? {}), ...(cfg as Record<string, unknown>) };
-      for (const field of ['apiKey', 'authToken']) delete (merged[name] as Record<string, unknown>)[field];
+      merged[name] = {
+        ...((merged[name] as Record<string, unknown>) ?? {}),
+        ...(cfg as Record<string, unknown>),
+      };
+      for (const field of ['apiKey', 'authToken'])
+        delete (merged[name] as Record<string, unknown>)[field];
     }
     config.providers = merged;
 
@@ -330,7 +343,7 @@ export function syncProviderConfigsToConfig(
 
     // Broadcast update via WebSocket broker
     wsBroker.publish('custom', {
-      type: 'system.config_updated' as any,
+      type: 'system.config_updated',
       payload: { source: 'provider-sync', updatedAt },
       timestamp: updatedAt,
       sessionId: 'global',

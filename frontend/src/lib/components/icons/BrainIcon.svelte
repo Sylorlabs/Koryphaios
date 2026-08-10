@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { Brain, BrainCircuit, BrainCog } from 'lucide-svelte';
+  import Brain from 'lucide-svelte/icons/brain';
+  import BrainCircuit from 'lucide-svelte/icons/brain-circuit';
+  import BrainCog from 'lucide-svelte/icons/brain-cog';
 
   interface Props {
     reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'none' | string;

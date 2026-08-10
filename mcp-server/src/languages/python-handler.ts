@@ -4,7 +4,7 @@
 
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
-import { BaseLanguageHandler } from './base-language-handler.js';
+
 import type {
   DetectionOptions,
   LanguageError,
@@ -16,6 +16,8 @@ import type {
 } from '../types/languages.js';
 import { SupportedLanguage } from '../types/languages.js';
 import { Logger } from '../utils/logger.js';
+
+import { BaseLanguageHandler } from './base-language-handler.js';
 
 export class PythonHandler extends BaseLanguageHandler {
   private pythonPath: string | undefined;
@@ -310,31 +312,11 @@ export class PythonHandler extends BaseLanguageHandler {
   }
 
   getDebugCapabilities(): LanguageDebugCapabilities {
-    return {
-      supportsBreakpoints: true,
-      supportsConditionalBreakpoints: true,
-      supportsStepInto: true,
-      supportsStepOver: true,
-      supportsStepOut: true,
-      supportsVariableInspection: true,
-      supportsWatchExpressions: true,
-      supportsHotReload: false,
-      supportsRemoteDebugging: false,
-      // Legacy properties for backward compatibility
-      breakpoints: true,
-      stepDebugging: true,
-      variableInspection: true,
-      callStackInspection: true,
-      conditionalBreakpoints: true,
-      hotReload: false,
-      profiling: true,
-      memoryInspection: true,
-    };
+    return this.unavailableDebugCapabilities();
   }
 
   async createDebugSession(_config: LanguageDebugConfig): Promise<LanguageDebugSession> {
-    // This would integrate with Python debugger (pdb, debugpy)
-    throw new Error('Debug session creation not implemented yet');
+    throw new Error('Python debug sessions are unavailable in this build');
   }
 
   async analyzePerformance(source: string): Promise<PerformanceAnalysis> {

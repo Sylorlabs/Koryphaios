@@ -15,6 +15,7 @@ import {
 const ENV_KEYS = [
   'HOME',
   'USERPROFILE',
+  'XDG_DATA_HOME',
   'PATH',
   'KORY_DISABLE_CLI_AUTODETECT',
   'GROK_CODE_XAI_API_KEY',
@@ -34,6 +35,7 @@ beforeEach(() => {
   process.env.HOME = tmpHome;
   process.env.USERPROFILE = tmpHome;
   for (const k of [
+    'XDG_DATA_HOME',
     'KORY_DISABLE_CLI_AUTODETECT',
     'GROK_CODE_XAI_API_KEY',
     'GROK_API_KEY',
@@ -86,10 +88,11 @@ describe('detectAgentClis', () => {
       expect(c.note.length).toBeGreaterThan(0);
       if (c.installed) expect(c.binaryPath).toBeTruthy();
       else expect(c.binaryPath).toBeNull();
-      // autoEnabled implies installed + loggedIn (never claim more than we can drive).
+      expect(c.loginDetected).toBe(c.loggedIn);
+      // autoEnabled implies installed + local setup material, not verified account access.
       if (c.autoEnabled) {
         expect(c.installed).toBe(true);
-        expect(c.loggedIn).toBe(true);
+        expect(c.loginDetected).toBe(true);
       }
     }
   });
@@ -189,6 +192,28 @@ describe('canAutoEnable gate', () => {
   it('never auto-enables a provider with no backing CLI', () => {
     expect(canAutoEnable('openai')).toBe(false);
     expect(canAutoEnable('anthropic')).toBe(false);
+  });
+
+  it('never auto-enables Kilo until its permission and sandbox boundary is enforceable', () => {
+    const bin = join(tmpHome, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const fake = join(bin, 'kilo');
+    writeFileSync(fake, '#!/bin/sh\n');
+    chmodSync(fake, 0o755);
+    process.env.PATH = `${bin}${delimiter}${saved.PATH ?? ''}`;
+    mkdirSync(join(tmpHome, '.local', 'share', 'kilo'), { recursive: true });
+    writeFileSync(
+      join(tmpHome, '.local', 'share', 'kilo', 'auth.json'),
+      JSON.stringify({ kilocode: { type: 'oauth', refresh: 'test-refresh-token' } }),
+    );
+
+    expect(canAutoEnable('kilocode')).toBe(false);
+    const kilo = detectAgentClis().find((entry) => entry.id === 'kilo');
+    expect(kilo?.installed).toBe(true);
+    expect(kilo?.loggedIn).toBe(true);
+    expect(kilo?.loginDetected).toBe(true);
+    expect(kilo?.autoEnabled).toBe(false);
+    expect(kilo?.note).toContain('cannot yet enforce');
   });
 
   it('does not auto-enable xai from a bare env key when the grok CLI is absent', () => {

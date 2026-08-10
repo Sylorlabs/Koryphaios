@@ -6,8 +6,8 @@
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
@@ -21,6 +21,17 @@ import {
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  writePrivatePromptToStdin,
+} from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import { writeManagedCliFile } from './managed-cli-storage';
+import { appendBoundedProviderFrames } from './bounded-provider-stream';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -106,7 +117,9 @@ async function queryCliModels(
       CODEX_MODEL_LIST_TIMEOUT_MS,
     );
     timeout.unref?.();
-    child.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr = appendPrivateDiagnostic(stderr, chunk);
+    });
     child.once('error', (error) => finish(undefined, error));
     child.once('exit', (code) => {
       if (!settled)
@@ -116,10 +129,14 @@ async function queryCliModels(
         );
     });
     child.stdout?.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
+      let bounded: ReturnType<typeof appendBoundedProviderFrames>;
+      try {
+        bounded = appendBoundedProviderFrames(buffer, chunk.toString());
+      } catch (error) {
+        return finish(undefined, error as Error);
+      }
+      buffer = bounded.remainder;
+      for (const line of bounded.frames) {
         try {
           const message = JSON.parse(line) as {
             id?: number;
@@ -141,7 +158,10 @@ async function queryCliModels(
           }
         } catch (err: unknown) {
           // Ignore non-JSON diagnostics/partial lines from the CLI.
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI skipping non-JSON diagnostics/partial line');
+          providerLog.debug(
+            safeProviderDiagnostic('codex', 'stdout', err),
+            'Codex CLI skipping non-JSON diagnostics/partial line',
+          );
         }
       }
     });
@@ -251,19 +271,16 @@ export function codexJsonEvents(
     }
     return { events, completed: true };
   } else if (event.type === 'turn.failed') {
-    // Codex CLI emits turn.failed when the model request fails (e.g. usage
-    // limit, auth error, rate limit). Extract the real error message —
-    // it's far more useful than the stderr noise.
-    const msg = (event.error as { message?: string } | undefined)?.message
+    const raw = (event.error as { message?: string } | undefined)?.message
       ?? (event.message as string | undefined)
-      ?? 'Codex turn failed (no error message provided)';
-    events.push({ type: 'error', error: msg });
+      ?? '';
+    const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
+    events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
     return { events, completed: true };
   } else if (event.type === 'error') {
-    // Codex CLI emits top-level error events for connection / auth issues.
-    const msg = (event as { message?: string }).message
-      ?? 'Codex CLI error (no message provided)';
-    events.push({ type: 'error', error: msg });
+    const raw = (event as { message?: string }).message ?? '';
+    const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
+    events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
   }
   return { events, completed: false };
 }
@@ -398,15 +415,9 @@ export class CodexCliProvider implements Provider {
         const failures: string[] = [];
         const models = results.flatMap((result) => {
           if (result.status === 'rejected') {
-            providerLog.warn(
-              {
-                provider: 'codex',
-                error:
-                  result.reason instanceof Error ? result.reason.message : String(result.reason),
-              },
-              'Could not load models for one Codex CLI account',
-            );
-            failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+            const diagnostic = safeProviderDiagnostic('codex', 'stdout', result.reason);
+            providerLog.warn(diagnostic, 'Could not load models for one Codex CLI account');
+            failures.push(safeProviderFailureMessage('codex', diagnostic));
             return [];
           }
           return result.value.models
@@ -488,8 +499,7 @@ export class CodexCliProvider implements Provider {
       const ruleFiles = codexBridge?.buildRules(bridgeCtx);
       if (ruleFiles) {
         for (const rule of ruleFiles) {
-          mkdirSync(dirname(rule.path), { recursive: true });
-          writeFileSync(rule.path, rule.content);
+          writeManagedCliFile(rule.path, rule.content);
         }
       }
     } catch (wiringErr) {
@@ -522,7 +532,7 @@ export class CodexCliProvider implements Provider {
       // than requesting the supported accelerated tier.
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
       ...codexReasoningArgs(request.reasoningLevel),
-      prompt,
+      '-',
     ];
     const codexHome = getKoryphaiosCodexHome(account.profileDir);
     const baseEnv = { ...process.env, CODEX_HOME: codexHome };
@@ -530,14 +540,17 @@ export class CodexCliProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(binary, args, { cwd, configDirs: [codexHome], policy: request.sandbox })
       : { command: binary, args };
+    assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     const child = spawn(wrapped.command, wrapped.args, {
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
       env: jail?.env ?? baseEnv,
     });
+    writePrivatePromptToStdin(child, prompt);
     let stderr = '';
     let stdoutBuffer = '';
     let completed = false;
+    let streamFrameFailure: unknown;
     const allowedToolNames = (request.tools ?? []).map((tool) => tool.name);
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -548,7 +561,10 @@ export class CodexCliProvider implements Provider {
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
     timeout.unref?.();
 
-    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+    child.stderr.on(
+      'data',
+      (chunk: Buffer) => (stderr = appendPrivateDiagnostic(stderr, chunk)),
+    );
     const queue: ProviderEvent[] = [];
     const consumeLine = (line: string) => {
       if (!line.trim()) return;
@@ -557,17 +573,23 @@ export class CodexCliProvider implements Provider {
         const translated = codexJsonEvents(event, allowedToolNames, account.id);
         queue.push(...translated.events);
         if (translated.completed) completed = true;
-      } catch (err: unknown) {
+      } catch {
         // Codex's JSON mode is JSONL; ignore a malformed partial line.
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI skipping malformed JSONL partial line');
+        providerLog.debug(
+          safeProviderDiagnostic('codex', 'stdout', line),
+          'Codex CLI skipping malformed JSONL partial line',
+        );
       }
     };
     child.stdout.on('data', (chunk: Buffer) => {
-      stdoutBuffer += chunk.toString();
-      const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop() ?? '';
-      for (const line of lines) {
-        consumeLine(line);
+      if (streamFrameFailure) return;
+      try {
+        const bounded = appendBoundedProviderFrames(stdoutBuffer, chunk.toString());
+        stdoutBuffer = bounded.remainder;
+        for (const line of bounded.frames) consumeLine(line);
+      } catch (error) {
+        streamFrameFailure = error;
+        child.kill('SIGTERM');
       }
     });
 
@@ -577,28 +599,23 @@ export class CodexCliProvider implements Provider {
     });
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
+    if (streamFrameFailure) {
+      const diagnostic = safeProviderDiagnostic('codex', 'stdout', streamFrameFailure);
+      providerLog.warn(diagnostic, 'Codex CLI stream exceeded the structural limit');
+      yield { type: 'error', error: safeProviderFailureMessage('codex', diagnostic) };
+      return;
+    }
     consumeLine(stdoutBuffer);
     while (queue.length) yield queue.shift()!;
     if (request.signal?.aborted) return;
     if (exitCode !== 0) {
-      // Filter out Codex CLI's informational stderr noise that isn't the
-      // actual error. "Reading additional input from stdin..." is printed
-      // on every exec invocation, not just failures.
-      const cleanStderr = stderr
-        .trim()
-        .split('\n')
-        .filter((line) => !line.includes('Reading additional input from stdin'))
-        .join('\n')
-        .trim();
-      // If we already emitted an error event from turn.failed, don't
-      // duplicate it — the real error was in stdout, not stderr.
-      const alreadyErrored = queue.some((e) => e.type === 'error');
-      if (alreadyErrored && !cleanStderr) {
-        return;
-      }
+      const diagnostic = safeProviderDiagnostic('codex', 'stderr', stderr, { exitCode });
+      providerLog.warn(diagnostic, 'Codex CLI exited unsuccessfully');
       yield {
         type: 'error',
-        error: `Codex CLI failed: ${(cleanStderr || `exit status ${exitCode}`).slice(0, 500)}`,
+        error: safeProviderFailureMessage('codex', diagnostic, {
+          authenticationAction: 'Run "codex login", then reconnect.',
+        }),
       };
       return;
     }

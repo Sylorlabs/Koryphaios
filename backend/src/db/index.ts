@@ -1,29 +1,25 @@
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { Database } from 'bun:sqlite';
 import * as schema from './schema';
-import path from 'path';
 import { runMigrations } from './migrations';
-import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
-import { serverLog } from '../logger';
+import { hardenFilePermissions } from '../security/fs-permissions';
+import { PROJECT_ROOT } from '../runtime/paths';
+import { ensureDatabaseDirectory, resolveDatabasePath } from './database-path';
 
 // Get database path from env or default to data/ directory.
 // Handle both `sqlite://path` (URL form) and `sqlite:path` (test-runner form).
 // On Windows, the path after `sqlite:` is a drive path like `C:\Users\...`
 // which does not start with `/`, so `sqlite://` won't match — strip any
 // `sqlite:` prefix instead.
-const dbPath =
-  process.env.DATABASE_URL?.replace(/^sqlite:\/\//, '').replace(/^sqlite:/, '') ||
-  'data/koryphaios.db';
+const dbPath = resolveDatabasePath(PROJECT_ROOT);
 // First run (packaged app: cwd = per-user data dir): the data/ folder does not
 // exist yet and SQLite refuses to create intermediate directories itself.
 // The DB and its WAL/SHM sidecars contain sessions, notes, and billing data —
 // tighten the directory to 0o700 so other local users can't list or read them.
-try {
-  const { dirname } = require('node:path') as typeof import('node:path');
-  if (dirname(dbPath) !== '.') ensureSecureDir(dirname(dbPath));
-} catch (err: unknown) {
-  serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to secure database directory');
-}
+// A configured broad or loose parent is rejected here before SQLite can create
+// a potentially world-readable database. Startup must fail closed rather than
+// mutate /, HOME, a shared temp root, or another user-owned directory.
+ensureDatabaseDirectory(dbPath);
 
 // Create bun:sqlite database instance
 const sqlite = new Database(dbPath);

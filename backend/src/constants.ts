@@ -94,8 +94,10 @@ export const SECURITY = {
   ALLOWED_ORIGINS: [
     'http://localhost:5173', // Vite dev default
     'http://localhost:3000', // Bun dev server
+    'http://localhost:3003', // Native desktop Vite server
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
+    'http://127.0.0.1:3003',
   ],
 } as const;
 

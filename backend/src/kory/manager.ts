@@ -29,8 +29,7 @@ import {
   type Provider,
 } from '../providers';
 import type { ProviderMessage } from '../providers/types';
-import { detectJulesApiKey } from '../providers/auth-utils';
-import { runJulesTask } from '../providers/jules-runner';
+import { JULES_APPROVAL_REQUIRED_ERROR } from '../providers/jules-runner';
 import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
 import {
   ToolRegistry,
@@ -47,7 +46,8 @@ import { wsBroker } from '../pubsub';
 import { koryLog, serverLog } from '../logger';
 import { initContextArchive, getContextArchive } from './context-archive';
 import { nanoid } from 'nanoid';
-import { sanitizeForPrompt } from '../security';
+import { redactSecretsInText, sanitizeForPrompt } from '../security';
+import { logBackgroundRegistrationFailure } from '../security/bash-sandbox';
 import {
   checkNoteToolPermission,
   filterToolDefsForNotesPermissions,
@@ -62,12 +62,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { db, sessions } from '../db';
 import { eq } from 'drizzle-orm';
 import type { ISessionStore } from '../stores/session-store';
@@ -75,6 +77,7 @@ import type { IMessageStore } from '../stores/message-store';
 import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
 import { processSupervisor } from '../process-supervisor/supervisor';
+import type { ProcessLifecycleEvent } from '../process-supervisor/supervisor';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
 import {
@@ -84,6 +87,7 @@ import {
   WorkerPipelineService,
 } from './services';
 import type { WorkflowHook, WorkflowHookEvent } from './services/EventEmitterService';
+import { ProcessCompletionCoordinator } from './services/ProcessCompletionCoordinator';
 import { TimeTravelService } from '../services';
 import { computeCostUsd } from '../pricing';
 import { RoutingServiceEnhanced } from './services/RoutingServiceEnhanced';
@@ -94,7 +98,16 @@ import {
 import { getModeManager } from '../mode';
 import type { WorkerPipelineHost } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
-import { compilePrompt, createTaskContract, requiresMultiAgentDelegation } from './prompts';
+import {
+  CRITIC_OUTPUT_TOKEN_LIMIT,
+  MANAGER_OUTPUT_TOKEN_LIMIT,
+  WORKER_OUTPUT_TOKEN_LIMIT,
+  compilePrompt,
+  createTaskContract,
+  estimateOccupiedContextTokenUpperBound,
+  requiresMultiAgentDelegation,
+  textTokenUpperBound,
+} from './prompts';
 import { discoverVerificationChecks, emptyQualityGateReport } from './verification';
 import {
   getProviderHarnessCapabilities,
@@ -117,6 +130,7 @@ import {
   getPendingQuestion,
 } from '../stores/pending-question-store';
 import { ensurePlanNote, syncPlanNote } from './plan-mode';
+import { automaticMemoryPrompt } from './settings-contract';
 import { resolveSkills } from './skills';
 import { rankHarnessCandidates, type QualificationRole } from './skill-qualifications';
 import {
@@ -124,6 +138,7 @@ import {
   clearCollaborationToolPolicy,
   type CollaborationToolPolicy,
 } from '../collaboration/tool-policy';
+import { checkAndEnforceCaps } from '../security/spend-caps-enforced';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -147,6 +162,14 @@ interface LLMTurnResult {
   completedToolCalls?: CompletedToolCall[];
   /** A native CLI harness performed work, even though it did not request a Kory tool call. */
   observedNativeTool?: boolean;
+}
+
+interface CriticGateResult {
+  passed: boolean;
+  skipped?: boolean;
+  feedback?: string;
+  model?: string;
+  provider?: string;
 }
 
 export interface AgentThreadEntry {
@@ -219,7 +242,10 @@ function safeParseJson(s?: string): Record<string, unknown> {
     const o = JSON.parse(s);
     return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse JSON string in safeParseJson');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to parse JSON string in safeParseJson',
+    );
     return {};
   }
 }
@@ -237,6 +263,12 @@ export interface KoryTask {
   error?: string;
 }
 
+export interface ManagerSessionErasureLease {
+  waitForIdle(timeoutMs?: number): Promise<void>;
+  complete(): void;
+  rollback(): void;
+}
+
 export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
@@ -246,6 +278,15 @@ export class KoryManager implements WorkerPipelineHost {
   private workspaceManager: WorkspaceManager | null = null;
   /** AbortController for the current manager run per session (so cancelSessionWorkers can abort manager too). */
   private managerAbortBySession = new Map<string, AbortController>();
+  /** Synchronous intent claims cover provider resolution, intent interviews,
+   * and every other pre-controller await. Time Travel uses the paired mutation
+   * barrier so a new manager turn cannot start between its busy check and the
+   * workspace transaction. */
+  private sessionRunClaims = new Set<string>();
+  private sessionMutationBarriers = new Set<string>();
+  /** Permanent process-lifetime tombstones stop stale callbacks from reviving
+   * a session after its durable row and archives have been erased. */
+  private erasedSessions = new Set<string>();
   /** Heartbeat timers per session — emit agent.heartbeat every 5s while a
    *  run is active so the client watchdog can distinguish "alive but quiet"
    *  (long tool call) from "dead — terminal event was dropped". */
@@ -262,10 +303,14 @@ export class KoryManager implements WorkerPipelineHost {
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
   private workerPipeline: WorkerPipelineService;
+  private processCompletionCoordinator: ProcessCompletionCoordinator;
+  private unsubscribeProcessLifecycle?: () => void;
   /** Sessions whose title has already been auto-generated. Prevents racing
    *  LLM calls when the user sends a second message before the first title
    *  resolves. */
   private titledSessions = new Set<string>();
+  private titleGenerationBySession = new Map<string, AbortController>();
+  private usageRetryTimersBySession = new Map<string, Set<ReturnType<typeof setTimeout>>>();
   /** Last visible prompt manifest per session; prevents repeated disclosure on tool-loop turns. */
   private promptManifestHashBySession = new Map<string, string>();
   /** Collision choices persist per project and are reused by task workers/critics. */
@@ -312,42 +357,42 @@ export class KoryManager implements WorkerPipelineHost {
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
 
+    this.processCompletionCoordinator = new ProcessCompletionCoordinator({
+      isSessionBusy: (sessionId) => this.isSessionRunning(sessionId),
+      hasActiveAgentProcess: (sessionId) =>
+        processSupervisor.hasActiveAgentToolForSession(sessionId),
+      wakeSession: (sessionId, events) => this.wakeForProcessCompletions(sessionId, events),
+      onWakeError: (sessionId, error) =>
+        koryLog.warn({ sessionId, error }, 'Background-process wake-up failed; batch retained'),
+    });
+
     // Background terminals: surface start/exit in the chat feed and wake the
     // agent when a process it was waiting on finishes.
-    processSupervisor.onLifecycle((e) => {
+    this.unsubscribeProcessLifecycle = processSupervisor.onLifecycle((e) => {
       if (!e.sessionId) return;
-      this.emitWSMessage(e.sessionId, e.type === 'started' ? 'process.started' : 'process.exited', {
+      const eventType =
+        e.type === 'started'
+          ? 'process.started'
+          : e.type === 'degraded'
+            ? 'process.status'
+            : 'process.exited';
+      this.emitWSMessage(e.sessionId, eventType, {
         id: e.id,
         name: e.name,
-        command: e.command,
+        command: redactSecretsInText(e.command, 1_000),
         pid: e.pid,
         exitCode: e.exitCode,
         status: e.status,
+        provenance: e.provenance,
+        supervision: e.supervision,
+        isBackground: e.isBackground,
+        terminalReason: e.terminalReason,
+        terminalError: e.terminalError ? redactSecretsInText(e.terminalError, 2_000) : undefined,
         willRestart: e.willRestart,
-        logsTail: e.logsTail,
+        logsTail: e.logsTail ? redactSecretsInText(e.logsTail, 4_000) : undefined,
+        recovered: e.recovered,
       });
-      if (
-        e.type === 'exited' &&
-        e.status !== 'killed' &&
-        !e.willRestart &&
-        !this.isSessionRunning(e.sessionId)
-      ) {
-        // The manager's turn already ended (button shows "Waiting…") — wake it
-        // with the outcome so it can react or report back to the user.
-        const summary =
-          `[background terminal] Process "${e.name}" (${e.command.slice(0, 120)}) ` +
-          `${e.status} with exit code ${e.exitCode ?? 'unknown'}.` +
-          (e.logsTail ? `\nRecent output:\n${e.logsTail}` : '') +
-          `\nReview the result (shell_manage logs id=${e.id} for full output), fix anything broken, or summarize for the user.`;
-        this.emitWSMessage(e.sessionId, 'agent.status', {
-          agentId: KORY_IDENTITY.id,
-          status: 'thinking',
-        });
-        this.setHeartbeatPhase(e.sessionId, 'thinking');
-        void this.handleDirectly(e.sessionId, summary, undefined, undefined).catch((err) =>
-          koryLog.warn({ err, sessionId: e.sessionId }, 'Background-process wake-up failed'),
-        );
-      }
+      if (e.type === 'exited') this.processCompletionCoordinator.enqueue(e);
     });
 
     // KoryManager implements WorkerPipelineHost directly — no closure bag.
@@ -370,22 +415,88 @@ export class KoryManager implements WorkerPipelineHost {
     try {
       if (this.git.isGitRepo()) {
         const wm = new WorkspaceManager(workingDirectory, config.workspace);
-        void wm.init().then(() => {
-          this.workspaceManager = wm;
-          this.workerPipeline.workspaceManager = wm;
-          koryLog.info('WorkspaceManager initialized for parallel agent isolation');
-        }).catch((err: unknown) => {
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager init failed');
-          koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
-        });
+        void wm
+          .init()
+          .then(() => {
+            this.workspaceManager = wm;
+            this.workerPipeline.workspaceManager = wm;
+            koryLog.info('WorkspaceManager initialized for parallel agent isolation');
+          })
+          .catch((err: unknown) => {
+            serverLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'WorkspaceManager init failed',
+            );
+            koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
+          });
       }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'WorkspaceManager initialization failed');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'WorkspaceManager initialization failed',
+      );
       koryLog.warn('WorkspaceManager unavailable — workers will share the main directory');
     }
 
     // Recover state from persistent stores
     this.recoverState();
+  }
+
+  private async wakeForProcessCompletions(
+    sessionId: string,
+    events: ProcessLifecycleEvent[],
+  ): Promise<void> {
+    if (!this.tryBeginSessionRun(sessionId)) {
+      throw new Error('Session became busy before its background-process completion drained');
+    }
+    const wakeAbort = new AbortController();
+    this.managerAbortBySession.set(sessionId, wakeAbort);
+    try {
+      await this.wakeForProcessCompletionsWithClaim(sessionId, events);
+    } finally {
+      if (this.managerAbortBySession.get(sessionId) === wakeAbort) {
+        this.managerAbortBySession.delete(sessionId);
+      }
+      this.endSessionRun(sessionId);
+    }
+  }
+
+  private async wakeForProcessCompletionsWithClaim(
+    sessionId: string,
+    events: ProcessLifecycleEvent[],
+  ): Promise<void> {
+    if (this.sessions && !(await this.sessions.get(sessionId))) {
+      koryLog.info({ sessionId }, 'Discarding process completion for a deleted session');
+      return;
+    }
+
+    const outcomes = events
+      .map((event) => {
+        const exit = event.exitCode === undefined ? 'unknown' : String(event.exitCode);
+        const output = event.logsTail
+          ? `\nRecent output:\n${redactSecretsInText(event.logsTail.slice(-1_200), 1_200)}`
+          : '\nNo output was captured; do not infer success from missing logs.';
+        return (
+          `- ${event.name} [id=${event.id}] ${event.status}; ` +
+          `reason=${event.terminalReason ?? 'unknown'}; exit=${exit}\n` +
+          `  command: ${redactSecretsInText(event.command.slice(0, 160), 160)}${output}`
+        );
+      })
+      .join('\n');
+    const summary =
+      `[background terminal completion]\n${events.length} supervised process${events.length === 1 ? '' : 'es'} reached an authoritative terminal state:\n` +
+      `${outcomes.slice(0, 8_000)}\n` +
+      'Review the outcomes, inspect full captured logs with shell_manage when needed, repair concrete failures, and report truthfully.';
+
+    // Runtime waits already have a parked heartbeat; restart-recovery wakes do
+    // not. Re-baseline both cases before entering the provider turn.
+    this.startHeartbeat(sessionId);
+    this.emitWSMessage(sessionId, 'agent.status', {
+      agentId: KORY_IDENTITY.id,
+      status: 'thinking',
+    });
+    this.setHeartbeatPhase(sessionId, 'thinking');
+    await this.handleDirectly(sessionId, summary, undefined, undefined);
   }
 
   private async recoverState() {
@@ -426,15 +537,13 @@ export class KoryManager implements WorkerPipelineHost {
     return this.workingDirectory;
   }
 
-  getQualityPolicy(): {
+  getQualityPolicy(workingDirectory = this.workingDirectory): {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   } {
-    const settings = loadAgentSettings(this.workingDirectory);
+    const settings = loadAgentSettings(workingDirectory);
     return {
-      gateStrictness: settings.criticGateEnabled
-        ? (settings.gateStrictness ?? 'strict')
-        : 'off',
+      gateStrictness: settings.criticGateEnabled ? (settings.gateStrictness ?? 'strict') : 'off',
       maxCriticIterations: settings.maxCriticIterations,
     };
   }
@@ -460,7 +569,15 @@ export class KoryManager implements WorkerPipelineHost {
     plan: string,
     preferredModel?: string,
   ): Promise<string[]> {
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    const workingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    const routing = this.resolveActiveRouting(
+      preferredModel,
+      'general',
+      true,
+      undefined,
+      undefined,
+      workingDirectory,
+    );
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider) return [];
 
@@ -477,7 +594,10 @@ export class KoryManager implements WorkerPipelineHost {
         if (event.type === 'content_delta') result += event.content ?? '';
       return JSON.parse(result.trim().match(/\[.*\]/s)?.[0] || '[]');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse affected paths from LLM response');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to parse affected paths from LLM response',
+      );
       return [];
     }
   }
@@ -497,8 +617,24 @@ export class KoryManager implements WorkerPipelineHost {
     reasoningLevel?: string;
     automatic?: boolean;
   }): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
+    if (!this.tryBeginSessionRun(input.sessionId)) {
+      throw new Error('This session is already running or applying a Time Travel recovery');
+    }
+    try {
+      return await this.compactSessionWithClaim(input);
+    } finally {
+      this.endSessionRun(input.sessionId);
+    }
+  }
+
+  private async compactSessionWithClaim(input: {
+    sessionId: string;
+    selectedModel: string;
+    reasoningLevel?: string;
+    automatic?: boolean;
+  }): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
     if (!this.messages) throw new Error('Message store unavailable');
-    if (this.isSessionRunning(input.sessionId) || this.compactingSessions.has(input.sessionId)) {
+    if (this.compactingSessions.has(input.sessionId)) {
       throw new Error('This session is already running');
     }
     const separator = input.selectedModel.indexOf(':');
@@ -506,7 +642,7 @@ export class KoryManager implements WorkerPipelineHost {
     const providerName = input.selectedModel.slice(0, separator) as ProviderName;
     const model = input.selectedModel.slice(separator + 1);
     const status = this.providers.getStatus().find((item) => item.name === providerName);
-    if (!status?.authenticated || !status.models.includes(model)) {
+    if (!status?.adapterAvailable || !status.models.includes(model)) {
       throw new Error('The selected model is no longer available. Select another model.');
     }
     const provider = await this.providers.resolveProvider(model, providerName);
@@ -562,7 +698,8 @@ export class KoryManager implements WorkerPipelineHost {
       });
 
       const projectRoot = await this.resolveSessionWorkingDirectory(input.sessionId);
-      const priorMemory = readSessionMemory(projectRoot, input.sessionId).content;
+      const priorMemoryFile = readSessionMemory(projectRoot, input.sessionId);
+      const priorMemory = priorMemoryFile.content;
       const prompt = `Return one JSON object and nothing else. Preserve concrete truth; never invent completion or verification.\n\nRequired keys:\nprojectBrief (string)\ndecisions (string[])\nfilesAndCodeState (string[])\ncompletedWork (string[])\nactiveWork (string[])\nopenIssues (string[])\nnextActions (string[])\ncriticalContext (string[])\nconfidenceAndRisk (string)\ndurableMemory (string)\n\nEXISTING SESSION MEMORY:\n${priorMemory || '[none]'}\n\nTRANSCRIPT TO COMPACT:\n${transcript}`;
       let raw = '';
       let tokensIn = sourceTokens;
@@ -655,9 +792,17 @@ export class KoryManager implements WorkerPipelineHost {
       // issue cannot retroactively turn a committed context revision into a
       // reported failure.
       try {
-        writeSessionMemory(projectRoot, input.sessionId, String(parsed.durableMemory));
+        writeSessionMemory(
+          projectRoot,
+          input.sessionId,
+          String(parsed.durableMemory),
+          priorMemoryFile.revision,
+        );
       } catch (error) {
-        koryLog.warn({ error, sessionId: input.sessionId }, 'Compaction memory mirror could not be updated');
+        koryLog.warn(
+          { error, sessionId: input.sessionId },
+          'Compaction memory mirror could not be updated',
+        );
       }
       const checkpointTokens = tokensOut || Math.ceil(summary.length / 4);
       emit(
@@ -710,20 +855,80 @@ export class KoryManager implements WorkerPipelineHost {
     );
   }
 
-  async handleSessionResponse(sessionId: string, accepted: boolean) {
-    if (accepted) {
-      this.emitThought(sessionId, 'synthesizing', 'User accepted changes.');
-    } else {
-      this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
-      const prevHash = this.state.getCheckpoint(sessionId);
-      if (prevHash && this.git.isGitRepo()) {
-        this.git.rollback(prevHash);
-      } else {
-        await this.snapshotManager.restoreSnapshot(sessionId, 'latest', this.workingDirectory);
-      }
+  /** Resolve the exact durable project for a destructive keep/reject decision.
+   * Legacy/global sessions are intentionally rejected here: falling back to
+   * the manager launch directory could apply session B's checkpoint to repo A. */
+  private async resolveSessionProjectForResponse(sessionId: string): Promise<string> {
+    if (!this.sessions) {
+      throw new Error('Cannot apply the change decision because the session store is unavailable');
     }
-    this.state.clearCheckpoint(sessionId);
-    this.state.clearChanges(sessionId);
+    const session = await this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(
+        `Cannot apply the change decision because session ${sessionId} was not found`,
+      );
+    }
+    const configured = session.workingDirectory?.trim();
+    if (!configured) {
+      throw new Error(
+        'Cannot apply the change decision because this session has no project folder',
+      );
+    }
+    const requested = resolve(configured);
+    if (!existsSync(requested) || !statSync(requested).isDirectory()) {
+      throw new Error(
+        `Cannot apply the change decision because its project is unavailable: ${requested}`,
+      );
+    }
+    return realpathSync(requested);
+  }
+
+  async handleSessionResponse(sessionId: string, accepted: boolean) {
+    const sessionLease = this.tryAcquireSessionMutationBarrier(sessionId);
+    if (!sessionLease) {
+      throw new Error('Wait for active session work to finish before applying this decision');
+    }
+    const processLease = processSupervisor.tryAcquireAgentToolBarrier(sessionId);
+    if (!processLease) {
+      sessionLease.release();
+      throw new Error('Wait for active agent terminals to finish before applying this decision');
+    }
+    try {
+      const projectRoot = await this.resolveSessionProjectForResponse(sessionId);
+      if (accepted) {
+        this.emitThought(sessionId, 'synthesizing', 'User accepted changes.');
+      } else {
+        this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
+        const prevHash = this.state.getCheckpoint(sessionId);
+        const projectGit = new GitManager(projectRoot);
+        if (prevHash && projectGit.isGitRepo()) {
+          const rolledBack = await projectGit.rollback(prevHash);
+          if (!rolledBack) {
+            throw new Error('The session project could not be restored to its recorded checkpoint');
+          }
+        } else {
+          const restored = await new SnapshotManager(projectRoot).restoreSnapshot(
+            sessionId,
+            'latest',
+            projectRoot,
+          );
+          if (!restored.success) {
+            throw new Error(
+              `The session project snapshot could not be restored: ${restored.error}`,
+            );
+          }
+        }
+      }
+      this.state.clearCheckpoint(sessionId);
+      this.state.clearChanges(sessionId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.emitError(sessionId, message);
+      throw error;
+    } finally {
+      processLease.release();
+      sessionLease.release();
+    }
   }
 
   private async handleManagerInquiry(
@@ -733,7 +938,15 @@ export class KoryManager implements WorkerPipelineHost {
     preferredModel?: string,
   ): Promise<string> {
     this.emitThought(sessionId, 'analyzing', `Worker help: "${question}"`);
-    const routing = this.resolveActiveRouting(preferredModel, 'general', true);
+    const workingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    const routing = this.resolveActiveRouting(
+      preferredModel,
+      'general',
+      true,
+      question,
+      undefined,
+      workingDirectory,
+    );
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider) return 'Error.';
 
@@ -764,7 +977,10 @@ export class KoryManager implements WorkerPipelineHost {
             const args = JSON.parse(event.toolInput || '{}');
             if (args.decision) decision = args.decision;
           } catch (err: unknown) {
-            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse route_inquiry tool input, defaulting to ANSWER');
+            serverLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'Failed to parse route_inquiry tool input, defaulting to ANSWER',
+            );
           }
         }
       }
@@ -773,7 +989,7 @@ export class KoryManager implements WorkerPipelineHost {
     }
 
     if (decision === 'WEB_SEARCH') {
-      const toolCtx: ToolContext = { sessionId, workingDirectory: this.workingDirectory };
+      const toolCtx: ToolContext = { sessionId, workingDirectory };
       const searchResult = await this.tools.execute(toolCtx, {
         id: nanoid(10),
         name: 'web_search',
@@ -854,8 +1070,8 @@ export class KoryManager implements WorkerPipelineHost {
     this.skillCollisionChoicesBySession.set(sessionId, choices);
 
     if (updated) {
-      const settings = loadAgentSettings(this.workingDirectory);
-      saveAgentSettings(this.workingDirectory, {
+      const settings = loadAgentSettings(workingDirectory);
+      saveAgentSettings(workingDirectory, {
         ...settings,
         skillCollisionChoices: { ...settings.skillCollisionChoices, ...choices },
       });
@@ -864,7 +1080,9 @@ export class KoryManager implements WorkerPipelineHost {
     return choices;
   }
 
-  /** Main entry point for processing a task. */
+  /** Main entry point for processing a task. The claim is installed before the
+   * first await, so cancellation and Time Travel see intent discovery/provider
+   * resolution as active work rather than a false idle window. */
   async processTask(
     sessionId: string,
     userMessage: string,
@@ -877,7 +1095,66 @@ export class KoryManager implements WorkerPipelineHost {
     interactionMode?: 'act' | 'plan',
     fastMode?: boolean,
   ): Promise<void> {
+    if (!this.tryBeginSessionRun(sessionId)) {
+      this.emitError(
+        sessionId,
+        'This session is already active or is applying a Time Travel recovery. Wait for it to finish before starting another turn.',
+      );
+      return;
+    }
+    const intentAbort = new AbortController();
+    this.managerAbortBySession.set(sessionId, intentAbort);
+    try {
+      await this.processTaskWithClaim(
+        sessionId,
+        userMessage,
+        preferredModel,
+        reasoningLevel,
+        attachments,
+        collaborationToolPolicy,
+        responseVariant,
+        goalContext,
+        interactionMode,
+        fastMode,
+      );
+    } catch (error) {
+      const aborted =
+        intentAbort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+      this.stopHeartbeat(sessionId);
+      this.isProcessing = false;
+      await this.updateWorkflowState(sessionId, aborted ? 'idle' : 'error');
+      if (aborted) {
+        this.emitWSMessage(sessionId, 'system.info', { message: 'Stopped by user.' });
+      } else {
+        koryLog.error({ sessionId, error }, 'Manager run failed before provider execution');
+        this.emitError(
+          sessionId,
+          `Error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } finally {
+      if (this.managerAbortBySession.get(sessionId) === intentAbort) {
+        this.managerAbortBySession.delete(sessionId);
+      }
+      this.endSessionRun(sessionId);
+    }
+  }
+
+  private async processTaskWithClaim(
+    sessionId: string,
+    userMessage: string,
+    preferredModel?: string,
+    reasoningLevel?: string,
+    attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
+    collaborationToolPolicy?: CollaborationToolPolicy,
+    responseVariant?: { groupId: string; index: number },
+    goalContext?: import('./prompts').TaskContract['goalContext'],
+    interactionMode?: 'act' | 'plan',
+    fastMode?: boolean,
+  ): Promise<void> {
+    this.processCompletionCoordinator.resumeSession(sessionId);
     const session = await this.sessions?.get(sessionId);
+    this.assertSessionRunActive(sessionId);
     interactionMode = interactionMode ?? session?.interactionMode ?? 'act';
     this.isProcessing = true;
     this.startHeartbeat(sessionId);
@@ -885,15 +1162,18 @@ export class KoryManager implements WorkerPipelineHost {
     userMessage = sanitizeForPrompt(userMessage);
 
     const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    this.assertSessionRunActive(sessionId);
     const workflowSettings = loadAgentSettings(sessionRoot);
-    const remembered = rememberExplicitPreference(sessionRoot, userMessage);
+    const remembered = workflowSettings.agentCanUpdatePreferences
+      ? rememberExplicitPreference(sessionRoot, userMessage)
+      : null;
     if (remembered) {
       this.emitWSMessage(sessionId, 'system.info', {
         message: `Remembered as a project preference: ${remembered}`,
       });
     }
     if (interactionMode === 'plan') {
-      const planNote = await ensurePlanNote(sessionId, userMessage);
+      const planNote = await ensurePlanNote(sessionId, userMessage, sessionRoot);
       await this.sessions?.update(sessionId, { planNoteId: planNote.id });
     }
     const configuredCollisionChoices = workflowSettings.skillCollisionChoices ?? {};
@@ -917,6 +1197,7 @@ export class KoryManager implements WorkerPipelineHost {
         break;
       decisions.push(`${question.question} ${answer}`);
     }
+    this.assertSessionRunActive(sessionId);
     if (decisions.length > 0) {
       userMessage += `\n\nResolved intent decisions:\n- ${decisions.join('\n- ')}`;
     }
@@ -927,9 +1208,17 @@ export class KoryManager implements WorkerPipelineHost {
       userMessage,
       configuredCollisionChoices,
     );
+    this.assertSessionRunActive(sessionId);
 
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
+    let routing = this.resolveActiveRouting(
+      preferredModel,
+      'general',
+      true,
+      userMessage,
+      undefined,
+      sessionRoot,
+    );
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     if (!provider && (!preferredModel || preferredModel === 'auto')) {
       const fallback = this.providers.getFirstAvailableRouting();
@@ -938,16 +1227,45 @@ export class KoryManager implements WorkerPipelineHost {
         provider = this.providers.resolveProvider(routing.model, routing.provider);
       }
     }
+    this.assertSessionRunActive(sessionId);
     if (!provider) {
       await this.updateWorkflowState(sessionId, 'idle');
       this.emitError(sessionId, this.getModelConfigurationError(preferredModel));
+      this.skillCollisionChoicesBySession.delete(sessionId);
+      this.goalContextBySession.delete(sessionId);
+      this.stopHeartbeat(sessionId);
       this.isProcessing = false;
+      this.processCompletionCoordinator.notifySessionIdle(sessionId);
       return;
     }
     this.managerRoutingBySession.set(sessionId, {
       model: routing.model,
       provider: provider.name,
     });
+
+    // This is the final local preflight before any paid provider stream. It
+    // evaluates only recorded spend; Koryphaios does not invent a projected
+    // cost when the selected provider has not supplied one.
+    const spendGate = await checkAndEnforceCaps(sessionId);
+    if (spendGate.reason && spendGate.canProceed) {
+      this.emitWSMessage(sessionId, 'system.info', {
+        message: `Spend limit warning: ${spendGate.reason}`,
+      });
+    }
+    if (!spendGate.canProceed) {
+      await this.updateWorkflowState(sessionId, spendGate.paused ? 'paused' : 'idle');
+      this.emitError(
+        sessionId,
+        spendGate.reason ?? 'A configured spend limit blocked this request.',
+      );
+      this.skillCollisionChoicesBySession.delete(sessionId);
+      this.goalContextBySession.delete(sessionId);
+      this.managerRoutingBySession.delete(sessionId);
+      this.stopHeartbeat(sessionId);
+      this.isProcessing = false;
+      this.processCompletionCoordinator.notifySessionIdle(sessionId);
+      return;
+    }
 
     koryLog.debug(
       { sessionId, routing, providerName: provider.name },
@@ -1026,6 +1344,7 @@ export class KoryManager implements WorkerPipelineHost {
     avoidLegacy = false,
     prompt?: string,
     preferCheap?: boolean,
+    workingDirectory = this.workingDirectory,
   ): { model: string; provider: ProviderName | undefined } {
     const routed = this.routing.resolveActiveRouting(
       preferredModel,
@@ -1040,7 +1359,7 @@ export class KoryManager implements WorkerPipelineHost {
       try {
         const { loadAgentSettings } =
           require('../agent-settings') as typeof import('../agent-settings');
-        const allowed = loadAgentSettings(this.workingDirectory).managerModelAccess?.[domain];
+        const allowed = loadAgentSettings(workingDirectory).managerModelAccess?.[domain];
         if (allowed?.length && !allowed.includes(routed.model)) {
           for (const candidate of allowed) {
             const alt = this.routing.resolveActiveRouting(
@@ -1054,7 +1373,10 @@ export class KoryManager implements WorkerPipelineHost {
           }
         }
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Agent settings unavailable — using the routed default');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Agent settings unavailable — using the routed default',
+        );
       }
     }
     return routed;
@@ -1073,15 +1395,16 @@ export class KoryManager implements WorkerPipelineHost {
     additionalAvoid: Array<{ model: string | undefined; provider: ProviderName | undefined }> = [],
     task?: string,
     qualificationRole: QualificationRole = 'worker',
+    workingDirectory = this.workingDirectory,
   ): { model: string; provider: ProviderName | undefined } | null {
-    const settings = loadAgentSettings(this.workingDirectory);
+    const settings = loadAgentSettings(workingDirectory);
     const configured = settings.managerModelAccess?.[domain] ?? [];
     const candidates =
       configured.length > 0
         ? configured
         : this.providers
             .getStatus()
-            .filter((status) => status.authenticated)
+            .filter((status) => status.adapterAvailable)
             .flatMap((status) => status.models.map((model) => `${status.name}:${model}`));
     const resolved: Array<{ model: string; provider: ProviderName | undefined }> = [];
     for (const candidate of candidates) {
@@ -1097,16 +1420,19 @@ export class KoryManager implements WorkerPipelineHost {
           resolved.push(route);
         }
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Stale user-enabled model: skip it and continue through the pool');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Stale user-enabled model: skip it and continue through the pool',
+        );
       }
     }
     const independent = resolved.filter((route) => route.provider !== avoidProvider);
     const differentModel = resolved.filter((route) => route.model !== avoidModel);
     const pool = independent.length ? independent : differentModel;
     const contract = createTaskContract(task ?? 'Delegate task');
-    const skillResolution = resolveSkills(this.workingDirectory, contract.goal, contract);
+    const skillResolution = resolveSkills(workingDirectory, contract.goal, contract);
     const ranked = rankHarnessCandidates(
-      this.workingDirectory,
+      workingDirectory,
       pool,
       qualificationRole,
       skillResolution.selected.map((item) => item.skill.name),
@@ -1133,7 +1459,7 @@ export class KoryManager implements WorkerPipelineHost {
 
   private getModelConfigurationError(preferredModel?: string): string {
     const statuses = this.providers.getStatus();
-    const authenticated = statuses.filter((provider) => provider.authenticated);
+    const authenticated = statuses.filter((provider) => provider.adapterAvailable);
 
     if (authenticated.length === 0) {
       return 'No model provider is configured. Open Settings and connect a provider before chatting.';
@@ -1179,7 +1505,15 @@ export class KoryManager implements WorkerPipelineHost {
     if (before.decision === 'deny') {
       return `Delegation denied by workflow hook: ${before.reason ?? 'no reason supplied'}`;
     }
-    const managerRouting = this.resolveActiveRouting(preferredModel, 'general', true, task);
+    const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const managerRouting = this.resolveActiveRouting(
+      preferredModel,
+      'general',
+      true,
+      task,
+      undefined,
+      sessionRoot,
+    );
     const workerDomain =
       domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
         ? (domainHint as WorkerDomain)
@@ -1191,6 +1525,7 @@ export class KoryManager implements WorkerPipelineHost {
       [],
       task,
       'worker',
+      sessionRoot,
     );
     const selectedWorkerRouting = workerRouting ?? managerRouting;
     if (!workerRouting) {
@@ -1216,11 +1551,10 @@ export class KoryManager implements WorkerPipelineHost {
       : result;
   }
 
-  /** Whether Jules cloud delegation is configured (API key). */
+  /** Whether Jules can run through Kory's enforced approval boundary. */
   isJulesAvailable(): boolean {
     const jules = this.providers.get('jules');
-    if (jules?.isAvailable()) return true;
-    return !!detectJulesApiKey();
+    return jules?.isAvailable() ?? false;
   }
 
   /** Fire-and-forget session title generation. Called by the messages route
@@ -1235,53 +1569,81 @@ export class KoryManager implements WorkerPipelineHost {
     if (!this.sessions) return;
     // De-dupe across overlapping calls: if the user fires a second message
     // before the first title resolves, we don't want two LLM calls racing.
-    if (this.titledSessions.has(sessionId)) return;
-    this.titledSessions.add(sessionId);
-
-    const session = await this.sessions.get(sessionId);
-    if (!session) {
-      this.titledSessions.delete(sessionId);
+    if (
+      this.erasedSessions.has(sessionId) ||
+      this.sessionMutationBarriers.has(sessionId) ||
+      this.titledSessions.has(sessionId)
+    ) {
       return;
     }
-    // Only rename sessions that are still on the default title — user-renamed
-    // sessions are sacred.
-    if (session.title !== SESSION.DEFAULT_TITLE) return;
-    // Only rename the very first user message; later turns keep the existing
-    // name even if the user hasn't renamed it manually.
-    if ((session.messageCount ?? 0) > 0) return;
-
-    const cleaned = userMessage.replace(/\s+/g, ' ').trim();
-    let title = this.fallbackTitle(cleaned);
-
+    this.titledSessions.add(sessionId);
+    const controller = new AbortController();
+    this.titleGenerationBySession.set(sessionId, controller);
     try {
-      const llmTitle = await this.askForTitle(cleaned);
-      if (llmTitle) title = llmTitle;
-    } catch (err) {
-      koryLog.debug(
-        { sessionId, err: String(err) },
-        'Agent title generation failed, using fallback',
-      );
+      const session = await this.sessions.get(sessionId);
+      if (!session || controller.signal.aborted || this.erasedSessions.has(sessionId)) return;
+      // Only rename sessions that are still on the default title — user-renamed
+      // sessions are sacred.
+      if (session.title !== SESSION.DEFAULT_TITLE) return;
+      // Only rename the very first user message; later turns keep the existing
+      // name even if the user hasn't renamed it manually.
+      if ((session.messageCount ?? 0) > 0) return;
+
+      const cleaned = userMessage.replace(/\s+/g, ' ').trim();
+      let title = this.fallbackTitle(cleaned);
+
+      try {
+        const workingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+        if (controller.signal.aborted || this.erasedSessions.has(sessionId)) return;
+        const llmTitle = await this.askForTitle(cleaned, workingDirectory, controller.signal);
+        if (llmTitle) title = llmTitle;
+      } catch (err) {
+        if (controller.signal.aborted || this.erasedSessions.has(sessionId)) return;
+        koryLog.debug({ sessionId }, 'Agent title generation failed, using fallback');
+      }
+
+      if (controller.signal.aborted || this.erasedSessions.has(sessionId)) return;
+      title = title.slice(0, SESSION.MAX_TITLE_LENGTH).trim();
+      if (!title || title === SESSION.DEFAULT_TITLE) return;
+
+      const updated = await this.sessions.update(sessionId, { title });
+      if (updated && !controller.signal.aborted && !this.erasedSessions.has(sessionId)) {
+        this.events.emit(sessionId, 'session.updated', { session: updated });
+      }
+    } finally {
+      if (this.titleGenerationBySession.get(sessionId) === controller) {
+        this.titleGenerationBySession.delete(sessionId);
+      }
     }
-
-    title = title.slice(0, SESSION.MAX_TITLE_LENGTH).trim();
-    if (!title || title === SESSION.DEFAULT_TITLE) return;
-
-    const updated = await this.sessions.update(sessionId, { title });
-    if (updated) this.events.emit(sessionId, 'session.updated', { session: updated });
   }
 
   /** Ask a small/fast model for a 3-6 word title. Returns null on any failure. */
-  private async askForTitle(userMessage: string): Promise<string | null> {
+  private async askForTitle(
+    userMessage: string,
+    workingDirectory = this.workingDirectory,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    if (signal?.aborted) return null;
     // Pick the cheapest available routing so title generation stays cheap.
     let routing;
     try {
-      routing = this.resolveActiveRouting(undefined, 'general', true, undefined, true);
+      routing = this.resolveActiveRouting(
+        undefined,
+        'general',
+        true,
+        undefined,
+        true,
+        workingDirectory,
+      );
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to resolve active routing for default model');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to resolve active routing for default model',
+      );
       return null;
     }
     const provider = await this.providers.resolveProvider(routing.model, routing.provider);
-    if (!provider) return null;
+    if (!provider || signal?.aborted) return null;
 
     const systemPrompt =
       'You generate short chat titles. Output ONLY the title, no quotes, no punctuation ' +
@@ -1297,6 +1659,7 @@ export class KoryManager implements WorkerPipelineHost {
         systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         maxTokens: 32,
+        signal,
       });
       for await (const event of stream) {
         if (event.type === 'content_delta') out += event.content ?? '';
@@ -1323,103 +1686,16 @@ export class KoryManager implements WorkerPipelineHost {
       : content.trim();
   }
 
-  private resolveJulesApiKey(): string | null {
-    const cfg = this.providers.getConfigs().jules;
-    return cfg?.apiKey?.trim() || detectJulesApiKey();
-  }
-
   /**
-   * Delegate a task to Google Jules (cloud async agent). Used by delegate_to_jules tool.
-   * Streams progress to the session feed while polling the Jules API.
+   * Jules remains a registered compatibility surface, but delegation is
+   * fail-closed until Kory can persist and enforce explicit plan approval.
    */
   async runJulesDelegation(
-    sessionId: string,
-    task: string,
-    options?: { createPr?: boolean; branch?: string },
+    _sessionId: string,
+    _task: string,
+    _options?: { createPr?: boolean; branch?: string },
   ): Promise<string> {
-    const apiKey = this.resolveJulesApiKey();
-    if (!apiKey) {
-      return 'Jules is not configured. Add JULES_API_KEY in Settings (https://jules.google.com/settings#api).';
-    }
-
-    this.emitThought(sessionId, 'executing', 'Jules cloud agent working…');
-    await this.updateWorkflowState(sessionId, 'executing');
-
-    let summary = '';
-    const automationMode = options?.createPr === false ? undefined : 'AUTO_CREATE_PR';
-
-    try {
-      for await (const event of runJulesTask({
-        apiKey,
-        prompt: task,
-        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
-        korySessionId: sessionId,
-        defaultBranch: options?.branch,
-        automationMode,
-        signal: this.state.getAbortController(sessionId).signal,
-      })) {
-        this.emitJulesProviderEvent(sessionId, event);
-        if (event.type === 'content_delta' && event.content) summary += event.content;
-        if (event.type === 'error') {
-          await this.updateWorkflowState(sessionId, 'idle');
-          return event.error ?? 'Jules cloud delegation failed.';
-        }
-        if (event.type === 'complete') break;
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.updateWorkflowState(sessionId, 'idle');
-      return `Jules cloud delegation failed: ${msg}`;
-    }
-
-    await this.updateWorkflowState(sessionId, 'idle');
-    const tail = summary.trim() || 'Jules cloud task finished. Check the session link or PR above.';
-    return `${tail}\n\n**Sync locally:** ${JULES_SYNC_INSTRUCTIONS}`;
-  }
-
-  private emitJulesProviderEvent(sessionId: string, event: ProviderEvent): void {
-    if (event.type === 'thinking_delta' && event.thinking) {
-      this.emitWSMessage(sessionId, 'stream.thinking', {
-        agentId: KORY_IDENTITY.id,
-        thinking: event.thinking,
-      } satisfies StreamThinkingPayload);
-    } else if (event.type === 'content_delta' && event.content) {
-      this.setHeartbeatPhase(sessionId, 'streaming');
-      this.emitWSMessage(sessionId, 'stream.delta', {
-        agentId: KORY_IDENTITY.id,
-        content: event.content,
-        model: 'jules',
-      });
-    } else if (event.type === 'tool_executed') {
-      const callId = `jules-${nanoid(8)}`;
-      this.setHeartbeatPhase(sessionId, 'tool_calling');
-      this.emitWSMessage(sessionId, 'stream.tool_call', {
-        agentId: KORY_IDENTITY.id,
-        toolCall: {
-          id: callId,
-          name: event.toolName ?? 'jules_cloud',
-          input: safeParseJson(event.toolInput),
-        },
-      });
-      this.emitWSMessage(sessionId, 'stream.tool_result', {
-        agentId: KORY_IDENTITY.id,
-        toolResult: {
-          callId,
-          name: event.toolName ?? 'jules_cloud',
-          output: event.toolOutput ?? '',
-          isError: event.isError === true,
-          durationMs: 0,
-        },
-      });
-    } else if (event.type === 'file_edit' && event.filePath) {
-      this.emitWSMessage(sessionId, 'stream.file_delta', {
-        agentId: KORY_IDENTITY.id,
-        path: event.filePath,
-        delta: event.fileContent ?? '',
-        totalLength: (event.fileContent ?? '').length,
-        operation: event.fileOperation ?? 'edit',
-      });
-    }
+    return JULES_APPROVAL_REQUIRED_ERROR;
   }
 
   /** Critic can only read files and grep. It sees the full worker transcript (truncated) and outputs PASS or FAIL with feedback. */
@@ -1429,7 +1705,8 @@ export class KoryManager implements WorkerPipelineHost {
     preferredModel?: string,
     task?: string,
     reviewDirectory = this.workingDirectory,
-  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    producerIdentity?: { provider: ProviderName; model: string },
+  ): Promise<CriticGateResult> {
     if (!loadAgentSettings(reviewDirectory).criticGateEnabled) {
       return { passed: true, skipped: true, feedback: 'Critic disabled by user.' };
     }
@@ -1446,9 +1723,18 @@ export class KoryManager implements WorkerPipelineHost {
     const hardCheckResult = await this.runHardChecks(sessionId, reviewDirectory);
     if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
-    const producerRouting = preferredModel
-      ? this.resolveActiveRouting(preferredModel, 'general')
-      : { model: undefined, provider: undefined };
+    const producerRouting = producerIdentity
+      ? { model: producerIdentity.model, provider: producerIdentity.provider }
+      : preferredModel
+        ? this.resolveActiveRouting(
+            preferredModel,
+            'general',
+            false,
+            undefined,
+            undefined,
+            reviewDirectory,
+          )
+        : { model: undefined, provider: undefined };
     const managerIdentity = this.managerRoutingBySession.get(sessionId);
     const routing = this.resolveIndependentRouting(
       producerRouting.model,
@@ -1457,54 +1743,47 @@ export class KoryManager implements WorkerPipelineHost {
       managerIdentity ? [managerIdentity] : [],
       task,
       'critic',
+      reviewDirectory,
     );
-    const criticRouting = routing ?? {
-      model: producerRouting.model,
-      provider: producerRouting.provider,
-    };
-    if (!criticRouting.model) {
-      return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
-    }
     if (!routing) {
-      this.emitThought(
-        sessionId,
-        'reviewing',
-        `The user-enabled critic pool has no independent alternative; reusing ${criticRouting.provider ?? 'unknown'}:${criticRouting.model}.`,
-      );
+      return {
+        passed: false,
+        skipped: true,
+        feedback:
+          'No distinct critic model is available. The producer cannot verify its own work, so the result remains unverified.',
+      };
+    }
+    const criticRouting = routing;
+    if (
+      criticRouting.model === producerRouting.model &&
+      criticRouting.provider === producerRouting.provider
+    ) {
+      return {
+        passed: false,
+        skipped: true,
+        feedback:
+          'The configured critic resolves to the producer provider and model. Self-verification is not independent, so the result remains unverified.',
+      };
     }
     const provider = await this.providers.resolveProvider(
       criticRouting.model,
       criticRouting.provider,
     );
     if (!provider) return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
-    const criticCompilation = compilePrompt({
-      role: 'critic',
-      mode: getModeManager().getMode(),
-      provider: provider.name,
-      workingDirectory: reviewDirectory,
-      taskContract: createTaskContract(task ?? 'Review delegated work'),
-      contextPaths: this.config.contextPaths,
-      skillSelection: {
-        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
-      },
-    });
     const criticGuidance = assembleAgentContext(
       reviewDirectory,
       loadAgentSettings(reviewDirectory),
     );
-    const criticMemory = formatMemoryForContext(assembleMemoryContext(reviewDirectory, sessionId));
-    const criticSystemPrompt =
-      criticCompilation.systemPrompt +
+    const criticMemoryContext = assembleMemoryContext(reviewDirectory, sessionId);
+    const criticMemory = automaticMemoryPrompt(
+      formatMemoryForContext(criticMemoryContext),
+      criticMemoryContext.settings,
+    );
+    const criticSupplementalContext =
       (criticGuidance.preferences.trim()
         ? `\n\n## Durable user preferences\n${criticGuidance.preferences.trim()}`
-        : '') +
-      (criticMemory ? `\n\n${criticMemory.slice(0, 8_000)}` : '');
-
+        : '') + (criticMemory ? `\n\n${criticMemory}` : '');
     const transcriptText = formatMessagesForCriticUtil(workerMessages ?? [], 12_000);
-    // The critic is a FRESH-context agent — it never shares the manager's
-    // conversation. The manager briefs it here: the original objective plus
-    // what to scrutinize, so the review judges fitness-for-purpose instead of
-    // vibing over an anonymous transcript.
     const objective = task?.trim()
       ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
       : '';
@@ -1514,6 +1793,27 @@ export class KoryManager implements WorkerPipelineHost {
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
       `Use read_file/grep/glob/ls as needed. Return the structured JSON critic report required by your system contract.`;
+    const criticCompilation = compilePrompt({
+      role: 'critic',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      model: criticRouting.model,
+      occupiedContextTokenUpperBound:
+        textTokenUpperBound(criticPrompt) + textTokenUpperBound(criticSupplementalContext),
+      reservedOutputTokens: CRITIC_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
+      workingDirectory: reviewDirectory,
+      taskContract: createTaskContract(task ?? 'Review delegated work'),
+      contextPaths: this.config.contextPaths,
+      skillSelection: {
+        collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
+      },
+    });
+    const criticSystemPrompt = criticCompilation.systemPrompt + criticSupplementalContext;
+    // The critic is a FRESH-context agent — it never shares the manager's
+    // conversation. The manager briefs it here: the original objective plus
+    // what to scrutinize, so the review judges fitness-for-purpose instead of
+    // vibing over an anonymous transcript.
     const criticId = `critic-${nanoid(8)}`;
     const identity: AgentIdentity = {
       id: criticId,
@@ -1577,7 +1877,7 @@ export class KoryManager implements WorkerPipelineHost {
       taskContractHash: criticCompilation.manifest.taskContractHash,
       toolRole: 'critic',
       maxTurns: 5,
-      maxTokens: 2048,
+      maxTokens: CRITIC_OUTPUT_TOKEN_LIMIT,
       messages: [{ role: 'user', content: criticPrompt }],
       threadEntries: [],
       ctx: criticCtx,
@@ -1591,9 +1891,17 @@ export class KoryManager implements WorkerPipelineHost {
     try {
       await this.runAgentThread(criticId, provider);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Critic failed to run');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Critic failed to run',
+      );
       rmSync(criticSessionWd, { recursive: true, force: true });
-      return { passed: false, feedback: 'Critic failed to run.' };
+      return {
+        passed: false,
+        feedback: 'Critic failed to run.',
+        model: criticRouting.model,
+        provider: provider.name,
+      };
     }
 
     const lastContent =
@@ -1610,9 +1918,16 @@ export class KoryManager implements WorkerPipelineHost {
       return {
         passed: false,
         feedback: `Critic result rejected by workflow hook: ${afterCritic.reason ?? 'no reason supplied'}`,
+        model: criticRouting.model,
+        provider: provider.name,
       };
     }
-    return { passed, feedback: lastContent.trim() };
+    return {
+      passed,
+      feedback: lastContent.trim(),
+      model: criticRouting.model,
+      provider: provider.name,
+    };
   }
 
   /** Goal Mode completion claims pass through the same global Critic switch and quality gate. */
@@ -1620,20 +1935,44 @@ export class KoryManager implements WorkerPipelineHost {
     sessionId: string,
     objective: string,
     itemTitle: string,
+    producerEvidence: string,
     preferredModel?: string,
-  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    producerProvider?: ProviderName,
+  ): Promise<CriticGateResult> {
     const session = await this.sessions?.get(sessionId);
+    if (!session) {
+      return { passed: false, feedback: 'Goal verification session is unavailable.' };
+    }
+    let reviewDirectory: string;
+    try {
+      reviewDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    } catch (error) {
+      return {
+        passed: false,
+        feedback: `Goal verification project is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    const safeObjective = sanitizeForPrompt(redactSecretsInText(objective, 2_000), 2_000);
+    const safeItemTitle = sanitizeForPrompt(redactSecretsInText(itemTitle, 1_000), 1_000);
+    const safeEvidence = sanitizeForPrompt(redactSecretsInText(producerEvidence, 8_000), 8_000);
     return this.runCriticGate(
       sessionId,
       [
         {
           role: 'user',
-          content: `Goal objective: ${objective}\nChecklist item claimed complete: ${itemTitle}\nInspect the actual workspace and verify this item is genuinely complete.`,
+          content:
+            `Goal objective: ${safeObjective}\n` +
+            `Checklist item claimed complete: ${safeItemTitle}\n` +
+            `Producer-submitted evidence (a claim, not a verdict):\n${safeEvidence}\n\n` +
+            'Inspect the actual workspace, independently reproduce the relevant checks, and verify whether the evidence genuinely proves this item complete.',
         },
       ],
       preferredModel,
-      `Verify Goal Mode checklist item: ${itemTitle}`,
-      session?.workingDirectory ?? this.workingDirectory,
+      `Verify Goal Mode checklist item: ${safeItemTitle}`,
+      reviewDirectory,
+      preferredModel && producerProvider
+        ? { provider: producerProvider, model: preferredModel }
+        : undefined,
     );
   }
 
@@ -1644,8 +1983,21 @@ export class KoryManager implements WorkerPipelineHost {
     itemTitle: string,
     blocker: string,
     preferredModel?: string,
-  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }> {
+    producerProvider?: ProviderName,
+  ): Promise<CriticGateResult> {
     const session = await this.sessions?.get(sessionId);
+    if (!session) {
+      return { passed: false, feedback: 'Goal blocker verification session is unavailable.' };
+    }
+    let reviewDirectory: string;
+    try {
+      reviewDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    } catch (error) {
+      return {
+        passed: false,
+        feedback: `Goal blocker project is unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
     return this.runCriticGate(
       sessionId,
       [
@@ -1656,7 +2008,10 @@ export class KoryManager implements WorkerPipelineHost {
       ],
       preferredModel,
       `Adjudicate Goal Mode blocker: ${blocker}`,
-      session?.workingDirectory ?? this.workingDirectory,
+      reviewDirectory,
+      preferredModel && producerProvider
+        ? { provider: producerProvider, model: preferredModel }
+        : undefined,
     );
   }
 
@@ -1711,7 +2066,15 @@ export class KoryManager implements WorkerPipelineHost {
       { sessionId, reasoningLevel, preferredModel, fastMode },
       'Entering handleDirectly',
     );
-    let routing = this.resolveActiveRouting(preferredModel, 'general', true, userMessage);
+    const directWorkingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    let routing = this.resolveActiveRouting(
+      preferredModel,
+      'general',
+      true,
+      userMessage,
+      undefined,
+      directWorkingDirectory,
+    );
     let provider = await this.providers.resolveProvider(routing.model, routing.provider);
     // Mirror processTask's fallback: for "auto" (or no model), if the routed model has no
     // available provider, fall back to the first available one — otherwise a configured
@@ -1727,8 +2090,34 @@ export class KoryManager implements WorkerPipelineHost {
     const providerName = provider.name as ProviderName;
     koryLog.debug({ routing, providerName }, 'Resolved routing and provider');
 
-    const abort = new AbortController();
+    // Normal human/Goal turns preflight immediately after their authoritative
+    // routing pass. Recovery wakes enter here directly, so enforce the same
+    // boundary before they can start another paid provider stream.
+    if (!this.managerRoutingBySession.has(sessionId)) {
+      const spendGate = await checkAndEnforceCaps(sessionId);
+      if (spendGate.reason && spendGate.canProceed) {
+        this.emitWSMessage(sessionId, 'system.info', {
+          message: `Spend limit warning: ${spendGate.reason}`,
+        });
+      }
+      if (!spendGate.canProceed) {
+        await this.updateWorkflowState(sessionId, spendGate.paused ? 'paused' : 'idle');
+        this.emitError(
+          sessionId,
+          spendGate.reason ?? 'A configured spend limit blocked this request.',
+        );
+        this.stopHeartbeat(sessionId);
+        return;
+      }
+      this.managerRoutingBySession.set(sessionId, {
+        model: routing.model,
+        provider: providerName,
+      });
+    }
+
+    const abort = this.managerAbortBySession.get(sessionId) ?? new AbortController();
     this.managerAbortBySession.set(sessionId, abort);
+    this.assertSessionRunActive(sessionId);
 
     try {
       this.emitWSMessage(sessionId, 'agent.status', {
@@ -1749,8 +2138,8 @@ export class KoryManager implements WorkerPipelineHost {
         usageKnown,
       );
 
-      const directWorkingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
       const directSettings = loadAgentSettings(directWorkingDirectory);
+      const directGit = new GitManager(directWorkingDirectory);
       const directNaturalSandboxed = interactionMode === 'plan';
       const managerCtx: ToolContext = {
         sessionId,
@@ -1766,8 +2155,11 @@ export class KoryManager implements WorkerPipelineHost {
         permissionPolicy: resolveToolPermissionPolicy(directSettings, interactionMode),
         approvedToolCallIds: new Set(),
         signal: abort.signal,
-        waitForUserInput: (question: string, options: string[], opts?: { allowOther?: boolean; allowKeepChatting?: boolean }) =>
-          this.waitForUserInputInternal(sessionId, question, options, opts),
+        waitForUserInput: (
+          question: string,
+          options: string[],
+          opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
+        ) => this.waitForUserInputInternal(sessionId, question, options, opts),
         emitFileEdit: (e) =>
           this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: KORY_IDENTITY.id, ...e }),
         emitFileComplete: (e) =>
@@ -1832,7 +2224,8 @@ export class KoryManager implements WorkerPipelineHost {
         turnCount++;
         koryLog.debug({ turnCount }, 'Starting manager turn');
         // Reclaim context: stub out tool outputs the user hid from the agent
-        // or that are old enough to be dead weight (recoverable via fetch_context).
+        // or that are old enough to be dead weight. fetch_context retains only
+        // the bounded, redacted durable preview.
         await this.applyContextPruning(sessionId, messages, turnCount);
         let result: LLMTurnResult;
         try {
@@ -1878,7 +2271,7 @@ export class KoryManager implements WorkerPipelineHost {
 
         const { completedToolCalls } = result;
         if (!completedToolCalls || completedToolCalls.length === 0) {
-          const runSettings = loadAgentSettings(this.workingDirectory);
+          const runSettings = loadAgentSettings(managerCtx.workingDirectory);
           const multiRequired =
             interactionMode !== 'plan' &&
             runSettings.agentExecutionMode === 'multi' &&
@@ -1932,16 +2325,33 @@ export class KoryManager implements WorkerPipelineHost {
               })();
           for (const { tc, toolResult } of executedCalls) {
             if (tc.name === 'delegate_to_worker' && !toolResult.isError) delegatedWorkerCount++;
-            // Archive the full output locally so pruning never loses anything —
-            // fetch_context can recover the exact content by this id.
+            // Persist a bounded, redacted activity preview before pruning.
             const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
             this.emitWSMessage(sessionId, 'stream.tool_result', {
               agentId: KORY_IDENTITY.id,
               toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
             });
+            // Record lightweight tool call preview for checkpoint metadata.
+            this.state.recordToolCall(sessionId, {
+              name: tc.name,
+              inputPreview: this.truncateToolPreview(JSON.stringify(tc.input)),
+              resultPreview: this.truncateToolPreview(toolResult.output),
+              durationMs: toolResult.durationMs,
+              isError: toolResult.isError,
+            });
+            // Track shell commands separately for the command timeline.
+            if (tc.name === 'bash' || tc.name === 'shell_manage') {
+              const cmd = typeof tc.input?.command === 'string' ? tc.input.command : '';
+              this.state.recordCommand(sessionId, {
+                command: cmd || tc.name,
+                exitCode: toolResult.isError ? 1 : 0,
+                durationMs: toolResult.durationMs,
+              });
+            }
             // Cap what enters the MODEL context — a megabyte build log would
             // blow the window (and made the context bar spike absurdly). The
-            // archive keeps the full output; fetch_context recovers it.
+            // fetch_context can later identify the event and return only its
+            // bounded, redacted durable preview.
             const TOOL_OUTPUT_CONTEXT_CAP = 30_000;
             const cappedResult =
               (toolResult.output?.length ?? 0) > TOOL_OUTPUT_CONTEXT_CAP
@@ -1949,7 +2359,7 @@ export class KoryManager implements WorkerPipelineHost {
                     ...toolResult,
                     output:
                       toolResult.output.slice(0, TOOL_OUTPUT_CONTEXT_CAP) +
-                      `\n…[truncated ${toolResult.output.length - TOOL_OUTPUT_CONTEXT_CAP} chars${archiveId ? ` — full output via fetch_context id=${archiveId}` : ''}]`,
+                      `\n…[truncated ${toolResult.output.length - TOOL_OUTPUT_CONTEXT_CAP} chars${archiveId ? ` — durable preview via fetch_context id=${archiveId}` : ''}]`,
                   }
                 : toolResult;
             const toolMsg: InternalMessage = {
@@ -1975,7 +2385,7 @@ export class KoryManager implements WorkerPipelineHost {
       // self-assessment cannot become the authoritative completion state.
       const directChanges = this.state.getChanges(sessionId);
       if (!stoppedByUser && directChanges.length > 0) {
-        const settingsForGate = loadAgentSettings(this.workingDirectory);
+        const settingsForGate = loadAgentSettings(managerCtx.workingDirectory);
         const hardBoundaryTask = createTaskContract(userMessage).taskKind === 'security-infra';
         const strictness = hardBoundaryTask
           ? 'strict'
@@ -1991,7 +2401,7 @@ export class KoryManager implements WorkerPipelineHost {
         } else {
           const diffSections = await Promise.all(
             directChanges.map(async (change) => {
-              const diff = await this.git.getDiff(change.path);
+              const diff = await directGit.getDiff(change.path);
               return `FILE: ${change.path}\n${diff || '[No Git diff available; inspect the file directly.]'}`;
             }),
           );
@@ -2007,6 +2417,7 @@ export class KoryManager implements WorkerPipelineHost {
             preferredModel,
             userMessage,
             managerCtx.workingDirectory,
+            { provider: providerName, model: routing.model },
           );
           if (!gate.passed) {
             messages.push({
@@ -2077,7 +2488,13 @@ export class KoryManager implements WorkerPipelineHost {
       const toPersist = stoppedByUser
         ? content
         : content || (missingFinalResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
-      koryLog.debug({ toPersist, sessionId }, 'Attempting to persist assistant message');
+      // Conversation text belongs in the message store, not in operational logs. Keep only
+      // non-content metadata here so a long response, prompt excerpt, or credential echoed by
+      // a provider cannot be copied into stdout or launcher/watchdog log files.
+      koryLog.debug(
+        { sessionId, contentLength: toPersist.length },
+        'Attempting to persist assistant message',
+      );
       let finalMessageId: string | undefined;
       if (this.messages && toPersist) {
         finalMessageId = nanoid(12);
@@ -2105,7 +2522,12 @@ export class KoryManager implements WorkerPipelineHost {
       }
       if (interactionMode === 'plan') {
         try {
-          const noteId = await syncPlanNote(sessionId, userMessage, toPersist);
+          const noteId = await syncPlanNote(
+            sessionId,
+            userMessage,
+            toPersist,
+            managerCtx.workingDirectory,
+          );
           await this.sessions?.update(sessionId, { planNoteId: noteId });
         } catch (err) {
           koryLog.warn({ err, sessionId }, 'Failed to synchronize durable Plan note');
@@ -2122,7 +2544,9 @@ export class KoryManager implements WorkerPipelineHost {
           createdAt: Date.now(),
         });
       }
-      const terminalStatus = processSupervisor.hasRunningForSession(sessionId) ? 'waiting' : 'done';
+      const terminalStatus = processSupervisor.hasActiveAgentToolForSession(sessionId)
+        ? 'waiting'
+        : 'done';
       // Stop the heartbeat BEFORE emitting the terminal event. If we stop
       // it after (in the finally block), the await in createRewindCheckpoint
       // creates a window where a heartbeat can fire and arrive at the client
@@ -2138,8 +2562,11 @@ export class KoryManager implements WorkerPipelineHost {
       });
       this.setHeartbeatPhase(sessionId, terminalStatus);
 
-      // Create rewind point after final response
-      if (finalMessageId) {
+      // Create rewind point after every turn end — even if no final message
+      // was produced (e.g. tool-only turns, aborted turns with changes).
+      // Skip only when there's no message AND no changes (nothing to checkpoint).
+      const turnChanges = this.state.getChanges(sessionId);
+      if (finalMessageId || turnChanges.length > 0) {
         await this.createRewindCheckpoint(
           sessionId,
           providerName,
@@ -2148,7 +2575,7 @@ export class KoryManager implements WorkerPipelineHost {
           finalMessageId,
           tokensIn,
           tokensOut,
-          this.state.getChanges(sessionId),
+          turnChanges,
         );
       }
 
@@ -2185,6 +2612,7 @@ export class KoryManager implements WorkerPipelineHost {
       this.managerAbortBySession.delete(sessionId);
       this.managerRoutingBySession.delete(sessionId);
       await this.updateWorkflowState(sessionId, 'idle');
+      this.processCompletionCoordinator.notifySessionIdle(sessionId);
     }
   }
 
@@ -2193,12 +2621,34 @@ export class KoryManager implements WorkerPipelineHost {
     provider: string,
     model: string,
     prompt: string,
-    messageId: string,
+    messageId: string | undefined,
     tokensIn = 0,
     tokensOut = 0,
     changedFiles: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }> = [],
   ) {
     try {
+      // Gather turn-scoped instrumentation for rich metadata.
+      const toolCalls = this.state.getToolCalls(sessionId);
+      const commands = this.state.getCommands(sessionId);
+
+      // Map ChangeSummary (with line counts) to fileEdits for the checkpoint.
+      const fileEdits = changedFiles.map((f) => {
+        const cs = f as {
+          path: string;
+          operation: 'create' | 'edit' | 'delete';
+          linesAdded?: number;
+          linesDeleted?: number;
+        };
+        return {
+          path: f.path,
+          operation: f.operation,
+          linesAdded: cs.linesAdded,
+          linesDeleted: cs.linesDeleted,
+        };
+      });
+
+      const hasRichMetadata = Boolean(toolCalls.length || commands.length || fileEdits.length);
+
       const metadata = {
         agentId: sessionId,
         model,
@@ -2209,16 +2659,30 @@ export class KoryManager implements WorkerPipelineHost {
         messageId,
         checkpointType: 'turn_end' as const,
         changedFiles,
+        // Rich instrumentation — lightweight previews, expandable on demand.
+        summary: prompt.slice(0, 120),
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        commands: commands.length > 0 ? commands : undefined,
+        fileEdits: fileEdits.length > 0 ? fileEdits : undefined,
+        provider,
+        hasRichMetadata,
       };
+      const checkpointDirectory = await this.resolveSessionWorkingDirectory(sessionId);
       if (this.timeTravel) {
-        await this.timeTravel.checkpoint(prompt.slice(0, 72), metadata);
+        const result = await this.timeTravel
+          .forWorkingDirectory(checkpointDirectory)
+          .checkpoint(prompt.slice(0, 72), metadata);
+        if (!result.success) throw new Error(result.message);
       } else {
         const { CheckpointStore } = await import('./checkpoint-store');
-        await new CheckpointStore(this.workingDirectory).createGhostCommit(
+        const hash = await new CheckpointStore(checkpointDirectory).createGhostCommit(
           prompt.slice(0, 72),
           metadata,
         );
+        if (!hash) throw new Error('Checkpoint publication failed');
       }
+      // Clear turn instrumentation after the checkpoint has captured them.
+      this.state.clearTurnInstrumentation(sessionId);
     } catch (err) {
       koryLog.warn({ err, sessionId }, 'Failed to create rewind checkpoint');
     }
@@ -2247,10 +2711,51 @@ export class KoryManager implements WorkerPipelineHost {
       typeof latestUserMessage?.content === 'string'
         ? latestUserMessage.content
         : 'Continue the current user-requested task.';
+    let memorySupplementalContext = '';
+    const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
+    if (notesEntries.length > 0) {
+      const notesSections = notesEntries
+        .map(([group, text]) => `### ${group}\n${text.trim()}`)
+        .join('\n\n');
+      memorySupplementalContext += `\n\n## User Notes (standing guidance)\n${notesSections}`;
+    }
+    const agentContext = assembleAgentContext(promptRoot, settings);
+    if (agentContext.preferences.trim()) {
+      memorySupplementalContext += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
+    }
+    const memoryContext = assembleMemoryContext(promptRoot, sessionId);
+    const automaticMemory = automaticMemoryPrompt(
+      formatMemoryForContext(memoryContext),
+      memoryContext.settings,
+    );
+    if (automaticMemory) memorySupplementalContext += `\n\n${automaticMemory}`;
+    if (hasAnyVisibleNoteTools(promptRoot)) {
+      const hint = buildNotesNetworkSystemHint(promptRoot);
+      if (hint) memorySupplementalContext += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        memorySupplementalContext += await buildNotesNetworkPrompt(2500, promptRoot);
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Notes DB may be unavailable — continuing without network context',
+        );
+      }
+    }
+    const researchSupplementalContext = settings.multiSourceResearch
+      ? '\n\n• DEEP RESEARCH: When researching complex topics, do not rely on a single source. Use the web_search tool to find multiple perspectives and fetch/read at least 3-5 different pages to verify information and identify consensus or contradictions.'
+      : '';
     const managerCompilation = compilePrompt({
       role: 'manager',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
+      occupiedContextTokenUpperBound:
+        estimateOccupiedContextTokenUpperBound(messages) +
+        textTokenUpperBound(memorySupplementalContext) +
+        textTokenUpperBound(researchSupplementalContext),
+      reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
       workingDirectory: promptRoot,
       taskContract: createTaskContract(taskGoal, {
         goalContext: this.goalContextBySession.get(sessionId),
@@ -2261,7 +2766,8 @@ export class KoryManager implements WorkerPipelineHost {
         ...(interactionMode === 'plan' ? { pins: ['plan-mode'] } : {}),
       },
     });
-    let systemPrompt = managerCompilation.systemPrompt;
+    let systemPrompt =
+      managerCompilation.systemPrompt + memorySupplementalContext + researchSupplementalContext;
     if (this.promptManifestHashBySession.get(sessionId) !== managerCompilation.manifest.hash) {
       this.promptManifestHashBySession.set(sessionId, managerCompilation.manifest.hash);
       const manifest = managerCompilation.manifest;
@@ -2281,45 +2787,9 @@ export class KoryManager implements WorkerPipelineHost {
         'Prompt manifest applied',
       );
     }
-    const beforeMemoryContext = systemPrompt.length;
-    const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
-    if (notesEntries.length > 0) {
-      const notesSections = notesEntries
-        .map(([group, text]) => `### ${group}\n${text.trim()}`)
-        .join('\n\n');
-      systemPrompt += `\n\n## User Notes (standing guidance)\n${notesSections}`;
-    }
-    const agentContext = assembleAgentContext(promptRoot, settings);
-    if (agentContext.preferences.trim()) {
-      systemPrompt += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
-    }
-    const memoryContext = assembleMemoryContext(promptRoot, sessionId);
-    if (memoryContext.settings.autoIncludeInContext) {
-      const formatted = formatMemoryForContext(memoryContext);
-      if (formatted) {
-        const maxChars = Math.max(400, memoryContext.settings.maxContextTokens * 4);
-        systemPrompt += `\n\n${formatted.slice(0, maxChars)}`;
-      }
-    }
     // Chars contributed by injected memory/notes — tracked separately so the
     // context-usage bar can show memory as its own segment.
-    if (hasAnyVisibleNoteTools(promptRoot)) {
-      const hint = buildNotesNetworkSystemHint(promptRoot);
-      if (hint) systemPrompt += `\n\n${hint}`;
-      try {
-        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
-        systemPrompt += await buildNotesNetworkPrompt(2500, promptRoot);
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB may be unavailable — continuing without network context');
-      }
-    }
-    const memoryChars = systemPrompt.length - beforeMemoryContext;
-
-    // Multi-source research instruction
-    if (settings.multiSourceResearch) {
-      systemPrompt +=
-        '\n\n• DEEP RESEARCH: When researching complex topics, do not rely on a single source. Use the web_search tool to find multiple perspectives and fetch/read at least 3-5 different pages to verify information and identify consensus or contradictions.';
-    }
+    const memoryChars = memorySupplementalContext.length;
 
     // Filter tools based on local web search setting
     let tools = filterToolDefsForNotesPermissions(
@@ -2486,7 +2956,7 @@ export class KoryManager implements WorkerPipelineHost {
         systemPrompt,
         messages: providerMessages,
         tools,
-        maxTokens: 16384,
+        maxTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
         signal: streamSignal,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
         ...(fastMode === true && { fastMode: true }),
@@ -2553,7 +3023,7 @@ export class KoryManager implements WorkerPipelineHost {
               event.fileOperation ?? 'edit',
               event.fileOldContent,
             );
-            // Archive the edit so fetch_context can recall exactly what was written.
+            // Archive a bounded, redacted edit preview for later identification.
             await getContextArchive()?.record(
               sessionId,
               'file_edit',
@@ -2577,7 +3047,13 @@ export class KoryManager implements WorkerPipelineHost {
               const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
               if (input.command) bgCommand = input.command;
             } catch (err: unknown) {
-              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse background command tool input, keeping tool name');
+              logBackgroundRegistrationFailure({
+                cwd: ctx.workingDirectory,
+                error: err,
+                phase: 'input_invalid',
+                sessionId,
+                toolCallId: callId,
+              });
             }
             void processSupervisor
               .registerExternal({
@@ -2589,7 +3065,14 @@ export class KoryManager implements WorkerPipelineHost {
               .catch((err: unknown) => {
                 // Background process registration is fire-and-forget — the command
                 // is already running; failure to track it doesn't affect the user.
-                serverLog.debug({ err: err instanceof Error ? err.message : String(err), command: bgCommand, sessionId }, 'Background process registration failed (non-critical)');
+                logBackgroundRegistrationFailure({
+                  command: bgCommand,
+                  cwd: ctx.workingDirectory,
+                  error: err,
+                  phase: 'registration_failed',
+                  sessionId,
+                  toolCallId: callId,
+                });
               });
           }
           const agenticArchiveId = await getContextArchive()?.record(
@@ -2654,7 +3137,10 @@ export class KoryManager implements WorkerPipelineHost {
             try {
               parsedInput = JSON.parse(call.input || '{}');
             } catch (err: unknown) {
-              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed tool input JSON, defaults to {}');
+              serverLog.debug(
+                { err: err instanceof Error ? err.message : String(err) },
+                'Malformed tool input JSON, defaults to {}',
+              );
             }
             this.emitWSMessage(sessionId, 'stream.tool_call', {
               agentId: KORY_IDENTITY.id,
@@ -2819,7 +3305,7 @@ export class KoryManager implements WorkerPipelineHost {
     return null;
   }
 
-  /** Archive a manager tool result for later recovery via fetch_context. */
+  /** Archive a bounded, redacted manager-tool preview for fetch_context. */
   private async archiveToolResult(
     sessionId: string,
     tc: CompletedToolCall,
@@ -2834,7 +3320,10 @@ export class KoryManager implements WorkerPipelineHost {
       try {
         inputSummary = JSON.stringify(tc.input ?? {}).slice(0, 140);
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Unstringifiable tool call input');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Unstringifiable tool call input',
+        );
       }
       return await archive.record(
         sessionId,
@@ -2843,15 +3332,18 @@ export class KoryManager implements WorkerPipelineHost {
         toolResult.output ?? '',
       );
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to record tool call in context archive');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to record tool call in context archive',
+      );
       return undefined;
     }
   }
 
   /**
    * Replace stale/hidden tool outputs in the in-flight message array with tiny
-   * stubs pointing at the archive. Frees the context window without losing
-   * anything — the agent (or user) can always recover via fetch_context.
+   * stubs pointing at the archive. The agent can later retrieve the bounded,
+   * redacted durable preview via fetch_context.
    */
   private async applyContextPruning(
     sessionId: string,
@@ -2861,7 +3353,7 @@ export class KoryManager implements WorkerPipelineHost {
     const archive = getContextArchive();
     if (!archive) return;
     const { loadAgentSettings } = await import('../agent-settings');
-    const settings = loadAgentSettings(this.workingDirectory);
+    const settings = loadAgentSettings(await this.resolveSessionWorkingDirectory(sessionId));
     const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 3; // recent turns keep full outputs
     const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 600; // tiny outputs aren't worth stubbing
     // A single current-turn result can be enormous (for example a tool
@@ -2890,12 +3382,15 @@ export class KoryManager implements WorkerPipelineHost {
       try {
         original = JSON.parse(m.content) as Record<string, unknown>;
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse message content as JSON, keeping empty shell');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Failed to parse message content as JSON, keeping empty shell',
+        );
       }
       m.content = JSON.stringify({
         callId: original.callId ?? meta.tool_call_id,
         name: original.name,
-        output: `[Output ${oversized ? 'was too large for the live context and was pruned' : 'pruned'} to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Recover the exact content with fetch_context id=${meta.archiveId}]`,
+        output: `[Output ${oversized ? 'was too large for the live context and was pruned' : 'pruned'} to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Retrieve the bounded, redacted preview with fetch_context id=${meta.archiveId}]`,
         isError: false,
         durationMs: 0,
       });
@@ -3025,10 +3520,51 @@ export class KoryManager implements WorkerPipelineHost {
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
     const resolvedReasoningLevel =
       reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
+    const workerSettings = loadAgentSettings(workerWorkingDirectory);
+    ctx.permissionPolicy = resolveSubAgentPermissionPolicy(
+      workerSettings,
+      workerSettings.subAgentApproval,
+    );
+    ctx.sandboxOptions = resolveSubAgentSandboxOptions(
+      workerSettings,
+      workerSettings.subAgentApproval,
+      isSandboxed,
+    );
+    ctx.approvedToolCallIds = new Set();
+    let workerSupplementalContext = '';
+    const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
+    if (workerGuidance.preferences.trim()) {
+      workerSupplementalContext += `\n\n## Durable user preferences\n${workerGuidance.preferences.trim()}`;
+    }
+    const workerMemory = assembleMemoryContext(workerWorkingDirectory, sessionId);
+    const automaticWorkerMemory = automaticMemoryPrompt(
+      formatMemoryForContext(workerMemory),
+      workerMemory.settings,
+    );
+    if (automaticWorkerMemory) workerSupplementalContext += `\n\n${automaticWorkerMemory}`;
+    if (hasAnyVisibleNoteTools(workerWorkingDirectory)) {
+      const hint = buildNotesNetworkSystemHint(workerWorkingDirectory);
+      if (hint) workerSupplementalContext += `\n\n${hint}`;
+      try {
+        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+        workerSupplementalContext += await buildNotesNetworkPrompt(2500, workerWorkingDirectory);
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Notes DB may be unavailable for worker system prompt',
+        );
+      }
+    }
     const workerCompilation = compilePrompt({
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
+      occupiedContextTokenUpperBound:
+        estimateOccupiedContextTokenUpperBound(messages) +
+        textTokenUpperBound(workerSupplementalContext),
+      reservedOutputTokens: WORKER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
       workingDirectory: workerWorkingDirectory,
       taskContract: {
         ...(taskContract ??
@@ -3043,31 +3579,7 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
-    let workerSystemPrompt = workerCompilation.systemPrompt;
-    const workerSettings = loadAgentSettings(workerWorkingDirectory);
-    ctx.permissionPolicy = resolveSubAgentPermissionPolicy(workerSettings, workerSettings.subAgentApproval);
-    ctx.sandboxOptions = resolveSubAgentSandboxOptions(workerSettings, workerSettings.subAgentApproval, isSandboxed);
-    ctx.approvedToolCallIds = new Set();
-    const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
-    if (workerGuidance.preferences.trim()) {
-      workerSystemPrompt += `\n\n## Durable user preferences\n${workerGuidance.preferences.trim()}`;
-    }
-    const workerMemory = assembleMemoryContext(workerWorkingDirectory, sessionId);
-    if (workerMemory.settings.autoIncludeInContext) {
-      const formatted = formatMemoryForContext(workerMemory);
-      if (formatted)
-        workerSystemPrompt += `\n\n${formatted.slice(0, Math.max(400, workerMemory.settings.maxContextTokens * 4))}`;
-    }
-    if (hasAnyVisibleNoteTools(this.workingDirectory)) {
-      const hint = buildNotesNetworkSystemHint(this.workingDirectory);
-      if (hint) workerSystemPrompt += `\n\n${hint}`;
-      try {
-        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
-        workerSystemPrompt += await buildNotesNetworkPrompt(2500, this.workingDirectory);
-      } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Notes DB may be unavailable for worker system prompt');
-      }
-    }
+    const workerSystemPrompt = workerCompilation.systemPrompt + workerSupplementalContext;
 
     const thread: AgentThreadState = {
       sessionId,
@@ -3082,7 +3594,7 @@ export class KoryManager implements WorkerPipelineHost {
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
-      maxTokens: 16384,
+      maxTokens: WORKER_OUTPUT_TOKEN_LIMIT,
       messages,
       threadEntries: [],
       ctx,
@@ -3161,7 +3673,10 @@ export class KoryManager implements WorkerPipelineHost {
         ],
       };
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build image content block');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to build image content block',
+      );
       return null;
     }
   }
@@ -3244,14 +3759,123 @@ export class KoryManager implements WorkerPipelineHost {
     };
   }
 
-  cancelSessionWorkers(sessionId: string) {
+  private tryBeginSessionRun(sessionId: string): boolean {
+    if (
+      this.erasedSessions.has(sessionId) ||
+      this.sessionMutationBarriers.has(sessionId) ||
+      this.sessionRunClaims.has(sessionId) ||
+      this.managerAbortBySession.has(sessionId) ||
+      this.compactingSessions.has(sessionId) ||
+      this.workers.hasSessionWorkers(sessionId)
+    ) {
+      return false;
+    }
+    this.sessionRunClaims.add(sessionId);
+    return true;
+  }
+
+  private endSessionRun(sessionId: string): void {
+    this.sessionRunClaims.delete(sessionId);
+    this.processCompletionCoordinator.notifySessionIdle(sessionId);
+  }
+
+  private assertSessionRunActive(sessionId: string): void {
+    const signal = this.managerAbortBySession.get(sessionId)?.signal;
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new DOMException('Session run cancelled', 'AbortError');
+    }
+  }
+
+  /** Atomically block new manager/worker/compaction intent while a coordinated
+   * session recovery is in progress. The process-supervisor barrier is acquired
+   * separately by the route, closing both lifecycle start races. */
+  tryAcquireSessionMutationBarrier(sessionId: string): { release(): void } | null {
+    if (
+      this.erasedSessions.has(sessionId) ||
+      this.sessionMutationBarriers.has(sessionId) ||
+      this.sessionRunClaims.has(sessionId) ||
+      this.managerAbortBySession.has(sessionId) ||
+      this.compactingSessions.has(sessionId) ||
+      this.workers.hasSessionWorkers(sessionId)
+    ) {
+      return null;
+    }
+    this.sessionMutationBarriers.add(sessionId);
+    let held = true;
+    return {
+      release: () => {
+        if (!held) return;
+        held = false;
+        this.sessionMutationBarriers.delete(sessionId);
+      },
+    };
+  }
+
+  /** Install an erasure barrier before the first await, cancel existing work,
+   * and wait until every in-memory producer has acknowledged cancellation. */
+  tryBeginSessionErasure(sessionId: string): ManagerSessionErasureLease | null {
+    if (this.erasedSessions.has(sessionId) || this.sessionMutationBarriers.has(sessionId)) {
+      return null;
+    }
+    this.sessionMutationBarriers.add(sessionId);
+    const cancellation = this.cancelSessionWorkers(sessionId);
+    this.titleGenerationBySession.get(sessionId)?.abort(
+      new DOMException('Session is being deleted', 'AbortError'),
+    );
+    let settled = false;
+    const hasExecution = () =>
+      this.sessionRunClaims.has(sessionId) ||
+      this.managerAbortBySession.has(sessionId) ||
+      this.compactingSessions.has(sessionId) ||
+      this.titleGenerationBySession.has(sessionId) ||
+      this.workers.hasSessionWorkers(sessionId);
+    return {
+      waitForIdle: async (timeoutMs = 10_000) => {
+        await cancellation;
+        const deadline = Date.now() + timeoutMs;
+        while (hasExecution()) {
+          if (Date.now() >= deadline) {
+            throw new Error(
+              'Session erasure timed out waiting for manager and worker cancellation to settle',
+            );
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      },
+      complete: () => {
+        if (settled) return;
+        settled = true;
+        this.cleanupSession(sessionId);
+        this.sessionMutationBarriers.delete(sessionId);
+        this.erasedSessions.add(sessionId);
+      },
+      rollback: () => {
+        if (settled) return;
+        settled = true;
+        this.sessionMutationBarriers.delete(sessionId);
+        this.titledSessions.delete(sessionId);
+        this.processCompletionCoordinator.resumeSession(sessionId);
+      },
+    };
+  }
+
+  async cancelSessionWorkers(sessionId: string): Promise<void> {
+    // Suppress queued wake work before aborting the manager or signalling
+    // terminals, otherwise a kill event can immediately resurrect the session.
+    this.processCompletionCoordinator.cancelSession(sessionId);
+    this.state.resolveUserInput(sessionId, '__cancelled__');
     this.abortManagerRun(sessionId);
     this.abortCompaction(sessionId);
     this.workers.cancelSessionWorkers(sessionId);
+    await processSupervisor.cancelAgentBackgroundProcessesForSession(sessionId);
   }
 
   /** True if the session has an active manager run or any worker. */
   isSessionRunning(sessionId: string): boolean {
+    if (this.sessionRunClaims.has(sessionId)) return true;
+    if (this.sessionMutationBarriers.has(sessionId)) return true;
     if (this.managerAbortBySession.has(sessionId)) return true;
     if (this.compactingSessions.has(sessionId)) return true;
     return this.workers.hasSessionWorkers(sessionId);
@@ -3263,12 +3887,15 @@ export class KoryManager implements WorkerPipelineHost {
 
   cancel() {
     const sessionIds = new Set(this.workers.cancelAll());
+    for (const sid of this.sessionRunClaims) sessionIds.add(sid);
     this.managerAbortBySession.forEach((ac, sid) => {
       sessionIds.add(sid);
       ac.abort();
     });
-    this.managerAbortBySession.clear();
     for (const sid of sessionIds) {
+      this.processCompletionCoordinator.cancelSession(sid);
+      this.state.resolveUserInput(sid, '__cancelled__');
+      void processSupervisor.cancelAgentBackgroundProcessesForSession(sid);
       this.stopHeartbeat(sid);
       this.emitWSMessage(sid, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
       this.setHeartbeatPhase(sid, 'done');
@@ -3481,7 +4108,7 @@ export class KoryManager implements WorkerPipelineHost {
         messages: this.toProviderMessages(thread.messages),
         tools: filterToolDefsForNotesPermissions(
           this.tools.getToolDefsForRole(thread.toolRole),
-          this.workingDirectory,
+          thread.ctx.workingDirectory,
         ),
         maxTokens: thread.maxTokens,
         signal: streamSignal,
@@ -3489,7 +4116,9 @@ export class KoryManager implements WorkerPipelineHost {
         sessionId: thread.sessionId,
         sandbox: SANDBOX_PRESETS.readonly,
         harnessRole: thread.toolRole,
-        permissionMode: (thread.toolRole === 'critic' ? 'plan' : thread.ctx.permissionPolicy?.mode) as AgentSettings['permissionMode'] | undefined,
+        permissionMode: (thread.toolRole === 'critic'
+          ? 'plan'
+          : thread.ctx.permissionPolicy?.mode) as AgentSettings['permissionMode'] | undefined,
         promptManifestHash: thread.promptManifestHash,
         taskContractHash: thread.taskContractHash,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
@@ -3551,7 +4180,10 @@ export class KoryManager implements WorkerPipelineHost {
           try {
             parsedInput = JSON.parse(call.input || '{}');
           } catch (err: unknown) {
-            serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed tool input JSON, defaults to {}');
+            serverLog.debug(
+              { err: err instanceof Error ? err.message : String(err) },
+              'Malformed tool input JSON, defaults to {}',
+            );
           }
           this.emitWSMessage(thread.sessionId, 'stream.tool_call', {
             agentId: thread.identity.id,
@@ -3625,6 +4257,10 @@ export class KoryManager implements WorkerPipelineHost {
       role: 'worker',
       mode: getModeManager().getMode(),
       provider: provider.name,
+      model: modelId,
+      occupiedContextTokenUpperBound: estimateOccupiedContextTokenUpperBound(messages),
+      reservedOutputTokens: WORKER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
       workingDirectory: ctx.workingDirectory,
       taskContract: createTaskContract(workerGoal, {
         scope: ctx.allowedPaths ?? [],
@@ -3656,7 +4292,7 @@ export class KoryManager implements WorkerPipelineHost {
       toolRole: 'worker',
       reasoningLevel,
       maxTurns: 1,
-      maxTokens: 16384,
+      maxTokens: WORKER_OUTPUT_TOKEN_LIMIT,
       messages,
       threadEntries: [],
       ctx,
@@ -3680,7 +4316,6 @@ export class KoryManager implements WorkerPipelineHost {
     const controller = this.managerAbortBySession.get(sessionId);
     if (controller) {
       controller.abort();
-      this.managerAbortBySession.delete(sessionId);
       koryLog.info({ sessionId }, 'Manager run aborted');
     }
   }
@@ -3699,6 +4334,8 @@ export class KoryManager implements WorkerPipelineHost {
    * Call this when a session is closed or abandoned.
    */
   cleanupSession(sessionId: string): void {
+    this.processCompletionCoordinator.cancelSession(sessionId);
+    void processSupervisor.cancelAgentBackgroundProcessesForSession(sessionId);
     // Cancel any active workers for this session
     this.workers.cancelSessionWorkers(sessionId);
 
@@ -3713,8 +4350,21 @@ export class KoryManager implements WorkerPipelineHost {
 
     // Clear session-specific data
     this.state.cleanupSession(sessionId);
+    this.sessionRunClaims.delete(sessionId);
     this.managerRoutingBySession.delete(sessionId);
     this.managerAbortBySession.delete(sessionId);
+    this.compactingSessions.delete(sessionId);
+    this.titledSessions.delete(sessionId);
+    this.titleGenerationBySession.get(sessionId)?.abort();
+    this.titleGenerationBySession.delete(sessionId);
+    this.promptManifestHashBySession.delete(sessionId);
+    this.skillCollisionChoicesBySession.delete(sessionId);
+    this.goalContextBySession.delete(sessionId);
+    this.sessionWorkingDirs.delete(sessionId);
+    this.stopHeartbeat(sessionId);
+    this.heartbeatPhaseBySession.delete(sessionId);
+    for (const timer of this.usageRetryTimersBySession.get(sessionId) ?? []) clearTimeout(timer);
+    this.usageRetryTimersBySession.delete(sessionId);
     for (const [agentId, thread] of this.agentThreads.entries()) {
       if (thread.sessionId === sessionId) this.agentThreads.delete(agentId);
     }
@@ -3827,6 +4477,9 @@ export class KoryManager implements WorkerPipelineHost {
   shutdown(): void {
     koryLog.info('Shutting down KoryManager');
 
+    this.unsubscribeProcessLifecycle?.();
+    this.unsubscribeProcessLifecycle = undefined;
+
     // Cancel all active workers
     this.workers.shutdown();
 
@@ -3842,6 +4495,16 @@ export class KoryManager implements WorkerPipelineHost {
       }
     }
     this.managerAbortBySession.clear();
+    for (const controller of this.titleGenerationBySession.values()) controller.abort();
+    this.titleGenerationBySession.clear();
+    for (const timers of this.usageRetryTimersBySession.values()) {
+      for (const timer of timers) clearTimeout(timer);
+    }
+    this.usageRetryTimersBySession.clear();
+    this.sessionRunClaims.clear();
+    this.sessionMutationBarriers.clear();
+    this.erasedSessions.clear();
+    this.sessionWorkingDirs.clear();
 
     // Clear all session state
     this.state.cleanupAll();
@@ -3877,9 +4540,19 @@ export class KoryManager implements WorkerPipelineHost {
     try {
       const session = await this.sessions?.get(sessionId);
       const wd = session?.workingDirectory?.trim();
-      if (wd && existsSync(wd)) resolved = wd;
+      if (wd) {
+        const requested = resolve(wd);
+        if (!existsSync(requested) || !statSync(requested).isDirectory()) {
+          throw new Error(`Session project directory is unavailable: ${requested}`);
+        }
+        resolved = realpathSync(requested);
+      }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to resolve session working directory, falling back to global root');
+      serverLog.warn(
+        { sessionId, err: err instanceof Error ? err.message : String(err) },
+        'Failed to resolve the session project directory',
+      );
+      throw err;
     }
     this.sessionWorkingDirs.set(sessionId, resolved);
     return resolved;
@@ -3917,17 +4590,18 @@ export class KoryManager implements WorkerPipelineHost {
       }
       return parts.join('\n\n');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to build goal context prompt');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to build goal context prompt',
+      );
       return '';
     }
   }
 
-  /** Check if the critic gate allows the CLI to stop. Called by the Stop hook.
-   *  Returns false if the critic has not verified the work as complete. */
-  async criticGateMayStop(_sessionId: string): Promise<boolean> {
-    // The critic gate is checked during the normal Kory orchestration loop.
-    // For CLI-driven sessions, we allow stopping by default — the critic gate
-    // is enforced when Kory drives the session, not when a CLI harness does.
+  /** Allow a CLI harness turn to end. This is a lifecycle/cancellation
+   *  boundary, not a Goal verifier verdict; Goal completion is adjudicated
+   *  independently. */
+  async cliHarnessMayEndTurn(_sessionId: string): Promise<boolean> {
     return true;
   }
 
@@ -3937,8 +4611,22 @@ export class KoryManager implements WorkerPipelineHost {
     try {
       this.state.recordChange(sessionId, change);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Best effort recordChange failed — state may not exist for CLI-only sessions');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Best effort recordChange failed — state may not exist for CLI-only sessions',
+      );
     }
+  }
+
+  /** Session-owned file evidence used by coordinated periodic checkpoints. */
+  getRecordedSessionChanges(sessionId: string): ChangeSummary[] {
+    return this.state.getChanges(sessionId);
+  }
+
+  /** Truncate tool input/output previews for checkpoint metadata. */
+  private truncateToolPreview(value: string | undefined, maxLen = 200): string | undefined {
+    if (value === undefined) return undefined;
+    return value.length > maxLen ? value.slice(0, maxLen - 1) + '…' : value;
   }
 
   private emitUsageUpdate(
@@ -3951,6 +4639,7 @@ export class KoryManager implements WorkerPipelineHost {
     usageKnown: boolean,
     breakdown?: ContextBreakdown,
   ) {
+    if (this.erasedSessions.has(sessionId)) return;
     this.events.emitUsageUpdate(
       sessionId,
       agentId,
@@ -3965,18 +4654,28 @@ export class KoryManager implements WorkerPipelineHost {
     // must never survive a reload looking like a real token count.
     if (agentId === KORY_IDENTITY.id && usageKnown) {
       const win = resolveTrustedContextWindow(model, provider);
-      void getContextArchive()?.recordUsage(sessionId, {
-        used: tokensIn + tokensOut,
-        max: win.contextWindow ?? 0,
-        contextKnown: win.contextKnown,
-        ...(breakdown ? { breakdown } : {}),
-        ts: Date.now(),
-      });
+      void getContextArchive()
+        ?.recordUsage(sessionId, {
+          used: tokensIn + tokensOut,
+          max: win.contextWindow ?? 0,
+          contextKnown: win.contextKnown,
+          ...(breakdown ? { breakdown } : {}),
+          ts: Date.now(),
+        })
+        .catch(() => {
+          if (!this.erasedSessions.has(sessionId)) {
+            serverLog.debug({ sessionId }, 'Context usage snapshot could not be persisted');
+          }
+        });
       // Window resolution can lose the startup race (provider model lists
       // refresh in the background). Retry once shortly after — if the window
       // is known by then, re-emit so the bar stops saying "unknown".
       if (!win.contextKnown) {
         const t = setTimeout(() => {
+          const timers = this.usageRetryTimersBySession.get(sessionId);
+          timers?.delete(t);
+          if (timers?.size === 0) this.usageRetryTimersBySession.delete(sessionId);
+          if (this.erasedSessions.has(sessionId)) return;
           const retry = resolveTrustedContextWindow(model, provider);
           if (retry.contextKnown) {
             this.emitUsageUpdate(
@@ -3992,6 +4691,9 @@ export class KoryManager implements WorkerPipelineHost {
           }
         }, 6_000);
         t.unref?.();
+        const timers = this.usageRetryTimersBySession.get(sessionId) ?? new Set();
+        timers.add(t);
+        this.usageRetryTimersBySession.set(sessionId, timers);
       }
     }
   }

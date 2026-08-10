@@ -26,11 +26,9 @@ export const voiceRoutes = new Elysia({ prefix: '/api/voice' })
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
   })
   .get('/settings', async () => ({ ok: true, data: await loadVoiceSettings() }))
-  .put(
-    '/settings',
-    async ({ body }) => ({ ok: true, data: await saveVoiceSettings(body) }),
-    { body: t.Any() },
-  )
+  .put('/settings', async ({ body }) => ({ ok: true, data: await saveVoiceSettings(body) }), {
+    body: t.Any(),
+  })
   .get('/providers', async () => ({ ok: true, data: await listVoiceProviders() }))
   .get('/packs', async () => ({ ok: true, data: await listVoicePacks() }))
   .post('/packs/:id/download', async ({ params }) => ({
@@ -41,7 +39,7 @@ export const voiceRoutes = new Elysia({ prefix: '/api/voice' })
     '/transcribe',
     async () => {
       const settings = await loadVoiceSettings();
-      if (settings.input.provider === 'local') assertNoCloudFallback(settings, 'stt');
+      assertNoCloudFallback(settings, 'stt');
       return { ok: true, data: await transcribeCloud() };
     },
     { body: t.Any() },
@@ -50,7 +48,7 @@ export const voiceRoutes = new Elysia({ prefix: '/api/voice' })
     '/synthesize',
     async ({ body }) => {
       const settings = await loadVoiceSettings();
-      if (settings.output.provider === 'local') assertNoCloudFallback(settings, 'tts');
+      assertNoCloudFallback(settings, 'tts');
       // Elysia body is typed as t.Any() (unvalidated); cast to the shape the
       // synthesis adapter expects. The adapter validates internally.
       return { ok: true, data: await synthesizeCloud(body as SynthesisRequest) };
