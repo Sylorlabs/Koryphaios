@@ -46,6 +46,8 @@
   import {
     type RecentProject,
     parseRecentProjects,
+    pruneRecentProjects,
+    pathExists,
     addRecentProject,
     buildNewProjectTemplate,
     createProjectSession,
@@ -360,7 +362,11 @@
       void refreshComposerFileMentions();
       void notesStore.fetchSettings();
     }
-    recentProjects = parseRecentProjects();
+    // Prune recent projects whose folder no longer exists (fire-and-forget;
+    // onMount cannot be async because it returns a cleanup function).
+    void pruneRecentProjects(parseRecentProjects()).then((pruned) => {
+      recentProjects = pruned;
+    });
     loadLayoutPrefs();
 
     window.addEventListener('keydown', handleGlobalKeydown);
@@ -951,6 +957,14 @@
     // (resume that folder's chats or start fresh); text-only briefs keep the
     // legacy behavior. (Web folder picks store a bare folder name, not a path.)
     if (found.path && (/^\//.test(found.path) || /^[A-Za-z]:[/\\]/.test(found.path))) {
+      // Re-check existence at click time — the folder may have been deleted
+      // after the list was loaded.
+      const exists = await pathExists(found.path);
+      if (!exists) {
+        toastStore.error('Project folder no longer exists');
+        recentProjects = await pruneRecentProjects(recentProjects);
+        return;
+      }
       await openProjectAtPath(found.path, {
         title: found.title,
         text: found.content,

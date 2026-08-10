@@ -1197,6 +1197,14 @@ fn list_workspace_projects(folder_path: String) -> Result<Vec<String>, String> {
     Ok(projects)
 }
 
+/// Check whether a filesystem path exists (file or directory). Used by the
+/// frontend to prune recent-project entries whose folder has been moved or
+/// deleted outside Koryphaios.
+#[tauri::command]
+fn path_exists(path: String) -> bool {
+    std::path::Path::new(&path).exists()
+}
+
 fn window_state(window: &WebviewWindow) -> AppResult<WindowState> {
     let scale_factor = window
         .scale_factor()
@@ -1863,6 +1871,7 @@ pub fn run() {
             create_project_folder,
             read_folder_contents,
             list_workspace_projects,
+            path_exists,
             indexer::search_codebase,
             check_for_updates,
             install_update,

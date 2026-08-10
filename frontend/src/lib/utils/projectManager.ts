@@ -1,6 +1,7 @@
 import { sessionStore } from '$lib/stores/sessions.svelte';
 import { wsStore } from '$lib/stores/websocket.svelte';
 import { toastStore } from '$lib/stores/toast.svelte';
+import { invoke } from '@tauri-apps/api/core';
 
 export type RecentProject = {
   id: string;
@@ -125,13 +126,49 @@ export function parseRecentProjects(): RecentProject[] {
       )
       .slice(0, MAX_RECENT_PROJECTS);
   } catch (err: unknown) {
-    console.debug('Failed to parse recent projects:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse recent projects:',
+      err instanceof Error ? err.message : String(err),
+    );
     return [];
   }
 }
 
 export function persistRecentProjects(projects: RecentProject[]): void {
   localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(projects));
+}
+
+/** Check whether a filesystem path exists via the Tauri `path_exists` command.
+ *  Returns true when not in a Tauri context (browser mode never stores
+ *  absolute paths, so there's nothing to validate). */
+export async function pathExists(path: string): Promise<boolean> {
+  if (!('__TAURI_INTERNALS__' in window || '__TAURI__' in window)) return true;
+  try {
+    return await invoke<boolean>('path_exists', { path });
+  } catch {
+    return false;
+  }
+}
+
+/** Remove recent-project entries whose `path` no longer exists on disk.
+ *  Only entries with an absolute path are checked; text-only briefs and
+ *  web folder picks (bare names) are kept.  Persists the pruned list and
+ *  returns it. */
+export async function pruneRecentProjects(projects: RecentProject[]): Promise<RecentProject[]> {
+  const withPaths = projects.filter(
+    (p) => p.path && (/^\//.test(p.path) || /^[A-Za-z]:[/\\]/.test(p.path)),
+  );
+  if (withPaths.length === 0) return projects;
+
+  const checks = await Promise.all(
+    withPaths.map(async (p) => ({ id: p.id, exists: await pathExists(p.path!) })),
+  );
+  const dead = new Set(checks.filter((c) => !c.exists).map((c) => c.id));
+  if (dead.size === 0) return projects;
+
+  const pruned = projects.filter((p) => !dead.has(p.id));
+  persistRecentProjects(pruned);
+  return pruned;
 }
 
 export function addRecentProject(
@@ -228,7 +265,10 @@ export async function readProjectFolder(
         total += slice.length;
         parts.push(`--- ${path} ---\n${slice}`);
       } catch (err: unknown) {
-        console.debug(`Failed to read file ${path} during folder import:`, err instanceof Error ? err.message : String(err));
+        console.debug(
+          `Failed to read file ${path} during folder import:`,
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
 
