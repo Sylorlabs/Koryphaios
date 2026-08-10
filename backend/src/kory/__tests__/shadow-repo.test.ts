@@ -22,6 +22,7 @@ import {
   rmSync,
   existsSync,
   readFileSync,
+  realpathSync,
   renameSync,
   symlinkSync,
   utimesSync,
@@ -190,14 +191,20 @@ describe('Shadow Repo Isolation', () => {
         });
         expect(hash).toBeTruthy();
 
+        // ShadowRepo.repositoryContext resolves paths through realpathSync.
+        // On macOS, tmpdir() may be under a symlinked root (e.g. /var →
+        // /private/var), so canonicalize mainDir before comparing.
+        const canonicalMainDir = realpathSync(mainDir);
         const shadowObjects = join(ShadowRepo.shadowPath(linkedDir), 'objects');
         const alternateEntry = readFileSync(
           join(shadowObjects, 'info', 'alternates'),
           'utf-8',
         ).trim();
-        expect(resolve(shadowObjects, alternateEntry)).toBe(join(mainDir, '.git', 'objects'));
+        expect(resolve(shadowObjects, alternateEntry)).toBe(
+          join(canonicalMainDir, '.git', 'objects'),
+        );
         expect(ShadowRepo.shadowPath(linkedDir)).toBe(
-          join(mainDir, '.git', 'koryphaios', 'shadow-git'),
+          join(canonicalMainDir, '.git', 'koryphaios', 'shadow-git'),
         );
         const removed = spawnSync(['git', 'worktree', 'remove', '--force', linkedDir], {
           cwd: mainDir,
@@ -1139,14 +1146,20 @@ describe('Shadow Repo Isolation', () => {
         const timeline = await store.getTimeline(10, 'legacy-agent');
         expect(timeline.map((entry) => entry.hash)).toEqual([hash]);
         expect(await store.getCursor('legacy-agent')).toBe(hash);
-        expect(ShadowRepo.shadowPath(repo)).toBe(join(repo, '.git', 'koryphaios', 'shadow-git'));
+        // ShadowRepo.repositoryContext resolves paths through realpathSync.
+        // On macOS, tmpdir() may be under a symlinked root (e.g. /var →
+        // /private/var), so canonicalize repo before comparing.
+        const canonicalRepo = realpathSync(repo);
+        expect(ShadowRepo.shadowPath(repo)).toBe(
+          join(canonicalRepo, '.git', 'koryphaios', 'shadow-git'),
+        );
         expect(existsSync(legacyShadow)).toBe(false);
         const migratedAlternate = readFileSync(
           join(ShadowRepo.shadowObjectsPath(repo), 'info', 'alternates'),
           'utf-8',
         ).trim();
         expect(migratedAlternate).toBe(
-          relative(ShadowRepo.shadowObjectsPath(repo), join(repo, '.git', 'objects')),
+          relative(ShadowRepo.shadowObjectsPath(repo), join(canonicalRepo, '.git', 'objects')),
         );
         const noWarning = spawnSync(['git', 'fsck', '--no-progress'], {
           cwd: repo,

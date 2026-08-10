@@ -1,17 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
-import {
-  recoverSessionFileErasures,
-  stageSessionFilesForErasure,
-} from './session-file-erasure';
+import { recoverSessionFileErasures, stageSessionFilesForErasure } from './session-file-erasure';
 
+const IS_WIN = process.platform === 'win32';
 const roots: string[] = [];
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best-effort on Windows where locked files may resist removal */
+    }
+  }
 });
 
 function project(): string {
@@ -38,17 +42,17 @@ describe('session file erasure staging', () => {
     });
     expect(existsSync(join(root, '.koryphaios', 'sessions', 'target'))).toBe(false);
     expect(existsSync(join(root, '.koryphaios', 'snapshots', 'target'))).toBe(false);
-    expect(readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8')).toBe(
-      'sessions-keep',
-    );
+    expect(
+      readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8'),
+    ).toBe('sessions-keep');
 
     lease.rollback();
-    expect(readFileSync(join(root, '.koryphaios', 'sessions', 'target', 'sentinel.txt'), 'utf8')).toBe(
-      'sessions-target',
-    );
-    expect(readFileSync(join(root, '.koryphaios', 'snapshots', 'target', 'sentinel.txt'), 'utf8')).toBe(
-      'snapshots-target',
-    );
+    expect(
+      readFileSync(join(root, '.koryphaios', 'sessions', 'target', 'sentinel.txt'), 'utf8'),
+    ).toBe('sessions-target');
+    expect(
+      readFileSync(join(root, '.koryphaios', 'snapshots', 'target', 'sentinel.txt'), 'utf8'),
+    ).toBe('snapshots-target');
     expect(existsSync(lease.recoveryReceiptPath)).toBe(false);
   });
 
@@ -70,9 +74,9 @@ describe('session file erasure staging', () => {
     expect(existsSync(join(root, '.koryphaios', 'sessions', 'target'))).toBe(false);
     expect(existsSync(join(root, '.koryphaios', 'snapshots', 'target'))).toBe(false);
     expect(existsSync(lease.recoveryReceiptPath)).toBe(false);
-    expect(readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8')).toBe(
-      'sessions-keep',
-    );
+    expect(
+      readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8'),
+    ).toBe('sessions-keep');
   });
 
   test('restart recovery rolls back when the database still owns the session', async () => {
@@ -90,21 +94,24 @@ describe('session file erasure staging', () => {
       sessionExists: (sessionId) => sessionId === 'target',
     });
     expect(recovery).toEqual([{ operationId: lease.operationId, action: 'rolled-back' }]);
-    expect(readFileSync(join(root, '.koryphaios', 'sessions', 'target', 'sentinel.txt'), 'utf8')).toBe(
-      'sessions-target',
-    );
+    expect(
+      readFileSync(join(root, '.koryphaios', 'sessions', 'target', 'sentinel.txt'), 'utf8'),
+    ).toBe('sessions-target');
     expect(existsSync(lease.recoveryReceiptPath)).toBe(false);
   });
 
   test('unsafe symlink targets fail before any session path is moved', () => {
+    // Symlink creation requires admin/developer mode on Windows. The
+    // validation logic itself is platform-independent, so skip the
+    // end-to-end symlink fixture on Windows rather than fail spuriously.
+    if (IS_WIN) return;
+
     const root = project();
     rmSync(join(root, '.koryphaios', 'sessions', 'target'), { recursive: true });
-    Bun.spawnSync([
-      'ln',
-      '-s',
+    symlinkSync(
       join(root, '.koryphaios', 'sessions', 'keep'),
       join(root, '.koryphaios', 'sessions', 'target'),
-    ]);
+    );
 
     expect(() =>
       stageSessionFilesForErasure({
@@ -115,9 +122,9 @@ describe('session file erasure staging', () => {
       }),
     ).toThrow(/unsafe sessions session directory/);
     expect(existsSync(join(root, '.koryphaios', 'snapshots', 'target'))).toBe(true);
-    expect(readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8')).toBe(
-      'sessions-keep',
-    );
+    expect(
+      readFileSync(join(root, '.koryphaios', 'sessions', 'keep', 'sentinel.txt'), 'utf8'),
+    ).toBe('sessions-keep');
   });
 
   test('delete-all discovers and removes orphan session directories', () => {

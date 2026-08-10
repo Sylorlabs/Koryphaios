@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { CheckpointStore } from '../checkpoint-store';
 import { ShadowRepo } from '../shadow-repo';
 
+const IS_WIN = process.platform === 'win32';
+
 const temporaryRepos: string[] = [];
 
 function git(
@@ -52,6 +54,11 @@ function createRepo(label: string): string {
   expect(git(repo, 'init', '-b', 'main').exitCode).toBe(0);
   expect(git(repo, 'config', 'user.name', 'Recovery Test').exitCode).toBe(0);
   expect(git(repo, 'config', 'user.email', 'recovery@example.com').exitCode).toBe(0);
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git restore, and
+  // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+  expect(git(repo, 'config', 'core.autocrlf', 'false').exitCode).toBe(0);
+  expect(git(repo, 'config', 'core.longpaths', 'true').exitCode).toBe(0);
   writeFileSync(join(repo, 'README.md'), '# Recovery\n');
   expect(git(repo, 'add', '.').exitCode).toBe(0);
   expect(git(repo, 'commit', '-m', 'base').exitCode).toBe(0);
@@ -111,6 +118,11 @@ describe('CheckpointStore recovery hardening', () => {
   });
 
   test('rejects symlink ancestors and preserves an external sentinel', async () => {
+    // Symlink creation requires admin/developer mode on Windows. The
+    // recovery path validation itself is platform-independent, so skip the
+    // end-to-end symlink fixture on Windows rather than fail spuriously.
+    if (IS_WIN) return;
+
     const repo = createRepo('symlink');
     const outside = `${repo}-outside`;
     temporaryRepos.push(outside);

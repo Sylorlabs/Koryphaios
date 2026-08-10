@@ -244,36 +244,39 @@ done
     },
   );
 
-  test('does not expose backend secrets to repository-configured Git helpers', async () => {
-    const repo = mkdtempSync(join(tmpdir(), 'kory-git-safe-env-'));
-    const helper = join(repo, 'fsmonitor.sh');
-    const leak = join(repo, 'helper-env');
-    const previous = process.env.KORY_GIT_ENV_SECRET;
-    process.env.KORY_GIT_ENV_SECRET = 'synthetic-git-secret';
-    try {
-      expect(Bun.spawnSync(['git', 'init'], { cwd: repo }).exitCode).toBe(0);
-      writeFileSync(
-        helper,
-        `#!/bin/sh
+  test.skipIf(process.platform === 'win32')(
+    'does not expose backend secrets to repository-configured Git helpers',
+    async () => {
+      const repo = mkdtempSync(join(tmpdir(), 'kory-git-safe-env-'));
+      const helper = join(repo, 'fsmonitor.sh');
+      const leak = join(repo, 'helper-env');
+      const previous = process.env.KORY_GIT_ENV_SECRET;
+      process.env.KORY_GIT_ENV_SECRET = 'synthetic-git-secret';
+      try {
+        expect(Bun.spawnSync(['git', 'init'], { cwd: repo }).exitCode).toBe(0);
+        writeFileSync(
+          helper,
+          `#!/bin/sh
 printf '%s' "$KORY_GIT_ENV_SECRET" > "${leak}"
 printf 'token\\n'
 `,
-      );
-      chmodSync(helper, 0o700);
-      expect(
-        Bun.spawnSync(['git', 'config', 'core.fsmonitor', helper], { cwd: repo }).exitCode,
-      ).toBe(0);
+        );
+        chmodSync(helper, 0o700);
+        expect(
+          Bun.spawnSync(['git', 'config', 'core.fsmonitor', helper], { cwd: repo }).exitCode,
+        ).toBe(0);
 
-      const result = await new GitExecutor(repo).exec(['status', '--porcelain']);
+        const result = await new GitExecutor(repo).exec(['status', '--porcelain']);
 
-      expect(result.success).toBe(true);
-      expect(readFileSync(leak, 'utf8')).toBe('');
-    } finally {
-      if (previous === undefined) delete process.env.KORY_GIT_ENV_SECRET;
-      else process.env.KORY_GIT_ENV_SECRET = previous;
-      rmSync(repo, { recursive: true, force: true });
-    }
-  });
+        expect(result.success).toBe(true);
+        expect(readFileSync(leak, 'utf8')).toBe('');
+      } finally {
+        if (previous === undefined) delete process.env.KORY_GIT_ENV_SECRET;
+        else process.env.KORY_GIT_ENV_SECRET = previous;
+        rmSync(repo, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 async function waitForFile(path: string, timeoutMs: number): Promise<void> {

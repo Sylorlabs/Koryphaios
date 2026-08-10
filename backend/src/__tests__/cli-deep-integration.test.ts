@@ -185,8 +185,11 @@ describe('MCP config generation', () => {
     expect(configs).not.toBeNull();
     expect(configs!.length).toBe(1);
     expect(configs![0].name).toBe('kory');
-    expect(configs![0].args).toContain('--session-id');
-    expect(configs![0].args).toContain('test-session');
+    // Auth is delivered via a private grant file (KORY_BRIDGE_AUTH_FILE),
+    // never inline in argv. The grant is scoped to this session + role.
+    expect(configs![0].args).toContain('--provider');
+    expect(configs![0].env?.KORY_BRIDGE_AUTH_FILE).toBeTruthy();
+    expect(configs![0].env?.KORY_BRIDGE_AUTH_FILE).toContain('bridge-grant');
   });
 
   test('Cursor always generates kory MCP config', () => {
@@ -230,7 +233,9 @@ describe('Hooks config generation', () => {
       'Stop',
     ]);
     for (const hook of hooks!) {
-      expect(hook.command).toContain('--auth "Bearer ');
+      // Auth is delivered via a private grant file path, not an inline bearer.
+      expect(hook.command).toContain('--auth-file');
+      expect(hook.command).toContain('bridge-grant');
       expect(hook.command).toContain(`--event ${hook.events[0]}`);
     }
     delete process.env.KORY_HOOK_BRIDGE_SCRIPT;

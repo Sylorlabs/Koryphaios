@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import {
   GrokBuildProvider,
   grokCapabilityBoundary,
@@ -6,6 +9,51 @@ import {
   parseGrokModelsOutput,
   parseGrokOutput,
 } from '../grok-build';
+
+/**
+ * The isolated test runner redirects HOME to a fresh temp directory, so the
+ * grok CLI's models cache (~/.grok/models_cache.json) is absent and
+ * `listModels()` returns an empty list. Seed a minimal cache so the provider
+ * model-discovery test works in both standalone and isolated environments.
+ */
+const GROK_CACHE_DIR = join(homedir(), '.grok');
+const GROK_CACHE_PATH = join(GROK_CACHE_DIR, 'models_cache.json');
+let grokCacheBackup: string | null = null;
+let grokCacheExisted = false;
+
+beforeAll(() => {
+  grokCacheExisted = existsSync(GROK_CACHE_PATH);
+  if (grokCacheExisted) {
+    grokCacheBackup = readFileSync(GROK_CACHE_PATH, 'utf8');
+  } else {
+    mkdirSync(GROK_CACHE_DIR, { recursive: true });
+  }
+  writeFileSync(
+    GROK_CACHE_PATH,
+    JSON.stringify({
+      models: {
+        'grok-build': {
+          info: { name: 'Grok Build', context_window: 256_000, hidden: false },
+        },
+        'grok-composer-2.5-fast': {
+          info: { name: 'Grok Composer 2.5 Fast', context_window: 128_000, hidden: false },
+        },
+      },
+    }),
+  );
+});
+
+afterAll(() => {
+  if (grokCacheBackup !== null) {
+    writeFileSync(GROK_CACHE_PATH, grokCacheBackup);
+  } else if (!grokCacheExisted) {
+    try {
+      rmSync(GROK_CACHE_PATH, { force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+});
 
 describe('Grok research-only capability boundary', () => {
   it('does not inherit MCP or workspace authority', () => {
@@ -144,8 +192,7 @@ describe('GrokBuildProvider', () => {
     const events: ProviderEvent[] = [];
     for await (const e of p.streamResponse(req)) events.push(e);
     const err = events.find((e) => e.type === 'error') as
-      | { type: 'error'; error: string }
-      | undefined;
+      { type: 'error'; error: string } | undefined;
     expect(err).toBeTruthy();
     expect(err!.error).toMatch(/not found|install|grok login/i);
   });

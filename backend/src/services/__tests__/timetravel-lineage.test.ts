@@ -39,6 +39,11 @@ function createRepository(): string {
   git(repository, 'init');
   git(repository, 'config', 'user.name', 'Koryphaios Test');
   git(repository, 'config', 'user.email', 'koryphaios-test@example.invalid');
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git restore, and
+  // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+  git(repository, 'config', 'core.autocrlf', 'false');
+  git(repository, 'config', 'core.longpaths', 'true');
   writeFileSync(join(repository, 'README.md'), 'baseline\n');
   git(repository, 'add', 'README.md');
   git(repository, 'commit', '-m', 'baseline');

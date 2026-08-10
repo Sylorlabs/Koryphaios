@@ -28,12 +28,15 @@ function repo(): string {
   roots.push(root);
   mkdirSync(root, { recursive: true });
   expect(spawnSync(['git', 'init', '-b', 'main'], { cwd: root }).exitCode).toBe(0);
-  expect(spawnSync(['git', 'config', 'user.name', 'Erasure Test'], { cwd: root }).exitCode).toBe(
-    0,
-  );
+  expect(spawnSync(['git', 'config', 'user.name', 'Erasure Test'], { cwd: root }).exitCode).toBe(0);
   expect(
     spawnSync(['git', 'config', 'user.email', 'erasure@example.test'], { cwd: root }).exitCode,
   ).toBe(0);
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git restore, and
+  // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+  expect(spawnSync(['git', 'config', 'core.autocrlf', 'false'], { cwd: root }).exitCode).toBe(0);
+  expect(spawnSync(['git', 'config', 'core.longpaths', 'true'], { cwd: root }).exitCode).toBe(0);
   writeFileSync(join(root, 'README.md'), '# checkpoint erasure\n');
   expect(spawnSync(['git', 'add', 'README.md'], { cwd: root }).exitCode).toBe(0);
   expect(spawnSync(['git', 'commit', '-m', 'base'], { cwd: root }).exitCode).toBe(0);
@@ -75,4 +78,3 @@ describe('CheckpointStore session erasure', () => {
     ]);
   }, 60_000);
 });
-

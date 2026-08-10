@@ -14,7 +14,7 @@ import { CheckpointStore } from '../checkpoint-store';
 import { GitExecutor } from '../git-executor';
 import { ShadowRepo } from '../shadow-repo';
 import { spawnSync } from 'bun';
-import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, realpathSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -32,10 +32,38 @@ function gitInit(dir: string): void {
     stderr: 'pipe',
   });
   spawnSync(['git', 'config', 'user.name', 'Test'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git restore, and
+  // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+  spawnSync(['git', 'config', 'core.autocrlf', 'false'], {
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  spawnSync(['git', 'config', 'core.longpaths', 'true'], {
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   writeFileSync(join(dir, 'README.md'), '# Initial\n');
   spawnSync(['git', 'add', '-A'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
   spawnSync(['git', 'commit', '-m', 'init'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
 }
+
+/**
+ * Git identity for shadow-repo notes operations. The shadow bare repo has its
+ * own config (separate from the main repo), and in the isolated test runner
+ * HOME is a fresh temp directory with no global ~/.gitconfig fallback. Without
+ * an explicit identity, `git notes add` fails silently and later getMetadata
+ * returns undefined. Pass these via the `env` option so they reach the git
+ * subprocess through the safe-env allowlist.
+ */
+const GIT_IDENTITY: Record<string, string> = {
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@test.com',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@test.com',
+};
 
 function gitOutput(dir: string, ...args: string[]): string {
   const proc = spawnSync(['git', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
@@ -80,16 +108,11 @@ describe('CheckpointStore polish features', () => {
       // to prove old checkpoints remain readable.
       const direct = await shadowGit.exec(['cat-file', 'blob', `refs/kory/metadata/${hash}`]);
       expect(direct.success).toBe(true);
-      await shadowGit.exec([
-        'notes',
-        '--ref',
-        'refs/notes/shadow-logger',
-        'add',
-        '-f',
-        '-m',
-        direct.stdout,
-        hash!,
-      ]);
+      const notesAdd = await shadowGit.exec(
+        ['notes', '--ref', 'refs/notes/shadow-logger', 'add', '-f', '-m', direct.stdout, hash!],
+        { env: GIT_IDENTITY },
+      );
+      expect(notesAdd.success).toBe(true);
       await shadowGit.exec(['update-ref', '-d', `refs/kory/metadata/${hash}`]);
 
       // getMetadata should fall back to the legacy ref
@@ -111,16 +134,20 @@ describe('CheckpointStore polish features', () => {
       expect(hash).toBeTruthy();
 
       // Also add a legacy note with different model
-      await shadowGit.exec([
-        'notes',
-        '--ref',
-        'refs/notes/shadow-logger',
-        'add',
-        '-f',
-        '-m',
-        JSON.stringify({ id: 'old', model: 'old-model', timestamp: Date.now() }),
-        hash!,
-      ]);
+      const legacyNotesAdd = await shadowGit.exec(
+        [
+          'notes',
+          '--ref',
+          'refs/notes/shadow-logger',
+          'add',
+          '-f',
+          '-m',
+          JSON.stringify({ id: 'old', model: 'old-model', timestamp: Date.now() }),
+          hash!,
+        ],
+        { env: GIT_IDENTITY },
+      );
+      expect(legacyNotesAdd.success).toBe(true);
 
       // Should prefer the new ref
       const metadata = await store.getMetadata(hash!);
@@ -566,7 +593,10 @@ describe('CheckpointStore polish features', () => {
       // The worktree should be recovered with its original metadata
       expect(wm2.hasWorktree('recover-test')).toBe(true);
       const path = wm2.getWorktreePath('recover-test');
-      expect(path).toBe(worktree!.path);
+      // On macOS, git worktree list --porcelain returns realpath-resolved
+      // paths (e.g. /private/var/folders/... instead of /var/folders/...),
+      // so compare canonical paths instead of raw strings.
+      expect(path ? realpathSync(path) : null).toBe(realpathSync(worktree!.path));
 
       // Clean up
       await wm2.cleanup('recover-test');

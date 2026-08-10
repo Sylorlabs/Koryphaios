@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BashTool } from './bash';
@@ -107,7 +107,11 @@ describe('Bash kernel sandbox boundary', () => {
       expect(existsSync(join(root, 'inside.txt'))).toBe(true);
 
       const escape = await runSandboxed(root, `touch ${outside}`);
-      expect(escape.isError).toBe(false);
+      // On Linux (bwrap), the touch command succeeds (exit 0) because the
+      // file is created in a private mount namespace that is invisible on the
+      // host. On macOS (sandbox-exec), the sandbox profile denies the write
+      // and touch exits non-zero. In both cases the file must not exist on
+      // the host filesystem.
       expect(existsSync(outside)).toBe(false);
 
       const environment = await runSandboxed(root, 'env');
@@ -125,6 +129,9 @@ describe('Bash kernel sandbox boundary', () => {
   test('global Koryphaios state is not an implicit Bash filesystem grant', () => {
     const root = temporaryPath('kory-sandbox-grant-root');
     mkdirSync(root, { recursive: true });
-    expect(defaultAllowedRoots(root)).toEqual([root]);
+    // defaultAllowedRoots canonicalizes through realpathSync. On macOS,
+    // tmpdir() may be under a symlinked root (e.g. /var → /private/var),
+    // so compare against the canonical form.
+    expect(defaultAllowedRoots(root)).toEqual([realpathSync(root)]);
   });
 });

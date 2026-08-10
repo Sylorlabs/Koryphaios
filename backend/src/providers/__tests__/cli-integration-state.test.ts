@@ -7,8 +7,7 @@ import {
 import { materializeCliImage, renderCliContent } from '../cli-attachments';
 import { buildKoryCliMcpConfig } from '../kory-cli-mcp-config';
 import { buildKoryHookConfigs, buildKoryMcpServerConfig } from '../cli-bridges';
-import { validateLocalBearerToken } from '../../auth/local-route-auth';
-import { localAuth } from '../../auth/local-auth';
+import { readBridgeGrantScopeFromFile } from '../bridge-grant';
 import { initDb } from '../../db';
 import { db, sessions } from '../../db';
 import { eq } from 'drizzle-orm';
@@ -73,7 +72,7 @@ describe('native CLI integration state', () => {
     expect(materializeCliImage(oversized, 'image/png')).toBeNull();
   });
 
-  it('scopes the Kory MCP bearer to the exact conversation and role', () => {
+  it('scopes the Kory MCP grant to the exact conversation and role', () => {
     const config = buildKoryCliMcpConfig(
       {
         provider: 'cursor',
@@ -86,11 +85,16 @@ describe('native CLI integration state', () => {
       },
       'cursor',
     );
-    const bearer = config?.[0]?.env?.KORY_LOCAL_AUTH;
-    const auth = validateLocalBearerToken(bearer);
-    expect(auth).toBeTruthy();
-    expect(localAuth.hasPermission(auth!, 'mcp:mcp-session:critic')).toBe(true);
-    expect(localAuth.hasPermission(auth!, 'mcp:another-session:critic')).toBe(false);
+    // Auth is delivered via a private grant file (KORY_BRIDGE_AUTH_FILE),
+    // never as an inline bearer in argv/env. The grant is scoped to this
+    // exact session + role + MCP actions.
+    const authFile = config?.[0]?.env?.KORY_BRIDGE_AUTH_FILE;
+    expect(authFile).toBeTruthy();
+    const scope = readBridgeGrantScopeFromFile(authFile!);
+    expect(scope.sessionId).toBe('mcp-session');
+    expect(scope.role).toBe('critic');
+    expect(scope.actions).toContain('mcp:catalog');
+    expect(scope.actions).toContain('mcp:execute');
     expect(config?.[0]?.args.some((arg) => arg.endsWith('kory-mcp-bridge.ts'))).toBe(true);
     const bridged = buildKoryMcpServerConfig(
       {
@@ -104,7 +108,12 @@ describe('native CLI integration state', () => {
       },
       'claude',
     );
-    expect(bridged?.env?.KORY_LOCAL_AUTH).toBe(bearer);
+    // The bridged config must also carry a grant scoped to the same session.
+    const bridgedAuthFile = bridged?.env?.KORY_BRIDGE_AUTH_FILE;
+    expect(bridgedAuthFile).toBeTruthy();
+    const bridgedScope = readBridgeGrantScopeFromFile(bridgedAuthFile!);
+    expect(bridgedScope.sessionId).toBe('mcp-session');
+    expect(bridgedScope.role).toBe('critic');
   });
 
   it('authenticates each native CLI lifecycle hook and preserves its real event', () => {
@@ -127,7 +136,10 @@ describe('native CLI integration state', () => {
         'Stop',
       ]);
       for (const hook of hooks ?? []) {
-        expect(hook.command).toContain('--auth "Bearer ');
+        // Auth is delivered via a private grant file path, not an inline
+        // bearer. The grant is scoped to this session + role + hook action.
+        expect(hook.command).toContain('--auth-file');
+        expect(hook.command).toContain('bridge-grant');
         expect(hook.command).toContain(`--event ${hook.events[0]}`);
         expect(hook.command).toContain('"/tmp/kory hook bridge.js"');
       }

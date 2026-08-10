@@ -1390,8 +1390,22 @@ export function seedDefaultSkills(): void {
   }
 }
 
-/** Directory in the tracked repo where file-based Koryphaios skills live. */
-const fileBasedSkillsRoot = (): string => join(PROJECT_ROOT, 'skills');
+/**
+ * Directory in the tracked repo where file-based Koryphaios skills live.
+ *
+ * The primary candidate is `<PROJECT_ROOT>/skills` (the packaged app's data
+ * directory). When that does not exist — e.g. in the isolated test runner,
+ * which redirects PROJECT_ROOT to a temporary KORYPHAIOS_DATA_DIR — fall back
+ * to the source-relative location so bundled file-based skills (Codex-only
+ * resources like skill-installer) remain discoverable.
+ */
+const fileBasedSkillsRoot = (): string => {
+  const primary = join(PROJECT_ROOT, 'skills');
+  if (existsSync(primary)) return primary;
+  const sourceRelative = join(import.meta.dir, '..', '..', '..', 'skills');
+  if (existsSync(sourceRelative)) return sourceRelative;
+  return primary;
+};
 
 /** Read the bundled SKILL.md content for a file-based skill. Returns null if not found. */
 function readBundledSkillContent(name: string): string | null {

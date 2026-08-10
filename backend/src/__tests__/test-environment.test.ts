@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createIsolatedTestEnvironment } from '../../../scripts/test-backend-isolated';
 
+/** Normalize backslashes to forward slashes so path assertions work on both
+ * Windows (where path.join uses \) and POSIX (where it uses /). */
+function normalizePath(p: string | undefined): string {
+  return (p ?? '').replace(/\\/g, '/');
+}
+
 describe('isolated backend test environment', () => {
   test('strips ambient provider authority and account locations from the default core gate', () => {
     const env = createIsolatedTestEnvironment(
@@ -84,11 +90,13 @@ describe('isolated backend test environment', () => {
     expect(env.KORY_LIVE_PROVIDER_TESTS).toBe('0');
     expect(env.KORY_LIVE_CLAUDE).toBe('0');
     expect(env.KORY_DISABLE_CLI_AUTODETECT).toBe('1');
-    expect(env.KORYPHAIOS_DATA_DIR).toBe('/isolated/home/.koryphaios');
-    expect(env.KORYPHAIOS_SKILLS_HOME).toBe('/isolated/home/.koryphaios/skills');
-    expect(env.KORYPHAIOS_WORKFLOWS_HOME).toBe('/isolated/home/.koryphaios/workflows');
-    expect(env.PROJECT_ROOT).toBe('/isolated/home/project');
-    expect(env.LOG_DIR).toBe('/isolated/home/.koryphaios/logs');
+    expect(normalizePath(env.KORYPHAIOS_DATA_DIR)).toBe('/isolated/home/.koryphaios');
+    expect(normalizePath(env.KORYPHAIOS_SKILLS_HOME)).toBe('/isolated/home/.koryphaios/skills');
+    expect(normalizePath(env.KORYPHAIOS_WORKFLOWS_HOME)).toBe(
+      '/isolated/home/.koryphaios/workflows',
+    );
+    expect(normalizePath(env.PROJECT_ROOT)).toBe('/isolated/home/project');
+    expect(normalizePath(env.LOG_DIR)).toBe('/isolated/home/.koryphaios/logs');
     expect(env.SESSION_TOKEN_SECRET).toBe('test_only_not_for_production_aaaaaaaaaa');
   });
 

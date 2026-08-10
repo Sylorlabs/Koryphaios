@@ -206,14 +206,15 @@ describe('long-form Notes hardening', () => {
     const stored = await getAttachment(attachment.id, project);
     expect(stored).not.toBeNull();
 
-    // A directory at the authorized attachment path makes unlink fail with
-    // EISDIR reliably, including in privileged test environments where chmod
-    // cannot reproduce EACCES/EPERM.
+    // A directory at the authorized attachment path makes unlink fail
+    // reliably, including in privileged test environments where chmod
+    // cannot reproduce EACCES/EPERM. On Linux the error code is EISDIR;
+    // on macOS, unlink on a directory returns EPERM instead.
     unlinkSync(stored!.storagePath);
     mkdirSync(stored!.storagePath);
 
     await expect(deleteAttachment(attachment.id, project)).rejects.toMatchObject({
-      code: 'EISDIR',
+      code: expect.stringMatching(/^E(ISDIR|PERM)$/),
     });
     expect(await getAttachment(attachment.id, project)).not.toBeNull();
     expect(existsSync(stored!.storagePath)).toBe(true);

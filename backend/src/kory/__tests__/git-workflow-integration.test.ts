@@ -56,6 +56,19 @@ describe('Git Workflow Integration Tests', () => {
       stdout: 'pipe',
       stderr: 'pipe',
     });
+    // Windows defaults (core.autocrlf=true, 260-char path limit) break
+    // cross-platform tests: CRLF alters file content after git restore, and
+    // long shadow ref paths exceed MAX_PATH. Disable both explicitly.
+    spawnSync(['git', 'config', 'core.autocrlf', 'false'], {
+      cwd: TEST_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    spawnSync(['git', 'config', 'core.longpaths', 'true'], {
+      cwd: TEST_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
 
     // Create initial commit
     writeFileSync(join(TEST_DIR, 'README.md'), '# Test Project');

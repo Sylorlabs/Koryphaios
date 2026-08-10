@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KoryManager } from '../manager';
@@ -42,6 +42,12 @@ import {
 const originalSkillsHome = process.env.KORYPHAIOS_SKILLS_HOME;
 const testSkillsHome = mkdtempSync(join(tmpdir(), 'kory-orchestration-skills-'));
 
+// Use a real (non-symlink) temp directory for the manager working directory.
+// On macOS, `/tmp` is a symlink to `/private/tmp`, and the SnapshotManager
+// constructor rejects symlinked project directories via lstatSync. Creating a
+// dedicated temp dir and resolving it through realpathSync avoids this.
+const testWorkDir = realpathSync(mkdtempSync(join(tmpdir(), 'kory-orchestration-wd-')));
+
 beforeAll(() => {
   process.env.KORYPHAIOS_SKILLS_HOME = testSkillsHome;
 });
@@ -54,6 +60,7 @@ afterAll(() => {
     process.env.KORYPHAIOS_SKILLS_HOME = originalSkillsHome;
   }
   rmSync(testSkillsHome, { recursive: true, force: true });
+  rmSync(testWorkDir, { recursive: true, force: true });
 });
 
 // Mock dependencies
@@ -92,13 +99,13 @@ describe('KoryManager Orchestration', () => {
     manager = new KoryManager(
       mockProviderRegistry,
       mockToolRegistry,
-      '/tmp',
+      testWorkDir,
       mockConfig as any,
       {
         get: async (id: string) => ({
           id,
           title: id,
-          workingDirectory: '/tmp',
+          workingDirectory: testWorkDir,
           messageCount: 0,
           totalTokensIn: 0,
           totalTokensOut: 0,
@@ -148,7 +155,7 @@ describe('KoryManager Orchestration', () => {
       role: 'manager',
       mode: 'advanced',
       provider: 'openai',
-      workingDirectory: '/tmp',
+      workingDirectory: testWorkDir,
       taskContract: createTaskContract('Explain the architecture'),
     });
     expect(compiled.systemPrompt).toContain('Suggest Goal Mode for long-running');
@@ -210,14 +217,14 @@ describe('KoryManager Orchestration', () => {
       'general',
       undefined,
       true,
-      ['/tmp/worktree-1'],
+      [join(testWorkDir, 'worktree-1')],
       true,
     );
     registerLiveModelResolver(() => undefined);
 
     expect(result.success).toBe(true);
-    expect(observed.workingDirectory).toBe('/tmp/worktree-1');
-    expect(observed.allowedPaths).toEqual(['/tmp/worktree-1']);
+    expect(observed.workingDirectory).toBe(join(testWorkDir, 'worktree-1'));
+    expect(observed.allowedPaths).toEqual([join(testWorkDir, 'worktree-1')]);
   });
 
   test('runWorkerPipeline fails when worktree reconcile fails', async () => {
@@ -236,7 +243,7 @@ describe('KoryManager Orchestration', () => {
     }));
     manager['handleAutoCommit'] = autoCommit;
     manager['workerPipeline']['workspaceManager'] = {
-      spawn: () => ({ path: '/tmp/worktree-2' }),
+      spawn: () => ({ path: join(testWorkDir, 'worktree-2') }),
       reconcile: () => ({ success: false, message: 'merge conflict' }),
       cleanup: mock(() => ({ success: true, message: 'cleaned' })),
     } as any;
@@ -272,7 +279,7 @@ describe('KoryManager Orchestration', () => {
       [{ role: 'assistant', content: 'I completed the task.' }],
       'openai:producer-model',
       'Verify the work',
-      '/tmp',
+      testWorkDir,
     );
 
     expect(result).toEqual({
@@ -296,7 +303,7 @@ describe('KoryManager Orchestration', () => {
       [{ role: 'assistant', content: 'I completed the task.' }],
       'producer-model',
       'Verify the work',
-      '/tmp',
+      testWorkDir,
       { provider: 'openai', model: 'producer-model' },
     );
 
@@ -343,7 +350,7 @@ describe('KoryManager Orchestration', () => {
       role: 'critic',
       mode: 'advanced',
       provider: 'claude',
-      workingDirectory: '/tmp',
+      workingDirectory: testWorkDir,
       taskContract: createTaskContract('Review the implementation'),
     });
 

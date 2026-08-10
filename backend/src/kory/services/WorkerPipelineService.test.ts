@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
@@ -58,6 +58,17 @@ function createHost(
   sessionRoot: string,
   workflowStates: string[],
 ): WorkerPipelineHost {
+  // WorkerPipelineService.canonicalDirectory resolves paths through realpath.
+  // On macOS, tmpdir() may be under a symlinked root (e.g. /var →
+  // /private/var), so canonicalize sessionRoot for comparisons against
+  // paths the service has already resolved. Use a safe fallback when the
+  // path does not exist (the "missing project" test relies on this).
+  let canonicalSessionRoot = sessionRoot;
+  try {
+    canonicalSessionRoot = realpathSync(sessionRoot);
+  } catch {
+    // path does not exist — keep the raw value; the service will reject it
+  }
   return {
     getIsYoloMode: () => true,
     getWorkingDirectory: () => configuredRoot,
@@ -90,7 +101,8 @@ function createHost(
     runCriticGate: async () => ({ passed: true, feedback: 'PASS' }),
     runDestinationChecks: async (_sessionId, workingDirectory) => ({
       passed:
-        workingDirectory === sessionRoot && existsSync(join(sessionRoot, 'worker-output.txt')),
+        workingDirectory === canonicalSessionRoot &&
+        existsSync(join(sessionRoot, 'worker-output.txt')),
       output: 'destination checked',
     }),
   };

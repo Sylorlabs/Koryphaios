@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
 import type { ChangeSummary } from '@koryphaios/shared';
 import { BashTool } from './bash';
 
+const IS_WIN = process.platform === 'win32';
 const testDirectories: string[] = [];
 
 function makeDirectory(prefix: string): string {
@@ -15,7 +16,12 @@ function makeDirectory(prefix: string): string {
   );
   mkdirSync(root, { recursive: true });
   testDirectories.push(root);
-  return root;
+  // Return the canonical path. On macOS, tmpdir() may be under a symlinked
+  // root (e.g. /var → /private/var). The BashTool's git-change-evidence
+  // capture resolves the repo root through realpath, so change paths are
+  // based on the canonical form. Tests that slice or compare against the
+  // root must use the same canonical path.
+  return realpathSync(root);
 }
 
 function git(root: string, ...args: string[]): void {
@@ -29,13 +35,22 @@ function initializeRepo(root: string): void {
   git(root, 'init');
   git(root, 'config', 'user.email', 'bash-evidence@test.invalid');
   git(root, 'config', 'user.name', 'Bash Evidence Test');
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform tests: CRLF alters file content after git operations.
+  git(root, 'config', 'core.autocrlf', 'false');
+  git(root, 'config', 'core.longpaths', 'true');
   writeFileSync(join(root, '.gitignore'), '.koryphaios/\n');
   writeFileSync(join(root, 'edit.txt'), 'before\n');
   writeFileSync(join(root, 'delete.txt'), 'delete me\n');
   writeFileSync(join(root, 'mode.sh'), '#!/bin/sh\necho mode\n', { mode: 0o644 });
   writeFileSync(join(root, 'target-a'), 'a\n');
   writeFileSync(join(root, 'target-b'), 'b\n');
-  Bun.spawnSync(['ln', '-s', 'target-a', 'link.txt'], { cwd: root });
+  // Use Node's symlinkSync instead of `ln -s` for cross-platform support.
+  // On Windows without admin/developer mode, skip symlink creation — the
+  // symlink-dependent assertions are guarded by IS_WIN checks below.
+  if (!IS_WIN) {
+    symlinkSync('target-a', join(root, 'link.txt'));
+  }
   writeFileSync(join(root, 'untouched-dirty.txt'), 'clean\n');
   git(root, 'add', '.');
   git(root, 'commit', '-m', 'baseline');
@@ -90,31 +105,35 @@ describe('Bash foreground changed-file evidence', () => {
     // `exec` lets each external utility replace the shell without a fork, so
     // this regression remains deterministic on busy CI hosts.
     const deletion = await runBash(root, 'exec rm -- delete.txt');
-    const modeChange = await runBash(root, 'exec chmod +x mode.sh');
-    const symlinkChange = await runBash(root, 'exec ln -sfn target-b link.txt');
-    const changes = [
-      ...contentChange.changes,
-      ...deletion.changes,
-      ...modeChange.changes,
-      ...symlinkChange.changes,
-    ];
+    const changes = [...contentChange.changes, ...deletion.changes];
 
-    for (const execution of [contentChange, deletion, modeChange, symlinkChange]) {
+    for (const execution of [contentChange, deletion]) {
       expect(execution.result).toMatchObject({ isError: false });
     }
+
+    // chmod and symlink changes require Unix file modes and symlink support.
+    // On Windows, skip these operations and their assertions.
+    if (!IS_WIN) {
+      const modeChange = await runBash(root, 'exec chmod +x mode.sh');
+      const symlinkChange = await runBash(root, 'exec ln -sfn target-b link.txt');
+      changes.push(...modeChange.changes, ...symlinkChange.changes);
+      for (const execution of [modeChange, symlinkChange]) {
+        expect(execution.result).toMatchObject({ isError: false });
+      }
+    }
+
     const byName = new Map(changes.map((change) => [change.path.slice(root.length + 1), change]));
-    expect([...byName.keys()].sort()).toEqual([
-      'created.txt',
-      'delete.txt',
-      'edit.txt',
-      'link.txt',
-      'mode.sh',
-    ]);
+    const expectedKeys = IS_WIN
+      ? ['created.txt', 'delete.txt', 'edit.txt']
+      : ['created.txt', 'delete.txt', 'edit.txt', 'link.txt', 'mode.sh'];
+    expect([...byName.keys()].sort()).toEqual(expectedKeys);
     expect(byName.get('created.txt')?.operation).toBe('create');
     expect(byName.get('delete.txt')?.operation).toBe('delete');
     expect(byName.get('edit.txt')?.operation).toBe('edit');
-    expect(byName.get('mode.sh')?.operation).toBe('edit');
-    expect(byName.get('link.txt')?.operation).toBe('edit');
+    if (!IS_WIN) {
+      expect(byName.get('mode.sh')?.operation).toBe('edit');
+      expect(byName.get('link.txt')?.operation).toBe('edit');
+    }
     expect(byName.has('untouched-dirty.txt')).toBe(false);
     expect([...byName.keys()].some((path) => path.startsWith('.koryphaios/'))).toBe(false);
   });
@@ -154,22 +173,25 @@ describe('Bash foreground changed-file evidence', () => {
     );
   });
 
-  test('timeout escalation kills TERM-ignoring descendants before returning', async () => {
-    const root = makeDirectory('kory-bash-timeout-reap');
-    initializeRepo(root);
-    const latePath = join(root, 'late-after-timeout.txt');
+  test.skipIf(process.platform === 'win32')(
+    'timeout escalation kills TERM-ignoring descendants before returning',
+    async () => {
+      const root = makeDirectory('kory-bash-timeout-reap');
+      initializeRepo(root);
+      const latePath = join(root, 'late-after-timeout.txt');
 
-    const timedOut = await runBash(
-      root,
-      "trap '' TERM; (trap '' TERM; sleep 0.4; printf 'late\\n' > late-after-timeout.txt) & wait",
-      { timeout: 0.05 },
-    );
+      const timedOut = await runBash(
+        root,
+        "trap '' TERM; (trap '' TERM; sleep 0.4; printf 'late\\n' > late-after-timeout.txt) & wait",
+        { timeout: 0.05 },
+      );
 
-    expect(timedOut.result.isError).toBe(true);
-    expect(timedOut.result.output).toContain('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 550));
-    expect(existsSync(latePath)).toBe(false);
-  });
+      expect(timedOut.result.isError).toBe(true);
+      expect(timedOut.result.output).toContain('timed out');
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      expect(existsSync(latePath)).toBe(false);
+    },
+  );
 
   test('fails safely without inventing evidence outside a Git repository', async () => {
     const root = makeDirectory('kory-bash-nongit-evidence');

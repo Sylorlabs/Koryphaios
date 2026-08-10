@@ -6,9 +6,27 @@ import { tmpdir } from 'node:os';
 import { eraseCreditUsageTransaction, eraseSessionDataTransaction } from './session-erasure';
 
 const roots: string[] = [];
+const openDatabases: Database[] = [];
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  // Windows holds exclusive file locks on open SQLite handles. Close every
+  // tracked database before removing the temp directory so rmSync does not
+  // throw EPERM on Windows (which would mark the test as failed even when
+  // all assertions passed).
+  for (const db of openDatabases.splice(0)) {
+    try {
+      db.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  for (const root of roots.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* best-effort on Windows where locked files may resist removal */
+    }
+  }
 });
 
 function fixture(): { root: string; mainPath: string; creditPath: string; sqlite: Database } {
@@ -17,6 +35,7 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
   const mainPath = join(root, 'main.db');
   const creditPath = join(root, 'credit.db');
   const sqlite = new Database(mainPath);
+  openDatabases.push(sqlite);
   sqlite.exec('PRAGMA foreign_keys = ON');
   sqlite.exec(`
     CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_id TEXT);
@@ -59,6 +78,7 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
     sqlite.exec(`CREATE TABLE ${table} (id TEXT, session_id TEXT NOT NULL)`);
   }
   const credit = new Database(creditPath);
+  openDatabases.push(credit);
   credit.exec(`
     CREATE TABLE credit_usage (id INTEGER PRIMARY KEY, session_id TEXT, payload TEXT);
   `);
@@ -104,14 +124,12 @@ function seed(sqlite: Database, creditPath: string): void {
     'tasks',
     'user_inputs',
   ]) {
-    sqlite.query(`INSERT INTO ${table} VALUES (?, ?), (?, ?)`).run(
-      `${table}-target`,
-      'target',
-      `${table}-keep`,
-      'keep',
-    );
+    sqlite
+      .query(`INSERT INTO ${table} VALUES (?, ?), (?, ?)`)
+      .run(`${table}-target`, 'target', `${table}-keep`, 'keep');
   }
   const credit = new Database(creditPath);
+  openDatabases.push(credit);
   credit
     .query('INSERT INTO credit_usage VALUES (1, ?, ?), (2, ?, ?), (3, NULL, ?)')
     .run('target', 'TARGET-CREDIT-SENTINEL', 'keep', 'KEEP-CREDIT-SENTINEL', 'GLOBAL-CREDIT');
@@ -135,6 +153,7 @@ describe('atomic session erasure', () => {
       sessionIds: ['target'],
     });
     const creditWriter = new Database(creditPath);
+    openDatabases.push(creditWriter);
     expect(
       eraseCreditUsageTransaction(creditWriter, {
         kind: 'selected',
@@ -147,6 +166,7 @@ describe('atomic session erasure', () => {
     sqlite.close();
 
     const restarted = new Database(mainPath);
+    openDatabases.push(restarted);
     for (const table of [
       'abort_controllers',
       'active_workers',
@@ -169,9 +189,9 @@ describe('atomic session erasure', () => {
     }
     expect(count(restarted, 'sessions', 'id = ?', 'target')).toBe(0);
     expect(count(restarted, 'sessions', 'id = ?', 'keep')).toBe(1);
-    expect(
-      restarted.query('SELECT parent_id FROM sessions WHERE id = ?').get('child'),
-    ).toEqual({ parent_id: null });
+    expect(restarted.query('SELECT parent_id FROM sessions WHERE id = ?').get('child')).toEqual({
+      parent_id: null,
+    });
     expect(count(restarted, 'process_events', 'process_id = ?', 'process-target')).toBe(0);
     expect(count(restarted, 'process_events', 'process_id = ?', 'process-keep')).toBe(1);
     expect(count(restarted, 'process_health_checks', 'process_id = ?', 'process-target')).toBe(0);
@@ -193,6 +213,7 @@ describe('atomic session erasure', () => {
     restarted.close();
 
     const credit = new Database(creditPath);
+    openDatabases.push(credit);
     expect(count(credit, 'credit_usage', 'session_id = ?', 'target')).toBe(0);
     expect(count(credit, 'credit_usage', 'session_id = ?', 'keep')).toBe(1);
     expect(count(credit, 'credit_usage', 'session_id IS NULL')).toBe(1);
@@ -210,6 +231,7 @@ describe('atomic session erasure', () => {
 
     const report = eraseSessionDataTransaction(sqlite, { kind: 'all' });
     const creditWriter = new Database(creditPath);
+    openDatabases.push(creditWriter);
     expect(eraseCreditUsageTransaction(creditWriter, { kind: 'all' })).toBe(2);
     creditWriter.close();
     expect(report.deletedSessions).toBe(3);
@@ -233,6 +255,7 @@ describe('atomic session erasure', () => {
     sqlite.close();
 
     const credit = new Database(creditPath);
+    openDatabases.push(credit);
     expect(count(credit, 'credit_usage', 'session_id IS NOT NULL')).toBe(0);
     expect(count(credit, 'credit_usage', 'session_id IS NULL')).toBe(1);
     credit.close();
@@ -260,6 +283,7 @@ describe('atomic session erasure', () => {
     sqlite.close();
 
     const credit = new Database(creditPath);
+    openDatabases.push(credit);
     expect(count(credit, 'credit_usage', 'session_id = ?', 'target')).toBe(1);
     credit.close();
   });
