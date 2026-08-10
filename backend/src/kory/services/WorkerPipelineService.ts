@@ -9,7 +9,8 @@ import { DOMAIN } from '../../constants';
 import type { ProviderRegistry, Provider } from '../../providers';
 import type { ProviderMessage } from '../../providers/types';
 import { nanoid } from 'nanoid';
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { koryLog, serverLog } from '../../logger';
 import type { SessionStateService } from './SessionStateService';
@@ -174,10 +175,10 @@ export class WorkerPipelineService {
 
   private async canonicalDirectory(path: string, label: string): Promise<string> {
     if (!path?.trim()) throw new Error(`${label} is empty`);
-    // Use realpath.native for consistent 8.3 short name resolution on Windows
-    // (GetFinalPathNameByHandleW). On other platforms, native === default.
-    const canonicalResolve = realpath.native ?? realpath;
-    const canonical = await canonicalResolve(resolve(path));
+    // Use realpathSync.native for consistent 8.3 short name resolution on
+    // Windows (GetFinalPathNameByHandleW). On other platforms, native === sync.
+    const canonicalResolve = realpathSync.native ?? realpathSync;
+    const canonical = canonicalResolve(resolve(path));
     const info = await stat(canonical);
     if (!info.isDirectory()) throw new Error(`${label} is not a directory: ${canonical}`);
     return canonical;
