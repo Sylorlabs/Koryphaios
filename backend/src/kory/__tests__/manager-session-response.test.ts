@@ -111,7 +111,11 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
 
     const cloneParent = makeDirectory('kory-response-clone-parent');
     const repoB = join(cloneParent, 'repo-b');
-    git(cloneParent, 'clone', repoA, repoB);
+    // Use -c core.autocrlf=false to override the global config during clone,
+    // preventing CRLF conversion on Windows that would alter file content.
+    git(cloneParent, '-c', 'core.autocrlf=false', 'clone', repoA, repoB);
+    git(repoB, 'config', 'core.autocrlf', 'false');
+    git(repoB, 'config', 'core.longpaths', 'true');
 
     writeFileSync(join(repoA, 'repo-a-later.txt'), 'must survive session B rejection\n');
     git(repoA, 'add', '.');

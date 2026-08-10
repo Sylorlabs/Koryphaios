@@ -174,7 +174,10 @@ export class WorkerPipelineService {
 
   private async canonicalDirectory(path: string, label: string): Promise<string> {
     if (!path?.trim()) throw new Error(`${label} is empty`);
-    const canonical = await realpath(resolve(path));
+    // Use realpath.native for consistent 8.3 short name resolution on Windows
+    // (GetFinalPathNameByHandleW). On other platforms, native === default.
+    const canonicalResolve = realpath.native ?? realpath;
+    const canonical = await canonicalResolve(resolve(path));
     const info = await stat(canonical);
     if (!info.isDirectory()) throw new Error(`${label} is not a directory: ${canonical}`);
     return canonical;

@@ -354,19 +354,20 @@ function spawnMacSandbox(
     // process model is per-line. When blockSubprocesses is true we omit
     // this allow, which causes the default-deny to block fork/exec.
     ...(opts.blockSubprocesses ? [] : ['(allow process*)']),
-    // Mach IPC is required for many macOS system calls (e.g. looking up
-    // system services, getting the current time via mach_absolute_time,
-    // and dynamic linker resolution). Without this, even simple commands
+    // Mach IPC, IOKit, signals, sysctl, and IPC primitives are required
+    // for many macOS system calls. Without these, even simple commands
     // like `touch` fail with "Operation not permitted".
     '(allow mach*)',
     '(allow iokit*)',
     '(allow signal)',
     '(allow sysctl-read)',
+    '(allow sysctl-write)',
     '(allow file-read-metadata)',
-    // IPC primitives needed by the C runtime and system frameworks.
+    '(allow file-write-metadata)',
+    '(allow file-ioctl)',
     '(allow ipc-posix-sem*)',
     '(allow ipc-posix-shm*)',
-    // System reads needed for dynamic linking, locale, etc.
+    '(allow ipc-posix-set)',
     '(allow file-read* (subpath "/usr"))',
     '(allow file-read* (subpath "/bin"))',
     '(allow file-read* (subpath "/sbin"))',
@@ -375,15 +376,12 @@ function spawnMacSandbox(
     '(allow file-read* (subpath "/dev"))',
     '(allow file-read* (subpath "/private/etc"))',
     '(allow file-read* (subpath "/etc"))',
-    // The dyld shared cache lives under /private/var/db/dyld on macOS.
-    // The dynamic linker reads it during process startup; without this
-    // allow, commands like `touch` and `env` fail to launch.
     '(allow file-read* (subpath "/private/var/db/dyld"))',
-    // /private/tmp and /private/var/folders are used by macOS for per-user
-    // temp dirs and caches. Some system frameworks probe these during launch.
     '(allow file-read* (subpath "/private/tmp"))',
     '(allow file-read* (subpath "/private/var/folders"))',
     '(allow file-read* (subpath "/private/var/db/analyticsd"))',
+    // Allow writes to /dev/null and other safe device files.
+    '(allow file-write* (subpath "/dev"))',
   ];
 
   for (const root of roots) {

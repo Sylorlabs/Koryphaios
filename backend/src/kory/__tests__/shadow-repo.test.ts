@@ -217,11 +217,16 @@ describe('Shadow Repo Isolation', () => {
           join(shadowObjects, 'info', 'alternates'),
           'utf-8',
         ).trim();
-        expect(realpathSync(resolve(shadowObjects, alternateEntry))).toBe(
-          join(canonicalMainDir, '.git', 'objects'),
-        );
-        expect(ShadowRepo.shadowPath(linkedDir)).toBe(
-          join(canonicalMainDir, '.git', 'koryphaios', 'shadow-git'),
+        // On Windows, realpathSync may not consistently resolve 8.3 short
+        // names (e.g. RUNNER~1 vs runneradmin). Use realpathSync.native
+        // (GetFinalPathNameByHandleW on Windows) for consistent
+        // canonicalization on both sides of the comparison.
+        const realpath = realpathSync.native ?? realpathSync;
+        const resolvedAlternate = realpath(resolve(shadowObjects, alternateEntry));
+        const expectedObjectsDir = realpath(join(canonicalMainDir, '.git', 'objects'));
+        expect(resolvedAlternate).toBe(expectedObjectsDir);
+        expect(realpath(ShadowRepo.shadowPath(linkedDir))).toBe(
+          realpath(join(canonicalMainDir, '.git', 'koryphaios', 'shadow-git')),
         );
         const removed = spawnSync(['git', 'worktree', 'remove', '--force', linkedDir], {
           cwd: mainDir,
@@ -1192,7 +1197,9 @@ describe('Shadow Repo Isolation', () => {
           relative(
             ShadowRepo.shadowObjectsPath(canonicalRepo),
             join(canonicalRepo, '.git', 'objects'),
-          ).split(sep).join('/'),
+          )
+            .split(sep)
+            .join('/'),
         );
         const noWarning = spawnSync(['git', 'fsck', '--no-progress'], {
           cwd: canonicalRepo,

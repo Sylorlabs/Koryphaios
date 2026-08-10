@@ -134,21 +134,22 @@ export class WorkspaceManager {
     for (const wt of allWorktrees) {
       // On Windows, `git worktree list --porcelain` may report paths using
       // 8.3 short names (e.g. RUNNER~1) while the WorkspaceManager was
-      // constructed with the canonical long name (e.g. runneradmin). The
-      // startsWith prefix check below would silently skip every worktree,
-      // causing hasWorktree() to return false after a restart. Canonicalize
-      // both sides through realpathSync so the comparison is consistent.
+      // constructed with the canonical long name (e.g. runneradmin), or vice
+      // versa. realpathSync may not consistently resolve 8.3 names on Windows,
+      // so use realpathSync.native (which calls GetFinalPathNameByHandleW)
+      // for consistent canonicalization. On other platforms, native === sync.
+      const realpath = realpathSync.native ?? realpathSync;
       let absoluteWtPath = resolve(wt.path);
       try {
-        absoluteWtPath = realpathSync(absoluteWtPath);
+        absoluteWtPath = realpath(absoluteWtPath);
       } catch {
-        // realpathSync fails if the path doesn't exist (e.g. a stale
+        // realpath fails if the path doesn't exist (e.g. a stale
         // worktree entry). Keep the resolved path so the startsWith check
         // can still filter it out naturally.
       }
       let canonicalBaseDir = worktreeBaseDir;
       try {
-        canonicalBaseDir = realpathSync(worktreeBaseDir);
+        canonicalBaseDir = realpath(worktreeBaseDir);
       } catch {
         // worktreeBaseDir may not exist yet on first run; fall back to the
         // resolved path.

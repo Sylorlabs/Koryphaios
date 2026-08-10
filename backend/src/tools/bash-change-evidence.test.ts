@@ -11,9 +11,18 @@ const testDirectories: string[] = [];
 
 /** Normalize path separators to forward slashes for cross-platform comparison.
  *  On Windows, Node's resolve/join produce backslash paths while git reports
- *  forward-slash paths. This helper ensures comparisons are separator-agnostic. */
+ *  forward-slash paths. This helper ensures comparisons are separator-agnostic.
+ *  Also canonicalizes 8.3 short names (e.g. RUNNER~1 → runneradmin) via
+ *  realpathSync.native on Windows for consistent path comparisons. */
 function normalizePath(p: string): string {
-  return p.replaceAll('\\', '/');
+  const realpath = realpathSync.native ?? realpathSync;
+  let resolved = p;
+  try {
+    resolved = realpath(resolved);
+  } catch {
+    // path may not exist yet; fall back to the original
+  }
+  return resolved.replaceAll('\\', '/');
 }
 
 function makeDirectory(prefix: string): string {

@@ -68,9 +68,13 @@ function createHost(
   // /private/var), so canonicalize sessionRoot for comparisons against
   // paths the service has already resolved. Use a safe fallback when the
   // path does not exist (the "missing project" test relies on this).
+  // On Windows, realpathSync may not consistently resolve 8.3 short names
+  // (e.g. RUNNER~1 vs runneradmin), so use realpathSync.native for
+  // consistent canonicalization.
+  const realpath = realpathSync.native ?? realpathSync;
   let canonicalSessionRoot = sessionRoot;
   try {
-    canonicalSessionRoot = realpathSync(sessionRoot);
+    canonicalSessionRoot = realpath(sessionRoot);
   } catch {
     // path does not exist — keep the raw value; the service will reject it
   }
