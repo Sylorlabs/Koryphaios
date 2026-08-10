@@ -8,6 +8,7 @@ import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
+import { wsStore } from './websocket.svelte';
 
 const LAST_SESSION_KEY = 'koryphaios-last-session';
 const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
@@ -32,7 +33,10 @@ function loadNewChatBehavior(): NewChatBehavior {
     localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, 'always-create');
     return 'always-create';
   } catch (err: unknown) {
-    console.debug('Failed to persist new chat behavior:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to persist new chat behavior:',
+      err instanceof Error ? err.message : String(err),
+    );
     return 'always-create';
   }
 }
@@ -46,7 +50,10 @@ function setNewChatBehavior(behavior: NewChatBehavior): void {
     localStorage.setItem(NEW_CHAT_BEHAVIOR_KEY, behavior);
   } catch (err: unknown) {
     // Keep the in-memory preference when storage is unavailable.
-    console.debug('Failed to persist new chat behavior:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to persist new chat behavior:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -57,7 +64,10 @@ function loadLastSession(): string {
     const stored = localStorage.getItem(LAST_SESSION_KEY);
     return stored || '';
   } catch (err: unknown) {
-    console.debug('Failed to read last session from localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to read last session from localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
     return '';
   }
 }
@@ -73,7 +83,10 @@ function saveLastSession(id: string): void {
     }
   } catch (err: unknown) {
     // Ignore localStorage errors
-    console.debug('Failed to save last session to localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to save last session to localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }
 
@@ -94,7 +107,10 @@ async function fetchSessions(): Promise<boolean> {
         if (detail && import.meta.env.DEV) console.error('fetchSessions backend error:', detail);
       } catch (err: unknown) {
         /* ignore */
-        console.debug('Failed to parse fetchSessions error body:', err instanceof Error ? err.message : String(err));
+        console.debug(
+          'Failed to parse fetchSessions error body:',
+          err instanceof Error ? err.message : String(err),
+        );
       }
       if (!(res.status === 500 && !text.trim())) {
         if (import.meta.env.DEV)
@@ -110,7 +126,10 @@ async function fetchSessions(): Promise<boolean> {
     try {
       data = JSON.parse(text);
     } catch (err: unknown) {
-      console.debug('Failed to parse sessions response:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse sessions response:',
+        err instanceof Error ? err.message : String(err),
+      );
       return false;
     }
     if (data?.ok && Array.isArray(data.data)) {
@@ -224,7 +243,10 @@ async function createSessionRequest(
     try {
       data = text ? JSON.parse(text) : {};
     } catch (err: unknown) {
-      console.debug('Failed to parse create session response:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse create session response:',
+        err instanceof Error ? err.message : String(err),
+      );
       return null;
     }
     if (data?.ok && data?.data) {
@@ -283,7 +305,10 @@ async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): 
     sessions = sessions.map((session) => (session.id === id ? data.data : session));
     return true;
   } catch (err: unknown) {
-    console.warn('Failed to set interaction mode:', err instanceof Error ? err.message : String(err));
+    console.warn(
+      'Failed to set interaction mode:',
+      err instanceof Error ? err.message : String(err),
+    );
     toastStore.error('Could not change the conversation mode');
     return false;
   }
@@ -302,13 +327,19 @@ async function deleteSession(id: string) {
         detail = body.error ?? '';
       } catch (err: unknown) {
         /* ignore */
-        console.debug('Failed to parse delete session error body:', err instanceof Error ? err.message : String(err));
+        console.debug(
+          'Failed to parse delete session error body:',
+          err instanceof Error ? err.message : String(err),
+        );
       }
       toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
       return;
     }
     deletedSessionIds.add(id);
     sessions = sessions.filter((s) => s.id !== id);
+    // Drop the WS subscription so a reconnect does not replay stale events
+    // for this session and resurrect it in the sidebar.
+    wsStore.unsubscribeFromSession(id);
     if (activeSessionId === id) {
       activeSessionId = sessions[0]?.id ?? '';
       saveLastSession(activeSessionId);
@@ -329,14 +360,20 @@ async function deleteAllSessions(): Promise<boolean> {
       data = text ? JSON.parse(text) : {};
     } catch (err: unknown) {
       /* The status-based fallback below remains actionable. */
-      console.debug('Failed to parse delete all sessions response:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse delete all sessions response:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
     if (!res.ok || !data.ok) {
       toastStore.error(data.error || friendlyHttpError(res.status, 'delete all sessions'));
       return false;
     }
 
-    for (const session of sessions) deletedSessionIds.add(session.id);
+    for (const session of sessions) {
+      deletedSessionIds.add(session.id);
+      wsStore.unsubscribeFromSession(session.id);
+    }
     sessions = [];
     activeSessionId = '';
     saveLastSession('');
@@ -375,7 +412,10 @@ async function fetchMessages(
   try {
     data = text ? JSON.parse(text) : {};
   } catch (err: unknown) {
-    console.debug('Failed to parse messages response:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse messages response:',
+      err instanceof Error ? err.message : String(err),
+    );
     throw new Error('Chat history returned an invalid response.');
   }
   if (!data.ok || !Array.isArray(data.data)) {
@@ -432,6 +472,7 @@ function handleSessionUpdate(session: Session) {
 function handleSessionDeleted(sessionId: string) {
   deletedSessionIds.add(sessionId);
   sessions = sessions.filter((s) => s.id !== sessionId);
+  wsStore.unsubscribeFromSession(sessionId);
   if (activeSessionId === sessionId) {
     activeSessionId = sessions[0]?.id ?? '';
     saveLastSession(activeSessionId);

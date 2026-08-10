@@ -82,7 +82,10 @@ export class WSManager {
     // timer from the terminal-event retry — do not couple them.
     this.heartbeatInterval = setInterval(() => this.heartbeat(), 10_000);
     // Drain queued terminal events on a 2s timer, independent of the heartbeat.
-    this.terminalRetryInterval = setInterval(() => this.drainPendingTerminalEvents(), TERMINAL_RETRY_MS);
+    this.terminalRetryInterval = setInterval(
+      () => this.drainPendingTerminalEvents(),
+      TERMINAL_RETRY_MS,
+    );
   }
 
   add(ws: ServerWebSocket<WSClientData>) {
@@ -132,7 +135,10 @@ export class WSManager {
             client.ws.close();
           } catch (err: unknown) {
             /* Expected: socket may already be closed */
-            serverLog.debug({ clientId: id, err: err instanceof Error ? err.message : String(err) }, 'WebSocket close failed during inactive client termination');
+            serverLog.debug(
+              { clientId: id, err: err instanceof Error ? err.message : String(err) },
+              'WebSocket close failed during inactive client termination',
+            );
           }
           this.clients.delete(id);
           continue;
@@ -149,7 +155,10 @@ export class WSManager {
             client.ws.close();
           } catch (err: unknown) {
             /* Expected: socket may already be closed */
-            serverLog.debug({ clientId: id, err: err instanceof Error ? err.message : String(err) }, 'WebSocket close failed after ping failure');
+            serverLog.debug(
+              { clientId: id, err: err instanceof Error ? err.message : String(err) },
+              'WebSocket close failed after ping failure',
+            );
           }
         }
       }
@@ -165,6 +174,12 @@ export class WSManager {
   ) {
     const client = this.clients.get(clientId);
     if (!client) return;
+    // Never subscribe a client to or replay events for a session that has
+    // been erased.  The ordered event log still holds rows for deleted
+    // sessions (only the cursor/cause metadata is cleared), so without this
+    // guard a reconnect would replay stale `session.updated` events and
+    // resurrect the deleted chat in the frontend sidebar.
+    if (this.erasedSessions.has(sessionId)) return;
     client.subscribedSessions.add(sessionId);
 
     // Reconnects and full page refreshes recover every event that was durably

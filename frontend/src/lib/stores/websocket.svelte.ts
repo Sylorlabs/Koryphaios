@@ -1124,6 +1124,14 @@ function subscribeToSession(sessionId: string) {
   );
 }
 
+/** Remove a session from the subscription set so a WS reconnect does not
+ *  re-subscribe to (and replay stale events for) a deleted chat. */
+function unsubscribeFromSession(sessionId: string) {
+  subscribedSessions.delete(sessionId);
+  sentSessionSubscriptions.delete(sessionId);
+  realtimeCursors.delete(sessionId);
+}
+
 function disconnect() {
   shouldReconnect = false;
   connectGeneration++;
@@ -1523,6 +1531,7 @@ export const wsStore = {
   setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,
+  unsubscribeFromSession,
   clearFeed,
   activateSessionFeed,
   rewind,
