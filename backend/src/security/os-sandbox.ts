@@ -352,6 +352,12 @@ function spawnMacSandbox(
     // process model is per-line. When blockSubprocesses is true we omit
     // this allow, which causes the default-deny to block fork/exec.
     ...(opts.blockSubprocesses ? [] : ['(allow process*)']),
+    // Mach IPC is required for many macOS system calls (e.g. looking up
+    // system services, getting the current time via mach_absolute_time,
+    // and dynamic linker resolution). Without this, even simple commands
+    // like `touch` fail with "Operation not permitted".
+    '(allow mach*)',
+    '(allow iokit*)',
     '(allow signal)',
     '(allow sysctl-read)',
     '(allow file-read-metadata)',

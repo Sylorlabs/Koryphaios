@@ -1193,7 +1193,12 @@ describe('Shadow Repo Isolation', () => {
         });
         expect(new TextDecoder().decode(noWarning.stderr)).not.toContain('alternate object path');
         expect(
-          gitOutputShadow(canonicalRepo, 'for-each-ref', '--format=%(refname)', 'refs/kory/metadata'),
+          gitOutputShadow(
+            canonicalRepo,
+            'for-each-ref',
+            '--format=%(refname)',
+            'refs/kory/metadata',
+          ),
         ).toContain(hash);
       } finally {
         rmSync(repo, { recursive: true, force: true });

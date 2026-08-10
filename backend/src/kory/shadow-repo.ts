@@ -247,10 +247,17 @@ export class ShadowRepo {
           );
         }
 
-        for (const [key, value] of [
+        const shadowConfigEntries: Array<readonly [string, string]> = [
           ['core.fsync', 'all'],
           ['core.fsyncMethod', 'fsync'],
-        ] as const) {
+        ];
+        // Windows rejects paths longer than MAX_PATH (260) by default. Shadow
+        // ref paths like refs/kory/checkpoints/<sha256>/<timestamp-sha256>
+        // routinely exceed that limit, so enable long paths on Windows.
+        if (process.platform === 'win32') {
+          shadowConfigEntries.push(['core.longpaths', 'true']);
+        }
+        for (const [key, value] of shadowConfigEntries) {
           const configured = await shadowGit.exec(['config', key, value]);
           if (!configured.success) {
             throw new ShadowRepoError(

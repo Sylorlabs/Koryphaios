@@ -65,7 +65,16 @@ afterAll(() => {
   // Cleanup
   kory?.cancel();
   if (existsSync(TEST_DIR)) {
-    rmSync(TEST_DIR, { recursive: true });
+    // On Windows, file handles (e.g. SQLite) may still be held briefly
+    // after cancel. Retry with backoff to avoid EBUSY.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        rmSync(TEST_DIR, { recursive: true });
+        break;
+      } catch {
+        if (attempt === 4) throw new Error(`Failed to clean up ${TEST_DIR}`);
+      }
+    }
   }
 });
 
