@@ -110,10 +110,15 @@ function discoverSessionDirectories(root: string): string[] {
     if (!existsSync(namespaceRoot)) continue;
     assertOwnedDirectory(namespaceRoot, `${namespace} directory`);
     for (const entry of readdirSync(namespaceRoot, { withFileTypes: true })) {
-      assertSessionId(entry.name);
-      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+      // Skip plain files (e.g. legacy .json session metadata from older
+      // storage formats).  Only directories are session file trees.
+      if (!entry.isDirectory()) continue;
+      // Reject symlinks even if they point to a directory — a symlinked
+      // session directory could escape the project root.
+      if (entry.isSymbolicLink()) {
         throw new Error(`Session erasure refused unsafe ${namespace} entry: ${entry.name}`);
       }
+      assertSessionId(entry.name);
       discovered.add(entry.name);
     }
   }

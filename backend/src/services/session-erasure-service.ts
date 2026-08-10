@@ -30,7 +30,8 @@ import {
 } from '../stores/session-erasure';
 import type { WSManager } from '../ws/ws-manager';
 
-export type CoordinatedSessionErasureScope = { kind: 'selected'; sessionId: string } | { kind: 'all' };
+export type CoordinatedSessionErasureScope =
+  { kind: 'selected'; sessionId: string } | { kind: 'all' };
 
 export interface CoordinatedSessionErasureResult {
   operationId: string;
@@ -244,8 +245,10 @@ async function eraseSessionsCoordinatedWithLease(
   );
   const projectRoots = new Set([
     deps.receiptRoot,
-    ...sessions.map((session) => session.workingDirectory?.trim()).filter(Boolean),
-  ] as string[]);
+    ...sessions
+      .map((session) => session.workingDirectory?.trim())
+      .filter((dir): dir is string => !!dir && existsSync(dir)),
+  ]);
   const processLeases = new Map<string, SessionErasureBarrierLease>();
   const managerLeases = new Map<string, ManagerSessionErasureLease>();
   const goalLeases = new Map<string, GoalSessionErasureLease>();
