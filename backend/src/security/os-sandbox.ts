@@ -347,25 +347,42 @@ function spawnMacSandbox(
     `(allow file-read* (subpath "${root}"))\n` +
     `  (allow file-write* (subpath "${root}"))\n` +
     `  (allow file-write-metadata (subpath "${root}"))\n`;
-  // Use an allow-default profile with explicit denies for writes outside
-  // the granted roots and network when requested. This is more permissive
-  // than deny-default but ensures the security boundary (no writes outside
-  // roots, no network when blocked) is enforced. A deny-default profile
-  // requires exhaustively listing every system service and IPC mechanism
-  // that macOS commands need, which is fragile across OS versions.
+  // Use a deny-default profile with broad allows for system operations
+  // and per-root file-write allows. The key insight is that `touch` and
+  // similar commands need broad read and metadata access across the
+  // system (dynamic linker, system frameworks, etc.) but only need
+  // content write access to the granted roots.
   const profileLines: string[] = [
     '(version 1)',
-    '(allow default)',
-    // Deny writes outside the granted roots. The per-root allowFile rules
-    // below re-allow writes within each root.
-    '(deny file-write* (subpath "/"))',
-    '(deny file-write-metadata (subpath "/"))',
+    '(deny default)',
+    // Subprocess spawning: allowed by default because sandbox-exec's
+    // process model is per-line. When blockSubprocesses is true we omit
+    // this allow, which causes the default-deny to block fork/exec.
+    ...(opts.blockSubprocesses ? [] : ['(allow process*)']),
+    // Mach IPC, IOKit, signals, sysctl, and IPC primitives are required
+    // for many macOS system calls. Without these, even simple commands
+    // like `touch` fail with "Operation not permitted".
+    '(allow mach*)',
+    '(allow iokit*)',
+    '(allow signal)',
+    '(allow sysctl-read)',
+    '(allow sysctl-write)',
+    // Allow ALL file reads and metadata operations system-wide. Commands
+    // need to read system libraries, frameworks, and config files from
+    // arbitrary locations. Restricting reads breaks most commands.
+    '(allow file-read*)',
+    '(allow file-read-metadata)',
+    '(allow file-write-metadata)',
+    '(allow file-ioctl)',
+    // IPC primitives needed by the C runtime and system frameworks.
+    '(allow ipc-posix-sem*)',
+    '(allow ipc-posix-shm*)',
+    '(allow ipc-posix-set)',
   ];
 
-  if (opts.blockSubprocesses) {
-    profileLines.push('(deny process*)');
-  }
-
+  // Per-root file write allows. file-write* is not in the broad allows
+  // above, so writes are denied by default and only permitted within
+  // the granted roots.
   for (const root of roots) {
     profileLines.push(allowFile(root));
   }

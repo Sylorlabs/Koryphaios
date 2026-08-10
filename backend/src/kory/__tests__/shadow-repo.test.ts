@@ -1113,7 +1113,11 @@ describe('Shadow Repo Isolation', () => {
         // directory as-is for the current-worktree legacy path. Canonicalize
         // repo so both legacy candidates collapse to the same path instead of
         // appearing as two stores that need manual reconciliation.
-        const canonicalRepo = realpathSync(repo);
+        // On Windows, use realpathSync.native for consistent 8.3 short name
+        // resolution (matching the implementation in shadow-repo.ts).
+        const canonicalResolve =
+          process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
+        const canonicalRepo = canonicalResolve(repo);
         const legacyShadow = join(canonicalRepo, '.koryphaios', 'shadow-git');
         mkdirSync(dirname(legacyShadow), { recursive: true });
         expect(
