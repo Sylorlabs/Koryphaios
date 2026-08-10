@@ -34,7 +34,10 @@ export interface PrivateCliArtifact {
 }
 
 function safeKind(kind: string): string {
-  const normalized = kind.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  const normalized = kind
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return normalized.slice(0, 40) || 'artifact';
 }
 
@@ -56,7 +59,10 @@ function processStartId(pid: number): string | null {
     // Linux /proc stat field 22 is the process start time in clock ticks. The
     // command field may contain spaces, so parse only after its final `)`.
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const tail = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    const tail = stat
+      .slice(stat.lastIndexOf(')') + 2)
+      .trim()
+      .split(/\s+/);
     return tail[19] ?? null;
   } catch {
     return null;
@@ -80,7 +86,11 @@ function readPrivateArtifactOwner(directory: string): PrivateArtifactOwner | nul
   try {
     const path = join(directory, OWNER_FILE);
     const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) return null;
+    // Windows does not support Unix file permissions; skip the mode check
+    // there (the file type and symlink checks still apply).
+    const isWindows = process.platform === 'win32';
+    if (!stat.isFile() || stat.isSymbolicLink() || (!isWindows && (stat.mode & 0o077) !== 0))
+      return null;
     const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<PrivateArtifactOwner>;
     if (!Number.isSafeInteger(parsed.pid) || (parsed.pid ?? 0) <= 0) return null;
     if (parsed.processStartId !== null && typeof parsed.processStartId !== 'string') return null;
@@ -150,7 +160,6 @@ function createPrivateCliArtifact(
   content: Uint8Array,
   extension: string,
 ): PrivateCliArtifact {
-
   pruneStalePrivateCliArtifacts();
   ensurePrivateRoot();
   const directory = mkdtempSync(join(PRIVATE_ROOT, 'run-'));
@@ -160,7 +169,11 @@ function createPrivateCliArtifact(
     JSON.stringify({ pid: process.pid, processStartId: processStartId(process.pid) }),
     { mode: 0o600, flag: 'wx' },
   );
-  const suffix = extension.toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12) || 'txt';
+  const suffix =
+    extension
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '')
+      .slice(0, 12) || 'txt';
   const path = join(directory, `${safeKind(kind)}.${suffix}`);
   writeFileSync(path, content, { mode: 0o600, flag: 'wx' });
 

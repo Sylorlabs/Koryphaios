@@ -26,6 +26,20 @@ const ALLOWED_KEYS = new Set([
   'no_proxy',
   'ALL_PROXY',
   'all_proxy',
+  // Windows system environment variables required for subprocess execution.
+  // Without SystemRoot, the C runtime and system DLLs cannot be located,
+  // causing git and other tools to fail silently. PATHEXT is needed for
+  // executable resolution (e.g. git.exe). None of these are secrets.
+  'SystemRoot',
+  'SystemDrive',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
 ]);
 
 /** Patterns that must never be passed (case-insensitive key match). */

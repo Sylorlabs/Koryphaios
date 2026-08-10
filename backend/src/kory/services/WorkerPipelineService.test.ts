@@ -30,6 +30,11 @@ function makeRepo(prefix: string): string {
   run('init');
   run('config', 'user.email', 'worker-pipeline@test.invalid');
   run('config', 'user.name', 'Worker Pipeline Test');
+  // Windows defaults (core.autocrlf=true, 260-char path limit) break
+  // cross-platform worktree tests: CRLF alters file content after git
+  // operations and long worktree paths exceed the default limit.
+  run('config', 'core.autocrlf', 'false');
+  run('config', 'core.longpaths', 'true');
   writeFileSync(join(root, '.gitignore'), '.trees/\n.koryphaios/\nnode_modules\n');
   writeFileSync(join(root, 'seed.txt'), `${prefix}\n`);
   run('add', '.');

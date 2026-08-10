@@ -41,6 +41,10 @@ describe('process supervisor', () => {
   });
 
   test('Bash background work and shell_manage use the authoritative agent registry', async () => {
+    // Background process lifecycle (sleep, printf) and shell_manage kill
+    // rely on POSIX process-group signal delivery. Windows process killing
+    // differs fundamentally, so skip this contract there.
+    if (process.platform === 'win32') return;
     await processSupervisor.initialize();
     const sessionId = `bash-lifecycle-${Date.now()}`;
     const context = {

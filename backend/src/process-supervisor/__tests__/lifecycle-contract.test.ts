@@ -219,6 +219,11 @@ describe('authoritative process lifecycle contract', () => {
   });
 
   test('TERM-ignoring children keep recovery blocked until group KILL is reaped', async () => {
+    // Process-group signal delivery (SIGTERM/SIGKILL to -pid) and bash `trap`
+    // are Unix-specific. Windows has no equivalent, so skip this contract there.
+    // Use globalThis.process because this test scope shadows `process` with a
+    // local variable below (the started background process record).
+    if (globalThis.process.platform === 'win32') return;
     const instance = fresh({
       terminationGraceMs: 50,
       killReapTimeoutMs: 1_000,

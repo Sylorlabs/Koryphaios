@@ -344,7 +344,9 @@ function spawnMacSandbox(
   // under each root, denies network when requested, and allows subprocess
   // execution (sandbox-exec's process model is per-line, not a hard block).
   const allowFile = (root: string) =>
-    `(allow file-read* (subpath "${root}"))\n  (allow file-write* (subpath "${root}"))\n`;
+    `(allow file-read* (subpath "${root}"))\n` +
+    `  (allow file-write* (subpath "${root}"))\n` +
+    `  (allow file-write-metadata (subpath "${root}"))\n`;
   const profileLines: string[] = [
     '(version 1)',
     '(deny default)',
@@ -361,6 +363,9 @@ function spawnMacSandbox(
     '(allow signal)',
     '(allow sysctl-read)',
     '(allow file-read-metadata)',
+    // IPC primitives needed by the C runtime and system frameworks.
+    '(allow ipc-posix-sem*)',
+    '(allow ipc-posix-shm*)',
     // System reads needed for dynamic linking, locale, etc.
     '(allow file-read* (subpath "/usr"))',
     '(allow file-read* (subpath "/bin"))',
@@ -370,6 +375,15 @@ function spawnMacSandbox(
     '(allow file-read* (subpath "/dev"))',
     '(allow file-read* (subpath "/private/etc"))',
     '(allow file-read* (subpath "/etc"))',
+    // The dyld shared cache lives under /private/var/db/dyld on macOS.
+    // The dynamic linker reads it during process startup; without this
+    // allow, commands like `touch` and `env` fail to launch.
+    '(allow file-read* (subpath "/private/var/db/dyld"))',
+    // /private/tmp and /private/var/folders are used by macOS for per-user
+    // temp dirs and caches. Some system frameworks probe these during launch.
+    '(allow file-read* (subpath "/private/tmp"))',
+    '(allow file-read* (subpath "/private/var/folders"))',
+    '(allow file-read* (subpath "/private/var/db/analyticsd"))',
   ];
 
   for (const root of roots) {

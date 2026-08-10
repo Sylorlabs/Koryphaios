@@ -1199,7 +1199,12 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
         status: 'unavailable',
         reason: unavailableReason,
       });
-      expect(revision.compatibility?.supportingResources[0]).toContain(`/skills/${name}`);
+      // supportingResources uses path.join(), which produces backslashes on
+      // Windows. Normalize to forward slashes so the substring check is
+      // platform-independent.
+      expect(revision.compatibility?.supportingResources[0]?.replaceAll('\\', '/')).toContain(
+        `/skills/${name}`,
+      );
     }
     const preview = resolveSkills(
       root,

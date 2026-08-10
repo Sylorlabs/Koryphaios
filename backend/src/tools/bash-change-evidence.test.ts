@@ -9,6 +9,13 @@ import { BashTool } from './bash';
 const IS_WIN = process.platform === 'win32';
 const testDirectories: string[] = [];
 
+/** Normalize path separators to forward slashes for cross-platform comparison.
+ *  On Windows, Node's resolve/join produce backslash paths while git reports
+ *  forward-slash paths. This helper ensures comparisons are separator-agnostic. */
+function normalizePath(p: string): string {
+  return p.replaceAll('\\', '/');
+}
+
 function makeDirectory(prefix: string): string {
   const root = join(
     tmpdir(),
@@ -122,7 +129,9 @@ describe('Bash foreground changed-file evidence', () => {
       }
     }
 
-    const byName = new Map(changes.map((change) => [change.path.slice(root.length + 1), change]));
+    const byName = new Map(
+      changes.map((change) => [normalizePath(change.path.slice(root.length + 1)), change]),
+    );
     const expectedKeys = IS_WIN
       ? ['created.txt', 'delete.txt', 'edit.txt']
       : ['created.txt', 'delete.txt', 'edit.txt', 'link.txt', 'mode.sh'];
@@ -147,10 +156,8 @@ describe('Bash foreground changed-file evidence', () => {
 
     expect(result.isError).toBe(false);
     expect(changes).toHaveLength(1);
-    expect(changes[0]).toMatchObject({
-      path: join(root, 'edit.txt'),
-      operation: 'edit',
-    });
+    expect(normalizePath(changes[0]!.path)).toBe(normalizePath(join(root, 'edit.txt')));
+    expect(changes[0]!.operation).toBe('edit');
   });
 
   test('records edits made before command failure and timeout', async () => {
@@ -159,8 +166,11 @@ describe('Bash foreground changed-file evidence', () => {
 
     const failed = await runBash(root, "printf 'failed\\n' > failed.txt; false");
     expect(failed.result.isError).toBe(true);
-    expect(failed.changes).toContainEqual(
-      expect.objectContaining({ path: join(root, 'failed.txt'), operation: 'create' }),
+    expect(failed.changes.map((c) => ({ ...c, path: normalizePath(c.path) }))).toContainEqual(
+      expect.objectContaining({
+        path: normalizePath(join(root, 'failed.txt')),
+        operation: 'create',
+      }),
     );
 
     const timedOut = await runBash(root, "printf 'timed out\\n' > timeout.txt; sleep 1", {
@@ -168,8 +178,11 @@ describe('Bash foreground changed-file evidence', () => {
     });
     expect(timedOut.result.isError).toBe(true);
     expect(timedOut.result.output).toContain('timed out');
-    expect(timedOut.changes).toContainEqual(
-      expect.objectContaining({ path: join(root, 'timeout.txt'), operation: 'create' }),
+    expect(timedOut.changes.map((c) => ({ ...c, path: normalizePath(c.path) }))).toContainEqual(
+      expect.objectContaining({
+        path: normalizePath(join(root, 'timeout.txt')),
+        operation: 'create',
+      }),
     );
   });
 

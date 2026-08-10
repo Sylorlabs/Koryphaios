@@ -27,7 +27,7 @@ import {
   symlinkSync,
   utimesSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const TEST_DIR = join(
@@ -207,13 +207,17 @@ describe('Shadow Repo Isolation', () => {
         // ShadowRepo.repositoryContext resolves paths through realpathSync.
         // On macOS, tmpdir() may be under a symlinked root (e.g. /var →
         // /private/var), so canonicalize mainDir before comparing.
+        // On Windows, tmpdir() may use an 8.3 short name (e.g. RUNNER~1)
+        // while realpathSync resolves it to the long name (runneradmin).
+        // Git writes the alternates entry using the short name, so
+        // canonicalize the resolved path before comparing.
         const canonicalMainDir = realpathSync(mainDir);
         const shadowObjects = join(ShadowRepo.shadowPath(linkedDir), 'objects');
         const alternateEntry = readFileSync(
           join(shadowObjects, 'info', 'alternates'),
           'utf-8',
         ).trim();
-        expect(resolve(shadowObjects, alternateEntry)).toBe(
+        expect(realpathSync(resolve(shadowObjects, alternateEntry))).toBe(
           join(canonicalMainDir, '.git', 'objects'),
         );
         expect(ShadowRepo.shadowPath(linkedDir)).toBe(
@@ -1180,11 +1184,15 @@ describe('Shadow Repo Isolation', () => {
           join(ShadowRepo.shadowObjectsPath(canonicalRepo), 'info', 'alternates'),
           'utf-8',
         ).trim();
+        // Git always writes alternates entries with forward slashes (see
+        // ShadowRepo.writeShadowAlternate, which calls .replaceAll('\\', '/')).
+        // On Windows, path.relative() produces backslashes, so normalize the
+        // expected value to forward slashes for a platform-independent match.
         expect(migratedAlternate).toBe(
           relative(
             ShadowRepo.shadowObjectsPath(canonicalRepo),
             join(canonicalRepo, '.git', 'objects'),
-          ),
+          ).split(sep).join('/'),
         );
         const noWarning = spawnSync(['git', 'fsck', '--no-progress'], {
           cwd: canonicalRepo,

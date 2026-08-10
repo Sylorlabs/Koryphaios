@@ -16,7 +16,7 @@
  * All filesystem operations use fs/promises — the event loop is never blocked.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readFile, writeFile, appendFile, readdir, symlink } from 'node:fs/promises';
 import { join, resolve, relative } from 'node:path';
 import { koryLog, serverLog } from '../logger';
@@ -132,10 +132,30 @@ export class WorkspaceManager {
     const manifestById = new Map(manifest.worktrees.map((wt) => [wt.id, wt]));
 
     for (const wt of allWorktrees) {
-      const absoluteWtPath = resolve(wt.path);
-      if (!absoluteWtPath.startsWith(worktreeBaseDir)) continue;
+      // On Windows, `git worktree list --porcelain` may report paths using
+      // 8.3 short names (e.g. RUNNER~1) while the WorkspaceManager was
+      // constructed with the canonical long name (e.g. runneradmin). The
+      // startsWith prefix check below would silently skip every worktree,
+      // causing hasWorktree() to return false after a restart. Canonicalize
+      // both sides through realpathSync so the comparison is consistent.
+      let absoluteWtPath = resolve(wt.path);
+      try {
+        absoluteWtPath = realpathSync(absoluteWtPath);
+      } catch {
+        // realpathSync fails if the path doesn't exist (e.g. a stale
+        // worktree entry). Keep the resolved path so the startsWith check
+        // can still filter it out naturally.
+      }
+      let canonicalBaseDir = worktreeBaseDir;
+      try {
+        canonicalBaseDir = realpathSync(worktreeBaseDir);
+      } catch {
+        // worktreeBaseDir may not exist yet on first run; fall back to the
+        // resolved path.
+      }
+      if (!absoluteWtPath.startsWith(canonicalBaseDir)) continue;
 
-      const taskId = relative(worktreeBaseDir, absoluteWtPath);
+      const taskId = relative(canonicalBaseDir, absoluteWtPath);
       if (!taskId || taskId.includes('/') || taskId.includes('\\') || taskId.includes('..'))
         continue;
 

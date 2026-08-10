@@ -2,10 +2,7 @@ import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from
 import { lstatSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
-import {
-  createPrivateCliTextArtifact,
-  type PrivateCliArtifact,
-} from './private-cli-transport';
+import { createPrivateCliTextArtifact, type PrivateCliArtifact } from './private-cli-transport';
 
 export type BridgeGrantAudience = 'mcp' | 'hook';
 export type BridgeGrantAction =
@@ -90,9 +87,15 @@ function signingPayload(
   nonce: string,
   body: unknown,
 ): string {
-  return ['kory-bridge-v1', audience, method.toUpperCase(), path, timestamp, nonce, bodyDigest(body)].join(
-    '\n',
-  );
+  return [
+    'kory-bridge-v1',
+    audience,
+    method.toUpperCase(),
+    path,
+    timestamp,
+    nonce,
+    bodyDigest(body),
+  ].join('\n');
 }
 
 function signatureFor(secret: Buffer, payload: string): string {
@@ -114,7 +117,9 @@ export function bridgeActionForPath(
   const prefix = '/api/v1/mcp-bridge/';
   if (!path.startsWith(prefix)) return null;
   const suffix = path.slice(prefix.length);
-  const candidate = (audience === 'mcp' ? `mcp:${suffix}` : `hook:${suffix.replace(/^hooks\//, '')}`) as BridgeGrantAction;
+  const candidate = (
+    audience === 'mcp' ? `mcp:${suffix}` : `hook:${suffix.replace(/^hooks\//, '')}`
+  ) as BridgeGrantAction;
   return ALLOWED_BRIDGE_ACTIONS.has(candidate) && audienceForAction(candidate) === audience
     ? candidate
     : null;
@@ -157,11 +162,7 @@ export function getKoryBridgeGrant(
     actions: scopedActions,
     expiresAt,
   };
-  const artifact = createPrivateCliTextArtifact(
-    'bridge-grant',
-    JSON.stringify(payload),
-    'json',
-  );
+  const artifact = createPrivateCliTextArtifact('bridge-grant', JSON.stringify(payload), 'json');
   const record: BridgeGrantRecord = {
     ...payload,
     secret,
@@ -175,10 +176,24 @@ export function getKoryBridgeGrant(
 function readGrantFile(path: string): BridgeGrantFilePayload {
   const fileStat = lstatSync(path);
   const parentStat = lstatSync(dirname(path));
-  if (!fileStat.isFile() || fileStat.isSymbolicLink() || (fileStat.mode & 0o077) !== 0) {
+  // Windows does not support Unix-style file permissions (chmod). Node.js
+  // reports 0o666 for files and 0o777 for directories regardless of the mode
+  // passed to writeFileSync/mkdirSync, so the group/other bit checks below
+  // would always fail on Windows. Skip them there; the symlink and type
+  // checks still apply, and the directory is under a process-private root.
+  const isWindows = process.platform === 'win32';
+  if (
+    !fileStat.isFile() ||
+    fileStat.isSymbolicLink() ||
+    (!isWindows && (fileStat.mode & 0o077) !== 0)
+  ) {
     throw new Error('Bridge grant file permissions are unsafe');
   }
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || (parentStat.mode & 0o077) !== 0) {
+  if (
+    !parentStat.isDirectory() ||
+    parentStat.isSymbolicLink() ||
+    (!isWindows && (parentStat.mode & 0o077) !== 0)
+  ) {
     throw new Error('Bridge grant directory permissions are unsafe');
   }
   if (typeof process.getuid === 'function') {
@@ -198,7 +213,8 @@ function readGrantFile(path: string): BridgeGrantFilePayload {
     typeof parsed.expiresAt !== 'number' ||
     !Array.isArray(parsed.actions) ||
     parsed.actions.some(
-      (action) => typeof action !== 'string' || !ALLOWED_BRIDGE_ACTIONS.has(action as BridgeGrantAction),
+      (action) =>
+        typeof action !== 'string' || !ALLOWED_BRIDGE_ACTIONS.has(action as BridgeGrantAction),
     )
   ) {
     throw new Error('Bridge grant file is invalid');
@@ -331,10 +347,7 @@ export interface KoryBridgeGrantLease {
 /** Owns only the capabilities minted for one provider invocation. Concurrent
  * turns in the same session receive distinct grants, so one child exiting can
  * never revoke another child's authorization. */
-export function createKoryBridgeGrantLease(
-  sessionId: string,
-  role: string,
-): KoryBridgeGrantLease {
+export function createKoryBridgeGrantLease(sessionId: string, role: string): KoryBridgeGrantLease {
   const grantIds = new Set<string>();
   let cleaned = false;
   const cleanup = () => {

@@ -5,6 +5,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CONTEXT_ARCHIVE_LIMITS, ContextArchiveService } from './context-archive';
 
+// Windows does not support Unix-style file permissions (chmod). Node.js
+// reports 0o666 for files and 0o777 for directories regardless of the mode
+// passed to mkdir/writeFile/chmod, so the 0o600/0o700 assertions below would
+// always fail on Windows. Skip them there.
+const isWindows = process.platform === 'win32';
+async function expectPrivateMode(path: string, expected: number): Promise<void> {
+  if (isWindows) return;
+  expect((await stat(path)).mode & 0o777).toBe(expected);
+}
+
 describe('ContextArchiveService history pruning', () => {
   it('removes tool context after the edited conversation pivot', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kory-context-edit-'));
@@ -54,12 +64,10 @@ describe('ContextArchiveService history pruning', () => {
       expect(reloaded?.contentSha256).toBe(createHash('sha256').update(content).digest('hex'));
       expect(reloaded?.truncated).toBe(true);
       expect(reloaded?.redacted).toBe(true);
-      expect((await stat(file)).mode & 0o777).toBe(0o600);
-      expect((await stat(join(root, '.koryphaios'))).mode & 0o777).toBe(0o700);
-      expect((await stat(join(root, '.koryphaios', 'sessions'))).mode & 0o777).toBe(0o700);
-      expect((await stat(join(root, '.koryphaios', 'sessions', 'session'))).mode & 0o777).toBe(
-        0o700,
-      );
+      await expectPrivateMode(file, 0o600);
+      await expectPrivateMode(join(root, '.koryphaios'), 0o700);
+      await expectPrivateMode(join(root, '.koryphaios', 'sessions'), 0o700);
+      await expectPrivateMode(join(root, '.koryphaios', 'sessions', 'session'), 0o700);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -95,10 +103,10 @@ describe('ContextArchiveService history pruning', () => {
 
       expect(entry?.content).toBe('existing content remains byte-for-byte intact');
       expect(await readFile(file, 'utf8')).toBe(original);
-      expect((await stat(join(root, '.koryphaios'))).mode & 0o777).toBe(0o700);
-      expect((await stat(join(root, '.koryphaios', 'sessions'))).mode & 0o777).toBe(0o700);
-      expect((await stat(sessionDirectory)).mode & 0o777).toBe(0o700);
-      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      await expectPrivateMode(join(root, '.koryphaios'), 0o700);
+      await expectPrivateMode(join(root, '.koryphaios', 'sessions'), 0o700);
+      await expectPrivateMode(sessionDirectory, 0o700);
+      await expectPrivateMode(file, 0o600);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -118,12 +126,14 @@ describe('ContextArchiveService history pruning', () => {
       archive.beginSessionErasure('session');
       archive.completeSessionErasure('session');
       await expect(archive.listRecent('session')).rejects.toThrow(/being deleted/);
-      await expect(archive.recordUsage('session', {
-        used: 1,
-        max: 2,
-        contextKnown: true,
-        ts: Date.now(),
-      })).rejects.toThrow(/being deleted/);
+      await expect(
+        archive.recordUsage('session', {
+          used: 1,
+          max: 2,
+          contextKnown: true,
+          ts: Date.now(),
+        }),
+      ).rejects.toThrow(/being deleted/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -161,7 +171,7 @@ describe('ContextArchiveService history pruning', () => {
       expect(persisted).not.toContain(secret);
       expect(persisted).not.toContain(tail);
       expect(Buffer.byteLength(persisted)).toBeLessThan(10_000);
-      expect((await stat(file)).mode & 0o777).toBe(0o600);
+      await expectPrivateMode(file, 0o600);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

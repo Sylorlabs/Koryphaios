@@ -14,6 +14,10 @@ const supervisorModule = await import('../supervisor');
 
 describe('process restart recovery database boundary', () => {
   test('rejects initialization instead of treating a failed active-process read as empty', async () => {
+    // The test spawns /bin/sh and uses POSIX process-group signals
+    // (process.kill(-pid, 0/SIGKILL)) to verify orphan ownership. Windows
+    // has no /bin/sh and no process-group signal delivery, so skip there.
+    if (process.platform === 'win32') return;
     database.initProcessSupervisorTables();
     const directory = mkdtempSync(join(tmpdir(), 'kory-recovery-db-failure-'));
     const child = Bun.spawn(['/bin/sh', '-c', 'while :; do sleep 1; done'], {

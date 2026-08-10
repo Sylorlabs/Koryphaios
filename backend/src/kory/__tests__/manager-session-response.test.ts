@@ -68,9 +68,27 @@ function managerState(manager: KoryManager): SessionStateService {
   return (manager as unknown as { state: SessionStateService }).state;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const directory of testDirectories.splice(0)) {
-    if (existsSync(directory)) rmSync(directory, { recursive: true, force: true });
+    if (!existsSync(directory)) continue;
+    // On Windows, file handles (e.g. SQLite, git index locks) may still be
+    // held briefly after the test completes. Retry with backoff to avoid
+    // EBUSY during cleanup.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        rmSync(directory, { recursive: true, force: true });
+        break;
+      } catch (err) {
+        if (attempt === 4) {
+          // Last attempt failed — surface the error so CI doesn't silently
+          // leak temp directories, but don't mask the original test failure.
+          console.error(`Failed to clean up ${directory}:`, err);
+        } else {
+          // Brief backoff so the OS can release lingering file handles.
+          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        }
+      }
+    }
   }
 });
 
