@@ -384,22 +384,32 @@ export class ShadowRepo {
       }
     }
 
+    // Use realpathSync.native on Windows for consistent 8.3 short name
+    // resolution (GetFinalPathNameByHandleW). On other platforms, use the
+    // default realpathSync to avoid macOS /var → /private/var resolution
+    // differences with the native version.
+    const canonicalResolve =
+      process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
     try {
-      // On Windows, realpathSync may not consistently resolve 8.3 short
-      // names (e.g. RUNNER~1 vs runneradmin). Use realpathSync.native
-      // (GetFinalPathNameByHandleW) for consistent canonicalization.
-      // On other platforms, native === sync so this is a no-op.
-      const realpath =
-        process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
-      commonGitDir = realpath(commonGitDir);
-      gitDir = realpath(gitDir);
+      commonGitDir = canonicalResolve(commonGitDir);
+      gitDir = canonicalResolve(gitDir);
     } catch {
       return null;
     }
 
+    // Canonicalize root the same way as commonGitDir/gitDir to avoid
+    // 8.3 short name mismatches on Windows (e.g. RUNNER~1 vs runneradmin)
+    // that would cause legacyShadows to contain duplicate entries.
+    let canonicalRoot = root;
+    try {
+      canonicalRoot = canonicalResolve(root);
+    } catch {
+      // root always exists at this point; fall back to resolved path
+    }
+
     const storageRoot = join(commonGitDir, SHADOW_STORAGE_DIRECTORY);
     const mainWorktreeLegacy = join(dirname(commonGitDir), '.koryphaios', 'shadow-git');
-    const currentWorktreeLegacy = join(root, '.koryphaios', 'shadow-git');
+    const currentWorktreeLegacy = join(canonicalRoot, '.koryphaios', 'shadow-git');
 
     return {
       gitDir,
