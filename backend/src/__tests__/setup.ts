@@ -8,7 +8,7 @@ import { beforeAll, afterAll } from 'bun:test';
 
 // Global test configuration
 process.env.NODE_ENV = 'test';
-process.env.KORYPHAIOS_DATA_DIR = '/tmp/koryphaios-test';
+process.env.KORYPHAIOS_DATA_DIR = '/tmp/koryphaios/test-data';
 
 // Clean up function
 export async function cleanup(): Promise<void> {

@@ -134,7 +134,7 @@ function main() {
       testIndex++;
       const display = relative(PROJECT_ROOT, testFile).split(sep).join('/');
       console.log(`Testing ${display}`);
-      const dbUrl = `sqlite:${join(testDbDir, `${testIndex}.db`)}`;
+      const dbUrl = `sqlite:${join(testDbDir, 'db', `${testIndex}.db`)}`;
 
       const result = spawnSync(
         process.execPath,
