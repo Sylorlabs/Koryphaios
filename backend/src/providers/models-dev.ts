@@ -23,9 +23,6 @@ const PROVIDER_KEY: Record<string, string> = {
   google: 'google',
   gemini: 'google',
   aistudio: 'google',
-  // Antigravity is a Google CLI harness — its models are Gemini/Claude/GPT
-  // and models.dev has the real context windows under the google key.
-  antigravity: 'google',
   vertexai: 'google',
   xai: 'xai',
   deepseek: 'deepseek',
@@ -78,7 +75,6 @@ const PRICING_PROVIDER_KEY: Record<string, string> = {
   google: 'google',
   gemini: 'google',
   aistudio: 'google',
-  antigravity: 'google',
   vertexai: 'google',
   xai: 'xai',
   deepseek: 'deepseek',
@@ -200,18 +196,11 @@ export function applyModelsDevMetadata(providerName: string, models: ModelDef[])
     const rawId = m.apiModelId ?? m.id;
     // Strip the Koryphaios provider prefix (e.g. "opencodezen.claude-sonnet-4" → "claude-sonnet-4")
     const bare = rawId.replace(new RegExp(`^${providerName}\\.`), '');
-    // Some CLIs (e.g. antigravity) append a reasoning-effort suffix
-    // (-high/-medium/-low) to the model name.  Strip it so the base
-    // model matches the models.dev catalog key.
-    const strippedEffort = bare.replace(/-(high|medium|low)$/i, '');
-    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids),
-    // effort-stripped, effort-stripped lowercased
+    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids)
     const candidates = [
       bare,
       bare.toLowerCase(),
       bare.includes('/') ? bare.split('/').pop()! : '',
-      strippedEffort,
-      strippedEffort.toLowerCase(),
       rawId,
       rawId.toLowerCase(),
     ].filter(Boolean);

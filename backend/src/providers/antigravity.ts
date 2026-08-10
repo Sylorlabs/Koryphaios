@@ -49,7 +49,6 @@ import {
   fetchAntigravityQuotaGroups,
   type AntigravityQuotaGroup,
 } from './antigravity-quota';
-import { applyModelsDevMetadata, warmModelsDevCache } from './models-dev';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
 import {
@@ -160,13 +159,7 @@ function refreshModelsInBackground(): void {
   if (!bin) return;
 
   modelsFetchInProgress = true;
-  Promise.all([
-    fetchAgyModels(bin),
-    fetchAntigravityQuotaGroups(),
-    // Warm the models.dev cache so enrichment is available synchronously
-    // when we merge the model list below.
-    warmModelsDevCache(),
-  ])
+  Promise.all([fetchAgyModels(bin), fetchAntigravityQuotaGroups()])
     .then(([models, groups]) => {
       if (models.length > 0) {
         cachedQuotaGroups = groups;
@@ -187,10 +180,7 @@ function refreshModelsInBackground(): void {
           }
         }
         cachedQuota = quotaMap;
-        // Enrich with real context windows and reasoning tiers from models.dev
-        // (agy models only reports cliName + displayName, not token limits).
-        const enriched = applyModelsDevMetadata('antigravity', models);
-        cachedModels = mergeQuotaIntoModels(enriched, quotaMap);
+        cachedModels = mergeQuotaIntoModels(models, quotaMap);
         cachedModelsAt = Date.now();
       }
     })
