@@ -385,10 +385,12 @@ export class ShadowRepo {
     }
 
     try {
-      // Use realpathSync.native for consistent 8.3 short name resolution
-      // on Windows (GetFinalPathNameByHandleW). On other platforms,
-      // native === sync.
-      const realpath = realpathSync.native ?? realpathSync;
+      // On Windows, realpathSync may not consistently resolve 8.3 short
+      // names (e.g. RUNNER~1 vs runneradmin). Use realpathSync.native
+      // (GetFinalPathNameByHandleW) for consistent canonicalization.
+      // On other platforms, native === sync so this is a no-op.
+      const realpath =
+        process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
       commonGitDir = realpath(commonGitDir);
       gitDir = realpath(gitDir);
     } catch {

@@ -175,9 +175,13 @@ export class WorkerPipelineService {
 
   private async canonicalDirectory(path: string, label: string): Promise<string> {
     if (!path?.trim()) throw new Error(`${label} is empty`);
-    // Use realpathSync.native for consistent 8.3 short name resolution on
-    // Windows (GetFinalPathNameByHandleW). On other platforms, native === sync.
-    const canonicalResolve = realpathSync.native ?? realpathSync;
+    // On Windows, use realpathSync.native for consistent 8.3 short name
+    // resolution (GetFinalPathNameByHandleW). On other platforms, use the
+    // default realpathSync to avoid behavior differences with the native
+    // version (especially on macOS where /var → /private/var symlinks can
+    // be resolved differently).
+    const canonicalResolve =
+      process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
     const canonical = canonicalResolve(resolve(path));
     const info = await stat(canonical);
     if (!info.isDirectory()) throw new Error(`${label} is not a directory: ${canonical}`);

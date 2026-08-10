@@ -219,9 +219,10 @@ describe('Shadow Repo Isolation', () => {
         ).trim();
         // On Windows, realpathSync may not consistently resolve 8.3 short
         // names (e.g. RUNNER~1 vs runneradmin). Use realpathSync.native
-        // (GetFinalPathNameByHandleW on Windows) for consistent
-        // canonicalization on both sides of the comparison.
-        const realpath = realpathSync.native ?? realpathSync;
+        // (GetFinalPathNameByHandleW) on Windows for consistent
+        // canonicalization. On other platforms, use default realpathSync.
+        const realpath =
+          process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
         const resolvedAlternate = realpath(resolve(shadowObjects, alternateEntry));
         const expectedObjectsDir = realpath(join(canonicalMainDir, '.git', 'objects'));
         expect(resolvedAlternate).toBe(expectedObjectsDir);

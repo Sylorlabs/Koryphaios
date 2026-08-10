@@ -137,8 +137,10 @@ export class WorkspaceManager {
       // constructed with the canonical long name (e.g. runneradmin), or vice
       // versa. realpathSync may not consistently resolve 8.3 names on Windows,
       // so use realpathSync.native (which calls GetFinalPathNameByHandleW)
-      // for consistent canonicalization. On other platforms, native === sync.
-      const realpath = realpathSync.native ?? realpathSync;
+      // for consistent canonicalization. On other platforms, use the default
+      // realpathSync to avoid behavior differences with the native version.
+      const realpath =
+        process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
       let absoluteWtPath = resolve(wt.path);
       try {
         absoluteWtPath = realpath(absoluteWtPath);

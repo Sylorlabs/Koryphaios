@@ -70,8 +70,10 @@ function createHost(
   // path does not exist (the "missing project" test relies on this).
   // On Windows, realpathSync may not consistently resolve 8.3 short names
   // (e.g. RUNNER~1 vs runneradmin), so use realpathSync.native for
-  // consistent canonicalization.
-  const realpath = realpathSync.native ?? realpathSync;
+  // consistent canonicalization. On other platforms, use default
+  // realpathSync to avoid macOS /var → /private/var resolution issues.
+  const realpath =
+    process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
   let canonicalSessionRoot = sessionRoot;
   try {
     canonicalSessionRoot = realpath(sessionRoot);

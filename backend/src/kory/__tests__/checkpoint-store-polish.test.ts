@@ -610,8 +610,10 @@ describe('CheckpointStore polish features', () => {
       // On Windows, realpathSync may return 8.3 short names (RUNNER~1) for
       // one path and long names (runneradmin) for the other. Use
       // realpathSync.native (GetFinalPathNameByHandleW) for consistent
-      // canonicalization on both sides.
-      const realpath = realpathSync.native ?? realpathSync;
+      // canonicalization on Windows. On other platforms, use default
+      // realpathSync to avoid macOS /var → /private/var resolution issues.
+      const realpath =
+        process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
       expect(path ? realpath(path) : null).toBe(realpath(worktree!.path));
 
       // Clean up

@@ -20,7 +20,8 @@ function normalizePath(p: string): string {
  *  Use this when comparing absolute paths that may have been produced by
  *  different tools (e.g. Node.js vs git). */
 function canonicalPath(p: string): string {
-  const realpath = realpathSync.native ?? realpathSync;
+  const realpath =
+    process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
   try {
     return normalizePath(realpath(p));
   } catch {
@@ -141,15 +142,14 @@ describe('Bash foreground changed-file evidence', () => {
       }
     }
 
-    // Canonicalize root for the slice operation: on Windows, change.path
-    // may use the long name (runneradmin) while root uses the 8.3 short
-    // name (RUNNER~1), causing the slice to cut at the wrong position.
+    // On Windows, change.path may use the long name (runneradmin) while
+    // root uses the 8.3 short name (RUNNER~1). Canonicalize root to match
+    // the form used in change.path, then slice. Don't canonicalize
+    // change.path itself because that would resolve symlinks (e.g.
+    // link.txt → target-b), breaking the byName key.
     const canonicalRoot = canonicalPath(root);
     const byName = new Map(
-      changes.map((change) => [
-        normalizePath(canonicalPath(change.path).slice(canonicalRoot.length + 1)),
-        change,
-      ]),
+      changes.map((change) => [normalizePath(change.path.slice(canonicalRoot.length + 1)), change]),
     );
     const expectedKeys = IS_WIN
       ? ['created.txt', 'delete.txt', 'edit.txt']
