@@ -15,6 +15,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli-accounts';
 import { CodexAppServer } from '../providers/codex-app-server';
+import { getUsageSamplesByProvider } from '../credit-accountant';
+import { getContext } from '../context';
 import { serverLog } from '../logger';
 
 export interface UsageWindow {
@@ -73,7 +75,11 @@ interface UsageSample {
 
 function isReportedModel(model: string): boolean {
   const value = model.trim();
-  return value.length > 0 && !value.startsWith('<') && !/(?:^|[-_])(unknown|synthetic|null|undefined)$/i.test(value);
+  return (
+    value.length > 0 &&
+    !value.startsWith('<') &&
+    !/(?:^|[-_])(unknown|synthetic|null|undefined)$/i.test(value)
+  );
 }
 
 function hasReportedUsage(samples: UsageSample[]): boolean {
@@ -96,7 +102,10 @@ async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<
     } catch (err: unknown) {
       // Expected: directory may vanish between existsSync and readdir, or be
       // unreadable. Skipping it is safe — we just lose those session files.
-      serverLog.debug({ dir, err: err instanceof Error ? err.message : String(err) }, 'walkJsonlAsync: readdir skipped');
+      serverLog.debug(
+        { dir, err: err instanceof Error ? err.message : String(err) },
+        'walkJsonlAsync: readdir skipped',
+      );
       continue;
     }
     for (const e of entries) {
@@ -107,7 +116,10 @@ async function* walkJsonlAsync(root: string, newerThan: number): AsyncGenerator<
           if ((await stat(full)).mtimeMs >= newerThan) yield full;
         } catch (err: unknown) {
           // Expected: file was removed or renamed between readdir and stat.
-          serverLog.debug({ full, err: err instanceof Error ? err.message : String(err) }, 'walkJsonlAsync: stat skipped (raced)');
+          serverLog.debug(
+            { full, err: err instanceof Error ? err.message : String(err) },
+            'walkJsonlAsync: stat skipped (raced)',
+          );
         }
       }
     }
@@ -122,7 +134,10 @@ function* walkJsonl(root: string, newerThan: number): Generator<string> {
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch (err: unknown) {
-      serverLog.debug({ dir, err: err instanceof Error ? err.message : String(err) }, 'walkJsonl: readdir skipped');
+      serverLog.debug(
+        { dir, err: err instanceof Error ? err.message : String(err) },
+        'walkJsonl: readdir skipped',
+      );
       continue;
     }
     for (const entry of entries) {
@@ -132,7 +147,10 @@ function* walkJsonl(root: string, newerThan: number): Generator<string> {
         try {
           if (statSync(full).mtimeMs >= newerThan) yield full;
         } catch (err: unknown) {
-          serverLog.debug({ full, err: err instanceof Error ? err.message : String(err) }, 'walkJsonl: stat skipped (raced)');
+          serverLog.debug(
+            { full, err: err instanceof Error ? err.message : String(err) },
+            'walkJsonl: stat skipped (raced)',
+          );
         }
       }
     }
@@ -154,13 +172,18 @@ function windowsFromSamples(samples: UsageSample[], now: number): UsageWindow[] 
   });
 }
 
-function dailyUsageFromSamples(samples: UsageSample[], now: number, days = 30): CliUsageReport['dailyUsage'] {
+function dailyUsageFromSamples(
+  samples: UsageSample[],
+  now: number,
+  days = 30,
+): CliUsageReport['dailyUsage'] {
   const end = new Date(now);
   const endDay = Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate());
   const startDay = endDay - (days - 1) * DAY_MS;
   const totals = new Map<string, number>();
   for (const sample of samples) {
-    if (!isReportedModel(sample.model) || sample.ts < startDay || sample.ts >= endDay + DAY_MS) continue;
+    if (!isReportedModel(sample.model) || sample.ts < startDay || sample.ts >= endDay + DAY_MS)
+      continue;
     const date = new Date(sample.ts).toISOString().slice(0, 10);
     totals.set(date, (totals.get(date) ?? 0) + sample.tokensIn + sample.tokensOut);
   }
@@ -209,13 +232,20 @@ const fileCache = new Map<string, { mtimeMs: number; size: number; samples: Usag
 
 type LineParser = (line: string, now: number) => UsageSample | null;
 
-async function samplesFromFile(file: string, parse: LineParser, now: number): Promise<UsageSample[]> {
+async function samplesFromFile(
+  file: string,
+  parse: LineParser,
+  now: number,
+): Promise<UsageSample[]> {
   let st: import('node:fs').Stats;
   try {
     st = await stat(file);
   } catch (err: unknown) {
     // Expected: file removed between walk and read. No samples to extract.
-    serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'samplesFromFile: stat failed, skipping');
+    serverLog.debug(
+      { file, err: err instanceof Error ? err.message : String(err) },
+      'samplesFromFile: stat failed, skipping',
+    );
     return [];
   }
   const hit = fileCache.get(file);
@@ -226,7 +256,10 @@ async function samplesFromFile(file: string, parse: LineParser, now: number): Pr
     text = await readFile(file, 'utf8');
   } catch (err: unknown) {
     // Expected: file removed or became unreadable between stat and read.
-    serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'samplesFromFile: readFile failed, skipping');
+    serverLog.debug(
+      { file, err: err instanceof Error ? err.message : String(err) },
+      'samplesFromFile: readFile failed, skipping',
+    );
     return [];
   }
   for (const line of text.split('\n')) {
@@ -271,7 +304,10 @@ function parseClaudeLine(line: string, now: number): UsageSample | null {
   } catch (err: unknown) {
     // Expected: malformed JSONL line in a session log. Skipping one line
     // doesn't lose the rest of the file's samples.
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'parseClaudeLine: skipped malformed line');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'parseClaudeLine: skipped malformed line',
+    );
     return null;
   }
 }
@@ -321,7 +357,10 @@ function codexSessionRoot(profileDir: string): string {
   } catch (err: unknown) {
     // Expected: sessions dir doesn't exist yet. The unexpanded path is a
     // safe fallback — it just won't match any files until it does exist.
-    serverLog.debug({ root, err: err instanceof Error ? err.message : String(err) }, 'codexSessionRoot: realpath failed, using literal path');
+    serverLog.debug(
+      { root, err: err instanceof Error ? err.message : String(err) },
+      'codexSessionRoot: realpath failed, using literal path',
+    );
     return root;
   }
 }
@@ -385,7 +424,10 @@ async function readCodex(
         text = await readFile(file, 'utf8');
       } catch (err: unknown) {
         // Expected: file removed between walk and read.
-        serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'readCodex: readFile skipped');
+        serverLog.debug(
+          { file, err: err instanceof Error ? err.message : String(err) },
+          'readCodex: readFile skipped',
+        );
         continue;
       }
       // Session logs carry the selected model in turn_context records and
@@ -439,7 +481,10 @@ async function readCodex(
         } catch (err: unknown) {
           // Expected: malformed JSONL line. Skipping one line preserves the
           // rest of the session's token_count events.
-          serverLog.debug({ file, err: err instanceof Error ? err.message : String(err) }, 'readCodex: skipped malformed line');
+          serverLog.debug(
+            { file, err: err instanceof Error ? err.message : String(err) },
+            'readCodex: skipped malformed line',
+          );
         }
       }
     }
@@ -450,7 +495,13 @@ async function readCodex(
     if (!w || typeof w.used_percent !== 'number') return;
     const mins = w.window_minutes ?? null;
     const label =
-      mins === 300 ? '5-hour' : mins === 10080 ? 'weekly' : mins != null ? `${Math.round(mins / 60)}h` : 'quota';
+      mins === 300
+        ? '5-hour'
+        : mins === 10080
+          ? 'weekly'
+          : mins != null
+            ? `${Math.round(mins / 60)}h`
+            : 'quota';
     quotas.push({
       label,
       usedPercent: w.used_percent,
@@ -479,17 +530,27 @@ async function readCodex(
     } catch (err: unknown) {
       // The installed CLI may predate these read-only methods or be offline.
       // Preserve the verified session-log fallback rather than inventing data.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), accountId: account?.id }, 'Codex app-server usage/rateLimits unavailable');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), accountId: account?.id },
+        'Codex app-server usage/rateLimits unavailable',
+      );
     } finally {
       appServer.close();
     }
   }
 
   const liveSnapshot = liveLimits?.rateLimits ?? null;
-  const resolvedAttributionNote = codexAttributionNote(attributionNote, account?.plan, liveSnapshot?.planType ?? latestLimits?.plan);
+  const resolvedAttributionNote = codexAttributionNote(
+    attributionNote,
+    account?.plan,
+    liveSnapshot?.planType ?? latestLimits?.plan,
+  );
   const attributedSamples = resolvedAttributionNote ? [] : samples;
   const liveQuotas: QuotaWindow[] = [];
-  const appendLiveQuota = (label: string, window?: { usedPercent?: number; windowMinutes?: number; resetsAt?: number } | null) => {
+  const appendLiveQuota = (
+    label: string,
+    window?: { usedPercent?: number; windowMinutes?: number; resetsAt?: number } | null,
+  ) => {
     if (!window || typeof window.usedPercent !== 'number') return;
     liveQuotas.push({
       label,
@@ -500,32 +561,38 @@ async function readCodex(
   };
   appendLiveQuota('primary', liveSnapshot?.primary);
   appendLiveQuota('secondary', liveSnapshot?.secondary);
-  const attributedQuotas = liveQuotas.length > 0 ? liveQuotas : (resolvedAttributionNote ? [] : quotas);
+  const attributedQuotas =
+    liveQuotas.length > 0 ? liveQuotas : resolvedAttributionNote ? [] : quotas;
   const liveDaily = (liveUsage?.dailyUsageBuckets ?? [])
     .filter((bucket) => typeof bucket.startDate === 'string' && typeof bucket.tokens === 'number')
     .map((bucket) => ({ date: bucket.startDate!.slice(0, 10), tokens: bucket.tokens! }));
   const activityIsLive = liveDaily.length > 0;
   return {
     provider: 'codex',
-    ...(account ? {
-      accountId: account.id,
-      accountLabel: account.label,
-      ...(account.email ? { accountEmail: account.email } : {}),
-    } : {}),
+    ...(account
+      ? {
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+        }
+      : {}),
     available: activityIsLive || hasReportedUsage(attributedSamples),
-    attribution: (resolvedAttributionNote && !activityIsLive) ? 'unavailable' : 'account',
-    ...((resolvedAttributionNote && !activityIsLive) ? { attributionNote: resolvedAttributionNote } : {}),
+    attribution: resolvedAttributionNote && !activityIsLive ? 'unavailable' : 'account',
+    ...(resolvedAttributionNote && !activityIsLive
+      ? { attributionNote: resolvedAttributionNote }
+      : {}),
     planType: liveSnapshot?.planType ?? account?.plan ?? latestLimits?.plan,
     creditBalance: liveSnapshot?.credits?.balance ?? null,
     usageSource: activityIsLive ? 'codex-app-server' : 'local-session-history',
-    windows: activityIsLive ? windowsFromDailyUsage(liveDaily, now) : windowsFromSamples(attributedSamples, now),
+    windows: activityIsLive
+      ? windowsFromDailyUsage(liveDaily, now)
+      : windowsFromSamples(attributedSamples, now),
     dailyUsage: activityIsLive ? liveDaily : dailyUsageFromSamples(attributedSamples, now),
     quotas: attributedQuotas,
     byModel: byModelFromSamples(attributedSamples, now),
     updatedAt: now,
   };
 }
-
 
 // ── GitHub Copilot CLI ────────────────────────────────────────────────────────
 // ~/.copilot/session-state/<uuid>/events.jsonl — session.shutdown events carry
@@ -541,14 +608,20 @@ function readCopilot(now: number): CliUsageReport {
       try {
         st = statSync(file);
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'Failed to stat copilot events file');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), file },
+          'Failed to stat copilot events file',
+        );
         continue;
       }
       let text: string;
       try {
         text = readFileSync(file, 'utf8');
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), file }, 'Failed to read copilot events file');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), file },
+          'Failed to read copilot events file',
+        );
         continue;
       }
       for (const line of text.split('\n')) {
@@ -558,7 +631,9 @@ function readCopilot(now: number): CliUsageReport {
             data?: {
               modelMetrics?: Record<
                 string,
-                { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number } }
+                {
+                  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number };
+                }
               >;
             };
           };
@@ -575,7 +650,10 @@ function readCopilot(now: number): CliUsageReport {
           }
         } catch (err: unknown) {
           /* skip */
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse copilot events JSONL line');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Failed to parse copilot events JSONL line',
+          );
         }
       }
     }
@@ -607,7 +685,10 @@ function readGrok(now: number): CliUsageReport {
       try {
         entries = readdirSync(dir, { withFileTypes: true });
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Failed to read grok sessions directory');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), dir },
+          'Failed to read grok sessions directory',
+        );
         continue;
       }
       for (const e of entries) {
@@ -633,7 +714,10 @@ function readGrok(now: number): CliUsageReport {
             }
           } catch (err: unknown) {
             /* skip */
-            serverLog.debug({ err: err instanceof Error ? err.message : String(err), file: full }, 'Failed to parse grok signals.json');
+            serverLog.debug(
+              { err: err instanceof Error ? err.message : String(err), file: full },
+              'Failed to parse grok signals.json',
+            );
           }
         }
       }
@@ -700,7 +784,10 @@ async function fetchClaudeQuota(): Promise<void> {
     if (quotas.length) quotaCache.set('claude', { at: Date.now(), quotas });
   } catch (err: unknown) {
     /* endpoint is undocumented — degrade silently */
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Claude quota endpoint unavailable');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Claude quota endpoint unavailable',
+    );
   }
 }
 
@@ -735,8 +822,93 @@ async function fetchCopilotQuota(ghToken: string | undefined): Promise<void> {
     if (quotas.length) quotaCache.set('copilot', { at: Date.now(), quotas, plan: j.copilot_plan });
   } catch (err: unknown) {
     /* internal endpoint — degrade silently */
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Copilot quota endpoint unavailable');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Copilot quota endpoint unavailable',
+    );
   }
+}
+
+// ── Antigravity ───────────────────────────────────────────────────────────────
+// The agy CLI stores conversations as protobuf-encoded SQLite + JSONL transcripts
+// that don't expose per-turn token counts in a parseable format.  Instead, we
+// derive usage windows from Koryphaios's own credit-accountant DB (which records
+// every provider stream's usage_update events with timestamps) and report the
+// live per-group quota from the agy CLI's own `/usage` command.
+
+function readAntigravity(now: number): CliUsageReport {
+  // 1. Token usage windows from the credit-accountant DB
+  let samples: UsageSample[] = [];
+  try {
+    const rows = getUsageSamplesByProvider('antigravity', now - SCAN_HORIZON_MS);
+    samples = rows.map((r) => ({
+      ts: r.ts,
+      model: r.model,
+      tokensIn: r.tokensIn,
+      tokensOut: r.tokensOut,
+      cacheRead: 0,
+    }));
+  } catch (err: unknown) {
+    // Expected when the credit DB hasn't been initialized yet.
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readAntigravity: credit DB unavailable',
+    );
+  }
+
+  // 2. Live per-group quota from the agy CLI (already cached by the provider)
+  const quotas: QuotaWindow[] = [];
+  try {
+    const provider = getContext().providers.get('antigravity');
+    const quotaProvider = provider as unknown as {
+      getQuotaGroups?: () => Array<{
+        name: string;
+        buckets: Array<{
+          id: string;
+          name: string;
+          window: string;
+          remainingFraction: number;
+          resetTime: string;
+        }>;
+      }> | null;
+    };
+    if (provider && typeof quotaProvider.getQuotaGroups === 'function') {
+      const groups = quotaProvider.getQuotaGroups();
+      if (groups) {
+        for (const group of groups) {
+          for (const bucket of group.buckets) {
+            const mins = bucket.window === 'weekly' ? 10080 : bucket.window === '5h' ? 300 : null;
+            quotas.push({
+              label: `${group.name} ${bucket.name}`,
+              usedPercent: Math.max(
+                0,
+                Math.min(100, Math.round((1 - bucket.remainingFraction) * 100)),
+              ),
+              resetsAt: bucket.resetTime ? Date.parse(bucket.resetTime) : null,
+              windowMinutes: mins,
+            });
+          }
+        }
+      }
+    }
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readAntigravity: quota fetch failed',
+    );
+  }
+
+  return {
+    provider: 'antigravity',
+    available: hasReportedUsage(samples) || quotas.length > 0,
+    attribution: 'account',
+    usageSource: 'local-session-history',
+    windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
+    quotas,
+    byModel: byModelFromSamples(samples, now),
+    updatedAt: now,
+  };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -766,12 +938,16 @@ async function collectCliUsageReports(opts?: {
     ...codexReaders,
     readCopilot,
     readGrok,
+    readAntigravity,
   ];
   const results = await Promise.allSettled(readers.map((reader) => reader(now)));
   for (const result of results) {
-    if (result.status === 'fulfilled' && (
-      result.value.available || result.value.quotas.length > 0 || result.value.attribution === 'unavailable'
-    )) {
+    if (
+      result.status === 'fulfilled' &&
+      (result.value.available ||
+        result.value.quotas.length > 0 ||
+        result.value.attribution === 'unavailable')
+    ) {
       reports.push(result.value);
     }
   }
@@ -779,7 +955,10 @@ async function collectCliUsageReports(opts?: {
   for (const r of reports) {
     const q = quotaCache.get(r.provider);
     if (q) {
-      r.quotas = [...q.quotas, ...r.quotas.filter((x) => !q.quotas.some((y) => y.label === x.label))];
+      r.quotas = [
+        ...q.quotas,
+        ...r.quotas.filter((x) => !q.quotas.some((y) => y.label === x.label)),
+      ];
       if (q.plan && !r.planType) r.planType = q.plan;
     }
   }

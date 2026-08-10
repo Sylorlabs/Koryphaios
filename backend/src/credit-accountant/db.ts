@@ -45,9 +45,18 @@ export function initCreditDb(dataDir: string): void {
     'ALTER TABLE credit_usage ADD COLUMN account_id TEXT',
     'ALTER TABLE credit_usage ADD COLUMN session_id TEXT',
   ]) {
-    try { db.exec(sql); } catch (err: unknown) { /* column already exists */ serverLog.debug({ err: err instanceof Error ? err.message : String(err), sql }, 'Column already exists in credit_usage table'); }
+    try {
+      db.exec(sql);
+    } catch (err: unknown) {
+      /* column already exists */ serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), sql },
+        'Column already exists in credit_usage table',
+      );
+    }
   }
-  db.exec('CREATE INDEX IF NOT EXISTS idx_credit_usage_account_ts ON credit_usage(account_id, ts);');
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_credit_usage_account_ts ON credit_usage(account_id, ts);',
+  );
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS cloud_snapshots (
@@ -88,18 +97,49 @@ export function recordUsage(
   const d = getCreditDb();
   d.run(
     `INSERT INTO credit_usage (ts, model, provider, account_id, session_id, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [Date.now(), model, provider, attribution?.accountId ?? null, attribution?.sessionId ?? null, tokensIn, tokensOut, costUsd],
+    [
+      Date.now(),
+      model,
+      provider,
+      attribution?.accountId ?? null,
+      attribution?.sessionId ?? null,
+      tokensIn,
+      tokensOut,
+      costUsd,
+    ],
   );
 }
 
 export function getKoryAccountUsage(since = Date.now() - 30 * 24 * 60 * 60 * 1000): Array<{
-  accountId: string; provider: string; tokensIn: number; tokensOut: number; costUsd: number;
+  accountId: string;
+  provider: string;
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
 }> {
   const d = getCreditDb();
-  return d.query<{ account_id: string; provider: string; tokens_in: number; tokens_out: number; cost_usd: number }, [number]>(
-    `SELECT account_id, provider, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out, SUM(cost_usd) AS cost_usd
+  return d
+    .query<
+      {
+        account_id: string;
+        provider: string;
+        tokens_in: number;
+        tokens_out: number;
+        cost_usd: number;
+      },
+      [number]
+    >(
+      `SELECT account_id, provider, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out, SUM(cost_usd) AS cost_usd
      FROM credit_usage WHERE account_id IS NOT NULL AND ts >= ? GROUP BY account_id, provider`,
-  ).all(since).map((row) => ({ accountId: row.account_id, provider: row.provider, tokensIn: row.tokens_in, tokensOut: row.tokens_out, costUsd: row.cost_usd }));
+    )
+    .all(since)
+    .map((row) => ({
+      accountId: row.account_id,
+      provider: row.provider,
+      tokensIn: row.tokens_in,
+      tokensOut: row.tokens_out,
+      costUsd: row.cost_usd,
+    }));
 }
 
 export function getLocalTotals(): {
@@ -162,6 +202,30 @@ export function getLocalTotalsByProvider(): Array<{
     tokensIn: row.tokens_in,
     tokensOut: row.tokens_out,
   }));
+}
+
+/** Per-turn usage samples for a specific provider, for CLI usage reporting.
+ *  The credit DB records every provider stream's token usage with timestamps,
+ *  so we can derive windows/daily/by-model even for CLIs that don't write
+ *  parseable local session logs (e.g. antigravity's trajectory is protobuf). */
+export function getUsageSamplesByProvider(
+  provider: string,
+  since: number,
+): Array<{ ts: number; model: string; tokensIn: number; tokensOut: number }> {
+  const d = getCreditDb();
+  return d
+    .query<{ ts: number; model: string; tokens_in: number; tokens_out: number }, [string, number]>(
+      `SELECT ts, model, tokens_in, tokens_out FROM credit_usage
+       WHERE provider = ? AND ts >= ? AND (tokens_in > 0 OR tokens_out > 0)
+       ORDER BY ts`,
+    )
+    .all(provider, since)
+    .map((r) => ({
+      ts: r.ts,
+      model: r.model,
+      tokensIn: r.tokens_in,
+      tokensOut: r.tokens_out,
+    }));
 }
 
 export function saveCloudSnapshot(

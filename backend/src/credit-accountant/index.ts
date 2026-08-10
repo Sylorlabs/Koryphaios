@@ -17,8 +17,14 @@ import {
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
   getKoryAccountUsage,
+  getUsageSamplesByProvider,
 } from './db';
-import { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
+import {
+  startCreditPolling,
+  stopCreditPolling,
+  markCreditUsage,
+  type PollingConfig,
+} from './polling';
 
 const DRIFT_THRESHOLD_PERCENT = 5;
 
@@ -29,9 +35,15 @@ export {
   getLocalTotalsByProvider,
   getLatestCloudSnapshots,
   getKoryAccountUsage,
+  getUsageSamplesByProvider,
   getCreditDbPath,
 } from './db';
-export { startCreditPolling, stopCreditPolling, markCreditUsage, type PollingConfig } from './polling';
+export {
+  startCreditPolling,
+  stopCreditPolling,
+  markCreditUsage,
+  type PollingConfig,
+} from './polling';
 export { createUsageInterceptingFetch } from './usage-interceptor';
 
 /**
