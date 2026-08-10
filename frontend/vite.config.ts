@@ -141,7 +141,6 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
-          if (id.includes('monaco-editor')) return 'monaco';
           if (id.includes('@tauri-apps')) return 'tauri';
           if (id.includes('lucide-svelte')) return 'icons';
           if (
@@ -157,14 +156,5 @@ export default defineConfig({
   },
   esbuild: {
     target: 'es2020',
-  },
-  optimizeDeps: {
-    // lucide-svelte ships raw .svelte files that esbuild's pre-bundler cannot
-    // parse (no loader configured for .svelte). Excluding it routes the
-    // package through the Svelte plugin pipeline instead.
-    exclude: ['lucide-svelte'],
-    esbuildOptions: {
-      target: 'es2020',
-    },
   },
 });

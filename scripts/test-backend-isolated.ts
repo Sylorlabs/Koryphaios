@@ -11,13 +11,83 @@
  * works on macOS, Windows, and Linux without requiring bash.
  */
 
-import { mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_DIR = join(PROJECT_ROOT, 'backend');
+const BACKEND_TEST_TIMEOUT_MS = 60_000;
+const LIVE_PROVIDER_TEST_FLAG = 'KORY_RUN_LIVE_PROVIDER_TESTS';
+const SAFE_HOST_ENV = new Set([
+  'PATH',
+  'PATHEXT',
+  'SystemRoot',
+  'SYSTEMROOT',
+  'WINDIR',
+  'COMSPEC',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'CI',
+  'TERM',
+  'COLORTERM',
+  'FORCE_COLOR',
+  'NO_COLOR',
+]);
+
+/** Build the environment used by the default core gate. Closed-transport is
+ * the default: ambient provider secrets, endpoints, CLI accounts, and live
+ * opt-ins never cross into a test process. A live provider run requires the
+ * explicit KORY_RUN_LIVE_PROVIDER_TESTS=1 boundary and is not part of core. */
+export function createIsolatedTestEnvironment(
+  source: NodeJS.ProcessEnv,
+  isolatedHome: string,
+): Record<string, string | undefined> {
+  const allowLiveProviders = source[LIVE_PROVIDER_TEST_FLAG] === '1';
+  const env: Record<string, string | undefined> = {};
+
+  if (allowLiveProviders) {
+    Object.assign(env, source);
+  } else {
+    for (const name of SAFE_HOST_ENV) {
+      if (source[name] !== undefined) {
+        env[name] = source[name];
+      }
+    }
+    env[LIVE_PROVIDER_TEST_FLAG] = '0';
+    env.KORY_LIVE_PROVIDER_TESTS = '0';
+    env.KORY_LIVE_CLAUDE = '0';
+    env.KORY_DISABLE_CLI_AUTODETECT = '1';
+    env.AWS_EC2_METADATA_DISABLED = 'true';
+    env.HOME = isolatedHome;
+    env.USER = 'kory-test';
+    env.USERNAME = 'kory-test';
+    env.LOGNAME = 'kory-test';
+    env.USERPROFILE = isolatedHome;
+    env.TMPDIR = join(isolatedHome, 'tmp');
+    env.TEMP = join(isolatedHome, 'tmp');
+    env.TMP = join(isolatedHome, 'tmp');
+    env.XDG_CONFIG_HOME = join(isolatedHome, '.config');
+    env.XDG_DATA_HOME = join(isolatedHome, '.local', 'share');
+    env.XDG_CACHE_HOME = join(isolatedHome, '.cache');
+    env.APPDATA = join(isolatedHome, 'AppData', 'Roaming');
+    env.LOCALAPPDATA = join(isolatedHome, 'AppData', 'Local');
+    env.KORYPHAIOS_DATA_DIR = join(isolatedHome, '.koryphaios');
+    env.KORYPHAIOS_SKILLS_HOME = join(isolatedHome, '.koryphaios', 'skills');
+    env.KORYPHAIOS_WORKFLOWS_HOME = join(isolatedHome, '.koryphaios', 'workflows');
+    env.PROJECT_ROOT = join(isolatedHome, 'project');
+    env.LOG_DIR = join(isolatedHome, '.koryphaios', 'logs');
+  }
+
+  env.NODE_ENV = 'test';
+  env.SESSION_TOKEN_SECRET = 'test_only_not_for_production_aaaaaaaaaa';
+  env.KORYPHAIOS_KMS_PASSPHRASE = 'test_only_kms_passphrase_not_for_production';
+  return env;
+}
 
 function gatherTestFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -33,14 +103,11 @@ function gatherTestFiles(dir: string, acc: string[] = []): string[] {
 }
 
 function main() {
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-    NODE_ENV: 'test',
-    SESSION_TOKEN_SECRET:
-      process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa',
-  };
-
   const testDbDir = mkdtempSync(join(tmpdir(), 'kory-test-'));
+  const testHome = join(testDbDir, 'home');
+  mkdirSync(join(testHome, 'tmp'), { recursive: true });
+  mkdirSync(join(testHome, 'project'), { recursive: true });
+  const env = createIsolatedTestEnvironment(process.env, testHome);
   let exitCode = 0;
 
   try {
@@ -71,7 +138,15 @@ function main() {
 
       const result = spawnSync(
         process.execPath,
-        ['test', '--preload', './backend/src/__tests__/setup-db.ts', testFile],
+        [
+          '--no-env-file',
+          'test',
+          '--timeout',
+          String(BACKEND_TEST_TIMEOUT_MS),
+          '--preload',
+          './backend/src/__tests__/setup-db.ts',
+          testFile,
+        ],
         {
           cwd: PROJECT_ROOT,
           env: { ...env, DATABASE_URL: dbUrl },
@@ -91,4 +166,4 @@ function main() {
   process.exit(exitCode);
 }
 
-main();
+if (import.meta.main) main();

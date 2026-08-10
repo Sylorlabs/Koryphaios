@@ -8,6 +8,8 @@ const { spawn } = await import('node:child_process');
 const { readFileSync, existsSync } = await import('node:fs');
 const { resolve } = await import('node:path');
 const net = await import('node:net');
+const { isLauncherBackendReady, mergeCorsOriginEnv, resolveFrontendCorsOrigins } =
+  await import('./desktop-launcher-cors');
 
 // On Windows, `spawn('bun', ...)` fails with ENOENT because Node/Bun's spawn
 // doesn't consult PATHEXT — the binary on disk is `bun.exe`. Using `shell: true`
@@ -36,7 +38,6 @@ const FRONTEND_DIR = resolve(PROJECT_ROOT, 'frontend');
 const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const APP_CONFIG_PATH = resolve(PROJECT_ROOT, 'config', 'app.config.json');
 const ACTIVE_PORT_PATH = resolve(PROJECT_ROOT, '.koryphaios', '.active-port.json');
-const KORYPHAIOS_BACKEND_ID = 'koryphaios';
 
 const BACKEND_READY_TIMEOUT_MS = Number(process.env.KORYPHAIOS_BACKEND_READY_TIMEOUT_MS ?? 120_000);
 const FRONTEND_READY_TIMEOUT_MS = Number(
@@ -86,6 +87,8 @@ const frontendPort = Number(process.env.KORYPHAIOS_FRONTEND_PORT ?? 3003);
 
 const backendUrl = `http://${backendClientHost}:${backendPort}`;
 const frontendUrl = `http://${frontendHost}:${frontendPort}`;
+const frontendOrigin = new URL(frontendUrl).origin;
+const frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
 const websocketUrl = `ws://${backendClientHost}:${backendPort}/ws`;
 const backendHealthUrl = `${backendUrl}/api/health`;
 
@@ -96,6 +99,9 @@ const sharedEnv = {
   KORYPHAIOS_FRONTEND_HOST: frontendHost,
   KORYPHAIOS_FRONTEND_PORT: String(frontendPort),
   KORYPHAIOS_DESKTOP_DEV: '1',
+  // Keep every caller-configured origin and add only the exact dev frontend
+  // origins. The backend never needs a wildcard for the native WebView.
+  CORS_ORIGINS: mergeCorsOriginEnv(process.env.CORS_ORIGINS, frontendCorsOrigins),
   // Inherit any pinned compat hash so the dev backend's /api/health reports
   // the same value the dev frontend's Vite define baked in. Without this the
   // backend falls back to its own resolution (env, then compat-hash.json) —
@@ -176,11 +182,6 @@ async function isPortListening(host: string, port: number): Promise<boolean> {
   });
 }
 
-type BackendHealth = {
-  ok?: boolean;
-  data?: { id?: string; pid?: number; version?: string; compat?: { serverStartedAt?: number } };
-};
-
 type ActivePort = { host?: string; port?: number; pid?: number };
 
 function readActivePort(): ActivePort | null {
@@ -202,16 +203,24 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-async function fetchBackendHealth(timeoutMs = 3_000): Promise<BackendHealth | null> {
+type BackendHealthProbe = {
+  health: import('./desktop-launcher-cors').LauncherBackendHealth;
+  accessControlAllowOrigin: string | null;
+};
+
+async function fetchBackendHealth(timeoutMs = 3_000): Promise<BackendHealthProbe | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(backendHealthUrl, {
       signal: controller.signal,
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', Origin: frontendOrigin },
     });
     if (!response.ok) return null;
-    return (await response.json()) as BackendHealth;
+    return {
+      health: (await response.json()) as import('./desktop-launcher-cors').LauncherBackendHealth,
+      accessControlAllowOrigin: response.headers.get('access-control-allow-origin'),
+    };
   } catch {
     return null;
   } finally {
@@ -220,12 +229,11 @@ async function fetchBackendHealth(timeoutMs = 3_000): Promise<BackendHealth | nu
 }
 
 async function isBackendHealthy(): Promise<boolean> {
-  const health = await fetchBackendHealth();
-  return (
-    health?.ok === true &&
-    health.data?.id === KORYPHAIOS_BACKEND_ID &&
-    typeof health.data.pid === 'number' &&
-    typeof health.data.compat?.serverStartedAt === 'number'
+  const probe = await fetchBackendHealth();
+  return isLauncherBackendReady(
+    probe?.health ?? null,
+    probe?.accessControlAllowOrigin ?? null,
+    frontendOrigin,
   );
 }
 
@@ -255,11 +263,11 @@ async function resolvePortState(
   if (!(await isPortListening(host, port))) return 'free';
   if (label === 'Backend' && (await isHealthy())) {
     const activePort = readActivePort();
-    const health = await fetchBackendHealth();
+    const probe = await fetchBackendHealth();
     const markerMatches =
       activePort?.host === backendClientHost &&
       activePort.port === backendPort &&
-      activePort.pid === health?.data?.pid &&
+      activePort.pid === probe?.health.data?.pid &&
       isProcessAlive(activePort.pid);
     if (!markerMatches) {
       throw new Error(

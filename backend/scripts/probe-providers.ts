@@ -50,13 +50,18 @@ process.env.AWS_ACCESS_KEY_ID ||= 'AKIAIOSFODNN7EXAMPLE';
 process.env.AWS_SECRET_ACCESS_KEY ||= 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
 process.env.AWS_REGION ||= 'us-east-1';
 
-interface NetCall { url: string; status?: number; error?: string; body?: string }
+interface NetCall {
+  url: string;
+  status?: number;
+  error?: string;
+  body?: string;
+}
 // Per-probe call bucket so concurrent providers never cross-contaminate each other's
 // captured requests (a shared global races under concurrency).
 const als = new AsyncLocalStorage<NetCall[]>();
 const realFetch = globalThis.fetch;
-globalThis.fetch = (async (input: any, init?: any) => {
-  const url: string = typeof input === 'string' ? input : input?.url ?? String(input);
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url: string = typeof input === 'string' ? input : (input?.url ?? String(input));
   const bucket = als.getStore();
   try {
     const res = await realFetch(input, init);
@@ -65,24 +70,40 @@ globalThis.fetch = (async (input: any, init?: any) => {
     // 404 — some providers (e.g. Fireworks) validate the model BEFORE auth, so a bogus model
     // id 404s even though the endpoint is correct. Clone so the provider can still read it.
     if (res.status >= 400) {
-      try { call.body = (await res.clone().text()).slice(0, 200); } catch { /* streaming/opaque */ }
+      try {
+        call.body = (await res.clone().text()).slice(0, 200);
+      } catch {
+        /* streaming/opaque */
+      }
     }
     bucket?.push(call);
     return res;
-  } catch (e: any) {
-    bucket?.push({ url, error: e?.code || e?.message || String(e) });
+  } catch (e: unknown) {
+    const code = (e as { code?: string })?.code;
+    const message = e instanceof Error ? e.message : String(e);
+    bucket?.push({ url, error: code || message });
     throw e;
   }
 }) as typeof fetch;
 
 function buildConfig(name: ProviderName): ProviderConfig {
-  const base = { name, disabled: false, selectedModels: [], hideModelSelector: false } as ProviderConfig;
+  const base = {
+    name,
+    disabled: false,
+    selectedModels: [],
+    hideModelSelector: false,
+  } as ProviderConfig;
   const mode = PROVIDER_AUTH_MODE[name];
   if (LOCAL_PROVIDERS.has(name)) {
     return {
       ...base,
       apiKey: DUMMY_KEY,
-      baseUrl: name === 'llamacpp' ? LLAMACPP_DEFAULT : name === 'lmstudio' ? LMSTUDIO_DEFAULT : 'http://localhost:11434/v1',
+      baseUrl:
+        name === 'llamacpp'
+          ? LLAMACPP_DEFAULT
+          : name === 'lmstudio'
+            ? LMSTUDIO_DEFAULT
+            : 'http://localhost:11434/v1',
     };
   }
   if (mode === 'auth_only') {
@@ -106,38 +127,74 @@ async function drive(provider: Provider, model: string) {
       events.push(e);
       if (e.type === 'complete' || e.type === 'error') break;
     }
-  } catch { /* swallowed — captured via fetch wrapper / events */ } finally {
+  } catch {
+    /* swallowed — captured via fetch wrapper / events */
+  } finally {
     clearTimeout(guard);
   }
   return events;
 }
 
-type Verdict = 'REACHABLE' | 'WRONG_PATH' | 'DEAD_HOST' | 'LOCAL_DOWN' | 'ACCEPTED' | 'SERVER_ERR' | 'TIMEOUT' | 'NO_NET' | 'NO_INSTANCE' | 'NOT_AVAILABLE' | 'INFO';
+type Verdict =
+  | 'REACHABLE'
+  | 'WRONG_PATH'
+  | 'DEAD_HOST'
+  | 'LOCAL_DOWN'
+  | 'ACCEPTED'
+  | 'SERVER_ERR'
+  | 'TIMEOUT'
+  | 'NO_NET'
+  | 'NO_INSTANCE'
+  | 'NOT_AVAILABLE'
+  | 'INFO';
 
-function classify(name: string, chat: NetCall | undefined, events: ProviderEvent[]): { v: Verdict; detail: string } {
+function classify(
+  name: string,
+  chat: NetCall | undefined,
+  events: ProviderEvent[],
+): { v: Verdict; detail: string } {
   if (!chat) {
-    const errEvt = events.find((e) => e.type === 'error') as any;
-    return { v: 'NO_NET', detail: errEvt?.error ? `no network call (${String(errEvt.error).slice(0, 60)})` : 'no network call made' };
+    const errEvt = events.find((e) => e.type === 'error');
+    return {
+      v: 'NO_NET',
+      detail: errEvt?.error
+        ? `no network call (${String(errEvt.error).slice(0, 60)})`
+        : 'no network call made',
+    };
   }
   if (chat.error) {
     const e = chat.error.toUpperCase().replace(/[\s_]/g, '');
     // Bun reports BOTH DNS-resolution failure and active refusal as "ConnectionRefused",
     // so for localhost providers this means "no local server running" (expected, not a bug);
     // for a public cloud host it means the host is dead/unreachable (a real defect).
-    if (e.includes('ENOTFOUND') || e.includes('EAIAGAIN') || e.includes('DNS')) return { v: 'DEAD_HOST', detail: chat.error };
+    if (e.includes('ENOTFOUND') || e.includes('EAIAGAIN') || e.includes('DNS'))
+      return { v: 'DEAD_HOST', detail: chat.error };
     if (e.includes('CONNECTIONREFUSED') || e.includes('ECONNREFUSED'))
       return { v: LOCAL_PROVIDERS.has(name) ? 'LOCAL_DOWN' : 'DEAD_HOST', detail: chat.error };
-    if (e.includes('ABORT') || e.includes('TIMEOUT') || e.includes('TIMED')) return { v: 'TIMEOUT', detail: chat.error };
+    if (e.includes('ABORT') || e.includes('TIMEOUT') || e.includes('TIMED'))
+      return { v: 'TIMEOUT', detail: chat.error };
     return { v: 'NO_NET', detail: chat.error };
   }
   const s = chat.status!;
-  if (s === 401 || s === 403 || s === 400 || s === 422) return { v: 'REACHABLE', detail: `HTTP ${s} (endpoint live, dummy key rejected)` };
+  if (s === 401 || s === 403 || s === 400 || s === 422)
+    return { v: 'REACHABLE', detail: `HTTP ${s} (endpoint live, dummy key rejected)` };
   if (s === 404 || s === 405) {
     // A 404 whose body is about the MODEL (not the route) means the endpoint is correct but
     // the probe's catalog model id isn't a real deployment — the host/path are fine.
-    if (chat.body && /model.*(not found|inaccessible|not deployed|does not exist)|not_found.{0,20}model|"param"\s*:\s*"model"/i.test(chat.body))
-      return { v: 'REACHABLE', detail: `HTTP ${s} (endpoint live; model-id artifact, not a route bug)` };
-    return { v: 'WRONG_PATH', detail: `HTTP ${s}${chat.body ? ` — ${chat.body.slice(0, 80)}` : ''}` };
+    if (
+      chat.body &&
+      /model.*(not found|inaccessible|not deployed|does not exist)|not_found.{0,20}model|"param"\s*:\s*"model"/i.test(
+        chat.body,
+      )
+    )
+      return {
+        v: 'REACHABLE',
+        detail: `HTTP ${s} (endpoint live; model-id artifact, not a route bug)`,
+      };
+    return {
+      v: 'WRONG_PATH',
+      detail: `HTTP ${s}${chat.body ? ` — ${chat.body.slice(0, 80)}` : ''}`,
+    };
   }
   if (s === 200) return { v: 'ACCEPTED', detail: 'HTTP 200 (inspect)' };
   if (s >= 500) return { v: 'SERVER_ERR', detail: `HTTP ${s}` };
@@ -148,12 +205,17 @@ function classify(name: string, chat: NetCall | undefined, events: ProviderEvent
 function pickChat(calls: NetCall[]): NetCall | undefined {
   // The request that proves reachability: the chat/inference/exchange call (skip /models refreshes).
   const rel = calls.filter((c) =>
-    /chat\/completions|\/messages|generateContent|\/codex\/|copilot_internal|invoke-with-response-stream|\/oauth\/token|\/v2\/inference\//.test(c.url),
+    /chat\/completions|\/messages|generateContent|\/codex\/|copilot_internal|invoke-with-response-stream|\/oauth\/token|\/v2\/inference\//.test(
+      c.url,
+    ),
   );
   // Prefer a request that actually reached a status; else the first relevant; else any non-/models call.
-  return rel.find((c) => c.status !== undefined) ?? rel[0]
-    ?? calls.filter((c) => !/\/models(\b|$|\?)/.test(c.url)).find((c) => c.status !== undefined)
-    ?? calls.find((c) => c.status !== undefined);
+  return (
+    rel.find((c) => c.status !== undefined) ??
+    rel[0] ??
+    calls.filter((c) => !/\/models(\b|$|\?)/.test(c.url)).find((c) => c.status !== undefined) ??
+    calls.find((c) => c.status !== undefined)
+  );
 }
 
 async function probe(registry: ProviderRegistry, name: ProviderName) {
@@ -162,14 +224,26 @@ async function probe(registry: ProviderRegistry, name: ProviderName) {
     const info = NOT_GENERICALLY_PROBEABLE[name];
     let provider: Provider | null = null;
     try {
-      provider = (registry as any).createProvider(name, buildConfig(name)) as Provider | null;
-    } catch (e: any) {
-      return { name, v: 'NO_INSTANCE' as Verdict, detail: `createProvider threw: ${e.message}`, host: '' };
+      provider = (registry as unknown as {
+        createProvider(name: ProviderName, config: ProviderConfig): Provider | null;
+      }).createProvider(name, buildConfig(name));
+    } catch (e: unknown) {
+      return {
+        name,
+        v: 'NO_INSTANCE' as Verdict,
+        detail: `createProvider threw: ${e instanceof Error ? e.message : String(e)}`,
+        host: '',
+      };
     }
     // null/unavailable: report the per-tenant reason if known, else "requires base URL (BYO)".
     if (!provider) {
       if (info) return { name, v: 'INFO' as Verdict, detail: info, host: '' };
-      return { name, v: 'INFO' as Verdict, detail: 'requires user-supplied base URL (BYO) — not generically probeable', host: '' };
+      return {
+        name,
+        v: 'INFO' as Verdict,
+        detail: 'requires user-supplied base URL (BYO) — not generically probeable',
+        host: '',
+      };
     }
     if (!provider.isAvailable?.()) {
       if (info) return { name, v: 'INFO' as Verdict, detail: info, host: '' };
@@ -179,7 +253,15 @@ async function probe(registry: ProviderRegistry, name: ProviderName) {
     const model = getModelsForProvider(name)[0]?.id ?? 'test-model';
     const events = await drive(provider, model);
     const chat = pickChat(calls);
-    const host = chat ? (() => { try { return new URL(chat.url).host + new URL(chat.url).pathname; } catch { return chat.url; } })() : '';
+    const host = chat
+      ? (() => {
+          try {
+            return new URL(chat.url).host + new URL(chat.url).pathname;
+          } catch {
+            return chat.url;
+          }
+        })()
+      : '';
     const { v, detail } = classify(name, chat, events);
     // Per-tenant/CLI providers: report as INFO unless we genuinely reached a real shared host.
     if (info && v !== 'REACHABLE') return { name, v: 'INFO' as Verdict, detail: info, host };
@@ -189,9 +271,11 @@ async function probe(registry: ProviderRegistry, name: ProviderName) {
 
 async function main() {
   const onlyArg = process.argv.find((a) => a.startsWith('--only'));
-  const only = onlyArg ? (process.argv[process.argv.indexOf(onlyArg) + 1] ?? onlyArg.split('=')[1])?.split(',') : null;
+  const only = onlyArg
+    ? (process.argv[process.argv.indexOf(onlyArg) + 1] ?? onlyArg.split('=')[1])?.split(',')
+    : null;
   const registry = new ProviderRegistry();
-  let names = (Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]);
+  let names = Object.keys(PROVIDER_AUTH_MODE) as ProviderName[];
   if (only) names = names.filter((n) => only.includes(n));
 
   const results: Awaited<ReturnType<typeof probe>>[] = [];
@@ -203,26 +287,41 @@ async function main() {
 
   globalThis.fetch = realFetch;
   const icon: Record<Verdict, string> = {
-    REACHABLE: '✓', ACCEPTED: '✓', WRONG_PATH: '✗', DEAD_HOST: '✗', SERVER_ERR: '⚠',
-    TIMEOUT: '·', LOCAL_DOWN: '·', NO_NET: '✗', NO_INSTANCE: '✗', NOT_AVAILABLE: '·', INFO: 'ℹ',
+    REACHABLE: '✓',
+    ACCEPTED: '✓',
+    WRONG_PATH: '✗',
+    DEAD_HOST: '✗',
+    SERVER_ERR: '⚠',
+    TIMEOUT: '·',
+    LOCAL_DOWN: '·',
+    NO_NET: '✗',
+    NO_INSTANCE: '✗',
+    NOT_AVAILABLE: '·',
+    INFO: 'ℹ',
   };
   const pad = (s: string, n: number) => s.padEnd(n);
   results.sort((a, b) => a.name.localeCompare(b.name));
-  const line = (r: typeof results[number]) =>
+  const line = (r: (typeof results)[number]) =>
     `  ${icon[r.v]} ${pad(r.name, 16)} ${pad(r.v, 13)} ${pad(r.host, 52)} ${r.detail}`;
   const reachable = results.filter((r) => r.v === 'REACHABLE' || r.v === 'ACCEPTED').length;
-  const broken = results.filter((r) => r.v === 'WRONG_PATH' || r.v === 'DEAD_HOST' || r.v === 'NO_NET' || r.v === 'NO_INSTANCE');
+  const broken = results.filter(
+    (r) => r.v === 'WRONG_PATH' || r.v === 'DEAD_HOST' || r.v === 'NO_NET' || r.v === 'NO_INSTANCE',
+  );
 
   console.log(`\nPROVIDER REACHABILITY PROBE — real network, dummy credentials`);
   console.log('─'.repeat(120));
   console.log(results.map(line).join('\n'));
   console.log('─'.repeat(120));
-  console.log(`${reachable} endpoints LIVE & correct · ${broken.length} BROKEN · ` +
-    `${results.filter((r) => r.v === 'INFO').length} per-tenant/CLI (not probeable) · ` +
-    `${results.filter((r) => r.v === 'LOCAL_DOWN').length} local (no server) · ` +
-    `${results.filter((r) => r.v === 'TIMEOUT' || r.v === 'SERVER_ERR').length} inconclusive`);
+  console.log(
+    `${reachable} endpoints LIVE & correct · ${broken.length} BROKEN · ` +
+      `${results.filter((r) => r.v === 'INFO').length} per-tenant/CLI (not probeable) · ` +
+      `${results.filter((r) => r.v === 'LOCAL_DOWN').length} local (no server) · ` +
+      `${results.filter((r) => r.v === 'TIMEOUT' || r.v === 'SERVER_ERR').length} inconclusive`,
+  );
   if (broken.length) {
-    console.log(`\nBROKEN:\n${broken.map((r) => `  ✗ ${r.name}: ${r.detail} [${r.host}]`).join('\n')}`);
+    console.log(
+      `\nBROKEN:\n${broken.map((r) => `  ✗ ${r.name}: ${r.detail} [${r.host}]`).join('\n')}`,
+    );
   }
 }
 

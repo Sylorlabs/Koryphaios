@@ -22,6 +22,7 @@
     "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
     "test:coverage": "bun run --filter backend test:coverage:check && bun run --filter frontend test:coverage:check",
     "test:e2e": "playwright test",
+    "audit:files": "bun run scripts/audit-file-ledger.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:changed": "bun run scripts/check-changed-format.ts",
@@ -29,14 +30,39 @@
     "dev:workspace": "bun run --filter \"*\" dev"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
-    "playwright": "^1.59.1",
-    "playwright-core": "^1.59.1",
-    "prettier": "^3.1.1",
-    "prettier-plugin-svelte": "^3.1.2",
-    "prettier-plugin-tailwindcss": "^0.5.11"
+    "@playwright/test": "^1.62.1",
+    "playwright": "^1.62.1",
+    "playwright-core": "^1.62.1",
+    "prettier": "^3.9.6",
+    "prettier-plugin-svelte": "^3.5.2",
+    "prettier-plugin-tailwindcss": "^0.5.14"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "overrides": {
+    "@hono/node-server": "2.1.0",
+    "@protobufjs/utf8": "1.1.2",
+    "body-parser": "2.3.0",
+    "brace-expansion": "2.1.4",
+    "cookie": "0.7.2",
+    "dompurify": "3.4.13",
+    "esbuild": "0.25.12",
+    "fast-uri": "3.1.5",
+    "form-data": "4.0.6",
+    "hono": "4.13.1",
+    "ip-address": "10.4.0",
+    "lodash": "4.18.1",
+    "minimatch": "9.0.7",
+    "nanoid": "3.3.17",
+    "path-to-regexp": "8.4.2",
+    "picomatch": "4.0.5",
+    "postcss": "8.5.26",
+    "protobufjs": "7.6.5",
+    "qs": "6.15.3",
+    "rollup": "4.62.4",
+    "vite": "8.2.1",
+    "ws": "8.21.3",
+    "yaml": "1.10.3"
   }
 }

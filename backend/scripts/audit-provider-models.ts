@@ -7,7 +7,11 @@
 import type { ModelDef, ProviderName } from '@koryphaios/shared';
 import { ProviderRegistry } from '../src/providers/registry';
 import { getModelsForProvider } from '../src/providers/models';
-import { ENV_API_KEY_MAP, ENV_AUTH_TOKEN_MAP, PROVIDER_AUTH_MODE } from '../src/providers/constants';
+import {
+  ENV_API_KEY_MAP,
+  ENV_AUTH_TOKEN_MAP,
+  PROVIDER_AUTH_MODE,
+} from '../src/providers/constants';
 import { cliAutoEnableCreds, canAutoEnable } from '../src/providers/cli-detection';
 import { loadConfig } from '../src/runtime/config';
 import { PROJECT_ROOT } from '../src/runtime/paths';
@@ -66,7 +70,8 @@ function classifyModels(
     return { source: 'none', catalogOnly: true, note: 'no models returned' };
   }
 
-  const allInFallback = modelIds.every((id) => fallbackIds.has(id)) && modelIds.length <= fallback.length;
+  const allInFallback =
+    modelIds.every((id) => fallbackIds.has(id)) && modelIds.length <= fallback.length;
   const hasNew = modelIds.some((id) => !fallbackIds.has(id));
   const hasGeneric = models.some((m) => m.isGeneric);
 
@@ -92,10 +97,18 @@ function classifyModels(
     };
   }
   if (CLI_PROVIDERS.has(name) && models.length > 0) {
-    return { source: 'live', catalogOnly: false, note: 'CLI-backed provider with refreshed model list' };
+    return {
+      source: 'live',
+      catalogOnly: false,
+      note: 'CLI-backed provider with refreshed model list',
+    };
   }
   if (allInFallback && fallback.length > 0) {
-    return { source: 'fallback', catalogOnly: true, note: 'catalog fallback only (refresh may still be pending)' };
+    return {
+      source: 'fallback',
+      catalogOnly: true,
+      note: 'catalog fallback only (refresh may still be pending)',
+    };
   }
   if (models.every((m) => m.isGeneric)) {
     return { source: 'live', catalogOnly: false, note: 'generic models from API' };
@@ -121,7 +134,8 @@ async function main() {
       hasCliCred(name) ||
       !!userCfg?.apiKey ||
       !!userCfg?.authToken ||
-      (userCfg?.disabled === false && (userCfg?.baseUrl || name === 'llamacpp' || name === 'lmstudio'));
+      (userCfg?.disabled === false &&
+        (userCfg?.baseUrl || name === 'llamacpp' || name === 'lmstudio'));
 
     const existing = registry.get(name);
     const alreadyAvailable = existing?.isAvailable() ?? false;
@@ -172,7 +186,12 @@ async function main() {
   const connected = rows.filter((r) => r.available && r.verified);
   const liveLists = rows.filter((r) => r.source === 'live' && r.modelCount > 0);
   const stubOnly = rows.filter(
-    (r) => r.available && r.verified && r.catalogOnly && r.modelCount > 0 && !STATIC_BY_DESIGN.has(r.provider),
+    (r) =>
+      r.available &&
+      r.verified &&
+      r.catalogOnly &&
+      r.modelCount > 0 &&
+      !STATIC_BY_DESIGN.has(r.provider),
   );
 
   console.log('\n=== PROVIDER MODEL AUDIT ===\n');
@@ -187,7 +206,9 @@ async function main() {
 
   console.log(`\nConnected+verified: ${connected.length}`);
   console.log(`Live model lists:   ${liveLists.length}`);
-  console.log(`Catalog-only stubs: ${stubOnly.length} → ${stubOnly.map((r) => r.provider).join(', ') || 'none'}`);
+  console.log(
+    `Catalog-only stubs: ${stubOnly.length} → ${stubOnly.map((r) => r.provider).join(', ') || 'none'}`,
+  );
 
   if (stubOnly.length > 0) process.exit(2);
 }

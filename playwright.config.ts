@@ -3,7 +3,12 @@ import { defineConfig, devices } from '@playwright/test';
 const backendPort = 3011;
 const frontendPort = 5174;
 const backendUrl = `http://127.0.0.1:${backendPort}`;
+const frontendOrigins = [
+  `http://127.0.0.1:${frontendPort}`,
+  `http://localhost:${frontendPort}`,
+].join(',');
 const dataDirectory = `/tmp/koryphaios-playwright-${process.pid}`;
+const testKmsPassphrase = 'koryphaios-e2e-isolated-local-kms-v1';
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,7 +25,11 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `KORYPHAIOS_PORT=${backendPort} KORYPHAIOS_DATA_DIR=${dataDirectory} bun run --cwd backend dev`,
+      // The startup sentinel intentionally calls the backend directly, so the
+      // isolated browser origin must be admitted explicitly. The synthetic
+      // passphrase protects this run's disposable local KMS without weakening
+      // the production fail-closed default.
+      command: `KORYPHAIOS_PORT=${backendPort} KORYPHAIOS_DATA_DIR=${dataDirectory} CORS_ORIGINS=${frontendOrigins} KORYPHAIOS_KMS_PASSPHRASE=${testKmsPassphrase} KORY_DISABLE_CLI_AUTODETECT=1 bun run --cwd backend dev`,
       url: `${backendUrl}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000,

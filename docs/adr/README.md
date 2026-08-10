@@ -3,6 +3,7 @@
 This directory contains ADRs for load-bearing decisions in the Koryphaios backend.
 
 Each ADR documents a decision that is:
+
 - **Load-bearing** — changing it later would require significant rework
 - **Non-obvious** — the reasoning isn't clear from reading the code alone
 - **Consequential** — getting it wrong caused or would cause production incidents
@@ -16,3 +17,4 @@ Each ADR documents a decision that is:
 - [ADR-005: Optimistic locking with expectedVersion on SessionStore.update](./005-session-store-optimistic-locking.md)
 - [ADR-006: Explicit stub marking for embeddings instead of fake vectors](./006-embeddings-explicit-stub.md)
 - [ADR-007: Env-based KMS provider selection](./007-kms-env-based-selection.md)
+- [ADR-008: Skill polyhierarchy and professional facets](./008-skill-polyhierarchy-and-facets.md)

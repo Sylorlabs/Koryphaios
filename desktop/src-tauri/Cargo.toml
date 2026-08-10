@@ -31,3 +31,6 @@ ignore = "0.4.25"
 regex = "1.12.3"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-updater = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

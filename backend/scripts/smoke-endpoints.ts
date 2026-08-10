@@ -31,13 +31,27 @@ function resolveBaseUrl(): string {
 
 const BASE = resolveBaseUrl();
 
+interface SmokeProvider {
+  name?: string;
+  authMode?: string;
+  enabled?: boolean;
+  allAvailableModels?: Array<{ id?: string }>;
+}
+
+interface SmokeBody {
+  ok?: boolean;
+  data?: SmokeProvider[] | { status?: string };
+  subscriptions?: unknown;
+  byProvider?: unknown[];
+}
+
 interface Check {
   name: string;
   method?: string;
   path: string;
   expectStatus?: number;
   // Optional assertion on the parsed JSON body; return null if ok, else an error string.
-  assert?: (body: any) => string | null;
+  assert?: (body: SmokeBody) => string | null;
 }
 
 let token = '';
@@ -50,7 +64,7 @@ const checks: Check[] = [
     path: '/api/providers/status',
     assert: (b) => {
       if (!b?.ok) return 'ok!=true';
-      const claude = (b.data ?? []).find((p: any) => p.name === 'claude');
+      const claude = (Array.isArray(b.data) ? b.data : []).find((p) => p.name === 'claude');
       if (!claude) return 'claude provider missing from status';
       if (claude.authMode !== 'auth_only') return `claude authMode=${claude.authMode}`;
       return null;
@@ -60,14 +74,16 @@ const checks: Check[] = [
     name: 'providers/available',
     path: '/api/providers/available',
     assert: (b) =>
-      (b?.data ?? []).some((p: any) => p.name === 'claude') ? null : 'claude not in available types',
+      (Array.isArray(b?.data) ? b.data : []).some((p) => p.name === 'claude')
+        ? null
+        : 'claude not in available types',
   },
   {
     name: 'connect Claude Code (auth/start)',
     method: 'POST',
     path: '/api/providers/claude/auth/start',
     assert: (b) =>
-      b?.data?.status === 'connected'
+      (b?.data as { status?: string } | undefined)?.status === 'connected'
         ? null
         : `not connected (run "claude login"?): ${JSON.stringify(b?.data ?? b)}`,
   },
@@ -75,7 +91,7 @@ const checks: Check[] = [
     name: 'claude models appear after connect',
     path: '/api/providers/status',
     assert: (b) => {
-      const claude = (b?.data ?? []).find((p: any) => p.name === 'claude');
+      const claude = (Array.isArray(b?.data) ? b.data : []).find((p) => p.name === 'claude');
       if (!claude) return 'claude missing';
       if (!claude.enabled) return 'claude not enabled after connect';
       if (!Array.isArray(claude.allAvailableModels) || claude.allAvailableModels.length < 3)
@@ -107,7 +123,11 @@ const checks: Check[] = [
   },
   { name: 'mode', path: '/api/mode', assert: (b) => (b?.ok ? null : 'ok!=true') },
   { name: 'memory/stats', path: '/api/memory/stats', assert: (b) => (b?.ok ? null : 'ok!=true') },
-  { name: 'agent/settings', path: '/api/agent/settings', assert: (b) => (b?.ok ? null : 'ok!=true') },
+  {
+    name: 'agent/settings',
+    path: '/api/agent/settings',
+    assert: (b) => (b?.ok ? null : 'ok!=true'),
+  },
   {
     name: 'auth rejects no token (401)',
     path: '/api/providers/status',
@@ -121,7 +141,7 @@ async function mintToken(): Promise<void> {
     method: 'POST',
     headers: { 'x-forwarded-for': '127.0.0.1' },
   });
-  const body = (await res.json()) as any;
+  const body = (await res.json()) as { data?: { bearerToken?: string }; ok?: boolean };
   if (!body?.data?.bearerToken) throw new Error(`Failed to mint token: ${JSON.stringify(body)}`);
   token = body.data.bearerToken;
 }
@@ -142,7 +162,7 @@ async function run(): Promise<void> {
     try {
       const res = await fetch(`${BASE}${c.path}`, { method, headers });
       const expectStatus = c.expectStatus ?? 200;
-      let body: any = null;
+      let body: unknown = null;
       try {
         body = await res.json();
       } catch {
@@ -150,7 +170,7 @@ async function run(): Promise<void> {
       }
       let err: string | null = null;
       if (res.status !== expectStatus) err = `status ${res.status} != ${expectStatus}`;
-      else if (c.assert) err = c.assert(body);
+      else if (c.assert) err = c.assert(body as SmokeBody);
 
       if (err) {
         fail++;
@@ -167,7 +187,11 @@ async function run(): Promise<void> {
 
   // ── Custom (bring-your-own) provider flow ──
   console.log('\nCustom provider flow:');
-  const headers = { 'content-type': 'application/json', authorization: token, 'x-forwarded-for': '127.0.0.1' };
+  const headers = {
+    'content-type': 'application/json',
+    authorization: token,
+    'x-forwarded-for': '127.0.0.1',
+  };
   try {
     const add = await fetch(`${BASE}/api/providers/custom`, {
       method: 'POST',
@@ -180,7 +204,7 @@ async function run(): Promise<void> {
         models: ['smoke-model-1', 'smoke-model-2'],
       }),
     });
-    const addBody: any = await add.json();
+    const addBody = (await add.json()) as { ok?: boolean; data?: { id?: string } };
     const id = addBody?.data?.id;
     if (addBody?.ok && id) {
       pass++;
@@ -192,22 +216,40 @@ async function run(): Promise<void> {
 
     // It should appear in status with the right form fields.
     const st = await fetch(`${BASE}/api/providers/status`, { headers });
-    const stBody: any = await st.json();
-    const custom = (stBody.data ?? []).find((p: any) => p.name === id);
-    const fieldsOk = custom && custom.custom === true && custom.requiresBaseUrl === true && custom.supportsApiKey === true;
-    const modelsOk = custom && (custom.allAvailableModels ?? []).some((m: any) => m.id === 'smoke-model-1');
+    const stBody = (await st.json()) as {
+      data?: Array<{
+        name?: string;
+        custom?: boolean;
+        requiresBaseUrl?: boolean;
+        supportsApiKey?: boolean;
+        allAvailableModels?: Array<{ id?: string }>;
+      }>;
+    };
+    const custom = (stBody.data ?? []).find((p) => p.name === id);
+    const fieldsOk =
+      custom &&
+      custom.custom === true &&
+      custom.requiresBaseUrl === true &&
+      custom.supportsApiKey === true;
+    const modelsOk =
+      custom && (custom.allAvailableModels ?? []).some((m) => m.id === 'smoke-model-1');
     if (fieldsOk && modelsOk) {
       pass++;
       console.log(`✓ ${'custom provider in status w/ fields+models'.padEnd(46)} [${st.status}]`);
     } else {
       fail++;
-      console.log(`✗ custom provider status: fields=${fieldsOk} models=${modelsOk} ${JSON.stringify(custom)?.slice(0, 200)}`);
+      console.log(
+        `✗ custom provider status: fields=${fieldsOk} models=${modelsOk} ${JSON.stringify(custom)?.slice(0, 200)}`,
+      );
     }
 
     // Clean up.
     if (id) {
-      const del = await fetch(`${BASE}/api/providers/custom/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
-      const delBody: any = await del.json();
+      const del = await fetch(`${BASE}/api/providers/custom/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      });
+      const delBody = (await del.json()) as { ok?: boolean };
       if (delBody?.ok) {
         pass++;
         console.log(`✓ ${'delete custom provider'.padEnd(46)} [${del.status}]`);
