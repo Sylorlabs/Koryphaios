@@ -17,7 +17,7 @@ interface SnapshotManifest {
   files: string[];
 }
 
-const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SAFE_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 const RESERVED_PROJECT_PATHS = new Set(['.git', '.koryphaios']);
 
 export class SnapshotManager {

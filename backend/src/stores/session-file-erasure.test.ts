@@ -240,4 +240,31 @@ describe('session file erasure staging', () => {
     expect(attempts).toBe(2);
     expect(existsSync(lease.recoveryReceiptPath)).toBe(false);
   });
+
+  test('accepts nanoid session IDs that start with - or _', () => {
+    // nanoid's default alphabet includes "-" and "_", so IDs can legitimately
+    // start with either.  The SAFE_SESSION_ID regex must allow this.
+    const root = project();
+    for (const id of ['-4bebDx1B1d3', '_KgipYkja5DE']) {
+      for (const namespace of ['sessions', 'snapshots']) {
+        const dir = join(root, '.koryphaios', namespace, id);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'sentinel.txt'), id);
+      }
+    }
+
+    const lease = stageSessionFilesForErasure({
+      receiptRoot: root,
+      projectRoots: [root],
+      sessionIds: ['-4bebDx1B1d3', '_KgipYkja5DE', 'target', 'keep'],
+      scope: 'all',
+    });
+    lease.markDatabaseCommitted();
+    lease.finalize();
+
+    expect(existsSync(join(root, '.koryphaios', 'sessions', '-4bebDx1B1d3'))).toBe(false);
+    expect(existsSync(join(root, '.koryphaios', 'sessions', '_KgipYkja5DE'))).toBe(false);
+    expect(existsSync(join(root, '.koryphaios', 'sessions', 'target'))).toBe(false);
+    expect(existsSync(join(root, '.koryphaios', 'sessions', 'keep'))).toBe(false);
+  });
 });

@@ -16,7 +16,7 @@ import { redactSecretsInText } from '../security';
 const ARCHIVE_PREVIEW_MAX_BYTES = 8 * 1024;
 const ARCHIVE_DURABLE_MAX_BYTES = 4 * 1024 * 1024;
 const ARCHIVE_DURABLE_MAX_ENTRIES = 1_000;
-const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,511}$/;
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,511}$/;
 
 export const CONTEXT_ARCHIVE_LIMITS = {
   previewBytes: ARCHIVE_PREVIEW_MAX_BYTES,
@@ -317,10 +317,7 @@ export class ContextArchiveService {
   private async compactIfNeeded(sessionId: string, state: SessionState): Promise<void> {
     const path = this.file(sessionId);
     const size = existsSync(path) ? (await stat(path)).size : 0;
-    if (
-      size <= ARCHIVE_DURABLE_MAX_BYTES &&
-      state.entries.length <= ARCHIVE_DURABLE_MAX_ENTRIES
-    ) {
+    if (size <= ARCHIVE_DURABLE_MAX_BYTES && state.entries.length <= ARCHIVE_DURABLE_MAX_ENTRIES) {
       return;
     }
     await this.rewriteArchive(sessionId, state, state.entries, 0);
@@ -400,7 +397,9 @@ export class ContextArchiveService {
     state.retention = retention;
   }
 
-  private preview(content: string): Pick<
+  private preview(
+    content: string,
+  ): Pick<
     ArchiveEntry,
     'content' | 'originalByteCount' | 'contentSha256' | 'truncated' | 'redacted'
   > {

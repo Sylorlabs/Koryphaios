@@ -13,7 +13,10 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { redactSecretsInText } from '../security';
 
-const SAFE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,511}$/;
+// nanoid can produce IDs whose first character is "-" or "_" (both are in
+// its default alphabet).  These are safe as directory names — unlike "."
+// and "..", which are rejected explicitly in assertSessionId.
+const SAFE_SESSION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,511}$/;
 const RECEIPT_VERSION = 1;
 
 interface StagedPath {
@@ -72,7 +75,8 @@ function assertOwnedDirectory(path: string, label: string): void {
 
 function canonicalRoot(root: string): string {
   const requested = resolve(root);
-  if (!existsSync(requested)) throw new Error(`Session project directory is unavailable: ${requested}`);
+  if (!existsSync(requested))
+    throw new Error(`Session project directory is unavailable: ${requested}`);
   assertOwnedDirectory(requested, 'project directory');
   return realpathSync(requested);
 }
@@ -222,7 +226,9 @@ export class SessionFileErasureLease {
       for (const entry of [...this.receipt.paths].reverse()) {
         if (!existsSync(entry.staged)) continue;
         if (existsSync(entry.source)) {
-          throw new Error(`Cannot roll back session erasure over an existing path: ${entry.source}`);
+          throw new Error(
+            `Cannot roll back session erasure over an existing path: ${entry.source}`,
+          );
         }
         renameSync(entry.staged, entry.source);
       }
