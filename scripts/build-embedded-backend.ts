@@ -16,9 +16,10 @@
  * `--define process.env.RELAY_URL=...` (matches the CI workflow).
  */
 
-import { mkdirSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { gzipSync } from 'node:zlib';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_ENTRY = join(PROJECT_ROOT, 'backend', 'src', 'server.ts');
@@ -76,8 +77,22 @@ function detectHostTarget(): HostTarget {
 function main() {
   const target = detectHostTarget();
   const outfile = join(PAYLOAD_DIR, `koryphaios-backend-${target.rustTarget}${target.suffix}`);
+  // linuxdeploy rewrites every ELF resource it discovers. Bun's compiled
+  // executable is valid as shipped, but the host linuxdeploy/patchelf pass can
+  // make its loader segfault when it injects a RUNPATH. Keep the Linux payload
+  // opaque to that pass and restore executable permissions only in the private
+  // runtime cache (desktop/src-tauri/src/lib.rs).
+  const compressResource = process.platform === 'linux';
+  const compressedOutfile = `${outfile}.gz`;
+  const compileOutfile = compressResource ? `${outfile}.raw-${process.pid}` : outfile;
 
   mkdirSync(dirname(outfile), { recursive: true });
+
+  // Do not let a previous host build leave two backend resources in the
+  // directory. Tauri copies the whole directory into every bundle.
+  if (compressResource && existsSync(outfile)) unlinkSync(outfile);
+  if (!compressResource && existsSync(compressedOutfile)) unlinkSync(compressedOutfile);
+  if (existsSync(compileOutfile)) unlinkSync(compileOutfile);
 
   const args: string[] = ['build', '--compile', `--target=${target.bunTarget}`];
 
@@ -88,10 +103,10 @@ function main() {
     args.push('--define', `process.env.RELAY_URL="${relayUrl}"`);
   }
 
-  args.push(BACKEND_ENTRY, '--outfile', outfile);
+  args.push(BACKEND_ENTRY, '--outfile', compileOutfile);
 
   console.log(`[build-embedded-backend] target=${target.rustTarget} bun=${target.bunTarget}`);
-  console.log(`[build-embedded-backend] outfile=${outfile}`);
+  console.log(`[build-embedded-backend] outfile=${compressResource ? compressedOutfile : outfile}`);
 
   const result = spawnSync('bun', args, {
     cwd: PROJECT_ROOT,
@@ -106,8 +121,18 @@ function main() {
     );
   }
 
-  if (!existsSync(outfile)) {
-    throw new Error(`Embedded backend payload was not written to ${outfile}`);
+  if (!existsSync(compileOutfile)) {
+    throw new Error(`Embedded backend payload was not written to ${compileOutfile}`);
+  }
+
+  if (compressResource) {
+    const compressed = gzipSync(readFileSync(compileOutfile), { level: 9 });
+    writeFileSync(compressedOutfile, compressed, { mode: 0o644 });
+    unlinkSync(compileOutfile);
+  } else if (compileOutfile !== outfile) {
+    // Kept for clarity if another platform ever uses a staging output.
+    writeFileSync(outfile, readFileSync(compileOutfile), { mode: 0o755 });
+    unlinkSync(compileOutfile);
   }
 
   console.log(`[build-embedded-backend] done`);

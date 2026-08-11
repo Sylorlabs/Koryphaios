@@ -29,6 +29,7 @@ reqwest = { version = "0.12", features = ["json"], default-features = false }
 tokio = { version = "1", features = ["time"] }
 ignore = "0.4.25"
 regex = "1.12.3"
+flate2 = "1"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-updater = "2"
 

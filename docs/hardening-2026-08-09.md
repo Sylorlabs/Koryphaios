@@ -187,17 +187,17 @@ dependency re-optimization from invalidating the first WebKit module load.
   best-effort per-user limits, not a cgroup or VM boundary.
 - This Linux run does not certify macOS/Windows packaging, code signing,
   installer upgrade, or rollback. Each target needs its own build/install gate.
-- On this Linux host, the current desktop build produces the embedded app,
-  `.deb`, and `.rpm`, but the AppImage linuxdeploy GTK phase fails closed after
-  a bounded wait; AppImage distribution remains unverified until that host
-  toolchain is repaired. The bounded diagnostic identified the first failing
-  AppDir entry as the Bun-compiled embedded backend: linuxdeploy adds an
-  `$ORIGIN` runpath and its nested `ldd` probe exits non-zero/aborts there,
-  while the source backend, packaged desktop executable, WebKit libraries,
-  `.deb`, and `.rpm` pass their independent checks. Tauri's resource map keeps
-  that sidecar inside the resource tree, so excluding it would require a
-  cross-platform compressed-sidecar/runtime-extraction redesign rather than a
-  safe config-only change.
+- The Linux AppImage path now ships the Bun backend as an opaque gzip resource
+  (`backend/koryphaios-backend-*.gz`). The native shell streams it into a
+  private executable cache, enforces a 512 MiB decompressed ceiling, and uses
+  an atomic replacement plus source stamp; linuxdeploy therefore never rewrites
+  the Bun ELF. The build removes stale generated `AppDir`, `appimage_deb`, and
+  Debian staging trees before packaging so an old raw sidecar cannot return.
+  On offline hosts where appimagetool cannot download its type-2 runtime, the
+  script only falls back after validating that AppDir contains exactly one
+  gzip backend and extracts the runtime prefix from the cached appimagetool;
+  CI retains the normal network-backed plugin path. This host produced and
+  validated `Koryphaios_0.2.0_amd64.AppImage` (`--appimage-version` passed).
 - Notes filesystem coordination is process-local; concurrent independent
   backend processes are not presented as a supported multi-writer deployment.
 - Provider-specific tokenizers are not bundled. Live skill budgeting therefore

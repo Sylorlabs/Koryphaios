@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -82,9 +83,14 @@ fn resolve_bundled_backend(
     };
 
     let exact_name = format!("koryphaios-backend-{}{}", target_triple, os_suffix);
-    let exact_path = backend_dir.join(&exact_name);
-    if exact_path.is_file() {
-        return copy_backend_to_cache(app_handle, &exact_path);
+    let exact_paths = [
+        backend_dir.join(&exact_name),
+        backend_dir.join(format!("{exact_name}.gz")),
+    ];
+    for exact_path in exact_paths {
+        if exact_path.is_file() {
+            return copy_backend_to_cache(app_handle, &exact_path);
+        }
     }
 
     // Fall back: look for any koryphaios-backend-* executable in the directory
@@ -93,7 +99,10 @@ fn resolve_bundled_backend(
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if name.starts_with("koryphaios-backend-") {
-                if cfg!(target_os = "windows") && !name.ends_with(".exe") {
+                if cfg!(target_os = "windows")
+                    && !name.ends_with(".exe")
+                    && !name.ends_with(".exe.gz")
+                {
                     continue;
                 }
                 return copy_backend_to_cache(app_handle, &path);
@@ -121,7 +130,10 @@ fn copy_backend_to_cache(
     std::fs::create_dir_all(&runtime_dir)
         .map_err(|e| format!("Failed to create backend runtime directory: {e}"))?;
 
-    let source_size = std::fs::metadata(source).map(|m| m.len()).unwrap_or(0);
+    const MAX_BACKEND_BYTES: u64 = 512 * 1024 * 1024;
+    let source_metadata =
+        std::fs::metadata(source).map_err(|e| format!("Failed to inspect bundled backend: {e}"))?;
+    let source_size = source_metadata.len();
 
     let destination = runtime_dir.join(format!(
         "koryphaios-service-{}-{}{}",
@@ -134,13 +146,34 @@ fn copy_backend_to_cache(
         }
     ));
 
-    // Only copy if the destination doesn't exist or size differs (avoids
-    // redundant file I/O on every startup when the backend hasn't changed).
+    let source_marker = destination.with_extension("source");
+    let source_stamp = format!(
+        "{}:{}",
+        source_size,
+        source_metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default()
+    );
+    let source_is_compressed = source.extension().and_then(|ext| ext.to_str()) == Some("gz");
+
+    // Raw resources retain the old size fast-path. Compressed resources use a
+    // sidecar stamp because their source size is intentionally different from
+    // the decompressed executable size.
     let current_size = std::fs::metadata(&destination).map(|m| m.len()).ok();
-    if current_size != Some(source_size) {
+    let needs_copy = if source_is_compressed {
+        std::fs::read_to_string(&source_marker).ok().as_deref() != Some(source_stamp.as_str())
+    } else {
+        current_size != Some(source_size)
+    };
+    if needs_copy {
         let temporary = destination.with_extension("new");
-        std::fs::copy(source, &temporary)
-            .map_err(|e| format!("Failed to copy bundled backend: {e}"))?;
+        if let Err(error) = copy_backend_resource(source, &temporary, MAX_BACKEND_BYTES) {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error);
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -149,8 +182,46 @@ fn copy_backend_to_cache(
         }
         std::fs::rename(&temporary, &destination)
             .map_err(|e| format!("Failed to activate backend: {e}"))?;
+        if source_is_compressed {
+            let marker_temporary = source_marker.with_extension("new");
+            std::fs::write(&marker_temporary, &source_stamp)
+                .map_err(|e| format!("Failed to stage backend source stamp: {e}"))?;
+            std::fs::rename(&marker_temporary, &source_marker)
+                .map_err(|e| format!("Failed to activate backend source stamp: {e}"))?;
+        } else {
+            let _ = std::fs::remove_file(&source_marker);
+        }
     }
     Ok(Some(destination))
+}
+
+/// Materialize a bundled backend resource while keeping the resource opaque
+/// to ELF scanners. Both raw and gzip resources are streamed through the same
+/// hard ceiling so a corrupted or hostile bundle cannot exhaust memory/disk.
+fn copy_backend_resource(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    max_bytes: u64,
+) -> Result<u64, String> {
+    let input =
+        std::fs::File::open(source).map_err(|e| format!("Failed to open bundled backend: {e}"))?;
+    let source_is_compressed = source.extension().and_then(|ext| ext.to_str()) == Some("gz");
+    let reader: Box<dyn Read> = if source_is_compressed {
+        Box::new(flate2::read::GzDecoder::new(input))
+    } else {
+        Box::new(input)
+    };
+    let mut limited = reader.take(max_bytes.saturating_add(1));
+    let mut output = std::fs::File::create(destination)
+        .map_err(|e| format!("Failed to stage bundled backend: {e}"))?;
+    let bytes = std::io::copy(&mut limited, &mut output)
+        .map_err(|e| format!("Failed to materialize bundled backend: {e}"))?;
+    if bytes == 0 || bytes > max_bytes {
+        return Err(format!(
+            "Bundled backend decompressed size {bytes} is outside the safe limit"
+        ));
+    }
+    Ok(bytes)
 }
 
 // ─── Supervisor events (consumed by the frontend backend-health sentinel) ────
@@ -1882,7 +1953,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{open_private_backend_logs, validate_log_file_name};
+    use super::{copy_backend_resource, open_private_backend_logs, validate_log_file_name};
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1912,6 +1985,47 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn compressed_backend_resource_is_materialized_with_a_hard_limit() {
+        let directory = TestDirectory::new("backend-resource");
+        let source = directory.path().join("backend.gz");
+        let destination = directory.path().join("backend");
+        let payload = b"opaque backend payload";
+        let file = std::fs::File::create(&source).expect("compressed source should be writable");
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder.write_all(payload).expect("payload should compress");
+        encoder.finish().expect("gzip stream should finish");
+
+        let bytes = copy_backend_resource(&source, &destination, 1024)
+            .expect("compressed resource should materialize");
+        assert_eq!(bytes, payload.len() as u64);
+        assert_eq!(
+            std::fs::read(&destination).expect("destination should be readable"),
+            payload
+        );
+    }
+
+    #[test]
+    fn backend_resource_limit_rejects_oversized_raw_and_compressed_payloads() {
+        let directory = TestDirectory::new("backend-resource-limit");
+        let raw = directory.path().join("backend");
+        let compressed = directory.path().join("backend.gz");
+        let raw_destination = directory.path().join("raw-out");
+        let compressed_destination = directory.path().join("compressed-out");
+        let payload = vec![b'x'; 65];
+        std::fs::write(&raw, &payload).expect("raw source should be writable");
+        let file =
+            std::fs::File::create(&compressed).expect("compressed source should be writable");
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder
+            .write_all(&payload)
+            .expect("payload should compress");
+        encoder.finish().expect("gzip stream should finish");
+
+        assert!(copy_backend_resource(&raw, &raw_destination, 64).is_err());
+        assert!(copy_backend_resource(&compressed, &compressed_destination, 64).is_err());
     }
 
     #[test]

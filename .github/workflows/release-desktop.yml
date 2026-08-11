@@ -99,12 +99,19 @@ jobs:
           [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
           bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" \
             backend/src/server.ts --outfile="$OUTFILE"
-          ls -la "$OUTFILE"
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            # Keep linuxdeploy from rewriting the Bun executable. The desktop
+            # shell decompresses this resource into its private runtime cache
+            # immediately before launch.
+            gzip -9 -c "$OUTFILE" > "$OUTFILE.gz"
+            rm "$OUTFILE"
+          fi
+          ls -la "$OUTFILE"*
 
       - uses: actions/upload-artifact@v7
         with:
           name: backend-${{ matrix.target }}
-          path: koryphaios-backend-${{ matrix.target }}${{ matrix.suffix }}
+          path: koryphaios-backend-${{ matrix.target }}${{ matrix.suffix }}*
           if-no-files-found: error
           retention-days: 1
 
