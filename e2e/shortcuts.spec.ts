@@ -33,7 +33,7 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await expect(shortcutsHeading).toBeVisible({ timeout: 10_000 });
 
   // Find the "Open settings" shortcut group and reassign it
-  const openSettings = page.locator('.group').filter({ hasText: 'Open settings' });
+  const openSettings = settingsDialog.locator('.group').filter({ hasText: 'Open settings' });
   await openSettings.getByRole('button').click();
 
   // Press the new shortcut combo
