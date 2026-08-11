@@ -187,6 +187,10 @@ dependency re-optimization from invalidating the first WebKit module load.
   best-effort per-user limits, not a cgroup or VM boundary.
 - This Linux run does not certify macOS/Windows packaging, code signing,
   installer upgrade, or rollback. Each target needs its own build/install gate.
+- On this Linux host, the current desktop build produces the embedded app,
+  `.deb`, and `.rpm`, but the AppImage linuxdeploy GTK phase fails closed after
+  a bounded wait; AppImage distribution remains unverified until that host
+  toolchain is repaired.
 - Notes filesystem coordination is process-local; concurrent independent
   backend processes are not presented as a supported multi-writer deployment.
 - Provider-specific tokenizers are not bundled. Live skill budgeting therefore
