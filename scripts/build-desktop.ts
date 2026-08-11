@@ -35,10 +35,14 @@ import { spawnSync } from 'node:child_process';
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const DESKTOP_DIR = join(PROJECT_ROOT, 'desktop');
 const TAURI_CONF = join(DESKTOP_DIR, 'src-tauri', 'tauri.conf.json');
-const TAURI_METADATA = JSON.parse(readFileSync(TAURI_CONF, 'utf8')) as {
+const TAURI_CONFIG = JSON.parse(readFileSync(TAURI_CONF, 'utf8')) as {
   productName?: string;
   version?: string;
+  bundle?: {
+    targets?: string | string[];
+  };
 };
+const TAURI_METADATA = TAURI_CONFIG;
 const APPIMAGE_APPDIR = join(
   DESKTOP_DIR,
   'src-tauri',
@@ -58,16 +62,33 @@ const APPIMAGE_FALLBACK_OUTPUT = join(
   'appimage',
   `${TAURI_METADATA.productName ?? 'Koryphaios'}_${TAURI_METADATA.version ?? '0.0.0'}_${APPIMAGE_OUTPUT_ARCH}.AppImage`,
 );
+const DEFAULT_APPIMAGE_BUILD_TIMEOUT_MS = 180_000;
 
 const SPAWN_SHELL = process.platform === 'win32';
 
 function run(
   cmd: string,
   args: string[],
-  opts: { cwd: string; env?: Record<string, string | undefined> } = { cwd: PROJECT_ROOT },
+  opts: {
+    cwd: string;
+    env?: Record<string, string | undefined>;
+    timeoutMs?: number;
+  } = { cwd: PROJECT_ROOT },
 ): number {
   console.log(`\n[build-desktop] ${cmd} ${args.join(' ')}`);
-  const result = spawnSync(cmd, args, {
+  const timeoutMs = opts.timeoutMs;
+  const boundedOnLinux = process.platform === 'linux' && timeoutMs !== undefined;
+  const executable = boundedOnLinux ? 'timeout' : cmd;
+  const executableArgs = boundedOnLinux
+    ? [
+        '--foreground',
+        '--kill-after=10s',
+        `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`,
+        cmd,
+        ...args,
+      ]
+    : args;
+  const result = spawnSync(executable, executableArgs, {
     cwd: opts.cwd,
     stdio: 'inherit',
     shell: SPAWN_SHELL,
@@ -77,6 +98,28 @@ function run(
     throw new Error(`${cmd} ${args.join(' ')} exited with code ${result.status}`);
   }
   return result.status ?? 0;
+}
+
+/** Whether the current Tauri invocation is expected to produce an AppImage.
+ * The default configuration targets all Linux bundle formats, while an
+ * explicit --bundles list narrows the requested outputs. */
+export function buildRequestsAppImage(
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== 'linux') return false;
+  const explicit = args.find((arg) => arg === '--bundles' || arg.startsWith('--bundles='));
+  if (explicit) {
+    const value = explicit.startsWith('--bundles=')
+      ? explicit.slice('--bundles='.length)
+      : (args[args.indexOf(explicit) + 1] ?? '');
+    return value
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim().toLowerCase())
+      .includes('appimage');
+  }
+  const targets = TAURI_CONFIG.bundle?.targets;
+  return targets === 'all' || (Array.isArray(targets) && targets.includes('appimage'));
 }
 
 function patchTauriConfig(disableUpdater: boolean): string {
@@ -209,9 +252,17 @@ function main() {
     }
 
     try {
-      run('bun', tauriArgs, { cwd: DESKTOP_DIR });
+      const configuredTimeout = Number.parseInt(
+        process.env.KORY_APPIMAGE_BUILD_TIMEOUT_MS ?? '',
+        10,
+      );
+      const timeoutMs =
+        Number.isSafeInteger(configuredTimeout) && configuredTimeout > 0
+          ? configuredTimeout
+          : DEFAULT_APPIMAGE_BUILD_TIMEOUT_MS;
+      run('bun', tauriArgs, { cwd: DESKTOP_DIR, timeoutMs });
     } catch (error) {
-      const requestedAppImage = tauriArgs.some((arg) => arg.includes('appimage'));
+      const requestedAppImage = buildRequestsAppImage(tauriArgs);
       // Never bypass a signed build: the fallback intentionally produces only
       // the unsigned local artifact used when updater signing is disabled.
       if (hasSigningKey || !requestedAppImage || !buildAppImageFromValidatedAppDir()) {
@@ -232,4 +283,4 @@ function main() {
   console.log('\n[build-desktop] Build complete!');
 }
 
-main();
+if (import.meta.main) main();
