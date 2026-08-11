@@ -23,7 +23,10 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
 
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
-  await page.getByText(sessionTitle, { exact: true }).click();
+  // Session rows expose a full-row accessible button so the title and
+  // goal/status chips remain non-interactive descendants. Click that public
+  // interaction target instead of relying on text hit-testing.
+  await page.getByRole('button', { name: `Open session ${sessionTitle}` }).click();
 
   // Wait for the composer to be ready
   const composer = page.getByTestId('composer-input');
