@@ -190,7 +190,14 @@ dependency re-optimization from invalidating the first WebKit module load.
 - On this Linux host, the current desktop build produces the embedded app,
   `.deb`, and `.rpm`, but the AppImage linuxdeploy GTK phase fails closed after
   a bounded wait; AppImage distribution remains unverified until that host
-  toolchain is repaired.
+  toolchain is repaired. The bounded diagnostic identified the first failing
+  AppDir entry as the Bun-compiled embedded backend: linuxdeploy adds an
+  `$ORIGIN` runpath and its nested `ldd` probe exits non-zero/aborts there,
+  while the source backend, packaged desktop executable, WebKit libraries,
+  `.deb`, and `.rpm` pass their independent checks. Tauri's resource map keeps
+  that sidecar inside the resource tree, so excluding it would require a
+  cross-platform compressed-sidecar/runtime-extraction redesign rather than a
+  safe config-only change.
 - Notes filesystem coordination is process-local; concurrent independent
   backend processes are not presented as a supported multi-writer deployment.
 - Provider-specific tokenizers are not bundled. Live skill budgeting therefore
