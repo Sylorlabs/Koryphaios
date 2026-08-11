@@ -185,6 +185,11 @@ dependency re-optimization from invalidating the first WebKit module load.
 - OS sandbox proof is host-specific. Linux uses `bwrap`; unsupported or missing
   confinement fails closed for sandbox-required work. Resource limits are
   best-effort per-user limits, not a cgroup or VM boundary.
+- The deterministic core runner detects hosts that deny loopback listeners,
+  interactive Bun child-stdin pipes, or operational `bwrap` user namespaces.
+  Tests requiring those OS boundaries are reported as explicit skips in that
+  environment; they run normally on a host that grants the capability. A skip
+  is not provider, network, native-window, or entitlement evidence.
 - This Linux run does not certify macOS/Windows packaging, code signing,
   installer upgrade, or rollback. Each target needs its own build/install gate.
 - The Linux AppImage path now ships the Bun backend as an opaque gzip resource

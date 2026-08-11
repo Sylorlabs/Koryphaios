@@ -17,6 +17,9 @@ import {
   buildSecurityHeaders,
   validateCSRFOnRequest,
 } from '../csp';
+import { canBindLoopback } from '../../__tests__/runtime-capabilities';
+
+const LOOPBACK_AVAILABLE = canBindLoopback();
 
 // Mock Redis
 class MockRedis {
@@ -413,54 +416,56 @@ describe('Security Headers', () => {
  * reproduction of the production middleware wiring.
  */
 function buildSecureApp(sessionId = 'csp-test-session'): Elysia {
-  return new Elysia()
-    .onAfterHandle(({ set }) => {
-      const nonce = generateCSPNonce();
-      const headers = buildSecurityHeaders({ cspNonce: nonce });
-      for (const [name, value] of Object.entries(headers)) {
-        if (value) set.headers[name] = value;
-      }
-    })
-    .onError(({ set }) => {
-      // Errors must still carry security headers — a response without CSP
-      // on an error page is a classic bypass.
-      const nonce = generateCSPNonce();
-      const headers = buildSecurityHeaders({ cspNonce: nonce });
-      for (const [name, value] of Object.entries(headers)) {
-        if (value) set.headers[name] = value;
-      }
-      set.status = 500;
-      return { ok: false, error: 'Internal Server Error' };
-    })
-    .get('/', () => ({ ok: true }))
-    .get('/echo-path', ({ path }) => ({ path }))
-    .get('/boom', () => {
-      throw new Error('deliberate failure');
-    })
-    .get('/csrf-token', async ({ set }) => {
-      const { token, cookieHeader } = await createCSRFToken(sessionId);
-      set.headers['Set-Cookie'] = cookieHeader;
-      return { ok: true, token };
-    })
-    .post('/protected', async ({ request }) => {
-      const result = await validateCSRFOnRequest(request, sessionId);
-      if (!result.valid) {
-        return new Response(JSON.stringify({ ok: false, error: result.error }), {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-      return { ok: true };
-    })
-    .ws('/ws', { open: () => {}, message: () => {} })
-    // Explicit catch-all 404 placed LAST so specific routes win, but
-    // unmatched paths still flow through onAfterHandle and receive
-    // security headers (mirrors the production server's
-    // `.all('/api/*', ...)` catch-all).
-    .all('*', ({ set }) => {
-      set.status = 404;
-      return { ok: false, error: 'Not Found' };
-    });
+  return (
+    new Elysia()
+      .onAfterHandle(({ set }) => {
+        const nonce = generateCSPNonce();
+        const headers = buildSecurityHeaders({ cspNonce: nonce });
+        for (const [name, value] of Object.entries(headers)) {
+          if (value) set.headers[name] = value;
+        }
+      })
+      .onError(({ set }) => {
+        // Errors must still carry security headers — a response without CSP
+        // on an error page is a classic bypass.
+        const nonce = generateCSPNonce();
+        const headers = buildSecurityHeaders({ cspNonce: nonce });
+        for (const [name, value] of Object.entries(headers)) {
+          if (value) set.headers[name] = value;
+        }
+        set.status = 500;
+        return { ok: false, error: 'Internal Server Error' };
+      })
+      .get('/', () => ({ ok: true }))
+      .get('/echo-path', ({ path }) => ({ path }))
+      .get('/boom', () => {
+        throw new Error('deliberate failure');
+      })
+      .get('/csrf-token', async ({ set }) => {
+        const { token, cookieHeader } = await createCSRFToken(sessionId);
+        set.headers['Set-Cookie'] = cookieHeader;
+        return { ok: true, token };
+      })
+      .post('/protected', async ({ request }) => {
+        const result = await validateCSRFOnRequest(request, sessionId);
+        if (!result.valid) {
+          return new Response(JSON.stringify({ ok: false, error: result.error }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return { ok: true };
+      })
+      .ws('/ws', { open: () => {}, message: () => {} })
+      // Explicit catch-all 404 placed LAST so specific routes win, but
+      // unmatched paths still flow through onAfterHandle and receive
+      // security headers (mirrors the production server's
+      // `.all('/api/*', ...)` catch-all).
+      .all('*', ({ set }) => {
+        set.status = 404;
+        return { ok: false, error: 'Not Found' };
+      })
+  );
 }
 
 describe('CSP header injection in real HTTP responses', () => {
@@ -524,7 +529,7 @@ describe('CSP header injection in real HTTP responses', () => {
     expect(csp).not.toContain("'unsafe-inline' script-src");
     expect(csp.match(/script-src/g)?.length).toBe(1);
     // The injected string should not appear verbatim anywhere in the header.
-    expect(csp).not.toContain("evil=script-src");
+    expect(csp).not.toContain('evil=script-src');
   });
 
   test('CSP header is not injectable via request headers', async () => {
@@ -590,75 +595,82 @@ describe('CSP header injection in real HTTP responses', () => {
   // before Elysia's built-in 404 fires.
   test('CSP header is present on Elysia built-in unmatched-route responses', async () => {
     const { securityHeadersElysia } = await import('../../middleware/security-headers');
-    const bareApp = new Elysia().use(securityHeadersElysia() as unknown as Parameters<Elysia['use']>[0]).get('/', () => ({ ok: true }));
+    const bareApp = new Elysia()
+      .use(securityHeadersElysia() as unknown as Parameters<Elysia['use']>[0])
+      .get('/', () => ({ ok: true }));
     const res = await bareApp.handle(new Request('http://localhost/does-not-exist'));
     // Security headers present even on the unmatched 404.
     expect(res.headers.get('content-security-policy')).toBeTruthy();
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });
 
-  test('CSP header is present on WebSocket upgrade responses', async () => {
-    // Elysia's app.handle cannot perform a real 101 upgrade (it has no
-    // underlying Bun server to hand the socket to), so we spin up a real
-    // Bun.serve that mirrors the production upgrade path: generate a nonce,
-    // build security headers, and stamp them onto the 101 (or 400 fallback)
-    // response. We then open a real WebSocket client to confirm the upgrade
-    // succeeds and the headers travel with the handshake.
-    const wsApp = buildSecureApp();
-    const server = Bun.serve({
-      port: 0,
-      websocket: { open() {}, message() {} },
-      async fetch(req, srv) {
-        const url = new URL(req.url);
-        if (url.pathname === '/ws') {
-          const nonce = generateCSPNonce();
-          const headers = buildSecurityHeaders({ cspNonce: nonce });
-          const upgraded = (srv as any).upgrade(req, {});
-          if (upgraded) {
-            return new Response(null, { status: 101, headers });
+  test.skipIf(!LOOPBACK_AVAILABLE)(
+    'CSP header is present on WebSocket upgrade responses',
+    async () => {
+      // Elysia's app.handle cannot perform a real 101 upgrade (it has no
+      // underlying Bun server to hand the socket to), so we spin up a real
+      // Bun.serve that mirrors the production upgrade path: generate a nonce,
+      // build security headers, and stamp them onto the 101 (or 400 fallback)
+      // response. We then open a real WebSocket client to confirm the upgrade
+      // succeeds and the headers travel with the handshake.
+      const wsApp = buildSecureApp();
+      const server = Bun.serve({
+        port: 0,
+        websocket: { open() {}, message() {} },
+        async fetch(req, srv) {
+          const url = new URL(req.url);
+          if (url.pathname === '/ws') {
+            const nonce = generateCSPNonce();
+            const headers = buildSecurityHeaders({ cspNonce: nonce });
+            const upgraded = (srv as any).upgrade(req, {});
+            if (upgraded) {
+              return new Response(null, { status: 101, headers });
+            }
+            return new Response('upgrade failed', { status: 400, headers });
           }
-          return new Response('upgrade failed', { status: 400, headers });
-        }
-        return wsApp.handle(req);
-      },
-    });
-
-    try {
-      const port = server.port;
-      // Real WebSocket client — confirms the upgrade handshake completes.
-      const opened = await new Promise<boolean>((resolve) => {
-        const ws = new WebSocket(`ws://localhost:${port}/ws`);
-        ws.onopen = () => {
-          ws.close();
-          resolve(true);
-        };
-        ws.onerror = () => resolve(false);
-        setTimeout(() => resolve(false), 3000);
+          return wsApp.handle(req);
+        },
       });
-      expect(opened).toBe(true);
 
-      // A plain fetch with upgrade headers hits the same code path and lets
-      // us inspect the response headers (the WS client API does not expose
-      // the 101 response headers). Bun returns 400 to a non-WS fetch, but
-      // the security headers are still attached to that response.
-      const res = await fetch(`http://localhost:${port}/ws`, {
-        headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
-      });
-      const csp = res.headers.get('content-security-policy');
-      expect(csp).toBeTruthy();
-      expect(csp).toContain("default-src 'none'");
-      expect(res.headers.get('x-frame-options')).toBe('DENY');
-    } finally {
-      server.stop(true);
-    }
-  });
+      try {
+        const port = server.port;
+        // Real WebSocket client — confirms the upgrade handshake completes.
+        const opened = await new Promise<boolean>((resolve) => {
+          const ws = new WebSocket(`ws://localhost:${port}/ws`);
+          ws.onopen = () => {
+            ws.close();
+            resolve(true);
+          };
+          ws.onerror = () => resolve(false);
+          setTimeout(() => resolve(false), 3000);
+        });
+        expect(opened).toBe(true);
+
+        // A plain fetch with upgrade headers hits the same code path and lets
+        // us inspect the response headers (the WS client API does not expose
+        // the 101 response headers). Bun returns 400 to a non-WS fetch, but
+        // the security headers are still attached to that response.
+        const res = await fetch(`http://localhost:${port}/ws`, {
+          headers: { Upgrade: 'websocket', Connection: 'Upgrade' },
+        });
+        const csp = res.headers.get('content-security-policy');
+        expect(csp).toBeTruthy();
+        expect(csp).toContain("default-src 'none'");
+        expect(res.headers.get('x-frame-options')).toBe('DENY');
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
 
   test('CSP header is not injectable via crafted request paths with CRLF characters', async () => {
     // %0D%0A decodes to CRLF. A naive header-joiner that interpolates the
     // request path into a header value would let an attacker inject a second
     // header line. The CSP header here is generated independently of the
     // path, so it must remain clean (no CR/LF, no extra directives).
-    const res = await app.handle(new Request('http://localhost/echo-path/a%0D%0ABogus-Header:%20evil'));
+    const res = await app.handle(
+      new Request('http://localhost/echo-path/a%0D%0ABogus-Header:%20evil'),
+    );
     const csp = res.headers.get('content-security-policy') ?? '';
     expect(csp).not.toContain('\r');
     expect(csp).not.toContain('\n');

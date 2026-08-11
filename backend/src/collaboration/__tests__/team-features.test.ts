@@ -4,11 +4,13 @@ import { serverLog } from '../../logger';
 import { DEFAULT_COLLABORATION_POLICY } from '@koryphaios/shared';
 import { BashTool } from '../../tools/bash';
 import { clearCollaborationToolPolicy, setCollaborationToolPolicy } from '../tool-policy';
+import { canBindLoopback } from '../../__tests__/runtime-capabilities';
 
 const port = 18_181;
 const relayUrl = `http://127.0.0.1:${port}`;
 const hostSecret = 'team-feature-host-secret';
 let relay: ReturnType<typeof Bun.spawn>;
+const LOOPBACK_AVAILABLE = canBindLoopback();
 
 async function waitForRelay() {
   for (let attempt = 0; attempt < 120; attempt++) {
@@ -45,6 +47,7 @@ function nextMessage(
 }
 
 beforeAll(async () => {
+  if (!LOOPBACK_AVAILABLE) return;
   relay = Bun.spawn(['bun', 'run', resolve(import.meta.dir, '../../../../relay/server.ts')], {
     env: {
       ...process.env,
@@ -60,7 +63,7 @@ beforeAll(async () => {
 
 afterAll(() => relay?.kill());
 
-describe('team collaboration boundaries', () => {
+describe.skipIf(!LOOPBACK_AVAILABLE)('team collaboration boundaries', () => {
   test('public join-code resolution never requires or exposes the host secret', async () => {
     const createdResponse = await fetch(`${relayUrl}/session`, {
       method: 'POST',

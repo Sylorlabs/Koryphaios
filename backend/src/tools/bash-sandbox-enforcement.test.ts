@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BashTool } from './bash';
-import { defaultAllowedRoots, osSandboxAvailable } from '../security/os-sandbox';
+import { defaultAllowedRoots, osSandboxAvailable, spawnSandboxed } from '../security/os-sandbox';
 
 const cleanupPaths: string[] = [];
 
@@ -15,6 +15,30 @@ function temporaryPath(label: string): string {
   cleanupPaths.push(path);
   return path;
 }
+
+async function kernelSandboxOperational(): Promise<boolean> {
+  if (!osSandboxAvailable()) return false;
+  const root = temporaryPath('kory-sandbox-probe');
+  mkdirSync(root, { recursive: true });
+  try {
+    const { proc, cleanup } = spawnSandboxed(['/bin/true'], {
+      allowedRoots: [root],
+      cwd: root,
+      blockNetwork: true,
+      blockSubprocesses: false,
+    });
+    const exitCode = await new Promise<number>((resolve) => {
+      proc.once('exit', (code) => resolve(code ?? 1));
+      proc.once('error', () => resolve(1));
+    });
+    cleanup();
+    return exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+const KERNEL_SANDBOX_OPERATIONAL = await kernelSandboxOperational();
 
 async function runSandboxed(root: string, command: string, isBackground = false) {
   const callId = `sandbox-boundary-${Date.now()}-${Math.random()}`;
@@ -92,39 +116,41 @@ describe('Bash kernel sandbox boundary', () => {
     expect(existsSync(outside)).toBe(false);
   });
 
-  test('an enabled kernel sandbox writes inside the grant, not host /tmp, and strips secrets', async () => {
-    if (!osSandboxAvailable()) return;
-    const root = temporaryPath('kory-sandbox-enforced-root');
-    const outside = temporaryPath('kory-sandbox-enforced-outside');
-    mkdirSync(root, { recursive: true });
-    const previousEnabled = process.env.KORYPHAIOS_OS_SANDBOX;
-    const previousSecret = process.env.KORY_SANDBOX_TEST_SECRET;
-    process.env.KORYPHAIOS_OS_SANDBOX = '1';
-    process.env.KORY_SANDBOX_TEST_SECRET = 'must-not-cross-the-boundary';
-    try {
-      const inside = await runSandboxed(root, 'touch inside.txt');
-      expect(inside.isError).toBe(false);
-      expect(existsSync(join(root, 'inside.txt'))).toBe(true);
+  test.skipIf(!KERNEL_SANDBOX_OPERATIONAL)(
+    'an enabled kernel sandbox writes inside the grant, not host /tmp, and strips secrets',
+    async () => {
+      const root = temporaryPath('kory-sandbox-enforced-root');
+      const outside = temporaryPath('kory-sandbox-enforced-outside');
+      mkdirSync(root, { recursive: true });
+      const previousEnabled = process.env.KORYPHAIOS_OS_SANDBOX;
+      const previousSecret = process.env.KORY_SANDBOX_TEST_SECRET;
+      process.env.KORYPHAIOS_OS_SANDBOX = '1';
+      process.env.KORY_SANDBOX_TEST_SECRET = 'must-not-cross-the-boundary';
+      try {
+        const inside = await runSandboxed(root, 'touch inside.txt');
+        expect(inside.isError).toBe(false);
+        expect(existsSync(join(root, 'inside.txt'))).toBe(true);
 
-      const escape = await runSandboxed(root, `touch ${outside}`);
-      // On Linux (bwrap), the touch command succeeds (exit 0) because the
-      // file is created in a private mount namespace that is invisible on the
-      // host. On macOS (sandbox-exec), the sandbox profile denies the write
-      // and touch exits non-zero. In both cases the file must not exist on
-      // the host filesystem.
-      expect(existsSync(outside)).toBe(false);
+        const escape = await runSandboxed(root, `touch ${outside}`);
+        // On Linux (bwrap), the touch command succeeds (exit 0) because the
+        // file is created in a private mount namespace that is invisible on the
+        // host. On macOS (sandbox-exec), the sandbox profile denies the write
+        // and touch exits non-zero. In both cases the file must not exist on
+        // the host filesystem.
+        expect(existsSync(outside)).toBe(false);
 
-      const environment = await runSandboxed(root, 'env');
-      expect(environment.isError).toBe(false);
-      expect(environment.output).not.toContain('must-not-cross-the-boundary');
-      expect(environment.output).not.toContain('DATABASE_URL=');
-    } finally {
-      if (previousEnabled === undefined) delete process.env.KORYPHAIOS_OS_SANDBOX;
-      else process.env.KORYPHAIOS_OS_SANDBOX = previousEnabled;
-      if (previousSecret === undefined) delete process.env.KORY_SANDBOX_TEST_SECRET;
-      else process.env.KORY_SANDBOX_TEST_SECRET = previousSecret;
-    }
-  });
+        const environment = await runSandboxed(root, 'env');
+        expect(environment.isError).toBe(false);
+        expect(environment.output).not.toContain('must-not-cross-the-boundary');
+        expect(environment.output).not.toContain('DATABASE_URL=');
+      } finally {
+        if (previousEnabled === undefined) delete process.env.KORYPHAIOS_OS_SANDBOX;
+        else process.env.KORYPHAIOS_OS_SANDBOX = previousEnabled;
+        if (previousSecret === undefined) delete process.env.KORY_SANDBOX_TEST_SECRET;
+        else process.env.KORY_SANDBOX_TEST_SECRET = previousSecret;
+      }
+    },
+  );
 
   test('global Koryphaios state is not an implicit Bash filesystem grant', () => {
     const root = temporaryPath('kory-sandbox-grant-root');

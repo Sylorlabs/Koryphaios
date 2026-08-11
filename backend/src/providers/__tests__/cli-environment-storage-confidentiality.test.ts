@@ -28,8 +28,10 @@ import {
   writeManagedCliFile,
 } from '../managed-cli-storage';
 import { writeAllCliRulesAndSkills } from '../cli-rules-skills';
+import { canUseBunStdioPipes } from '../../__tests__/runtime-capabilities';
 
 const PROVIDERS = Object.keys(PROVIDER_CLI_SECRET_KEYS_FOR_TESTING) as NativeCliProvider[];
+const BUN_STDIO_PIPES_AVAILABLE = await canUseBunStdioPipes();
 
 const CONFIG_KEYS: Record<NativeCliProvider, string> = {
   claude: 'CLAUDE_CONFIG_DIR',
@@ -122,13 +124,15 @@ describe('provider CLI environment confidentiality', () => {
     expect(source).not.toContain('env: { ...process.env');
   });
 
-  it('terminates an oversized JSONL producer and rejects RPC plus login waiters', async () => {
-    if (process.platform === 'win32') return;
-    const testRoot = mkdtempSync(join(tmpdir(), 'kory-codex-frame-cap-'));
-    const fakeBinary = join(testRoot, 'codex');
-    const exitMarker = join(testRoot, 'terminated');
-    const codexHome = join(testRoot, 'data', 'codex-home');
-    const fakeSource = `#!${process.execPath}
+  it.skipIf(!BUN_STDIO_PIPES_AVAILABLE)(
+    'terminates an oversized JSONL producer and rejects RPC plus login waiters',
+    async () => {
+      if (process.platform === 'win32') return;
+      const testRoot = mkdtempSync(join(tmpdir(), 'kory-codex-frame-cap-'));
+      const fakeBinary = join(testRoot, 'codex');
+      const exitMarker = join(testRoot, 'terminated');
+      const codexHome = join(testRoot, 'data', 'codex-home');
+      const fakeSource = `#!${process.execPath}
 import { writeFileSync } from 'node:fs';
 let buffer = '';
 const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
@@ -165,36 +169,37 @@ process.on('SIGTERM', () => {
 setInterval(() => {}, 1000);
 `;
 
-    writeFileSync(fakeBinary, fakeSource, { mode: 0o700 });
-    chmodSync(fakeBinary, 0o700);
-    const server = new CodexAppServer(codexHome, fakeBinary);
-    try {
-      const login = await server.startChatgptLogin();
-      const startedAt = Date.now();
-      const [loginResult, requestResult] = await Promise.allSettled([
-        server.waitForLoginCompletion(login.loginId, 5_000),
-        server.account(),
-      ]);
+      writeFileSync(fakeBinary, fakeSource, { mode: 0o700 });
+      chmodSync(fakeBinary, 0o700);
+      const server = new CodexAppServer(codexHome, fakeBinary);
+      try {
+        const login = await server.startChatgptLogin();
+        const startedAt = Date.now();
+        const [loginResult, requestResult] = await Promise.allSettled([
+          server.waitForLoginCompletion(login.loginId, 5_000),
+          server.account(),
+        ]);
 
-      expect(loginResult.status).toBe('rejected');
-      expect(requestResult.status).toBe('rejected');
-      if (loginResult.status === 'rejected') {
-        expect(String(loginResult.reason)).toContain('invalid protocol stream');
-      }
-      if (requestResult.status === 'rejected') {
-        expect(String(requestResult.reason)).toContain('invalid protocol stream');
-      }
-      expect(Date.now() - startedAt).toBeLessThan(2_000);
+        expect(loginResult.status).toBe('rejected');
+        expect(requestResult.status).toBe('rejected');
+        if (loginResult.status === 'rejected') {
+          expect(String(loginResult.reason)).toContain('invalid protocol stream');
+        }
+        if (requestResult.status === 'rejected') {
+          expect(String(requestResult.reason)).toContain('invalid protocol stream');
+        }
+        expect(Date.now() - startedAt).toBeLessThan(2_000);
 
-      for (let attempt = 0; attempt < 100 && !existsSync(exitMarker); attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        for (let attempt = 0; attempt < 100 && !existsSync(exitMarker); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(readFileSync(exitMarker, 'utf8')).toBe('terminated');
+      } finally {
+        server.close();
+        rmSync(testRoot, { recursive: true, force: true });
       }
-      expect(readFileSync(exitMarker, 'utf8')).toBe('terminated');
-    } finally {
-      server.close();
-      rmSync(testRoot, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });
 
 describe('managed CLI storage confidentiality and durability', () => {

@@ -2,9 +2,11 @@
 import { describe, test, expect, beforeAll, afterAll, setDefaultTimeout } from 'bun:test';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
+import { canBindLoopback } from './runtime-capabilities';
 
 const TEST_PORT = 3301;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+const LOOPBACK_AVAILABLE = canBindLoopback();
 let serverProc: Bun.Subprocess | null = null;
 let authToken = '';
 setDefaultTimeout(90000);
@@ -85,6 +87,7 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 }
 
 beforeAll(async () => {
+  if (!LOOPBACK_AVAILABLE) return;
   const backendDir = join(dirname(import.meta.dir), '..');
   const serverPath = join(backendDir, 'src', 'server.ts');
   if (!existsSync(serverPath)) {
@@ -114,6 +117,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (!LOOPBACK_AVAILABLE) return;
   if (serverProc) {
     serverProc.kill();
     await serverProc.exited;
@@ -121,7 +125,7 @@ afterAll(async () => {
   }
 });
 
-describe('API Integration Tests', () => {
+describe.skipIf(!LOOPBACK_AVAILABLE)('API Integration Tests', () => {
   describe('GET /api/health', () => {
     test('returns health status', async () => {
       const res = request('/api/health');
