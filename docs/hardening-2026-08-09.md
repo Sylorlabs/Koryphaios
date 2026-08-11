@@ -173,7 +173,9 @@ frontend, and Tauri window. The same startup, chat/composer, provider, Goal,
 Time Travel, Monitoring, Settings, Notes, and Memory journeys are exercised at
 matching viewport sizes with console/network capture. Browser-only proof does
 not substitute for the native window, and unavailable providers or platform
-targets remain marked unverified.
+targets remain marked unverified. The Vite dev server pre-optimizes every
+Tauri WebView module before the native window mounts, preventing a lazy
+dependency re-optimization from invalidating the first WebKit module load.
 
 ## Environment-dependent limits
 
