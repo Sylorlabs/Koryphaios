@@ -72,10 +72,14 @@ const files = git('ls-files', '-co', '--exclude-standard', '-z')
   // The ledger is itself generated output. Excluding its destination avoids
   // an impossible self-hash fixed point while leaving every product/source
   // path in the inventory.
-  .filter(
-    (path) =>
-      path !== outputRelativePath && !path.startsWith(`${outputRelativePath.replace(/\/$/, '')}/`),
-  )
+  .filter((path) => {
+    const normalized = path.replaceAll('\\', '/');
+    return (
+      !normalized.startsWith('audit/') &&
+      normalized !== outputRelativePath &&
+      !normalized.startsWith(`${outputRelativePath.replace(/\/$/, '')}/`)
+    );
+  })
   .sort((left, right) => left.localeCompare(right));
 
 function statusByPath(): Map<string, string> {
