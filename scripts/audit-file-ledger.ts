@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readlink, rename, writeFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, relative, resolve } from 'node:path';
 
 import { getSafeSubprocessEnv } from '../backend/src/runtime/safe-env';
 
@@ -41,6 +41,7 @@ const outputDirectory = outputArgument
   : runId
     ? join('.koryphaios', 'evidence', runId, 'audit', 'current')
     : join('.koryphaios', 'evidence', new Date().toISOString().replace(/[:.]/g, '-'), 'audit');
+const outputRelativePath = relative(root, resolve(root, outputDirectory)).replaceAll('\\', '/');
 
 async function writeEvidenceFile(path: string, content: string): Promise<void> {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
@@ -68,6 +69,13 @@ const files = git('ls-files', '-co', '--exclude-standard', '-z')
   .toString('utf8')
   .split('\0')
   .filter(Boolean)
+  // The ledger is itself generated output. Excluding its destination avoids
+  // an impossible self-hash fixed point while leaving every product/source
+  // path in the inventory.
+  .filter(
+    (path) =>
+      path !== outputRelativePath && !path.startsWith(`${outputRelativePath.replace(/\/$/, '')}/`),
+  )
   .sort((left, right) => left.localeCompare(right));
 
 function statusByPath(): Map<string, string> {
