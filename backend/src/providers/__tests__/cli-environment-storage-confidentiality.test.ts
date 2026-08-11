@@ -21,10 +21,7 @@ import {
   PROVIDER_CLI_SECRET_KEYS_FOR_TESTING,
   type NativeCliProvider,
 } from '../cli-environment';
-import {
-  CodexAppServer,
-  CODEX_APP_SERVER_MAX_FRAME_BYTES_FOR_TESTING,
-} from '../codex-app-server';
+import { CodexAppServer, CODEX_APP_SERVER_MAX_FRAME_BYTES_FOR_TESTING } from '../codex-app-server';
 import {
   ensureManagedCliDirectory,
   healManagedCliFile,
@@ -75,7 +72,13 @@ describe('provider CLI environment confidentiality', () => {
       }
       source[CONFIG_KEYS[provider]] = `/private/${provider}-home`;
 
-      const env = buildProviderCliEnv(provider, {}, source);
+      // Config roots are explicit overrides: the helper must never copy the
+      // backend's real HOME/XDG roots from ambient source state.
+      const env = buildProviderCliEnv(
+        provider,
+        { [CONFIG_KEYS[provider]]: `/private/${provider}-home` },
+        source,
+      );
       expect(env[PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[provider]]).toBe(
         `synthetic-${provider}-secret`,
       );

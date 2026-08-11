@@ -29,7 +29,10 @@ import {
 } from './types';
 import { DevinCliBridge, getKoryphaiosDevinHome } from './devin-bridge';
 import { createKoryBridgeGrantLease } from './bridge-grant';
-import { getDevinCapabilitiesAsync, getDevinCapabilities as getDevinCapabilitiesSync } from './devin-capabilities';
+import {
+  getDevinCapabilitiesAsync,
+  getDevinCapabilities as getDevinCapabilitiesSync,
+} from './devin-capabilities';
 import {
   assertPrivateValuesAbsentFromArgv,
   createPrivateCliTextArtifact,
@@ -42,6 +45,7 @@ import {
   safeProviderFailureMessage,
 } from './provider-diagnostics';
 import { writeManagedCliFile } from './managed-cli-storage';
+import { buildProviderCliEnv } from './cli-environment';
 
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
@@ -155,12 +159,15 @@ export class DevinProvider implements Provider {
     if (researchOnly && !caps.supportsAgentConfig) {
       yield {
         type: 'error',
-        error: 'Devin native research is unavailable: this CLI does not expose strict tool visibility.',
+        error:
+          'Devin native research is unavailable: this CLI does not expose strict tool visibility.',
       };
       return;
     }
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-devin-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-devin-'))
+      : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
 
     // ── Build the declarative agent config when supported (Phase 1) ──
@@ -189,10 +196,7 @@ export class DevinProvider implements Provider {
     };
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
-        ? bridgeGrantLease!.grant([
-            'mcp:catalog',
-            'mcp:execute',
-          ]).directory
+        ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
     if (caps.supportsAgentConfig) {
       const agentConfig = bridge.buildAgentConfig(bridgeCtx);
@@ -296,7 +300,11 @@ export class DevinProvider implements Provider {
       // boundary. Devin does not have a "plan" permission-mode value.
       '--permission-mode',
       caps.supportsPermissionMode
-        ? (researchOnly ? 'auto' : request.harnessRole === 'critic' ? 'normal' : 'accept-edits')
+        ? researchOnly
+          ? 'auto'
+          : request.harnessRole === 'critic'
+            ? 'normal'
+            : 'accept-edits'
         : 'auto',
       ...(!researchOnly && caps.supportsSandbox ? ['--sandbox'] : []),
       ...(researchOnly ? ['--respect-workspace-trust', 'false'] : []),
@@ -307,22 +315,34 @@ export class DevinProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel) args.push('--model', cliModel);
 
-    const jail = request.sandbox && !researchOnly ? buildSoftJail(process.env, [join(homedir(), '.devin')]) : null;
-    const wrapped = request.sandbox && !researchOnly
-      ? wrapCommand(bin, args, {
-          cwd,
-          configDirs: [
-            ...(devinHome ? [devinHome] : []),
-            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
-            promptArtifact.directory,
-            exportArtifact.directory,
-            ...(agentConfigArtifact ? [agentConfigArtifact.directory] : []),
-          ],
-          policy: request.sandbox,
-        })
-      : { command: bin, args };
+    const baseEnv = buildProviderCliEnv('devin', {
+      ...(devinHome && !researchOnly
+        ? {
+            DEVIN_CONFIG_DIR: devinHome,
+            XDG_CONFIG_HOME: devinHome,
+            HOME: devinHome,
+            USERPROFILE: devinHome,
+          }
+        : {}),
+    });
+    const jail =
+      request.sandbox && !researchOnly ? buildSoftJail(baseEnv, [devinHome ?? tmpdir()]) : null;
+    const wrapped =
+      request.sandbox && !researchOnly
+        ? wrapCommand(bin, args, {
+            cwd,
+            configDirs: [
+              ...(devinHome ? [devinHome] : []),
+              ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+              promptArtifact.directory,
+              exportArtifact.directory,
+              ...(agentConfigArtifact ? [agentConfigArtifact.directory] : []),
+            ],
+            policy: request.sandbox,
+          })
+        : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: NodeJS.ProcessEnv = { ...baseEnv };
     // Point the CLI at the isolated per-session home so our rules/skills/hooks
     // and session transcripts stay separate from the user's interactive runs.
     if (devinHome && !researchOnly) {
@@ -345,7 +365,10 @@ export class DevinProvider implements Provider {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin CLI child already gone on abort');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Devin CLI child already gone on abort',
+        );
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -439,20 +462,26 @@ export class DevinProvider implements Provider {
     try {
       raw = readFileSync(exportPath, 'utf-8');
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin export file not readable');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Devin export file not readable',
+      );
       return;
     }
     const bridge = new DevinCliBridge();
     const { trajectory, events } = bridge.parseTrajectory(raw);
     if (trajectory.modelName) {
       providerLog.debug(
-        { provider: 'devin', resolvedModel: trajectory.modelName, schema: trajectory.schemaVersion },
+        {
+          provider: 'devin',
+          resolvedModel: trajectory.modelName,
+          schema: trajectory.schemaVersion,
+        },
         'Devin ATIF trajectory parsed',
       );
     }
     yield* events;
   }
-
 }
 
 // Re-export for detection modules that only need the home dir.

@@ -89,6 +89,18 @@ import {
 } from './constants';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
+function safeVerificationHttpError(
+  status: number,
+  label = 'Provider verification request',
+): string {
+  if (status === 401) return `${label} was not authenticated (HTTP 401).`;
+  if (status === 403) return `${label} was denied by the provider (HTTP 403).`;
+  if (status === 404) return `${label} endpoint was not found (HTTP 404).`;
+  if (status === 408) return `${label} timed out (HTTP 408).`;
+  if (status === 429) return `${label} was rate-limited (HTTP 429).`;
+  return `${label} failed (HTTP ${status}).`;
+}
+
 const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'claude',
   'codex',
@@ -1495,7 +1507,7 @@ class ProviderRegistry {
         }
       }
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error: 'Provider verification failed safely.' };
     }
   }
 
@@ -1603,7 +1615,7 @@ class ProviderRegistry {
       }
       return { success: false, error: 'Failed to initialize provider' };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error: 'Provider configuration could not be initialized.' };
     }
   }
 
@@ -1701,7 +1713,7 @@ class ProviderRegistry {
       this.circuitStates.delete(name); // Reset circuit breaker on refresh
       return { success: true };
     } catch (err: unknown) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error: 'Provider refresh could not be initialized.' };
     }
   }
 
@@ -2030,11 +2042,11 @@ class ProviderRegistry {
         signal: controller.signal,
       });
       if (!response.ok) {
-        const body = await response.text();
+        await response.arrayBuffer();
         return {
           success: false,
           status: response.status,
-          error: `HTTP ${response.status}: ${body.slice(0, 300)}`,
+          error: safeVerificationHttpError(response.status),
         };
       }
 
@@ -2062,7 +2074,7 @@ class ProviderRegistry {
       if (message.includes('abort') || message.includes('timeout')) {
         return { success: false, error: 'Request timeout (5s)' };
       }
-      return { success: false, error: message };
+      return { success: false, error: 'Provider model-catalog verification request failed.' };
     } finally {
       clearTimeout(timer);
     }
@@ -2127,10 +2139,10 @@ class ProviderRegistry {
         signal: controller.signal,
       });
       if (!response.ok) {
-        const body = (await response.text()).slice(0, 240);
+        await response.arrayBuffer();
         return {
           success: false,
-          error: `GitHub Models catalog verification failed (HTTP ${response.status})${body ? `: ${body}` : ''}`,
+          error: safeVerificationHttpError(response.status, 'GitHub Models catalog verification'),
         };
       }
       const models = parseGitHubModelsCatalog(await response.json());
@@ -2142,8 +2154,7 @@ class ProviderRegistry {
       }
       return { success: true };
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { success: false, error: `GitHub Models verification failed: ${message}` };
+      return { success: false, error: 'GitHub Models verification request failed.' };
     } finally {
       clearTimeout(timeout);
     }
@@ -2174,10 +2185,10 @@ class ProviderRegistry {
       });
 
       if (!response.ok) {
-        const body = await response.text();
+        await response.arrayBuffer();
         return {
           success: false,
-          error: `Vertex AI verification failed (HTTP ${response.status}): ${body.slice(0, 300)}`,
+          error: safeVerificationHttpError(response.status, 'Vertex AI verification'),
         };
       }
 
@@ -2196,7 +2207,7 @@ class ProviderRegistry {
       if (message.toLowerCase().includes('abort') || message.toLowerCase().includes('timeout')) {
         return { success: false, error: 'Vertex AI verification timed out after 5 seconds' };
       }
-      return { success: false, error: `Vertex AI verification failed: ${message}` };
+      return { success: false, error: 'Vertex AI verification request failed.' };
     } finally {
       clearTimeout(timer);
     }
@@ -2318,18 +2329,18 @@ class ProviderRegistry {
         signal: controller.signal,
       });
       if (response.ok) return { success: true, status: response.status };
-      const body = await response.text();
+      await response.arrayBuffer();
       return {
         success: false,
         status: response.status,
-        error: `HTTP ${response.status}: ${body.slice(0, 300)}`,
+        error: safeVerificationHttpError(response.status),
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('abort') || msg.includes('timeout')) {
         return { success: false, error: 'Request timeout (5s)' };
       }
-      return { success: false, error: msg };
+      return { success: false, error: 'Provider verification request failed.' };
     } finally {
       clearTimeout(timer);
     }

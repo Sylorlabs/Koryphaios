@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process';
 import { nanoid } from 'nanoid';
 import type { ProviderName } from '@koryphaios/shared';
 import { whichBinary } from './cli-detection';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 /** A native slash command a user can invoke from the composer. */
 export interface NativeSlashCommand {
@@ -98,7 +99,7 @@ function runCli(
     const child = spawn(resolved, args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env: getSafeSubprocessEnv(),
     });
     const flush = (data: string, stream: 'stdout' | 'stderr') => {
       if (!data) return;

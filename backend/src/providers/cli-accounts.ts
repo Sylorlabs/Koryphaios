@@ -50,6 +50,16 @@ export function cliAccountCommandLabel(
 // These are login stores owned by the official CLI harnesses. Numbered or
 // suffixed sibling homes are intentionally included: users commonly isolate
 // work/personal subscriptions with wrappers such as CODEX_HOME=~/.codex2.
+//
+// kilocode, freebuff, and jules are deliberately NOT listed here even though
+// they have local credential files (~/.local/share/kilo/auth.json,
+// ~/.config/manicode/credentials.json, ~/.jules/config.yaml). These providers
+// are fail-closed or approval-required in this build — adding them to
+// PROFILE_DEFINITIONS would make them appear in model pickers, account
+// selection, and the billing "Indexing usage…" loading state, which would
+// mislead users into thinking the provider is usable. Instead, billing
+// detects them via auth-utils detection functions and surfaces them with an
+// explicit "unavailable" attribution explaining why no usage is recorded.
 const PROFILE_DEFINITIONS: ProfileDefinition[] = [
   { provider: 'codex', command: 'codex', directoryPrefix: '.codex', authFiles: ['auth.json'] },
   {

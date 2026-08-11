@@ -15,6 +15,7 @@ import type { ModelQuota } from '@koryphaios/shared';
 import { spawn } from 'node:child_process';
 import { providerLog } from '../logger';
 import { whichBinary } from './cli-detection';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 /** Quota info for a group of models (e.g. "Gemini Models", "Claude and GPT models"). */
 export interface AntigravityQuotaGroup {
@@ -59,18 +60,15 @@ interface AgyUsageResponse {
  *  Returns the parsed quota groups, or null if the CLI is unavailable or the
  *  command fails. The caller maps models to groups and attaches the more
  *  restrictive (lower) of the weekly and 5-hour remaining fractions. */
-export async function fetchAntigravityQuotaGroups(): Promise<
-  AntigravityQuotaGroup[] | null
-> {
+export async function fetchAntigravityQuotaGroups(): Promise<AntigravityQuotaGroup[] | null> {
   const bin = whichBinary('agy');
   if (!bin) return null;
 
   return new Promise((resolve) => {
-    const child = spawn(
-      bin,
-      ['--print', '/usage', '--output-format', 'json'],
-      { stdio: ['ignore', 'pipe', 'ignore'] },
-    );
+    const child = spawn(bin, ['--print', '/usage', '--output-format', 'json'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: getSafeSubprocessEnv(),
+    });
 
     let out = '';
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
@@ -137,9 +135,7 @@ function quotaFromGroup(group: AntigravityQuotaGroup): ModelQuota {
  *  don't match any known group are omitted from the map.
  *
  *  Returns null if the CLI is unavailable or the command fails. */
-export async function fetchAntigravityQuota(): Promise<
-  Map<string, ModelQuota> | null
-> {
+export async function fetchAntigravityQuota(): Promise<Map<string, ModelQuota> | null> {
   const groups = await fetchAntigravityQuotaGroups();
   if (!groups) return null;
 

@@ -39,6 +39,7 @@ import {
   writeManagedCliFile,
 } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { buildProviderCliEnv } from './cli-environment';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -168,14 +169,20 @@ interface CursorStreamLine {
 export function parseCursorModelList(output: string): ModelDef[] {
   const models: ModelDef[] = [];
   if (/No models available for this account/i.test(output)) return [];
-  const lines = output.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim());
+  const lines = output
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map((line) => line.trim());
 
   try {
     const jsonValue = JSON.parse(output);
     parseCursorModelJsonChunk(jsonValue, models);
   } catch (err: unknown) {
     /* not json */
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model list output is not JSON');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Cursor model list output is not JSON',
+    );
   }
 
   for (const line of lines) {
@@ -192,7 +199,10 @@ export function parseCursorModelList(output: string): ModelDef[] {
         if (models.length > 0) continue;
       } catch (err: unknown) {
         /* not json */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model list line is not JSON');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Cursor model list line is not JSON',
+        );
       }
     }
 
@@ -238,7 +248,9 @@ export function parseCursorModelList(output: string): ModelDef[] {
 
 function buildModelFromId(modelId: string, displayName?: string): ModelDef {
   const trimmed = modelId.trim();
-  const humanName = (displayName || trimmed).replace(/\s+\((?:current|active|default)\)\s*$/i, '').trim();
+  const humanName = (displayName || trimmed)
+    .replace(/\s+\((?:current|active|default)\)\s*$/i, '')
+    .trim();
   const fallbackName = humanName || trimmed;
 
   return {
@@ -291,12 +303,15 @@ export class CursorProvider implements Provider {
     // A forced refresh must not invalidate the in-flight lock. The provider
     // routes intentionally issue a second startup poll after 700ms, and UI
     // remounts can issue more; previously each one spawned another Cursor CLI.
-    if (!shouldStartCursorModelRefresh({
-      forceRefresh,
-      inFlight: this.modelsInFlight,
-      lastStartedAt: this.modelsRefreshStartedAt,
-      now: Date.now(),
-    })) return;
+    if (
+      !shouldStartCursorModelRefresh({
+        forceRefresh,
+        inFlight: this.modelsInFlight,
+        lastStartedAt: this.modelsRefreshStartedAt,
+        now: Date.now(),
+      })
+    )
+      return;
 
     if (forceRefresh) {
       this.cachedModels = null;
@@ -312,6 +327,11 @@ export class CursorProvider implements Provider {
       const args = CURSOR_MODEL_COMMANDS[index];
       const child = spawn('cursor-agent', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: buildProviderCliEnv('cursor', {
+          CURSOR_CONFIG_DIR: getKoryphaiosCursorHome(),
+          HOME: getKoryphaiosCursorHome(),
+          USERPROFILE: getKoryphaiosCursorHome(),
+        }),
       });
 
       let out = '';
@@ -339,7 +359,10 @@ export class CursorProvider implements Provider {
         try {
           child.kill('SIGTERM');
         } catch (err: unknown) {
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor model probe child already gone on timeout');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Cursor model probe child already gone on timeout',
+          );
         }
       }, 20_000).unref?.();
     };
@@ -401,41 +424,42 @@ export class CursorProvider implements Provider {
       : getKoryphaiosCursorHome();
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
-        ? bridgeGrantLease!.grant([
-            'mcp:catalog',
-            'mcp:execute',
-          ]).directory
+        ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
     ensureManagedCliDirectory(cursorHome);
-    if (!researchOnly) try {
-      // MCP: write the kory server config so the CLI gets kory__ tools.
-      const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
-      if (mcpConfigs && mcpConfigs.length > 0) {
-        const mcpConfigPath = join(cursorHome, 'mcp.json');
-        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-        const existing = existsSync(mcpConfigPath)
-          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-          : {};
-        existing.mcpServers = existing.mcpServers ?? {};
-        for (const srv of mcpConfigs) {
-          existing.mcpServers[srv.name] = {
-            command: srv.command,
-            args: srv.args,
-            env: srv.env,
-          };
+    if (!researchOnly)
+      try {
+        // MCP: write the kory server config so the CLI gets kory__ tools.
+        const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          const mcpConfigPath = join(cursorHome, 'mcp.json');
+          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+          const existing = existsSync(mcpConfigPath)
+            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+            : {};
+          existing.mcpServers = existing.mcpServers ?? {};
+          for (const srv of mcpConfigs) {
+            existing.mcpServers[srv.name] = {
+              command: srv.command,
+              args: srv.args,
+              env: srv.env,
+            };
+          }
+          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
         }
-        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
-      }
-      // Rules: write .cursorrules with the Kory session rules.
-      const ruleFiles = cursorBridge?.buildRules(bridgeCtx);
-      if (ruleFiles) {
-        for (const rule of ruleFiles) {
-          writeManagedCliFile(rule.path, rule.content);
+        // Rules: write .cursorrules with the Kory session rules.
+        const ruleFiles = cursorBridge?.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            writeManagedCliFile(rule.path, rule.content);
+          }
         }
+      } catch (wiringErr) {
+        providerLog.warn(
+          { err: wiringErr, provider: 'cursor' },
+          'Failed to wire kory MCP/rules for Cursor',
+        );
       }
-    } catch (wiringErr) {
-      providerLog.warn({ err: wiringErr, provider: 'cursor' }, 'Failed to wire kory MCP/rules for Cursor');
-    }
 
     const args = [
       '-p',
@@ -450,9 +474,16 @@ export class CursorProvider implements Provider {
     const cliModel = this.resolveCliModel(request.model);
     if (cliModel && cliModel !== 'auto') args.push('--model', cliModel);
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-cursor-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-cursor-'))
+      : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cursor')]) : null;
+    const baseEnv = buildProviderCliEnv('cursor', {
+      CURSOR_CONFIG_DIR: cursorHome,
+      HOME: cursorHome,
+      USERPROFILE: cursorHome,
+    });
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [cursorHome]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
@@ -463,8 +494,7 @@ export class CursorProvider implements Provider {
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server
     // and .cursorrules we just wrote.
-    const cursorEnv = { ...(jail?.env ?? { ...process.env }) };
-    cursorEnv.CURSOR_CONFIG_DIR = cursorHome;
+    const cursorEnv = { ...(jail?.env ?? baseEnv) };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {
@@ -482,7 +512,10 @@ export class CursorProvider implements Provider {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor CLI child already gone on abort');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Cursor CLI child already gone on abort',
+        );
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -601,7 +634,10 @@ export class CursorProvider implements Provider {
           output = JSON.stringify(payload?.result ?? '').slice(0, 8_000);
         } catch (err: unknown) {
           /* unstringifiable */
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cursor tool result not stringifiable');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Cursor tool result not stringifiable',
+          );
         }
         yield {
           type: 'tool_executed',

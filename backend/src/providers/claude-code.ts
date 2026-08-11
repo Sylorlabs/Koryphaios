@@ -58,6 +58,7 @@ import {
   writeManagedCliFile,
 } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { buildProviderCliEnv } from './cli-environment';
 
 const CLAUDE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -91,7 +92,15 @@ let cachedEffortLevels: string[] | null = null;
 function detectEffortLevels(): Promise<string[] | null> {
   if (!effortLevelsPromise) {
     effortLevelsPromise = new Promise((resolve) => {
-      const child = spawn('claude', ['--help'], { stdio: ['ignore', 'pipe', 'ignore'] });
+      const claudeConfigDir = getKoryphaiosClaudeConfigDir();
+      const child = spawn('claude', ['--help'], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: buildProviderCliEnv('claude', {
+          CLAUDE_CONFIG_DIR: claudeConfigDir,
+          HOME: claudeConfigDir,
+          USERPROFILE: claudeConfigDir,
+        }),
+      });
       let out = '';
       let settled = false;
       const finish = () => {
@@ -121,7 +130,10 @@ function detectEffortLevels(): Promise<string[] | null> {
         try {
           child.kill('SIGTERM');
         } catch (err: unknown) {
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: effort probe child already gone on timeout kill');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'claude-code: effort probe child already gone on timeout kill',
+          );
         }
         finish();
       }, 10_000);
@@ -202,7 +214,10 @@ function findClaudeBinaries(): string[] {
       }
     }
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to scan platform dir for additional CLI binaries');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'claude-code: failed to scan platform dir for additional CLI binaries',
+    );
     candidates.push(found);
   }
   return candidates;
@@ -268,7 +283,10 @@ function getCliModelCatalog(): Map<string, CliCatalogEntry> | null {
       }
     } catch (err: unknown) {
       /* try next candidate */
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err), path }, 'claude-code: failed to extract model catalog from CLI binary, trying next candidate');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err), path },
+        'claude-code: failed to extract model catalog from CLI binary, trying next candidate',
+      );
     }
   }
   return null;
@@ -331,7 +349,11 @@ async function probeAlias(alias: string): Promise<string | null> {
       ['-p', '.', '--output-format', 'stream-json', '--verbose', '--model', alias],
       {
         stdio: ['ignore', 'pipe', 'ignore'],
-        env: { ...process.env },
+        env: buildProviderCliEnv('claude', {
+          CLAUDE_CONFIG_DIR: getKoryphaiosClaudeConfigDir(),
+          HOME: getKoryphaiosClaudeConfigDir(),
+          USERPROFILE: getKoryphaiosClaudeConfigDir(),
+        }),
       },
     );
 
@@ -344,7 +366,10 @@ async function probeAlias(alias: string): Promise<string | null> {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: model probe child already gone on done');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'claude-code: model probe child already gone on done',
+        );
       }
       resolve(id);
     };
@@ -371,7 +396,10 @@ async function probeAlias(alias: string): Promise<string | null> {
           }
         } catch (err: unknown) {
           /* skip non-JSON */
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: model probe skipping non-JSON line');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'claude-code: model probe skipping non-JSON line',
+          );
         }
       }
     });
@@ -448,7 +476,10 @@ function readCliExtraModels(): ModelDef[] {
         };
       });
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: failed to read CLI extra models');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'claude-code: failed to read CLI extra models',
+    );
     return [];
   }
 }
@@ -544,8 +575,7 @@ export function getKoryphaiosClaudeConfigDir(): string {
   if (cachedClaudeConfigDir) return cachedClaudeConfigDir;
   const dir = join(homedir(), '.koryphaios', 'claude-home');
   try {
-    const { symlinkSync, rmSync, lstatSync } =
-      require('node:fs') as typeof import('node:fs');
+    const { symlinkSync, rmSync, lstatSync } = require('node:fs') as typeof import('node:fs');
     ensureManagedCliDirectory(dir);
     // Share auth (and settings) with the user's real ~/.claude via symlinks —
     // isolation is about SESSIONS, not credentials.
@@ -636,29 +666,29 @@ interface ClaudeRateLimitInfo {
 // Known built-in claude CLI command descriptions.
 // Commands not in this map are shown as "custom" (skills/plugins).
 const CLAUDE_BUILTIN_COMMANDS: Record<string, string> = {
-  'compact': 'Compress conversation history to save context window space',
-  'clear': 'Clear conversation history and start fresh',
-  'cost': 'Show token usage and cost for this session',
-  'memory': 'View or edit Claude\'s memory files',
-  'doctor': 'Check Claude Code installation health',
-  'help': 'Show available commands and usage help',
-  'init': 'Initialize Claude Code in this project (create CLAUDE.md)',
-  'model': 'Switch AI model for this session',
-  'permissions': 'View or update tool permissions',
-  'review': 'Request a code review of recent changes',
-  'status': 'Show current session status and configuration',
-  'config': 'View or modify Claude Code configuration',
-  'context': 'Show what\'s in the current context window',
-  'login': 'Login to Claude Code',
-  'logout': 'Logout from Claude Code',
-  'resume': 'Resume a previous conversation session',
-  'vim': 'Enter vim keybinding mode',
+  compact: 'Compress conversation history to save context window space',
+  clear: 'Clear conversation history and start fresh',
+  cost: 'Show token usage and cost for this session',
+  memory: "View or edit Claude's memory files",
+  doctor: 'Check Claude Code installation health',
+  help: 'Show available commands and usage help',
+  init: 'Initialize Claude Code in this project (create CLAUDE.md)',
+  model: 'Switch AI model for this session',
+  permissions: 'View or update tool permissions',
+  review: 'Request a code review of recent changes',
+  status: 'Show current session status and configuration',
+  config: 'View or modify Claude Code configuration',
+  context: "Show what's in the current context window",
+  login: 'Login to Claude Code',
+  logout: 'Logout from Claude Code',
+  resume: 'Resume a previous conversation session',
+  vim: 'Enter vim keybinding mode',
   'add-dir': 'Add a directory to the current context',
-  'bug': 'Report a bug to Anthropic',
+  bug: 'Report a bug to Anthropic',
   'release-notes': 'View Claude Code release notes',
   'pr-comments': 'Fetch and display GitHub PR comments',
   'terminal-setup': 'Install Claude Code terminal integration',
-  'mcp': 'Manage MCP server connections',
+  mcp: 'Manage MCP server connections',
   'run-mcp': 'Run an MCP tool directly',
 };
 
@@ -720,7 +750,10 @@ export class ClaudeCodeProvider implements Provider {
     const researchOnly = request.capabilityProfile === 'research-only';
     const cliModel = this.resolveCliModel(request.model);
     if (!cliModel) {
-      yield { type: 'error', error: 'Claude Code did not report an available model for this account.' };
+      yield {
+        type: 'error',
+        error: 'Claude Code did not report an available model for this account.',
+      };
       return;
     }
     const attachmentScope = createCliAttachmentScope();
@@ -758,25 +791,26 @@ export class ClaudeCodeProvider implements Provider {
     const bridgeConfig = claudeBridge?.buildAgentConfig(bridgeCtx);
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
-        ? bridgeGrantLease!.grant([
-            'mcp:catalog',
-            'mcp:execute',
-          ]).directory
+        ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
     const disallowed = researchOnly
       ? ['Bash', 'Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent']
-      : bridgeScopes?.deny ?? (() => {
-      // Fallback to the inline computation if the bridge isn't available.
-      const d = ['Task', 'Agent'];
-      if (sandbox && !sandbox.allowEdits)
-        d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
-      if (sandbox && !sandbox.allowShell) d.push('Bash');
-      if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
-      return d;
-    })();
-    const allowedTools = researchOnly ? 'WebSearch,WebFetch' : bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS;
+      : (bridgeScopes?.deny ??
+        (() => {
+          // Fallback to the inline computation if the bridge isn't available.
+          const d = ['Task', 'Agent'];
+          if (sandbox && !sandbox.allowEdits) d.push('Edit', 'Write', 'MultiEdit', 'NotebookEdit');
+          if (sandbox && !sandbox.allowShell) d.push('Bash');
+          if (sandbox && !sandbox.allowWebSearch) d.push('WebFetch', 'WebSearch');
+          return d;
+        })());
+    const allowedTools = researchOnly
+      ? 'WebSearch,WebFetch'
+      : (bridgeScopes?.allow?.join(',') ?? ALLOWED_TOOLS);
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-claude-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-claude-'))
+      : null;
     const args = [
       '-p',
       '--output-format',
@@ -788,9 +822,7 @@ export class ClaudeCodeProvider implements Provider {
       // Agentic, non-interactive: auto-approve edits + the pre-approved toolset so a
       // headless run never hangs waiting for a permission prompt.
       '--permission-mode',
-      request.harnessRole === 'critic'
-        ? 'plan'
-        : 'acceptEdits',
+      request.harnessRole === 'critic' ? 'plan' : 'acceptEdits',
       '--allowedTools',
       allowedTools,
       '--disallowedTools',
@@ -811,12 +843,16 @@ export class ClaudeCodeProvider implements Provider {
     // --effort on models that ignore it, so acceptance can't be trusted). Fall
     // back to the MAX_THINKING_TOKENS env var for levels the flag can't express
     // ('none', numeric budgets) or for older CLIs without --effort.
-    const env: NodeJS.ProcessEnv = { ...process.env };
     // Isolate Koryphaios's claude sessions from the user's interactive ones.
-    env.CLAUDE_CONFIG_DIR = researchOnly
+    const claudeConfigDir = researchOnly
       ? join(getKoryphaiosClaudeConfigDir(), 'research-only')
       : getKoryphaiosClaudeConfigDir();
-    ensureManagedCliDirectory(env.CLAUDE_CONFIG_DIR);
+    const env: NodeJS.ProcessEnv = buildProviderCliEnv('claude', {
+      CLAUDE_CONFIG_DIR: claudeConfigDir,
+      HOME: claudeConfigDir,
+      USERPROFILE: claudeConfigDir,
+    });
+    ensureManagedCliDirectory(claudeConfigDir);
     let appliedEffort: string | null = null;
     if (request.reasoningLevel) {
       const cliLevels = await detectEffortLevels();
@@ -857,10 +893,7 @@ export class ClaudeCodeProvider implements Provider {
     const systemPrompt = request.systemPrompt?.trim()
       ? `${request.systemPrompt}\n\n${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`
       : `${bridgeConfig?.systemInstructions?.[0] ?? HARNESS_SYSTEM_NOTE}${effortNote}`;
-    const systemPromptArtifact = createPrivateCliTextArtifact(
-      'claude-system-prompt',
-      systemPrompt,
-    );
+    const systemPromptArtifact = createPrivateCliTextArtifact('claude-system-prompt', systemPrompt);
     args.push('--append-system-prompt-file', systemPromptArtifact.path);
 
     // Write the kory MCP server config to the isolated Claude home so the CLI
@@ -966,7 +999,10 @@ export class ClaudeCodeProvider implements Provider {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'claude-code: harness child already gone on abort');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'claude-code: harness child already gone on abort',
+        );
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });

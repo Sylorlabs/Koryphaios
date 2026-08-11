@@ -66,6 +66,8 @@ import {
   healManagedCliFile,
   writeManagedCliFile,
 } from './managed-cli-storage';
+import { buildProviderCliEnv } from './cli-environment';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -91,6 +93,7 @@ function supportsPrivatePromptFile(bin: string): boolean {
       encoding: 'utf8',
       timeout: 4_000,
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: getSafeSubprocessEnv(),
     });
     cachedPrivatePromptFileSupport = antigravityHelpSupportsPrivatePromptFile(result.stdout ?? '');
   } catch {
@@ -216,7 +219,11 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, ['models'], {
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: { ...process.env },
+      env: buildProviderCliEnv('antigravity', {
+        ANTIGRAVITY_HOME: getKoryphaiosAntigravityHome(),
+        HOME: getKoryphaiosAntigravityHome(),
+        USERPROFILE: getKoryphaiosAntigravityHome(),
+      }),
     });
     let out = '';
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
@@ -624,9 +631,12 @@ export class AntigravityProvider implements Provider {
 
     // Run in the session's project directory when one is set so the CLI sees
     // the real workspace; fall back to a neutral temp dir otherwise.
-    const jail = request.sandbox
-      ? buildSoftJail(process.env, [join(homedir(), '.gemini'), join(homedir(), '.antigravity')])
-      : null;
+    const baseEnv = buildProviderCliEnv('antigravity', {
+      HOME: agyHome,
+      USERPROFILE: agyHome,
+      ANTIGRAVITY_HOME: agyHome,
+    });
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [agyHome]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd: cwd || tmpdir(),
@@ -644,8 +654,7 @@ export class AntigravityProvider implements Provider {
     // Point the CLI at the isolated home so it discovers the kory MCP server,
     // hooks, and rules we just wrote. Antigravity reads .claude/ config from
     // the user home, so we redirect HOME to the isolated dir.
-    const agyEnv = { ...(jail?.env ?? { ...process.env }) };
-    agyEnv.HOME = agyHome;
+    const agyEnv = { ...(jail?.env ?? baseEnv) };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {

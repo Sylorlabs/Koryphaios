@@ -26,7 +26,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { providerLog } from '../logger';
 import type { ProviderEvent } from './types';
-import { appendPrivateDiagnostic, safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import { buildProviderCliEnv } from './cli-environment';
 
 // ─── JSON-RPC types ────────────────────────────────────────────────────────
 
@@ -80,11 +85,7 @@ export class DevinAcpClient {
   private agentConfigPath: string | null;
   private stderr = '';
 
-  constructor(opts: {
-    binaryPath: string;
-    devinHome: string;
-    agentConfigPath?: string | null;
-  }) {
+  constructor(opts: { binaryPath: string; devinHome: string; agentConfigPath?: string | null }) {
     this.binaryPath = opts.binaryPath;
     this.devinHome = opts.devinHome;
     this.agentConfigPath = opts.agentConfigPath ?? null;
@@ -99,11 +100,12 @@ export class DevinAcpClient {
     }
     this.child = spawn(this.binaryPath, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
+      env: buildProviderCliEnv('devin', {
         DEVIN_CONFIG_DIR: this.devinHome,
         XDG_CONFIG_HOME: this.devinHome,
-      },
+        HOME: this.devinHome,
+        USERPROFILE: this.devinHome,
+      }),
     });
 
     this.child.stdout?.setEncoding('utf-8');
@@ -133,7 +135,10 @@ export class DevinAcpClient {
         await this.sendRequest('session/end', { sessionId: this.sessionId });
       } catch (err: unknown) {
         /* best effort */
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin ACP: session/end best-effort failed');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Devin ACP: session/end best-effort failed',
+        );
       }
     }
     this.child?.stdin?.end();
@@ -151,11 +156,11 @@ export class DevinAcpClient {
     workingDirectory?: string;
   }): Promise<string> {
     if (!this.initialized) throw new Error('ACP client not connected');
-    const result = await this.sendRequest('session/start', {
+    const result = (await this.sendRequest('session/start', {
       systemPrompt: opts.systemPrompt,
       model: opts.model,
       workingDirectory: opts.workingDirectory,
-    }) as { sessionId: string };
+    })) as { sessionId: string };
     this.sessionId = result.sessionId;
     return result.sessionId;
   }
@@ -195,30 +200,33 @@ export class DevinAcpClient {
         case 'tool_call':
           // Intercept: ask the caller whether to approve/block/rewrite.
           if (opts?.onToolCall) {
-            opts.onToolCall({
-              toolCallId: event.toolCallId,
-              toolName: event.toolName,
-              input: event.input,
-            }).then(async (decision) => {
-              if (decision === 'block') {
-                await this.sendNotification('tool/block', {
-                  toolCallId: event.toolCallId,
-                  reason: 'Blocked by Koryphaios — use kory__ MCP tool instead.',
-                });
-              } else if (typeof decision === 'object' && 'rewrite' in decision) {
-                await this.sendNotification('tool/rewrite', {
-                  toolCallId: event.toolCallId,
-                  input: decision.rewrite,
-                });
-              } else {
-                await this.sendNotification('tool/approve', {
-                  toolCallId: event.toolCallId,
-                });
-              }
-            }).catch(() => {
-              // Fail open: approve on error.
-              this.sendNotification('tool/approve', { toolCallId: event.toolCallId });
-            });
+            opts
+              .onToolCall({
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                input: event.input,
+              })
+              .then(async (decision) => {
+                if (decision === 'block') {
+                  await this.sendNotification('tool/block', {
+                    toolCallId: event.toolCallId,
+                    reason: 'Blocked by Koryphaios — use kory__ MCP tool instead.',
+                  });
+                } else if (typeof decision === 'object' && 'rewrite' in decision) {
+                  await this.sendNotification('tool/rewrite', {
+                    toolCallId: event.toolCallId,
+                    input: decision.rewrite,
+                  });
+                } else {
+                  await this.sendNotification('tool/approve', {
+                    toolCallId: event.toolCallId,
+                  });
+                }
+              })
+              .catch(() => {
+                // Fail open: approve on error.
+                this.sendNotification('tool/approve', { toolCallId: event.toolCallId });
+              });
           } else {
             // Passthrough: auto-approve.
             this.sendNotification('tool/approve', { toolCallId: event.toolCallId });
@@ -252,7 +260,10 @@ export class DevinAcpClient {
           {
             const diagnostic = safeProviderDiagnostic('devin', 'stream', event.message);
             providerLog.warn(diagnostic, 'Devin ACP emitted an error event');
-            eventQueue.push({ type: 'error', error: safeProviderFailureMessage('devin', diagnostic) });
+            eventQueue.push({
+              type: 'error',
+              error: safeProviderFailureMessage('devin', diagnostic),
+            });
           }
           done = true;
           break;
@@ -370,7 +381,10 @@ export class DevinAcpClient {
         }
       } catch (err: unknown) {
         // Not valid JSON — ignore (could be a log line).
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin ACP: non-JSON line skipped');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Devin ACP: non-JSON line skipped',
+        );
       }
     }
   }

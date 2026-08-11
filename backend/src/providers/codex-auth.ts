@@ -2,12 +2,26 @@ import { spawn } from 'node:child_process';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { whichBinary } from './cli-detection';
 import { getManagedCodexAppServer, type CodexAppServerModel } from './codex-app-server';
-import type { Provider, ProviderContentBlock, ProviderEvent, ProviderMessage, StreamRequest } from './types';
+import type {
+  Provider,
+  ProviderContentBlock,
+  ProviderEvent,
+  ProviderMessage,
+  StreamRequest,
+} from './types';
 import { providerLog } from '../logger';
 import { getKoryphaiosCodexHome } from './cli-bridges';
-import { appendPrivateDiagnostic, safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
-import { assertPrivateValuesAbsentFromArgv, writePrivatePromptToStdin } from './private-cli-transport';
+import {
+  appendPrivateDiagnostic,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
+import {
+  assertPrivateValuesAbsentFromArgv,
+  writePrivatePromptToStdin,
+} from './private-cli-transport';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { buildProviderCliEnv } from './cli-environment';
 
 const CODEX_TIMEOUT_MS = 300_000;
 /** A non-secret Koryphaios configuration marker; the app-server owns OAuth tokens. */
@@ -30,11 +44,18 @@ function prompt(systemPrompt: string | undefined, messages: ProviderMessage[]): 
       .map((message) => {
         const text = flatten(message.content).trim();
         if (!text) return '';
-        const label = message.role === 'assistant' ? 'Assistant' : message.role === 'tool' ? 'Tool result' : 'User';
+        const label =
+          message.role === 'assistant'
+            ? 'Assistant'
+            : message.role === 'tool'
+              ? 'Tool result'
+              : 'User';
         return `${label}: ${text}`;
       })
       .filter(Boolean),
-  ].filter(Boolean).join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 function modelDefinition(model: CodexAppServerModel): ModelDef | null {
@@ -42,13 +63,14 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
   if (typeof id !== 'string' || !id.trim()) return null;
   const reasoningLevels = Array.isArray(model?.supportedReasoningEfforts)
     ? model.supportedReasoningEfforts
-      .map((entry) => entry?.reasoningEffort)
-      .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
+        .map((entry) => entry?.reasoningEffort)
+        .filter((level: unknown): level is string => typeof level === 'string' && level.length > 0)
     : [];
   return {
     id,
     apiModelId: id,
-    name: typeof model?.displayName === 'string' && model.displayName.trim() ? model.displayName : id,
+    name:
+      typeof model?.displayName === 'string' && model.displayName.trim() ? model.displayName : id,
     provider: 'codex-auth',
     contextWindow: 0,
     contextVerified: false,
@@ -59,8 +81,8 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
     reasoningLevels,
     supportsFastMode: Array.isArray(model?.supportedServiceTiers)
       ? model.supportedServiceTiers.includes('fast')
-      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase())
-        && !/(?:^|-)mini(?:$|-)|codex-spark/.test(id.toLowerCase()),
+      : /^gpt-5\.(4|5|6)(?:[-.]|$)/.test(id.toLowerCase()) &&
+        !/(?:^|-)mini(?:$|-)|codex-spark/.test(id.toLowerCase()),
     supportsAttachments: model?.inputModalities?.includes?.('image') === true,
     supportsStreaming: true,
     tier: model?.isDefault ? 'flagship' : undefined,
@@ -71,7 +93,9 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
 export class CodexAuthProvider implements Provider {
   readonly name = 'codex-auth' as const;
   private models: ModelDef[] = [];
-  private account: Awaited<ReturnType<ReturnType<typeof getManagedCodexAppServer>['account']>> | null = null;
+  private account: Awaited<
+    ReturnType<ReturnType<typeof getManagedCodexAppServer>['account']>
+  > | null = null;
 
   constructor(readonly config: ProviderConfig) {}
 
@@ -106,7 +130,10 @@ export class CodexAuthProvider implements Provider {
       return;
     }
     if (!this.isAvailable()) {
-      yield { type: 'error', error: 'OpenAI Codex is not signed in with ChatGPT. Connect it from Settings.' };
+      yield {
+        type: 'error',
+        error: 'OpenAI Codex is not signed in with ChatGPT. Connect it from Settings.',
+      };
       return;
     }
     const binary = whichBinary('codex');
@@ -116,18 +143,33 @@ export class CodexAuthProvider implements Provider {
     }
     const privatePrompt = prompt(request.systemPrompt, request.messages);
     const args = [
-      '--ask-for-approval', 'never', 'exec', '--json', '--ephemeral', '--skip-git-repo-check',
-      '--color', 'never', '--sandbox', 'read-only',
-      '--model', request.model,
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--json',
+      '--ephemeral',
+      '--skip-git-repo-check',
+      '--color',
+      'never',
+      '--sandbox',
+      'read-only',
+      '--model',
+      request.model,
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
-      ...(request.reasoningLevel ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`] : []),
+      ...(request.reasoningLevel
+        ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`]
+        : []),
       '-',
     ];
     assertPrivateValuesAbsentFromArgv(args, [privatePrompt, request.systemPrompt]);
     const child = spawn(binary, args, {
       cwd: request.workingDirectory?.trim() || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CODEX_HOME: getKoryphaiosCodexHome() },
+      env: buildProviderCliEnv('codex', {
+        CODEX_HOME: getKoryphaiosCodexHome(),
+        HOME: getKoryphaiosCodexHome(),
+        USERPROFILE: getKoryphaiosCodexHome(),
+      }),
     });
     writePrivatePromptToStdin(child, privatePrompt);
     let stderr = '';
@@ -148,7 +190,11 @@ export class CodexAuthProvider implements Provider {
           completed = true;
           const usage = event.usage as Record<string, unknown> | undefined;
           if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-            events.push({ type: 'usage_update', tokensIn: usage.input_tokens as number | undefined, tokensOut: usage.output_tokens as number | undefined });
+            events.push({
+              type: 'usage_update',
+              tokensIn: usage.input_tokens as number | undefined,
+              tokensOut: usage.output_tokens as number | undefined,
+            });
           }
         }
       } catch (err: unknown) {
@@ -158,7 +204,9 @@ export class CodexAuthProvider implements Provider {
         );
       }
     };
-    child.stderr.on('data', (chunk: Buffer) => { stderr = appendPrivateDiagnostic(stderr, chunk); });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = appendPrivateDiagnostic(stderr, chunk);
+    });
     child.stdout.on('data', (chunk: Buffer) => {
       if (streamFrameFailure) return;
       try {
@@ -195,7 +243,8 @@ export class CodexAuthProvider implements Provider {
       yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
       return;
     }
-    if (!completed) providerLog.warn({ provider: this.name }, 'Codex auth turn exited without turn.completed');
+    if (!completed)
+      providerLog.warn({ provider: this.name }, 'Codex auth turn exited without turn.completed');
     yield { type: 'complete', finishReason: 'end_turn' };
   }
 }

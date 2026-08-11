@@ -15,6 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
+import { getSafeSubprocessEnv } from '../runtime/safe-env';
 
 export interface DevinModelEntry {
   id: string;
@@ -74,7 +75,10 @@ function runCli(
       resolve({ stdout: '', stderr: 'devin not on PATH', code: -1 });
       return;
     }
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(bin, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: getSafeSubprocessEnv(),
+    });
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -92,7 +96,10 @@ function runCli(
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe child already gone on timeout');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Devin capability probe child already gone on timeout',
+        );
       }
       finish(-1);
     }, timeoutMs);
@@ -200,7 +207,10 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
   try {
     stat = statSync(bin);
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe binary stat failed');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Devin capability probe binary stat failed',
+    );
     return { ...empty, binaryPath: bin };
   }
 
@@ -282,7 +292,10 @@ export function getDevinCapabilities(): DevinCapabilities {
     mtimeMs = statSync(bin).mtimeMs;
   } catch (err: unknown) {
     /* unreadable — fall through with stale cache */
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Devin capability probe binary stat unreadable — using stale cache');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Devin capability probe binary stat unreadable — using stale cache',
+    );
   }
   const key = `${bin}:${mtimeMs}`;
   if (cached && cacheKey === key) return cached;

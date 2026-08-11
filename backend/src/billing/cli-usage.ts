@@ -4,20 +4,44 @@
 //   • token usage over hourly / daily / weekly / monthly windows
 //   • the provider's OWN quota state (% burned + reset time) where the CLI
 //     records it locally (Codex writes rate_limits into every session log)
+//   • the raw inference API model equivalent for each CLI model (apiModelId)
+//     so users can see what subscription models map to on the backing API
 //
 // Sources verified on-disk:
-//   claude  ~/.claude/projects/**/*.jsonl        message.usage + message.model
-//   codex   ~/.codex/sessions/**/*.jsonl         token_count events + rate_limits
+//   claude       ~/.claude/projects/**/*.jsonl              message.usage + message.model
+//   codex        ~/.codex/sessions/**/*.jsonl               token_count events + rate_limits
+//   copilot      ~/.copilot/session-state/<uuid>/events.jsonl  modelMetrics usage totals
+//   grok         ~/.grok/sessions/<cwd>/<session>/signals.json  contextTokensUsed + modelsUsed
+//   antigravity  credit-accountant DB + live /usage command  (protobuf transcripts not parseable)
+//   cursor       credit-accountant DB                         (agent-transcripts have no token counts)
+//   devin        ~/.local/share/devin/cli/transcripts/*.json  ATIF final_metrics (session totals)
+//   cline        ~/.cline/data/sessions/<id>/*.messages.json  per-message metrics + modelInfo
+//   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
+//   kilocode     detected-only (fail-closed; no usage recorded)
+//   freebuff     detected-only (fail-closed; no usage recorded)
+//   jules        detected-only (approval-required; no local usage)
+//
+// Quota state: claude, codex, copilot, and antigravity expose live quota
+// endpoints or local rate_limit records. cursor, devin, cline, and kimicode
+// return empty quotas because their CLIs don't expose a local quota state —
+// usage limits are enforced server-side by the backing API and are not
+// written to disk in a parseable form.
 
 import { readdirSync, statSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import type { ProviderName } from '@koryphaios/shared';
 import { discoverCliAccounts, type DiscoveredCliAccount } from '../providers/cli-accounts';
 import { CodexAppServer } from '../providers/codex-app-server';
 import { getUsageSamplesByProvider } from '../credit-accountant';
 import { getContext } from '../context';
 import { serverLog } from '../logger';
+import {
+  detectKiloCLILogin,
+  detectFreebuffCLILogin,
+  detectJulesApiKey,
+} from '../providers/auth-utils';
 
 export interface UsageWindow {
   /** 'hour' | 'day' | 'week' | 'month' */
@@ -52,7 +76,17 @@ export interface CliUsageReport {
   /** Calendar-day token totals from the same local CLI session records. */
   dailyUsage: Array<{ date: string; tokens: number }>;
   quotas: QuotaWindow[];
-  byModel: Array<{ model: string; tokensIn: number; tokensOut: number }>;
+  byModel: Array<{
+    model: string;
+    tokensIn: number;
+    tokensOut: number;
+    /** The raw inference API model ID this CLI model maps to (e.g. claude-sonnet-4-5-20250929). */
+    apiEquivalent?: string;
+    /** The API provider that serves the equivalent model (e.g. anthropic, openai, google). */
+    apiProvider?: string;
+  }>;
+  /** The backing API provider name for this CLI subscription (e.g. anthropic for claude). */
+  apiProviderName?: string;
   updatedAt: number;
 }
 
@@ -65,7 +99,13 @@ const WINDOWS_MS: Array<[string, number]> = [
 const SCAN_HORIZON_MS = 31 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-interface UsageSample {
+// Kimi Code's wire.jsonl StatusUpdate events don't carry a per-turn model
+// name. The kimi CLI's config.toml has default_model = "" (API default). We
+// try to resolve the live default from the KimiCode provider's catalog at
+// runtime; if the catalog is unavailable, fall back to this constant.
+const KIMI_DEFAULT_MODEL = 'kimi-k2';
+
+export interface UsageSample {
   ts: number;
   model: string;
   tokensIn: number;
@@ -207,7 +247,19 @@ function windowsFromDailyUsage(
   });
 }
 
-function byModelFromSamples(samples: UsageSample[], now: number): CliUsageReport['byModel'] {
+/** Resolves a CLI-local model name to its raw inference API equivalent.
+ *  Returns `{ apiEquivalent, apiProvider }` when the provider's model catalog
+ *  contains a matching entry (by id, apiModelId, or realModelId); otherwise
+ *  the fields are omitted so the UI can show "—" rather than a fabricated id. */
+export type ApiEquivalentResolver = (
+  model: string,
+) => { apiEquivalent?: string; apiProvider?: string } | null;
+
+export function byModelFromSamples(
+  samples: UsageSample[],
+  now: number,
+  resolveApi?: ApiEquivalentResolver,
+): CliUsageReport['byModel'] {
   const perModel = new Map<string, { in: number; out: number }>();
   for (const s of samples) {
     if (now - s.ts > 30 * 24 * 60 * 60 * 1000 || !isReportedModel(s.model)) continue;
@@ -217,12 +269,85 @@ function byModelFromSamples(samples: UsageSample[], now: number): CliUsageReport
     perModel.set(s.model, m);
   }
   return [...perModel.entries()]
-    .map(([model, t]) => ({
-      model,
-      tokensIn: t.in,
-      tokensOut: t.out,
-    }))
+    .map(([model, t]) => {
+      const entry: {
+        model: string;
+        tokensIn: number;
+        tokensOut: number;
+        apiEquivalent?: string;
+        apiProvider?: string;
+      } = { model, tokensIn: t.in, tokensOut: t.out };
+      const resolved = resolveApi?.(model);
+      if (resolved?.apiEquivalent) entry.apiEquivalent = resolved.apiEquivalent;
+      if (resolved?.apiProvider) entry.apiProvider = resolved.apiProvider;
+      return entry;
+    })
     .sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut));
+}
+
+// ── API equivalent resolution ────────────────────────────────────────────────
+// Each CLI subscription routes to a backing raw inference API. We resolve the
+// apiModelId from the live provider model catalog so the billing view can show
+// the exact API model a subscription turn maps to (e.g. claude-sonnet-4-5 →
+// claude-sonnet-4-5-20250929 on the anthropic API).
+
+/** Maps a CLI provider name to its backing raw inference API provider. */
+export const CLI_API_PROVIDER_MAP: Record<string, string> = {
+  claude: 'anthropic',
+  codex: 'openai',
+  'codex-auth': 'openai',
+  copilot: 'openai',
+  grok: 'xai',
+  antigravity: 'google',
+  cursor: 'openai',
+  devin: 'devin',
+  cline: 'cline',
+  kimicode: 'kimicode',
+  kilocode: 'kilocode',
+  freebuff: 'freebuff',
+  jules: 'google',
+};
+
+/** Builds a resolver that consults the provider's live model catalog to map
+ *  CLI-local model names to their raw API model IDs. Falls back to the
+ *  CLI_API_PROVIDER_MAP for the apiProvider field when the catalog has no
+ *  explicit mapping (e.g. the model is already an API id). */
+export function makeApiEquivalentResolver(providerName: string): ApiEquivalentResolver {
+  const fallbackApiProvider = CLI_API_PROVIDER_MAP[providerName];
+  let models:
+    | Array<{ id: string; apiModelId?: string; realModelId?: string; provider?: string }>
+    | null
+    | undefined;
+  const loadModels = (): typeof models => {
+    if (models !== undefined) return models;
+    try {
+      const provider = getContext().providers.get(providerName as ProviderName);
+      models = provider ? provider.listModels() : null;
+    } catch (err: unknown) {
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), provider: providerName },
+        'makeApiEquivalentResolver: provider lookup failed',
+      );
+      models = null;
+    }
+    return models;
+  };
+  return (model: string) => {
+    const catalog = loadModels();
+    if (!catalog || catalog.length === 0) {
+      return fallbackApiProvider ? { apiProvider: fallbackApiProvider } : null;
+    }
+    const match = catalog.find(
+      (m) => m.id === model || m.apiModelId === model || m.realModelId === model,
+    );
+    if (!match) {
+      return fallbackApiProvider ? { apiProvider: fallbackApiProvider } : null;
+    }
+    return {
+      apiEquivalent: match.apiModelId ?? match.realModelId ?? match.id,
+      apiProvider: match.provider ?? fallbackApiProvider,
+    };
+  };
 }
 
 // ── Per-file sample cache ─────────────────────────────────────────────────────
@@ -338,12 +463,13 @@ async function readClaude(now: number): Promise<CliUsageReport> {
   samples.push(...byId.values());
   return {
     provider: 'claude',
+    apiProviderName: CLI_API_PROVIDER_MAP['claude'],
     available: hasReportedUsage(samples),
     attribution: 'account',
     windows: windowsFromSamples(samples, now),
     dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
-    byModel: byModelFromSamples(samples, now),
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('claude')),
     updatedAt: now,
   };
 }
@@ -569,6 +695,7 @@ async function readCodex(
   const activityIsLive = liveDaily.length > 0;
   return {
     provider: 'codex',
+    apiProviderName: CLI_API_PROVIDER_MAP['codex'],
     ...(account
       ? {
           accountId: account.id,
@@ -589,7 +716,7 @@ async function readCodex(
       : windowsFromSamples(attributedSamples, now),
     dailyUsage: activityIsLive ? liveDaily : dailyUsageFromSamples(attributedSamples, now),
     quotas: attributedQuotas,
-    byModel: byModelFromSamples(attributedSamples, now),
+    byModel: byModelFromSamples(attributedSamples, now, makeApiEquivalentResolver('codex')),
     updatedAt: now,
   };
 }
@@ -660,12 +787,13 @@ function readCopilot(now: number): CliUsageReport {
   }
   return {
     provider: 'copilot',
+    apiProviderName: CLI_API_PROVIDER_MAP['copilot'],
     available: hasReportedUsage(samples),
     attribution: 'account',
     windows: windowsFromSamples(samples, now),
     dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
-    byModel: byModelFromSamples(samples, now),
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('copilot')),
     updatedAt: now,
   };
 }
@@ -725,12 +853,13 @@ function readGrok(now: number): CliUsageReport {
   }
   return {
     provider: 'grok',
+    apiProviderName: CLI_API_PROVIDER_MAP['grok'],
     available: hasReportedUsage(samples),
     attribution: 'account',
     windows: windowsFromSamples(samples, now),
     dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
-    byModel: byModelFromSamples(samples, now),
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('grok')),
     updatedAt: now,
   };
 }
@@ -900,13 +1029,434 @@ function readAntigravity(now: number): CliUsageReport {
 
   return {
     provider: 'antigravity',
+    apiProviderName: CLI_API_PROVIDER_MAP['antigravity'],
     available: hasReportedUsage(samples) || quotas.length > 0,
     attribution: 'account',
     usageSource: 'local-session-history',
     windows: windowsFromSamples(samples, now),
     dailyUsage: dailyUsageFromSamples(samples, now),
     quotas,
-    byModel: byModelFromSamples(samples, now),
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('antigravity')),
+    updatedAt: now,
+  };
+}
+
+// ── Cursor CLI ────────────────────────────────────────────────────────────────
+// Cursor's agent-transcripts (~/.cursor/projects/<cwd>/agent-transcripts/<uuid>/*.jsonl)
+// carry user/assistant messages and turn_ended events but NO per-turn token
+// counts. The CursorProvider DOES emit usage_update events that the credit
+// accountant records, so we derive all usage windows from the credit DB —
+// the same approach used for antigravity. Multi-account Cursor profiles are
+// discovered via cli-accounts (~/.cursor, ~/.cursor2, …).
+
+function readCursorFromCreditDb(now: number, account?: DiscoveredCliAccount): CliUsageReport {
+  let samples: UsageSample[] = [];
+  try {
+    const rows = getUsageSamplesByProvider('cursor', now - SCAN_HORIZON_MS);
+    // When multiple Cursor profiles share the same credit DB, we cannot
+    // attribute individual samples to a specific profile. Report aggregate
+    // usage only for the primary profile and mark others unavailable.
+    if (account) {
+      // Per-account attribution requires an accountId filter in the credit DB;
+      // the current schema stores accountId but the cursor provider does not
+      // emit it. Show aggregate under the first profile only.
+      const cursorAccounts = discoverCliAccounts().filter((a) => a.provider === 'cursor');
+      const isFirst = cursorAccounts[0]?.id === account.id;
+      if (!isFirst) {
+        return {
+          provider: 'cursor',
+          apiProviderName: CLI_API_PROVIDER_MAP['cursor'],
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+          available: false,
+          attribution: 'unavailable',
+          attributionNote:
+            'Cursor profiles share a single local usage history; per-account attribution is not available',
+          windows: [],
+          dailyUsage: [],
+          quotas: [],
+          byModel: [],
+          updatedAt: now,
+        };
+      }
+    }
+    samples = rows.map((r) => ({
+      ts: r.ts,
+      model: r.model,
+      tokensIn: r.tokensIn,
+      tokensOut: r.tokensOut,
+      cacheRead: 0,
+    }));
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readCursor: credit DB unavailable',
+    );
+  }
+
+  return {
+    provider: 'cursor',
+    apiProviderName: CLI_API_PROVIDER_MAP['cursor'],
+    ...(account
+      ? {
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+        }
+      : {}),
+    available: hasReportedUsage(samples),
+    attribution: 'account',
+    usageSource: 'local-session-history',
+    windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
+    quotas: [],
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cursor')),
+    updatedAt: now,
+  };
+}
+
+// ── Devin CLI ─────────────────────────────────────────────────────────────────
+// Devin stores ATIF-v1.7 transcripts at ~/.local/share/devin/cli/transcripts/*.json
+// Each transcript has agent.model_name and final_metrics with total_prompt_tokens,
+// total_completion_tokens, and total_cached_tokens. Steps carry timestamps.
+// We use the file's mtime as the sample timestamp and final_metrics as the
+// session-level token totals (one sample per transcript).
+
+async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
+  const transcriptRoot = join(homedir(), '.local', 'share', 'devin', 'cli', 'transcripts');
+  const samples: UsageSample[] = [];
+  if (existsSync(transcriptRoot)) {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = readdirSync(transcriptRoot, { withFileTypes: true });
+    } catch (err: unknown) {
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'readDevin: readdir transcripts failed',
+      );
+      entries = [];
+    }
+    for (const entry of entries) {
+      if (!entry.name.endsWith('.json')) continue;
+      const file = join(transcriptRoot, entry.name);
+      try {
+        const st = await stat(file);
+        if (now - st.mtimeMs > SCAN_HORIZON_MS) continue;
+        const text = await readFile(file, 'utf8');
+        const data = JSON.parse(text) as {
+          agent?: { model_name?: string };
+          final_metrics?: {
+            total_prompt_tokens?: number;
+            total_completion_tokens?: number;
+            total_cached_tokens?: number;
+          };
+        };
+        const model = data.agent?.model_name?.trim();
+        const metrics = data.final_metrics;
+        if (!model || !metrics) continue;
+        const tokensIn = (metrics.total_prompt_tokens ?? 0) + (metrics.total_cached_tokens ?? 0);
+        const tokensOut = metrics.total_completion_tokens ?? 0;
+        if (tokensIn > 0 || tokensOut > 0) {
+          samples.push({
+            ts: st.mtimeMs,
+            model,
+            tokensIn,
+            tokensOut,
+            cacheRead: metrics.total_cached_tokens ?? 0,
+          });
+        }
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), file },
+          'readDevin: transcript parse failed',
+        );
+      }
+    }
+  }
+
+  return {
+    provider: 'devin',
+    apiProviderName: CLI_API_PROVIDER_MAP['devin'],
+    ...(account
+      ? {
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+        }
+      : {}),
+    available: hasReportedUsage(samples),
+    attribution: 'account',
+    usageSource: 'local-session-history',
+    windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
+    quotas: [],
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('devin')),
+    updatedAt: now,
+  };
+}
+
+// ── Cline CLI ─────────────────────────────────────────────────────────────────
+// Cline stores session metadata + messages at ~/.cline/data/sessions/<id>/*.json
+// The messages file has per-assistant-message metrics (inputTokens, outputTokens,
+// cacheReadTokens, cacheWriteTokens) and modelInfo.id. Each message has a `ts`
+// epoch-ms field. We parse every messages.json in the session tree.
+
+async function readCline(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
+  const sessionsRoot = join(homedir(), '.cline', 'data', 'sessions');
+  const samples: UsageSample[] = [];
+  if (existsSync(sessionsRoot)) {
+    const stack = [sessionsRoot];
+    while (stack.length) {
+      const dir = stack.pop()!;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), dir },
+          'readCline: readdir sessions failed',
+        );
+        continue;
+      }
+      for (const entry of entries) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.messages.json')) continue;
+        try {
+          const st = await stat(full);
+          if (now - st.mtimeMs > SCAN_HORIZON_MS) continue;
+          const text = await readFile(full, 'utf8');
+          const data = JSON.parse(text) as {
+            messages?: Array<{
+              role?: string;
+              ts?: number;
+              modelInfo?: { id?: string; provider?: string };
+              metrics?: {
+                inputTokens?: number;
+                outputTokens?: number;
+                cacheReadTokens?: number;
+                cacheWriteTokens?: number;
+              };
+            }>;
+          };
+          for (const msg of data.messages ?? []) {
+            if (msg.role !== 'assistant') continue;
+            const model = msg.modelInfo?.id?.trim();
+            const metrics = msg.metrics;
+            const ts = msg.ts;
+            if (!model || !metrics || typeof ts !== 'number') continue;
+            if (now - ts > SCAN_HORIZON_MS) continue;
+            // Cline routes through OpenAI-compatible providers, so inputTokens
+            // (prompt_tokens) already INCLUDES cached tokens. Do not add
+            // cacheReadTokens or cacheWriteTokens to tokensIn — that would
+            // double-count. cacheRead is recorded as a breakdown detail only.
+            const tokensIn = metrics.inputTokens ?? 0;
+            const tokensOut = metrics.outputTokens ?? 0;
+            if (tokensIn > 0 || tokensOut > 0) {
+              samples.push({
+                ts,
+                model,
+                tokensIn,
+                tokensOut,
+                cacheRead: metrics.cacheReadTokens ?? 0,
+              });
+            }
+          }
+        } catch (err: unknown) {
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err), file: full },
+            'readCline: messages parse failed',
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    provider: 'cline',
+    apiProviderName: CLI_API_PROVIDER_MAP['cline'],
+    ...(account
+      ? {
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+        }
+      : {}),
+    available: hasReportedUsage(samples),
+    attribution: 'account',
+    usageSource: 'local-session-history',
+    windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
+    quotas: [],
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cline')),
+    updatedAt: now,
+  };
+}
+
+// ── Kimi Code CLI ─────────────────────────────────────────────────────────────
+// Kimi stores sessions at ~/.kimi/sessions/<hash>/<uuid>/{wire.jsonl,context.jsonl}
+// wire.jsonl has StatusUpdate events with token_usage (input_other, output,
+// input_cache_read, input_cache_creation) and a float timestamp. We parse each
+// StatusUpdate as one usage sample with the model from the session metadata or
+// the KimiCode provider's model catalog fallback.
+
+async function readKimiCode(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
+  const sessionsRoot = join(homedir(), '.kimi', 'sessions');
+  const samples: UsageSample[] = [];
+
+  // Kimi wire logs don't carry a per-turn model name. Resolve the active
+  // model from the KimiCode provider's live catalog (first model = default);
+  // fall back to KIMI_DEFAULT_MODEL when the catalog is unavailable.
+  let resolvedKimiModel: string | null = null;
+  try {
+    const provider = getContext().providers.get('kimicode' as ProviderName);
+    const models = provider?.listModels() ?? [];
+    if (models.length > 0) resolvedKimiModel = models[0].apiModelId ?? models[0].id;
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readKimiCode: provider catalog unavailable, using fallback model',
+    );
+  }
+  const kimiModel = resolvedKimiModel ?? KIMI_DEFAULT_MODEL;
+
+  if (existsSync(sessionsRoot)) {
+    let sessionDirs: import('node:fs').Dirent[];
+    try {
+      sessionDirs = readdirSync(sessionsRoot, { withFileTypes: true });
+    } catch (err: unknown) {
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'readKimiCode: readdir sessions failed',
+      );
+      sessionDirs = [];
+    }
+    for (const sessionDir of sessionDirs) {
+      if (!sessionDir.isDirectory()) continue;
+      const sessionPath = join(sessionsRoot, sessionDir.name);
+      let convDirs: import('node:fs').Dirent[];
+      try {
+        convDirs = readdirSync(sessionPath, { withFileTypes: true });
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err), dir: sessionPath },
+          'readKimiCode: readdir conversation dir failed',
+        );
+        continue;
+      }
+      for (const convDir of convDirs) {
+        if (!convDir.isDirectory()) continue;
+        const wirePath = join(sessionPath, convDir.name, 'wire.jsonl');
+        if (!existsSync(wirePath)) continue;
+        try {
+          const st = await stat(wirePath);
+          if (now - st.mtimeMs > SCAN_HORIZON_MS) continue;
+          const text = await readFile(wirePath, 'utf8');
+          for (const line of text.split('\n')) {
+            if (!line.includes('StatusUpdate')) continue;
+            try {
+              const row = JSON.parse(line) as {
+                timestamp?: number;
+                message?: {
+                  type?: string;
+                  payload?: {
+                    token_usage?: {
+                      input_other?: number;
+                      output?: number;
+                      input_cache_read?: number;
+                      input_cache_creation?: number;
+                    };
+                  };
+                };
+              };
+              if (row.message?.type !== 'StatusUpdate') continue;
+              // Kimi timestamps are float seconds; floor to avoid rounding
+              // up into the next second bucket.
+              const ts = typeof row.timestamp === 'number' ? Math.floor(row.timestamp * 1000) : NaN;
+              if (!Number.isFinite(ts) || now - ts > SCAN_HORIZON_MS) continue;
+              const usage = row.message.payload?.token_usage;
+              if (!usage) continue;
+              const tokensIn =
+                (usage.input_other ?? 0) +
+                (usage.input_cache_read ?? 0) +
+                (usage.input_cache_creation ?? 0);
+              const tokensOut = usage.output ?? 0;
+              if (tokensIn > 0 || tokensOut > 0) {
+                samples.push({
+                  ts,
+                  model: kimiModel,
+                  tokensIn,
+                  tokensOut,
+                  cacheRead: usage.input_cache_read ?? 0,
+                });
+              }
+            } catch (err: unknown) {
+              serverLog.debug(
+                { err: err instanceof Error ? err.message : String(err) },
+                'readKimiCode: StatusUpdate line parse failed',
+              );
+            }
+          }
+        } catch (err: unknown) {
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err), file: wirePath },
+            'readKimiCode: wire.jsonl read failed',
+          );
+        }
+      }
+    }
+  }
+
+  return {
+    provider: 'kimicode',
+    apiProviderName: CLI_API_PROVIDER_MAP['kimicode'],
+    ...(account
+      ? {
+          accountId: account.id,
+          accountLabel: account.label,
+          ...(account.email ? { accountEmail: account.email } : {}),
+        }
+      : {}),
+    available: hasReportedUsage(samples),
+    attribution: 'account',
+    usageSource: 'local-session-history',
+    windows: windowsFromSamples(samples, now),
+    dailyUsage: dailyUsageFromSamples(samples, now),
+    quotas: [],
+    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('kimicode')),
+    updatedAt: now,
+  };
+}
+
+// ── Unavailable CLI providers (kilocode, freebuff, jules) ─────────────────────
+// These providers are fail-closed or approval-required in this build. They never
+// emit usage_update and have no parseable local session logs. When their CLI
+// login is detected, surface them in billing with an explicit unavailable
+// attribution so users understand WHY no usage appears (not just "no data").
+
+function readUnavailableCli(
+  providerName: string,
+  detectionFn: (() => boolean | string | null) | null,
+  unavailableNote: string,
+  now: number,
+): CliUsageReport | null {
+  // Only surface when the CLI is actually detected on-disk.
+  const detected = detectionFn ? !!detectionFn() : false;
+  if (!detected) return null;
+  return {
+    provider: providerName,
+    apiProviderName: CLI_API_PROVIDER_MAP[providerName],
+    available: false,
+    attribution: 'unavailable',
+    attributionNote: unavailableNote,
+    windows: [],
+    dailyUsage: [],
+    quotas: [],
+    byModel: [],
     updatedAt: now,
   };
 }
@@ -924,7 +1474,10 @@ async function collectCliUsageReports(opts?: {
   const quotaJobs = Promise.allSettled([fetchClaudeQuota(), fetchCopilotQuota(opts?.githubToken)]);
 
   const reports: CliUsageReport[] = [];
-  const codexAccounts = discoverCliAccounts().filter((account) => account.provider === 'codex');
+  const allAccounts = discoverCliAccounts();
+
+  // ── Codex: per-account readers with shared-history attribution guards ──────
+  const codexAccounts = allAccounts.filter((account) => account.provider === 'codex');
   const codexAttribution = codexSessionAttribution(codexAccounts);
   const codexReaders = (codexAccounts.length > 0 ? codexAccounts : [undefined]).map((account) => {
     if (!account) return (at: number) => readCodex(at);
@@ -933,17 +1486,74 @@ async function collectCliUsageReports(opts?: {
     // login just because the auth homes are separate.
     return (at: number) => readCodex(at, account, codexAttribution.get(account.id));
   });
-  const readers: Array<(now: number) => CliUsageReport | Promise<CliUsageReport>> = [
+
+  // ── Cursor: per-account readers (credit DB is aggregate; secondary profiles
+  //    get an explicit unavailable attribution) ───────────────────────────────
+  const cursorAccounts = allAccounts.filter((account) => account.provider === 'cursor');
+  const cursorReaders = (cursorAccounts.length > 0 ? cursorAccounts : [undefined]).map(
+    (account) => (at: number) => readCursorFromCreditDb(at, account),
+  );
+
+  // ── Devin: per-account readers (transcripts are shared across profiles) ────
+  const devinAccounts = allAccounts.filter((account) => account.provider === 'devin');
+  const devinReaders = (devinAccounts.length > 0 ? devinAccounts : [undefined]).map(
+    (account) => (at: number) => readDevin(at, account),
+  );
+
+  // ── Cline: per-account readers ─────────────────────────────────────────────
+  const clineAccounts = allAccounts.filter((account) => account.provider === 'cline');
+  const clineReaders = (clineAccounts.length > 0 ? clineAccounts : [undefined]).map(
+    (account) => (at: number) => readCline(at, account),
+  );
+
+  // ── Kimi Code: per-account readers ─────────────────────────────────────────
+  const kimiAccounts = allAccounts.filter((account) => account.provider === 'kimicode');
+  const kimiReaders = (kimiAccounts.length > 0 ? kimiAccounts : [undefined]).map(
+    (account) => (at: number) => readKimiCode(at, account),
+  );
+
+  // ── Unavailable CLI providers: surface only when detected on-disk ──────────
+  const unavailableReaders: Array<(now: number) => CliUsageReport | null> = [
+    (at) =>
+      readUnavailableCli(
+        'kilocode',
+        detectKiloCLILogin,
+        'Kilo Code is unavailable in this build: Koryphaios cannot enforce its tool permission boundary, so no sessions are run and no usage is recorded.',
+        at,
+      ),
+    (at) =>
+      readUnavailableCli(
+        'freebuff',
+        detectFreebuffCLILogin,
+        'Freebuff is unavailable in this build. The prior integration used an undocumented SDK contract and is disabled; no usage is recorded.',
+        at,
+      ),
+    (at) =>
+      readUnavailableCli(
+        'jules',
+        detectJulesApiKey,
+        'Jules is an async cloud coding agent that requires explicit approval per task. No local usage is recorded; usage is tracked on Google’s side.',
+        at,
+      ),
+  ];
+
+  const readers: Array<(now: number) => CliUsageReport | Promise<CliUsageReport> | null> = [
     readClaude,
     ...codexReaders,
     readCopilot,
     readGrok,
     readAntigravity,
+    ...cursorReaders,
+    ...devinReaders,
+    ...clineReaders,
+    ...kimiReaders,
+    ...unavailableReaders,
   ];
   const results = await Promise.allSettled(readers.map((reader) => reader(now)));
   for (const result of results) {
     if (
       result.status === 'fulfilled' &&
+      result.value &&
       (result.value.available ||
         result.value.quotas.length > 0 ||
         result.value.attribution === 'unavailable')

@@ -50,6 +50,18 @@ const PROCESS_ENV_KEYS = [
   'CURL_CA_BUNDLE',
 ] as const;
 
+// These paths are accepted only as explicit caller overrides. Copying the
+// backend's real HOME/XDG roots by default would re-expose interactive CLI
+// state (and any credentials stored below it) to a native child.
+const EXPLICIT_PRIVATE_PATH_KEYS = [
+  'HOME',
+  'USERPROFILE',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
+] as const;
+
 const KORY_BRIDGE_ENV_KEYS = [
   'KORY_BACKEND_URL',
   'KORY_BRIDGE_AUTH_FILE',
@@ -92,7 +104,12 @@ const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {
 };
 
 function allowedKeysFor(provider: NativeCliProvider): ReadonlySet<string> {
-  return new Set([...PROCESS_ENV_KEYS, ...KORY_BRIDGE_ENV_KEYS, ...PROVIDER_ENV_KEYS[provider]]);
+  return new Set([
+    ...PROCESS_ENV_KEYS,
+    ...EXPLICIT_PRIVATE_PATH_KEYS,
+    ...KORY_BRIDGE_ENV_KEYS,
+    ...PROVIDER_ENV_KEYS[provider],
+  ]);
 }
 
 /**
@@ -109,6 +126,7 @@ export function buildProviderCliEnv(
   const result: NodeJS.ProcessEnv = {};
 
   for (const key of allowed) {
+    if ((EXPLICIT_PRIVATE_PATH_KEYS as readonly string[]).includes(key)) continue;
     const value = source[key];
     if (value !== undefined) result[key] = value;
   }

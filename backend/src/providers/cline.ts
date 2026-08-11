@@ -39,6 +39,7 @@ import {
   writeManagedCliFile,
 } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { buildProviderCliEnv } from './cli-environment';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -86,7 +87,10 @@ function readJsonFile<T = unknown>(path: string): T | null {
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as T;
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline JSON file read failed');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Cline JSON file read failed',
+    );
     return null;
   }
 }
@@ -168,16 +172,19 @@ function readConfiguredClineModels(): ModelDef[] {
     }
   }
 
-  return [...modelIds].map((modelId) => ({
-    id: `cline-${modelId}`,
-    name: modelId,
-    provider: 'cline',
-    apiModelId: modelId,
-    contextWindow: 0,
-    maxOutputTokens: 0,
-    supportsStreaming: true,
-    supportsAttachments: false,
-  } as ModelDef));
+  return [...modelIds].map(
+    (modelId) =>
+      ({
+        id: `cline-${modelId}`,
+        name: modelId,
+        provider: 'cline',
+        apiModelId: modelId,
+        contextWindow: 0,
+        maxOutputTokens: 0,
+        supportsStreaming: true,
+        supportsAttachments: false,
+      }) as ModelDef,
+  );
 }
 
 interface ClineEvent {
@@ -246,7 +253,12 @@ export class ClineProvider implements Provider {
   }
 
   refreshModels(forceRefresh = false): void {
-    if (!forceRefresh && this.modelsFetchedAt > 0 && !this.modelsInFlight && this.cachedModels?.length) {
+    if (
+      !forceRefresh &&
+      this.modelsFetchedAt > 0 &&
+      !this.modelsInFlight &&
+      this.cachedModels?.length
+    ) {
       return;
     }
     if (this.modelsInFlight) return;
@@ -257,7 +269,10 @@ export class ClineProvider implements Provider {
       this.modelsFetchedAt = Date.now();
       this.modelsInFlight = false;
       if (models.length) {
-        providerLog.debug({ provider: 'cline', count: models.length }, 'Cline model list refreshed');
+        providerLog.debug(
+          { provider: 'cline', count: models.length },
+          'Cline model list refreshed',
+        );
       }
     };
 
@@ -278,6 +293,11 @@ export class ClineProvider implements Provider {
 
       const child = spawn('cline', args, {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: buildProviderCliEnv('cline', {
+          CLINE_HOME: getKoryphaiosClineHome(),
+          HOME: getKoryphaiosClineHome(),
+          USERPROFILE: getKoryphaiosClineHome(),
+        }),
       });
 
       child.stdout.on('data', (c: Buffer) => (out += c.toString()));
@@ -296,7 +316,10 @@ export class ClineProvider implements Provider {
         try {
           child.kill('SIGTERM');
         } catch (err: unknown) {
-          providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline model probe child already gone on timeout');
+          providerLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Cline model probe child already gone on timeout',
+          );
         }
       }, 12_000).unref?.();
     };
@@ -361,56 +384,60 @@ export class ClineProvider implements Provider {
       : getKoryphaiosClineHome();
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
-        ? bridgeGrantLease!.grant([
-            'mcp:catalog',
-            'mcp:execute',
-          ]).directory
+        ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
     ensureManagedCliDirectory(clineHome);
-    if (!researchOnly) try {
-      // MCP: write cline_mcp_settings.json with the kory server.
-      const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
-      if (mcpConfigs && mcpConfigs.length > 0) {
-        const mcpConfigPath = join(clineHome, 'cline_mcp_settings.json');
-        if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-        const existing = existsSync(mcpConfigPath)
-          ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-          : {};
-        existing.mcpServers = existing.mcpServers ?? {};
-        for (const srv of mcpConfigs) {
-          existing.mcpServers[srv.name] = {
-            command: srv.command,
-            args: srv.args,
-            env: srv.env,
-          };
+    if (!researchOnly)
+      try {
+        // MCP: write cline_mcp_settings.json with the kory server.
+        const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          const mcpConfigPath = join(clineHome, 'cline_mcp_settings.json');
+          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+          const existing = existsSync(mcpConfigPath)
+            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+            : {};
+          existing.mcpServers = existing.mcpServers ?? {};
+          for (const srv of mcpConfigs) {
+            existing.mcpServers[srv.name] = {
+              command: srv.command,
+              args: srv.args,
+              env: srv.env,
+            };
+          }
+          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
         }
-        writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
-      }
-      // Rules: write .clinerules with the Kory session rules.
-      const ruleFiles = clineBridge?.buildRules(bridgeCtx);
-      if (ruleFiles) {
-        for (const rule of ruleFiles) {
-          writeManagedCliFile(rule.path, rule.content);
+        // Rules: write .clinerules with the Kory session rules.
+        const ruleFiles = clineBridge?.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            writeManagedCliFile(rule.path, rule.content);
+          }
         }
+      } catch (wiringErr) {
+        providerLog.warn(
+          safeProviderDiagnostic('cline', 'configuration', wiringErr),
+          'Failed to wire kory MCP/rules for Cline',
+        );
       }
-    } catch (wiringErr) {
-      providerLog.warn(
-        safeProviderDiagnostic('cline', 'configuration', wiringErr),
-        'Failed to wire kory MCP/rules for Cline',
-      );
-    }
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-cline-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-cline-'))
+      : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const args = [
       '--plan',
       '--auto-approve',
       'true',
       '--json',
-      '--cwd', cwd,
-      '--config', clineHome,
-      '--data-dir', join(clineHome, 'data'),
-      '--hooks-dir', join(clineHome, 'hooks'),
+      '--cwd',
+      cwd,
+      '--config',
+      clineHome,
+      '--data-dir',
+      join(clineHome, 'data'),
+      '--hooks-dir',
+      join(clineHome, 'hooks'),
     ];
     if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
       const lvl = request.reasoningLevel.toLowerCase();
@@ -424,7 +451,12 @@ export class ClineProvider implements Provider {
     const cliModel = request.model?.replace(/^cline-/, '');
     if (cliModel && cliModel !== 'default') args.push('--model', cliModel);
 
-    const jail = request.sandbox ? buildSoftJail(process.env, [join(homedir(), '.cline')]) : null;
+    const baseEnv = buildProviderCliEnv('cline', {
+      CLINE_HOME: clineHome,
+      HOME: clineHome,
+      USERPROFILE: clineHome,
+    });
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [clineHome]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
@@ -435,8 +467,7 @@ export class ClineProvider implements Provider {
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     // Point the CLI at the isolated home so it discovers the kory MCP server
     // and .clinerules we just wrote.
-    const clineEnv = { ...(jail?.env ?? { ...process.env }) };
-    clineEnv.CLINE_HOME = clineHome;
+    const clineEnv = { ...(jail?.env ?? baseEnv) };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {
@@ -454,7 +485,10 @@ export class ClineProvider implements Provider {
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cline CLI child already gone on abort');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Cline CLI child already gone on abort',
+        );
       }
     };
     request.signal?.addEventListener('abort', onAbort, { once: true });

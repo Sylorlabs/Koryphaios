@@ -32,6 +32,7 @@ import {
 } from './provider-diagnostics';
 import { writeManagedCliFile } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { buildProviderCliEnv } from './cli-environment';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -94,7 +95,11 @@ async function queryCliModels(
       stdio: ['pipe', 'pipe', 'pipe'],
       // This is the actual profile boundary. A second account is not just a
       // display label: the official CLI reads its own auth store from here.
-      env: { ...process.env, CODEX_HOME: account.profileDir },
+      env: buildProviderCliEnv('codex', {
+        CODEX_HOME: account.profileDir,
+        HOME: account.profileDir,
+        USERPROFILE: account.profileDir,
+      }),
     });
     let buffer = '';
     let stderr = '';
@@ -106,7 +111,10 @@ async function queryCliModels(
       try {
         child.kill('SIGTERM');
       } catch (err: unknown) {
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex CLI child already exited on finish');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Codex CLI child already exited on finish',
+        );
       }
       error ? reject(error) : resolve(result ?? []);
     };
@@ -214,7 +222,10 @@ export function extractKoryToolEnvelope(
       tool: { name: parsed.name, input: parsed.input as Record<string, unknown> },
     };
   } catch (err: unknown) {
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Codex tool tag parse failed — returning raw text');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Codex tool tag parse failed — returning raw text',
+    );
     return { content: text };
   }
 }
@@ -271,9 +282,10 @@ export function codexJsonEvents(
     }
     return { events, completed: true };
   } else if (event.type === 'turn.failed') {
-    const raw = (event.error as { message?: string } | undefined)?.message
-      ?? (event.message as string | undefined)
-      ?? '';
+    const raw =
+      (event.error as { message?: string } | undefined)?.message ??
+      (event.message as string | undefined) ??
+      '';
     const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
     events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
     return { events, completed: true };
@@ -431,11 +443,12 @@ export class CodexCliProvider implements Provider {
         this.accountByModelId = accountByModelId;
         this.models = models;
         this.modelsAt = Date.now();
-        this.modelDiscoveryError = models.length > 0
-          ? undefined
-          : failures.length > 0
-            ? `Codex CLI model discovery failed: ${failures.join('; ').slice(0, 500)}`
-            : 'Codex CLI reported no models for the signed-in account.';
+        this.modelDiscoveryError =
+          models.length > 0
+            ? undefined
+            : failures.length > 0
+              ? `Codex CLI model discovery failed: ${failures.join('; ').slice(0, 500)}`
+              : 'Codex CLI reported no models for the signed-in account.';
         providerLog.info(
           {
             provider: 'codex',
@@ -495,21 +508,24 @@ export class CodexCliProvider implements Provider {
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
     };
-    if (!researchOnly) try {
-      const ruleFiles = codexBridge?.buildRules(bridgeCtx);
-      if (ruleFiles) {
-        for (const rule of ruleFiles) {
-          writeManagedCliFile(rule.path, rule.content);
+    if (!researchOnly)
+      try {
+        const ruleFiles = codexBridge?.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            writeManagedCliFile(rule.path, rule.content);
+          }
         }
+      } catch (wiringErr) {
+        providerLog.warn(
+          { err: wiringErr, provider: 'codex' },
+          'Failed to write rules file for Codex',
+        );
       }
-    } catch (wiringErr) {
-      providerLog.warn(
-        { err: wiringErr, provider: 'codex' },
-        'Failed to write rules file for Codex',
-      );
-    }
 
-    const researchRoot = researchOnly ? mkdtempSync(join(tmpdir(), 'kory-web-research-codex-')) : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-codex-'))
+      : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const args = [
       '--ask-for-approval',
@@ -535,7 +551,11 @@ export class CodexCliProvider implements Provider {
       '-',
     ];
     const codexHome = getKoryphaiosCodexHome(account.profileDir);
-    const baseEnv = { ...process.env, CODEX_HOME: codexHome };
+    const baseEnv = buildProviderCliEnv('codex', {
+      CODEX_HOME: codexHome,
+      HOME: codexHome,
+      USERPROFILE: codexHome,
+    });
     const jail = request.sandbox ? buildSoftJail(baseEnv, [codexHome]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(binary, args, { cwd, configDirs: [codexHome], policy: request.sandbox })
@@ -561,10 +581,7 @@ export class CodexCliProvider implements Provider {
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
     timeout.unref?.();
 
-    child.stderr.on(
-      'data',
-      (chunk: Buffer) => (stderr = appendPrivateDiagnostic(stderr, chunk)),
-    );
+    child.stderr.on('data', (chunk: Buffer) => (stderr = appendPrivateDiagnostic(stderr, chunk)));
     const queue: ProviderEvent[] = [];
     const consumeLine = (line: string) => {
       if (!line.trim()) return;
