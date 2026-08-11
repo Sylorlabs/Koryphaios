@@ -177,6 +177,19 @@ targets remain marked unverified. The Vite dev server pre-optimizes every
 Tauri WebView module before the native window mounts, preventing a lazy
 dependency re-optimization from invalidating the first WebKit module load.
 
+Packaged WebViews keep their application-owned Tauri origin. The bundled
+launcher injects an explicit, non-wildcard allowlist for `http://tauri.localhost`,
+`https://tauri.localhost`, and `tauri://localhost`; development loopback
+origins remain separate. Release tests cover both GET and OPTIONS CORS paths
+for every packaged origin.
+
+Release compatibility identity is content-addressed over the source worktree
+and records the exact commit and dirty state. `build:desktop` invokes the hash
+writer in strict release mode, which refuses modified, deleted, or untracked
+non-ignored source inputs. A packaged health hash is therefore attributable to
+the committed source used to build that artifact rather than merely to a stale
+HEAD abbreviation.
+
 ## Environment-dependent limits
 
 - Provider calls require the user's own authenticated accounts, quota, and
