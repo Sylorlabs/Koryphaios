@@ -219,7 +219,10 @@ function main() {
 
   // 1. Write compat hash
   console.log('[build-desktop] Writing compat hash...');
-  run('bun', ['run', 'scripts/write-compat-hash.ts']);
+  // A packaged artifact is only certifiable when every source input comes
+  // from one committed checkout. The hash script fails closed on any dirty
+  // or untracked source instead of stamping an old HEAD into a new binary.
+  run('bun', ['run', 'scripts/write-compat-hash.ts', '--release']);
 
   // 2. Build embedded backend payload for the host target
   console.log('[build-desktop] Building embedded backend payload...');
