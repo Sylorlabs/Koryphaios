@@ -1,12 +1,32 @@
 // MCP (Model Context Protocol) client integration.
 // Supports connecting to MCP servers via stdio and SSE transports.
 // This allows Koryphaios to connect to external tool servers.
+//
+// Protocol negotiation: the client probes with server/discover (2026-07-28).
+// If the server responds, it uses the stateless 2026-07-28 flow (per-request
+// _meta, no initialize handshake). If server/discover returns method-not-found
+// (-32601), it falls back to the 2025-11-25 legacy initialize handshake. This
+// keeps existing user MCP servers working while supporting the current spec.
 
 import { mcpLog, serverLog } from '../logger';
+import { resolve } from 'node:path';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
 import { ToolRegistry } from '../tools/registry';
 import { VERSION } from '../constants';
 import { registerMCPToolsInRegistry } from './tool-bridge';
+
+/** MCP protocol versions supported by this client, newest first. The client
+ *  negotiates the highest mutually supported version via server/discover. */
+const SUPPORTED_PROTOCOL_VERSIONS = [
+  '2026-07-28',
+  '2025-11-25',
+  '2025-06-18',
+  '2024-11-05',
+] as const;
+type ProtocolVersion = (typeof SUPPORTED_PROTOCOL_VERSIONS)[number];
+const LEGACY_PROTOCOL_VERSION: ProtocolVersion = '2025-11-25';
+/** The newest spec revision (stateless, per-request _meta, server/discover). */
+const CURRENT_PROTOCOL_VERSION: ProtocolVersion = '2026-07-28';
 
 // ─── MCP Protocol Types ─────────────────────────────────────────────────────
 
@@ -32,6 +52,18 @@ interface MCPResponse {
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+}
+
+interface MCPDiscoverResult {
+  // 2026-07-28 spec: field is `supportedVersions`, not `protocolVersions`.
+  // Only modern (2026-07-28+) versions are listed; 2025-era versions are
+  // negotiated via the legacy initialize handshake.
+  supportedVersions?: string[];
+  capabilities?: Record<string, unknown>;
+  // serverInfo is NOT a top-level field on DiscoverResult — it's in
+  // result._meta['io.modelcontextprotocol/serverInfo'] (spec PR #3002).
+  // Kept here for backward compat with older drafts.
+  serverInfo?: { name: string; version: string };
 }
 
 interface MCPToolDef {
@@ -127,6 +159,10 @@ export class MCPClient {
   private serverName: string;
   private serverCapabilities: Record<string, unknown> = {};
   private idleShutdown: ReturnType<typeof setTimeout> | null = null;
+  /** Negotiated protocol version for this server connection. */
+  private protocolVersion: ProtocolVersion = LEGACY_PROTOCOL_VERSION;
+  /** Last connection error, surfaced in listServers() for the UI. */
+  lastError: string | undefined;
 
   constructor(private config: MCPServerConfig) {
     this.serverName = config.name;
@@ -141,13 +177,25 @@ export class MCPClient {
   get availableTools() {
     return this.tools;
   }
+  get negotiatedProtocolVersion() {
+    return this.protocolVersion;
+  }
+  get transport() {
+    return this.config.transport;
+  }
 
   async connect(): Promise<void> {
     if (this.connected) return;
-    if (this.config.transport === 'stdio') {
-      await this.connectStdio();
-    } else {
-      await this.connectSSE();
+    try {
+      if (this.config.transport === 'stdio') {
+        await this.connectStdio();
+      } else {
+        await this.connectSSE();
+      }
+      this.lastError = undefined;
+    } catch (err: unknown) {
+      this.lastError = err instanceof Error ? err.message : String(err);
+      throw err;
     }
   }
 
@@ -269,34 +317,80 @@ export class MCPClient {
         );
       });
 
-    // Initialize
-    const initResult = await this.request('initialize', {
-      protocolVersion: '2024-11-05',
-      capabilities: {
-        roots: { listChanged: false },
-      },
-      clientInfo: {
-        name: 'koryphaios',
-        version: VERSION,
-      },
-    });
-
-    if (this.process !== processHandle) {
-      throw new Error('MCP process exited during initialization');
+    // ── Protocol negotiation ──────────────────────────────────────────────
+    // Probe with server/discover (2026-07-28). If the server responds, use the
+    // stateless flow. If it returns method-not-found (-32601), fall back to the
+    // 2025-11-25 initialize handshake used by existing local servers.
+    let discovered = false;
+    try {
+      const discoverResult = await this.request('server/discover', {});
+      if (this.process !== processHandle) {
+        throw new Error('MCP process exited during server/discover');
+      }
+      const discover = discoverResult.result as MCPDiscoverResult | undefined;
+      if (discover?.supportedVersions?.length) {
+        // Pick the highest mutually supported modern version.
+        const serverSupported = new Set(discover.supportedVersions);
+        const negotiated = SUPPORTED_PROTOCOL_VERSIONS.find((v) => serverSupported.has(v));
+        if (negotiated) {
+          this.protocolVersion = negotiated;
+          this.serverCapabilities = discover.capabilities ?? {};
+          discovered = true;
+          mcpLog.info(
+            { server: this.serverName, protocolVersion: this.protocolVersion },
+            'MCP server discovered (2026-07-28 stateless flow)',
+          );
+        }
+      }
+    } catch (err: unknown) {
+      // Transport-level failure (timeout, stdin write). JSON-RPC -32601 errors
+      // resolve (not reject) with response.error set — handled by the undefined
+      // discover.result check above, which falls through to legacy initialize.
+      mcpLog.debug(
+        { server: this.serverName, err: err instanceof Error ? err.message : String(err) },
+        'server/discover probe failed; falling back to legacy initialize',
+      );
     }
 
-    this.serverCapabilities =
-      (initResult.result as { capabilities?: Record<string, unknown> } | undefined)?.capabilities ??
-      {};
+    if (!discovered) {
+      // Legacy 2025-11-25 initialize handshake.
+      this.protocolVersion = LEGACY_PROTOCOL_VERSION;
+      const initResult = await this.request('initialize', {
+        protocolVersion: LEGACY_PROTOCOL_VERSION,
+        capabilities: {
+          roots: { listChanged: false },
+        },
+        clientInfo: {
+          name: 'koryphaios',
+          version: VERSION,
+        },
+      });
 
-    // Send initialized notification
-    this.notify('notifications/initialized', {});
+      if (this.process !== processHandle) {
+        throw new Error('MCP process exited during initialization');
+      }
 
-    // List available tools if server supports them
-    if (this.serverCapabilities.tools) {
+      this.serverCapabilities =
+        (initResult.result as { capabilities?: Record<string, unknown> } | undefined)
+          ?.capabilities ?? {};
+
+      // Send initialized notification
+      this.notify('notifications/initialized', {});
+    }
+
+    // List available tools if server supports them. In 2026-07-28 the
+    // capabilities may be empty (stateless servers need not advertise), so
+    // attempt tools/list regardless when no capability gate is present.
+    const hasToolsCapability = Boolean(this.serverCapabilities.tools);
+    if (discovered || hasToolsCapability) {
       try {
         const toolsResult = await this.request('tools/list', {});
-        this.tools = (toolsResult.result as { tools?: MCPToolDef[] } | undefined)?.tools ?? [];
+        if (this.process !== processHandle) {
+          throw new Error('MCP process exited during tools/list');
+        }
+        const result = toolsResult.result as
+          { tools?: MCPToolDef[]; ttlMs?: number; cacheScope?: string } | undefined;
+        this.tools = result?.tools ?? [];
       } catch (err: unknown) {
         mcpLog.warn(
           { server: this.serverName, err: err instanceof Error ? err.message : String(err) },
@@ -311,55 +405,136 @@ export class MCPClient {
 
     this.connected = true;
     this.scheduleIdleShutdown();
-    mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via stdio');
+    mcpLog.info(
+      { server: this.serverName, tools: this.tools.length, protocolVersion: this.protocolVersion },
+      'MCP connected via stdio',
+    );
   }
 
   private async connectSSE(): Promise<void> {
-    // SSE transport — connect to HTTP endpoint
+    // Streamable HTTP transport — connect to HTTP endpoint.
     const { url, headers = {} } = this.config;
     if (!url) throw new Error(`MCP server ${this.serverName}: url is required for SSE transport`);
 
-    // For SSE, we call HTTP endpoints for RPC
-    // Initialize
-    const initResp = await fetch(`${url}/initialize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: { roots: { listChanged: false } },
-          clientInfo: { name: 'koryphaios', version: VERSION },
+    // ── Protocol negotiation via server/discover ──────────────────────────
+    let discovered = false;
+    try {
+      const discoverResp = await fetch(`${url}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Mcp-Method': 'server/discover',
+          'Mcp-Name': '',
+          ...headers,
         },
-      }),
-    });
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: ++this.requestId,
+          method: 'server/discover',
+          params: {},
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': CURRENT_PROTOCOL_VERSION,
+            'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        }),
+      });
+      if (discoverResp.ok) {
+        const data = (await discoverResp.json()) as MCPResponse;
+        const discover = data.result as MCPDiscoverResult | undefined;
+        if (discover?.supportedVersions?.length) {
+          const serverSupported = new Set(discover.supportedVersions);
+          const negotiated = SUPPORTED_PROTOCOL_VERSIONS.find((v) => serverSupported.has(v));
+          if (negotiated) {
+            this.protocolVersion = negotiated;
+            this.serverCapabilities = discover.capabilities ?? {};
+            discovered = true;
+            mcpLog.info(
+              { server: this.serverName, protocolVersion: this.protocolVersion },
+              'MCP server discovered via HTTP (2026-07-28 stateless flow)',
+            );
+          }
+        }
+      }
+    } catch (err: unknown) {
+      mcpLog.debug(
+        { server: this.serverName, err: err instanceof Error ? err.message : String(err) },
+        'server/discover HTTP probe failed; falling back to legacy initialize',
+      );
+    }
 
-    if (!initResp.ok) {
-      throw new Error(`MCP server ${this.serverName}: initialization failed (${initResp.status})`);
+    if (!discovered) {
+      // Legacy 2025-11-25 initialize over HTTP.
+      this.protocolVersion = LEGACY_PROTOCOL_VERSION;
+      const initResp = await fetch(`${url}/initialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: ++this.requestId,
+          method: 'initialize',
+          params: {
+            protocolVersion: LEGACY_PROTOCOL_VERSION,
+            capabilities: { roots: { listChanged: false } },
+            clientInfo: { name: 'koryphaios', version: VERSION },
+          },
+        }),
+      });
+      if (!initResp.ok) {
+        throw new Error(
+          `MCP server ${this.serverName}: initialization failed (${initResp.status})`,
+        );
+      }
+      const initData = (await initResp.json()) as MCPResponse;
+      this.serverCapabilities =
+        (initData.result as { capabilities?: Record<string, unknown> } | undefined)?.capabilities ??
+        {};
     }
 
     // List tools
     const toolsResp = await fetch(`${url}/tools/list`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: ++this.requestId,
-        method: 'tools/list',
-        params: {},
-      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Mcp-Method': 'tools/list',
+        'Mcp-Name': '',
+        ...headers,
+      },
+      body: JSON.stringify(
+        this.protocolVersion === CURRENT_PROTOCOL_VERSION
+          ? {
+              jsonrpc: '2.0',
+              id: ++this.requestId,
+              method: 'tools/list',
+              params: {},
+              _meta: {
+                'io.modelcontextprotocol/protocolVersion': this.protocolVersion,
+                'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
+                'io.modelcontextprotocol/clientCapabilities': {},
+              },
+            }
+          : {
+              jsonrpc: '2.0',
+              id: ++this.requestId,
+              method: 'tools/list',
+              params: {},
+            },
+      ),
     });
 
     if (toolsResp.ok) {
       const data = (await toolsResp.json()) as MCPResponse;
-      this.tools = (data.result as { tools?: MCPToolDef[] } | undefined)?.tools ?? [];
+      const result = data.result as
+        { tools?: MCPToolDef[]; ttlMs?: number; cacheScope?: string } | undefined;
+      this.tools = result?.tools ?? [];
     }
 
     this.connected = true;
     this.scheduleIdleShutdown();
-    mcpLog.info({ server: this.serverName, tools: this.tools.length }, 'MCP connected via SSE');
+    mcpLog.info(
+      { server: this.serverName, tools: this.tools.length, protocolVersion: this.protocolVersion },
+      'MCP connected via HTTP',
+    );
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolResult> {
@@ -376,16 +551,36 @@ export class MCPClient {
         }
         return response.result as MCPToolResult;
       } else {
-        // SSE transport
+        // Streamable HTTP transport
+        const isCurrent = this.protocolVersion === CURRENT_PROTOCOL_VERSION;
         const resp = await fetch(`${this.config.url}/tools/call`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(this.config.headers ?? {}) },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: ++this.requestId,
-            method: 'tools/call',
-            params: { name, arguments: args },
-          }),
+          headers: {
+            'Content-Type': 'application/json',
+            'Mcp-Method': 'tools/call',
+            'Mcp-Name': name,
+            ...(this.config.headers ?? {}),
+          },
+          body: JSON.stringify(
+            isCurrent
+              ? {
+                  jsonrpc: '2.0',
+                  id: ++this.requestId,
+                  method: 'tools/call',
+                  params: { name, arguments: args },
+                  _meta: {
+                    'io.modelcontextprotocol/protocolVersion': this.protocolVersion,
+                    'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
+                    'io.modelcontextprotocol/clientCapabilities': {},
+                  },
+                }
+              : {
+                  jsonrpc: '2.0',
+                  id: ++this.requestId,
+                  method: 'tools/call',
+                  params: { name, arguments: args },
+                },
+          ),
         });
 
         if (!resp.ok) {
@@ -415,7 +610,25 @@ export class MCPClient {
     }
 
     const id = ++this.requestId;
-    const request: MCPRequest = { jsonrpc: '2.0', id, method, params };
+    // For the 2026-07-28 stateless protocol, every request carries protocol
+    // version + client identity + capabilities in _meta. Legacy requests omit it.
+    // The server/discover probe always advertises the current version so the
+    // server knows what we're probing for, even before negotiation completes.
+    const includeMeta =
+      this.protocolVersion === CURRENT_PROTOCOL_VERSION || method === 'server/discover';
+    const metaVersion =
+      method === 'server/discover' ? CURRENT_PROTOCOL_VERSION : this.protocolVersion;
+    const baseRequest: MCPRequest = { jsonrpc: '2.0', id, method, params };
+    const request = includeMeta
+      ? {
+          ...baseRequest,
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': metaVersion,
+            'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        }
+      : baseRequest;
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -628,16 +841,120 @@ export class MCPToolWrapper implements Tool {
 
 // ─── MCP Manager ─────────────────────────────────────────────────────────────
 
+export interface McpServerStatus {
+  name: string;
+  transport: 'stdio' | 'sse';
+  connected: boolean;
+  toolCount: number;
+  protocolVersion: string;
+  lastError?: string;
+}
+
 export class MCPManager {
   private clients = new Map<string, MCPClient>();
 
   constructor(private workingDirectory: string) {}
 
-  async connectServer(config: MCPServerConfig): Promise<MCPClient> {
+  private scopeKey(name: string, projectRoot = this.workingDirectory): string {
+    return `${resolve(projectRoot)}\u0000${name}`;
+  }
+
+  private assertNameNotActiveInAnotherProject(name: string, projectRoot: string): void {
+    const scope = resolve(projectRoot);
+    for (const key of this.clients.keys()) {
+      const separator = key.indexOf('\u0000');
+      if (separator === -1 || key.slice(separator + 1) !== name) continue;
+      if (key.slice(0, separator) !== scope) {
+        throw new Error(`MCP server "${name}" is already active for another project`);
+      }
+    }
+  }
+
+  async connectServer(
+    config: MCPServerConfig,
+    projectRoot = this.workingDirectory,
+  ): Promise<MCPClient> {
+    this.assertNameNotActiveInAnotherProject(config.name, projectRoot);
+    const key = this.scopeKey(config.name, projectRoot);
     const client = new MCPClient(config);
     await client.connect();
-    this.clients.set(config.name, client);
+    this.clients.set(key, client);
     return client;
+  }
+
+  /** Connect a new server and register its tools immediately (hot-add). */
+  async addServer(
+    config: MCPServerConfig,
+    registry: ToolRegistry,
+    projectRoot = this.workingDirectory,
+  ): Promise<MCPClient> {
+    this.assertNameNotActiveInAnotherProject(config.name, projectRoot);
+    const key = this.scopeKey(config.name, projectRoot);
+    // If a server with this name exists, shut it down first (replace semantics).
+    const existing = this.clients.get(key);
+    if (existing) {
+      await existing.shutdown();
+      registry.unregisterByPrefix(`mcp_${config.name}_`);
+      this.clients.delete(key);
+    }
+    const client = new MCPClient(config);
+    await client.connect();
+    this.clients.set(key, client);
+    await registerMCPToolsInRegistry(registry, client);
+    return client;
+  }
+
+  /** Shut down a server and remove its tools from the registry (hot-remove). */
+  async removeServer(
+    name: string,
+    registry: ToolRegistry,
+    projectRoot = this.workingDirectory,
+  ): Promise<boolean> {
+    const key = this.scopeKey(name, projectRoot);
+    const client = this.clients.get(key);
+    if (!client) return false;
+    await client.shutdown();
+    registry.unregisterByPrefix(`mcp_${name}_`);
+    this.clients.delete(key);
+    return true;
+  }
+
+  /** Shut down and reconnect a server with updated config (hot-reload). */
+  async reloadServer(
+    name: string,
+    config: MCPServerConfig,
+    registry: ToolRegistry,
+    projectRoot = this.workingDirectory,
+  ): Promise<MCPClient> {
+    const key = this.scopeKey(name, projectRoot);
+    this.assertNameNotActiveInAnotherProject(name, projectRoot);
+    const existing = this.clients.get(key);
+    if (existing) {
+      await existing.shutdown();
+      registry.unregisterByPrefix(`mcp_${name}_`);
+      this.clients.delete(key);
+    }
+    return this.addServer(config, registry, projectRoot);
+  }
+
+  /** Snapshot of all servers for UI status display. */
+  listServers(projectRoot?: string): McpServerStatus[] {
+    const scope = projectRoot === undefined ? null : `${resolve(projectRoot)}\u0000`;
+    return [...this.clients.entries()]
+      .filter(([key]) => scope === null || key.startsWith(scope))
+      .map(([, client]) => ({
+        name: client.name,
+        transport: client.transport,
+        connected: client.isConnected,
+        toolCount: client.availableTools.length,
+        protocolVersion: client.negotiatedProtocolVersion,
+        lastError: client.lastError,
+      }));
+  }
+
+  /** Get a connected client by name (for test-connect). */
+  getClient(name: string, projectRoot = this.workingDirectory): MCPClient | undefined {
+    return this.clients.get(this.scopeKey(name, projectRoot));
   }
 
   async registerAllTools(registry: ToolRegistry): Promise<void> {

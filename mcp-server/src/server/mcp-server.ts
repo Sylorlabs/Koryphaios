@@ -2,18 +2,18 @@
  * Core MCP Server implementation
  */
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
-  CallToolRequestSchema,
-  ErrorCode,
-  ListPromptsRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  McpError,
-  ReadResourceRequestSchema,
-  GetPromptRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+  Server,
+  ProtocolError,
+  ProtocolErrorCode,
+  type ListToolsResult,
+  type CallToolResult,
+  type ListResourcesResult,
+  type ReadResourceResult,
+  type ListPromptsResult,
+  type GetPromptResult,
+} from '@modelcontextprotocol/server';
+import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
 
 import { EventEmitter } from './event-emitter.js';
 import { PlaywrightManager } from './playwright-manager.js';
@@ -28,7 +28,7 @@ import type { ServerConfig } from '@/types/index.js';
 import { Logger } from '@/utils/logger.js';
 
 export class KoryphaiosMCPServer extends EventEmitter {
-  private server: Server;
+  private stdioHandle: StdioServerHandle | undefined;
   private pluginManager: PluginManager;
   private resourceManager: ResourceManager;
   private toolRegistry: ToolRegistry;
@@ -44,15 +44,6 @@ export class KoryphaiosMCPServer extends EventEmitter {
     super();
     this.config = config;
     this.logger = logger || new Logger('info', { logFile: undefined });
-    this.server = new Server(
-      {
-        name: config.server.name,
-        version: config.server.version,
-      },
-      {
-        capabilities: this.getServerCapabilities(),
-      }
-    );
 
     this.pluginManager = new PluginManager();
     this.resourceManager = new ResourceManager();
@@ -67,8 +58,6 @@ export class KoryphaiosMCPServer extends EventEmitter {
       autoDetectLanguages: true,
       logger: this.logger,
     });
-
-    this.setupHandlers();
   }
 
   private getServerCapabilities() {
@@ -80,15 +69,33 @@ export class KoryphaiosMCPServer extends EventEmitter {
     };
   }
 
-  private setupHandlers(): void {
-    // Tool handlers
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools: this.toolRegistry.listTools(),
-      };
-    });
+  buildServer(): Server {
+    const server = new Server(
+      {
+        name: this.config.server.name,
+        version: this.config.server.version,
+      },
+      {
+        capabilities: this.getServerCapabilities(),
+      }
+    );
 
-    this.server.setRequestHandler(CallToolRequestSchema, async request => {
+    this.setupHandlers(server);
+
+    server.onerror = error => {
+      this.emit('server:error', error instanceof Error ? error : new Error(String(error)));
+    };
+
+    return server;
+  }
+
+  private setupHandlers(server: Server): void {
+    // Tool handlers
+    server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => ({
+      tools: this.toolRegistry.listTools() as ListToolsResult['tools'],
+    }));
+
+    server.setRequestHandler('tools/call', async request => {
       const { name, arguments: args } = request.params;
 
       try {
@@ -96,59 +103,53 @@ export class KoryphaiosMCPServer extends EventEmitter {
         return {
           content: result.content,
           isError: result.isError,
-        };
+        } as CallToolResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${message}`);
+        throw new ProtocolError(
+          ProtocolErrorCode.InternalError,
+          `Tool execution failed: ${message}`
+        );
       }
     });
 
     // Resource handlers
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      return {
-        resources: this.resourceManager.listResources(),
-      };
-    });
+    server.setRequestHandler('resources/list', async (): Promise<ListResourcesResult> => ({
+      resources: this.resourceManager.listResources() as ListResourcesResult['resources'],
+    }));
 
-    this.server.setRequestHandler(ReadResourceRequestSchema, async request => {
+    server.setRequestHandler('resources/read', async request => {
       const { uri } = request.params;
 
       try {
         const content = await this.resourceManager.readResource(uri);
         return {
           contents: [content],
-        };
+        } as unknown as ReadResourceResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new McpError(ErrorCode.InvalidRequest, `Resource not found: ${message}`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, `Resource not found: ${message}`);
       }
     });
 
     // Prompt handlers
-    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
-      return {
-        prompts: this.promptRegistry.listPrompts(),
-      };
-    });
+    server.setRequestHandler('prompts/list', async (): Promise<ListPromptsResult> => ({
+      prompts: this.promptRegistry.listPrompts() as ListPromptsResult['prompts'],
+    }));
 
-    this.server.setRequestHandler(GetPromptRequestSchema, async request => {
+    server.setRequestHandler('prompts/get', async request => {
       const { name, arguments: args } = request.params;
 
       try {
         const prompt = await this.promptRegistry.executePrompt(name, args);
         return {
           messages: prompt.messages,
-        };
+        } as GetPromptResult;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new McpError(ErrorCode.InvalidRequest, `Prompt not found: ${message}`);
+        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, `Prompt not found: ${message}`);
       }
     });
-
-    // Error handling
-    this.server.onerror = error => {
-      this.emit('server:error', error instanceof Error ? error : new Error(String(error)));
-    };
   }
 
   async start(): Promise<void> {
@@ -211,29 +212,23 @@ export class KoryphaiosMCPServer extends EventEmitter {
       this.logger.debug(`Starting MCP server with ${transportType} transport...`);
       const transportStartTime = Date.now();
 
-      let transport: any;
-      let transportInfo: any;
-
-      switch (transportType) {
-        case 'stdio':
-          transport = new StdioServerTransport();
-          transportInfo = {
-            transport: 'stdio',
-            transportType: 'stdin/stdout',
-            description: 'Standard input/output communication',
-          };
-          break;
-        case 'http':
-        case 'sse':
-          // For future implementation - currently only stdio is supported
-          throw new Error(
-            `Transport type '${transportType}' is not yet implemented. Only 'stdio' transport is currently supported.`
-          );
-        default:
-          throw new Error(`Unknown transport type: ${transportType}`);
+      if (transportType !== 'stdio') {
+        // For future implementation - currently only stdio is supported
+        throw new Error(
+          `Transport type '${transportType}' is not yet implemented. Only 'stdio' transport is currently supported.`
+        );
       }
 
-      await this.server.connect(transport);
+      // serveStdio owns the stdio transport and serves the 2026-07-28 protocol
+      // revision by default, with 2025-era fallback for legacy clients.
+      this.stdioHandle = serveStdio(() => this.buildServer());
+
+      const transportInfo = {
+        transport: 'stdio',
+        transportType: 'stdin/stdout',
+        description: 'Standard input/output communication',
+        protocolRevision: '2026-07-28',
+      };
       this.logger.logPerformance('transport-connection', Date.now() - transportStartTime);
 
       this._isRunning = true;
@@ -279,7 +274,8 @@ export class KoryphaiosMCPServer extends EventEmitter {
     }
 
     try {
-      await this.server.close();
+      await this.stdioHandle?.close();
+      this.stdioHandle = undefined;
       await this.playwrightManager.shutdown();
       await this.errorDetectorManager.stop();
       await this.languageHandlerManager.dispose();

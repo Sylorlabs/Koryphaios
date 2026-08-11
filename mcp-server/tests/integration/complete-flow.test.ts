@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
 import { DevelopmentEnvironment } from '../../src/debug/development-environment.js';
 import { ErrorDebuggingMCPServer } from '../../src/server/mcp-server.js';
 import { SupportedLanguage } from '../../src/types/languages.js';
@@ -251,47 +252,6 @@ describe('Complete Integration Flow', () => {
       results.forEach(result => {
         expect(result.status).toBe('fulfilled');
       });
-    });
-  });
-
-  describe('MCP Server Integration', () => {
-    it('should start MCP server successfully', async () => {
-      await mcpServer.start();
-
-      expect(mcpServer.isServerRunning()).toBe(true);
-
-      const capabilities = mcpServer.getCapabilities();
-      expect(capabilities).toBeDefined();
-      expect(capabilities.tools).toBeDefined();
-      expect(capabilities.resources).toBeDefined();
-    });
-
-    it('should handle tool calls', async () => {
-      await mcpServer.start();
-
-      const tools = mcpServer.listTools();
-      expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBeGreaterThan(0);
-
-      // Check that we have error detection tools
-      const errorDetectionTool = tools.find(
-        tool => tool.name.includes('detect') || tool.name.includes('error')
-      );
-      expect(errorDetectionTool).toBeDefined();
-    });
-
-    it('should provide resources', async () => {
-      await mcpServer.start();
-
-      const resources = mcpServer.listResources();
-      expect(Array.isArray(resources)).toBe(true);
-    });
-
-    it('should handle prompts', async () => {
-      await mcpServer.start();
-
-      const prompts = mcpServer.listPrompts();
-      expect(Array.isArray(prompts)).toBe(true);
     });
   });
 

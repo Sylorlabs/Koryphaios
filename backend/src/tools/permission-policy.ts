@@ -115,7 +115,10 @@ export function resolveSubAgentSandboxOptions(
         ? 'yolo'
         : baseSettings.permissionMode;
   return resolveSandboxOptions(
-    { ...baseSettings, permissionMode: effectiveMode as unknown as AgentSettings['permissionMode'] },
+    {
+      ...baseSettings,
+      permissionMode: effectiveMode as unknown as AgentSettings['permissionMode'],
+    },
     naturalSandboxed,
   );
 }
@@ -165,6 +168,7 @@ const RISKY_TOOLS = new Set([
   'shell_manage',
   'delegate_to_jules',
   'commit_and_create_pr',
+  'manage_mcp_server',
 ]);
 
 export function resolveToolPermissionPolicy(
@@ -209,9 +213,10 @@ export function decideToolPermission(
   const fileEdit = FILE_EDIT_TOOLS.has(toolName);
   const risky = RISKY_TOOLS.has(toolName);
   const exceedsAutonomyLimits = Boolean(
-    change && policy.autonomyLimitsEnabled &&
-      (change.fileCount > policy.approvalThresholdFiles ||
-        change.linesChanged > policy.approvalThresholdLines),
+    change &&
+    policy.autonomyLimitsEnabled &&
+    (change.fileCount > policy.approvalThresholdFiles ||
+      change.linesChanged > policy.approvalThresholdLines),
   );
 
   if (policy.mode === 'plan') {
@@ -234,7 +239,10 @@ export function decideToolPermission(
   }
   if (policy.mode === 'edits') {
     return readOnly || fileEdit
-      ? { action: 'allow', reason: fileEdit ? 'Accept Edits allows file changes' : 'Read-only action' }
+      ? {
+          action: 'allow',
+          reason: fileEdit ? 'Accept Edits allows file changes' : 'Read-only action',
+        }
       : { action: 'ask', reason: 'Accept Edits requires approval for non-file actions' };
   }
   if (policy.mode === 'guarded') {
@@ -262,6 +270,7 @@ export function decideToolPermission(
 }
 
 export function bypassLocalRiskPrompts(policy: ToolPermissionPolicy | undefined): boolean {
-  return policy?.mode === 'yolo' ||
-    (policy?.mode === 'custom' && policy.confirmRiskyActions === false);
+  return (
+    policy?.mode === 'yolo' || (policy?.mode === 'custom' && policy.confirmRiskyActions === false)
+  );
 }

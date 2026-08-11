@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "koryphaios": {
+      "command": "node",
+      "args": ["/home/micah/Desktop/Sylorlabs/Koryphaios/mcp-server/dist/index.js"],
+      "transport": "stdio"
+    }
+  }
+}

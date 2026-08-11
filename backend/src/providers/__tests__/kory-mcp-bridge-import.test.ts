@@ -22,6 +22,6 @@ describe('Kory MCP bridge module boundary', () => {
     expect(result.signal).toBeNull();
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
-    expect(JSON.parse(result.stdout)).toEqual({ tools: 47, manager: 47, unknown: 0 });
+    expect(JSON.parse(result.stdout)).toEqual({ tools: 48, manager: 48, unknown: 0 });
   });
 });

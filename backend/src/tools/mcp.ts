@@ -284,8 +284,11 @@ class MCPClient {
     if (this.isInitialized) return;
 
     try {
+      // The bundled mcp-server uses the v2 SDK. 2025-11-25 is the compatibility
+      // initialize revision accepted by older local builds; the server also
+      // advertises the current 2026-07-28 revision through its public flow.
       await this.sendRequestToActiveProcess('initialize', {
-        protocolVersion: '2024-11-05',
+        protocolVersion: '2025-11-25',
         capabilities: {},
         clientInfo: {
           name: 'koryphaios-backend',

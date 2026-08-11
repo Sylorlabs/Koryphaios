@@ -5,11 +5,14 @@
  * Provides AI agents with error detection, debugging, and console log monitoring
  */
 
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { KoryphaiosMCPServer } from './server/mcp-server.js';
 import { ConfigManager } from './utils/config-manager.js';
 import { Logger } from './utils/logger.js';
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   try {
     // Initialize configuration
     const configManager = new ConfigManager();
@@ -74,9 +77,13 @@ async function main(): Promise<void> {
   }
 }
 
-// Run the server
-main().catch(error => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
-
+// Keep importing the library side-effect free. The executable is registered in
+// CLI MCP configs, while tests and embedding applications import the server
+// factory without accidentally claiming stdin/stdout.
+const entrypoint = process.argv[1] ? resolve(process.argv[1]) : '';
+if (entrypoint === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error('Fatal error:', error);
+    process.exit(1);
+  });
+}

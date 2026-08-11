@@ -3,11 +3,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
+
 import {
   MCPTool,
   MCPResource,
   MCPPrompt,
-  MCPPromptArgument,
   MCPToolCall,
   MCPToolResult,
   MCPContent,
@@ -166,7 +166,7 @@ describe('MCP Types', () => {
 
     it('should define initialization types correctly', () => {
       const initParams: MCPInitializeParams = {
-        protocolVersion: '2024-11-05',
+        protocolVersion: '2025-11-25',
         capabilities: {
           experimental: {},
           sampling: {},
@@ -178,7 +178,7 @@ describe('MCP Types', () => {
       };
 
       const initResult: MCPInitializeResult = {
-        protocolVersion: '2024-11-05',
+        protocolVersion: '2025-11-25',
         capabilities: {
           tools: { listChanged: true },
           resources: { subscribe: true },
@@ -189,7 +189,7 @@ describe('MCP Types', () => {
         },
       };
 
-      expect(initParams.protocolVersion).toBe('2024-11-05');
+      expect(initParams.protocolVersion).toBe('2025-11-25');
       expect(initParams.clientInfo.name).toBe('Test Client');
       expect(initResult.serverInfo.name).toBe('Error Debugging MCP Server');
     });

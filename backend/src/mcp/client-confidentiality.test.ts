@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import {
   mcpMalformedStdoutLogMetadata,
   mcpOversizedStdoutLogMetadata,
   mcpStderrLogMetadata,
 } from './client';
+
+// Resolve relative to this test file so the path is correct regardless of CWD.
+const clientModulePath = resolve(import.meta.dir, 'client.ts');
 
 describe('MCP stderr confidentiality', () => {
   test('never decodes or copies MCP-controlled stderr into log metadata', () => {
@@ -41,7 +45,7 @@ describe('MCP stderr confidentiality', () => {
   test('keeps malformed MCP stdout out of the actual logger sink', () => {
     const sentinel = 'SYNTHETIC_MCP_PRIVATE_TOOL_OUTPUT_590bed';
     const childCode = `
-      import { MCPClient } from './backend/src/mcp/client.ts';
+      import { MCPClient } from ${JSON.stringify(clientModulePath)};
       const sentinel = ${JSON.stringify(sentinel)};
       const client = new MCPClient({ name: 'fixture-server', transport: 'stdio' });
       const processHandle = { kill() {} };
@@ -83,7 +87,7 @@ describe('MCP stderr confidentiality', () => {
     });
 
     const childCode = `
-      import { MCPClient } from './backend/src/mcp/client.ts';
+      import { MCPClient } from ${JSON.stringify(clientModulePath)};
       const sentinel = ${JSON.stringify(sentinel)};
       const client = new MCPClient({ name: 'fixture-server', transport: 'stdio' });
       const processHandle = { kill() {} };

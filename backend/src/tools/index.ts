@@ -39,6 +39,7 @@ export { ViewImageTool } from './image';
 export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction';
 export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
+export { ManageMcpServerTool } from './manage-mcp';
 export { FetchContextTool, PruneContextTool } from './context';
 export { CreateGoalTool, UpdateGoalTool } from './goals';
 export { LoadSkillDetailTool } from './skills';

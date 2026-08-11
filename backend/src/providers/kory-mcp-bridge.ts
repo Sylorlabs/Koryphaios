@@ -20,14 +20,14 @@
 // The CLI spawns this as a subprocess (stdio MCP). Session ID correlates tool
 // calls back to the Kory session that owns the turn.
 
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
-  CallToolRequestSchema,
-  ErrorCode,
-  ListToolsRequestSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+  Server,
+  ProtocolError,
+  ProtocolErrorCode,
+  type ListToolsResult,
+  type CallToolResult,
+} from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
 
 const BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
@@ -57,8 +57,7 @@ export function parseArgs(argv: string[]): {
       args.backendUrl ||
       process.env.KORY_BACKEND_URL ||
       'http://127.0.0.1:3001',
-    authFile:
-      args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
+    authFile: args['auth-file'] || args.authFile || process.env.KORY_BRIDGE_AUTH_FILE || '',
   };
 }
 
@@ -596,6 +595,34 @@ export const KORY_TOOLS: KoryToolDef[] = [
     inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
     role: 'worker',
   },
+
+  // ── MCP server management ──
+  {
+    name: 'kory__manage_mcp_server',
+    description:
+      'Manage user-pluggable MCP servers: list, add, update, remove, test-connect, or reload. ' +
+      'Env vars (including tokens) are stored in the 0600 secret store, never in koryphaios.json. ' +
+      'Mutations are blocked in plan mode.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'add', 'update', 'remove', 'test', 'reload'],
+          description: 'What to do with the MCP server',
+        },
+        name: { type: 'string', maxLength: 64 },
+        type: { type: 'string', enum: ['stdio', 'sse'] },
+        command: { type: 'string' },
+        args: { type: 'array', items: { type: 'string' } },
+        env: { type: 'object', additionalProperties: { type: 'string' } },
+        url: { type: 'string' },
+        headers: { type: 'object', additionalProperties: { type: 'string' } },
+      },
+      required: ['action'],
+    },
+    role: 'manager',
+  },
 ];
 
 /** Filter tools by role. Critic gets read-only; worker gets build tools; manager gets all. */
@@ -706,6 +733,54 @@ async function proxyToolCall(
   }
 }
 
+// ─── Server factory ────────────────────────────────────────────────────────
+
+/**
+ * Build a v2 MCP Server wired with the bridge's tools/list and tools/call
+ * handlers. Exported so protocol tests can drive the server through a real
+ * Client without spawning a subprocess or providing a bridge grant file.
+ */
+export function buildServer(
+  allowedTools: RuntimeKoryToolDef[],
+  proxy: (
+    toolName: string,
+    input: Record<string, unknown>,
+  ) => Promise<{ content: string; isError: boolean }>,
+): Server {
+  const allowedToolNames = new Set(allowedTools.map((tool) => tool.name));
+
+  const server = new Server(
+    { name: 'kory-control-plane', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => ({
+    tools: allowedTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })) as ListToolsResult['tools'],
+  }));
+
+  server.setRequestHandler('tools/call', async (req) => {
+    const { name, arguments: args } = req.params;
+    if (!name?.startsWith('kory__') || !allowedToolNames.has(name)) {
+      throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+    }
+    const result = await proxy(name, (args ?? {}) as Record<string, unknown>);
+    return {
+      content: [{ type: 'text', text: result.content }],
+      isError: result.isError,
+    } as CallToolResult;
+  });
+
+  return server;
+}
+
+// Compatibility alias for callers/tests that use the descriptive factory
+// name. The executable path intentionally calls buildServer directly.
+export const createBridgeServer = buildServer;
+
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -720,37 +795,12 @@ async function main(): Promise<void> {
     return;
   }
   const allowedTools = await fetchAuthoritativeToolCatalog(config);
-  const allowedToolNames = new Set(allowedTools.map((tool) => tool.name));
-  const server = new Server(
-    { name: 'kory-control-plane', version: '1.0.0' },
-    { capabilities: { tools: {} } },
+
+  // serveStdio owns the stdio transport and serves the 2026-07-28 protocol
+  // revision by default, with 2025-era fallback for legacy clients.
+  serveStdio(() =>
+    buildServer(allowedTools, (toolName, input) => proxyToolCall(config, toolName, input)),
   );
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: allowedTools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-  }));
-
-  server.setRequestHandler(
-    CallToolRequestSchema,
-    async (req: { params: { name: string; arguments?: Record<string, unknown> } }) => {
-      const { name, arguments: args } = req.params;
-      if (!name?.startsWith('kory__') || !allowedToolNames.has(name)) {
-        throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-      }
-      const result = await proxyToolCall(config, name, (args ?? {}) as Record<string, unknown>);
-      return {
-        content: [{ type: 'text', text: result.content }],
-        isError: result.isError,
-      };
-    },
-  );
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
   // stdout is reserved for the MCP channel; do not echo session or endpoint
   // metadata to inherited diagnostics.
 }

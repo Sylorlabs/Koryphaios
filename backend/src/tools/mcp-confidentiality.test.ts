@@ -5,7 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const temporaryRoots: string[] = [];
-const modulePath = resolve('backend/src/tools/mcp.ts');
+// Resolve relative to this test file so the path is correct regardless of CWD.
+const modulePath = resolve(import.meta.dir, 'mcp.ts');
 
 function fixtureRoot(serverSource: string): string {
   const root = mkdtempSync(join(tmpdir(), 'kory-mcp-confidentiality-'));

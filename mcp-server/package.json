@@ -26,9 +26,9 @@
     "optimize": "bun run build && bun run benchmark",
     "cleanup": "scripts/cleanup.sh",
     "cleanup:deep": "scripts/cleanup.sh --deep",
-    "test:mcp": "node scripts/test-mcp-protocol.js",
-    "test:integration": "node scripts/test-mcp-integration.js",
-    "test:errors": "node scripts/simple-mcp-test.js",
+    "test:mcp": "vitest run tests/protocol",
+    "test:integration": "vitest run tests/integration",
+    "test:errors": "vitest run tests/unit/detectors",
     "verify": "bun run build && bun run test && bun run test:mcp"
   },
   "keywords": [
@@ -65,7 +65,7 @@
   ],
   "dependencies": {
     "@koryphaios/shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "acorn": "^8.18.0",
     "acorn-walk": "^8.3.5",
     "chokidar": "^3.6.0",
@@ -74,6 +74,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@types/acorn": "^6.0.4",
     "@types/node": "^25.9.5",
     "eslint": "^10.8.1",

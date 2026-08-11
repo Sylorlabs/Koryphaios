@@ -145,6 +145,24 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /** Remove a single tool by name. Returns true if a tool was removed. */
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
+  /** Remove every tool whose name starts with `prefix` (e.g. `mcp_myserver_`).
+   *  Returns the count of removed tools. Used when an MCP server is deleted. */
+  unregisterByPrefix(prefix: string): number {
+    let removed = 0;
+    for (const name of [...this.tools.keys()]) {
+      if (name.startsWith(prefix)) {
+        this.tools.delete(name);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
   get(name: string): Tool | undefined {
     return this.tools.get(name);
   }

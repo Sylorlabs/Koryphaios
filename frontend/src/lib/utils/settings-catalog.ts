@@ -9,7 +9,8 @@ export type SettingsTab =
   | 'teams'
   | 'billing'
   | 'experimental'
-  | 'images';
+  | 'images'
+  | 'mcp';
 
 export type SettingsGroup = 'Intelligence' | 'Workspace' | 'Experience' | 'Operations';
 
@@ -61,6 +62,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     scope: 'Current project',
     group: 'Workspace',
     keywords: ['essay', 'knowledge', 'wikilink', 'graph', 'budget', 'agent permissions'],
+  },
+  {
+    id: 'mcp',
+    label: 'MCP servers',
+    description: 'Pluggable Model Context Protocol tool servers and connection status.',
+    scope: 'This app',
+    group: 'Workspace',
+    keywords: ['mcp', 'tools', 'model context protocol', 'external', 'plugin', 'stdio', 'sse'],
   },
   {
     id: 'teams',

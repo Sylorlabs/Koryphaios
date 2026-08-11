@@ -1,6 +1,8 @@
 # Koryphaios MCP server
 
-This private workspace package exposes Koryphaios error detection and browser-control helpers over the Model Context Protocol (MCP). It is a local stdio server used by the Koryphaios product and development tooling.
+This private workspace package exposes Koryphaios error detection and browser-control helpers over the Model Context Protocol (MCP). It is one of Koryphaios's two local stdio servers; the other is the control-plane bridge in `backend/src/providers/kory-mcp-bridge.ts`.
+
+Both servers use `@modelcontextprotocol/server` v2 and `serveStdio(() => buildServer())`. The current wire revision is `2026-07-28`, with `2025-11-25` accepted as the legacy negotiation fallback. Production code does not construct `StdioServerTransport` or call `server.connect()`; the in-memory transport used by protocol tests is test-only.
 
 The server reports only capabilities backed by an implementation. In particular, it does not publish demo resources, claim active debugger sessions, or return synthetic performance and variable data.
 
@@ -46,6 +48,9 @@ bun install
 bun run --filter @koryphaios/mcp-server typecheck
 bun run --filter @koryphaios/mcp-server build
 bun run --filter @koryphaios/mcp-server test -- --run
+
+# The explicit protocol-wire suite
+bun run --filter @koryphaios/mcp-server test:mcp
 ```
 
 For the narrow capability-truth regressions:
@@ -55,7 +60,7 @@ cd mcp-server
 bunx vitest run \
   tests/unit/server/resource-manager.test.ts \
   tests/unit/server/tool-registry-truth.test.ts \
-  tests/unit/server/mcp-server.test.ts
+  tests/protocol/mcp-server-protocol.test.ts
 ```
 
 ## Run locally
@@ -74,6 +79,12 @@ Build the package, then configure an MCP client to start the compiled stdio entr
 ```
 
 The server writes protocol messages to stdout. Normal console logging is disabled in MCP mode so logs cannot corrupt that stream.
+
+The bundled debugging server is registered in Devin at all three supported
+scopes: the project `.devin/mcp_config.json`, the project-local
+`.devin/mcp_config.local.json`, and the user
+`~/.config/devin/mcp_config.json`. Each points at the built `dist/index.js`
+entrypoint and uses stdio; build the package before starting a fresh client.
 
 ## Configuration
 

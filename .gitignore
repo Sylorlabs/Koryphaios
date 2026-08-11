@@ -37,6 +37,9 @@ frontend/coverage/
 *.log.*
 backend/server*.log
 frontend/frontend*.log
+# Error-debugging MCP falls back to a cwd config only when no user config dir
+# is available; keep that generated local default out of the repository.
+/error-debugging-config.json
 
 # OS
 .DS_Store

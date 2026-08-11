@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-import { MCPClient } from './client';
+import { MCPClient, MCPManager } from './client';
 
 interface TestProcessHandle {
   kill(): void;
@@ -46,6 +49,15 @@ process.stdin.on('data', (chunk) => {
     input = input.slice(newline + 1);
     if (!line.trim()) continue;
     const request = JSON.parse(line);
+    if (request.method === 'server/discover') {
+      // Legacy server: return method-not-found so the client falls back to initialize.
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32601, message: 'method not found' },
+      }) + '\n');
+      continue;
+    }
     if (request.method === 'initialize') {
       process.stdout.write(JSON.stringify({
         jsonrpc: '2.0',
@@ -71,6 +83,15 @@ process.stdin.on('data', (chunk) => {
     input = input.slice(newline + 1);
     if (!line.trim()) continue;
     const request = JSON.parse(line);
+    if (request.method === 'server/discover') {
+      // Legacy server: return method-not-found so the client falls back to initialize.
+      process.stdout.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32601, message: 'method not found' },
+      }) + '\n');
+      continue;
+    }
     if (request.method === 'initialize') {
       process.stdout.write(JSON.stringify({
         jsonrpc: '2.0',
@@ -187,5 +208,30 @@ describe('MCP stdio framing and lifecycle', () => {
     await expect(pending).rejects.toThrow('MCP client shut down before the request completed');
     expect(testable(client).pending.size).toBe(0);
     expect(client.isConnected).toBe(false);
+  }, 5_000);
+
+  test('MCP manager refuses same-name servers from a different project scope', async () => {
+    const projectA = mkdtempSync(join(tmpdir(), 'kory-mcp-scope-a-'));
+    const projectB = mkdtempSync(join(tmpdir(), 'kory-mcp-scope-b-'));
+    const manager = new MCPManager(projectA);
+    const config = {
+      name: 'same-name',
+      transport: 'stdio' as const,
+      command: process.execPath,
+      args: ['--no-env-file', '-e', HANGING_MCP_SERVER],
+      env: { NODE_ENV: 'test' },
+    };
+    try {
+      await manager.connectServer(config, projectA);
+      expect(manager.listServers(projectA)).toHaveLength(1);
+      await expect(manager.connectServer(config, projectB)).rejects.toThrow(
+        'already active for another project',
+      );
+      expect(manager.listServers(projectB)).toHaveLength(0);
+    } finally {
+      await manager.shutdown();
+      rmSync(projectA, { recursive: true, force: true });
+      rmSync(projectB, { recursive: true, force: true });
+    }
   }, 5_000);
 });

@@ -1,34 +1,6 @@
 {
   "name": "koryphaios",
   "version": "0.2.0",
-  "private": true,
-  "workspaces": [
-    "backend",
-    "frontend",
-    "shared",
-    "desktop",
-    "mcp-server"
-  ],
-  "scripts": {
-    "dev": "bun run dev:desktop",
-    "dev:desktop": "bun run scripts/launch-desktop.ts",
-    "write-compat-hash": "bun run scripts/write-compat-hash.ts",
-    "build": "bun run write-compat-hash && bun run --filter '*' build",
-    "build:desktop": "bun run scripts/build-desktop.ts",
-    "typecheck": "bun run --filter '*' typecheck",
-    "typecheck:ci": "bun run --filter backend typecheck && bun run --filter frontend check",
-    "test": "bun run --filter '*' test",
-    "test:backend:isolated": "bun run scripts/test-backend-isolated.ts",
-    "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
-    "test:coverage": "bun run --filter backend test:coverage:check && bun run --filter frontend test:coverage:check",
-    "test:e2e": "playwright test",
-    "audit:files": "bun run scripts/audit-file-ledger.ts",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:changed": "bun run scripts/check-changed-format.ts",
-    "build:ci": "bun run write-compat-hash && bun run --filter backend build && bun run --filter frontend build",
-    "dev:workspace": "bun run --filter \"*\" dev"
-  },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "playwright": "^1.62.1",
@@ -36,9 +8,6 @@
     "prettier": "^3.9.6",
     "prettier-plugin-svelte": "^3.5.2",
     "prettier-plugin-tailwindcss": "^0.5.14"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "overrides": {
     "@hono/node-server": "2.1.0",
@@ -64,5 +33,33 @@
     "vite": "8.2.1",
     "ws": "8.21.3",
     "yaml": "1.10.3"
-  }
+  },
+  "private": true,
+  "scripts": {
+    "dev": "bun run dev:desktop",
+    "dev:desktop": "bun run scripts/launch-desktop.ts",
+    "write-compat-hash": "bun run scripts/write-compat-hash.ts",
+    "build": "bun run write-compat-hash && bun run --filter '*' build",
+    "build:desktop": "bun run scripts/build-desktop.ts",
+    "typecheck": "bun run --filter '*' typecheck",
+    "typecheck:ci": "bun run --filter backend typecheck && bun run --filter frontend check",
+    "test": "bun run --filter '*' test",
+    "test:backend:isolated": "bun run scripts/test-backend-isolated.ts",
+    "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
+    "test:coverage": "bun run --filter backend test:coverage:check && bun run --filter frontend test:coverage:check",
+    "test:e2e": "playwright test",
+    "audit:files": "bun run scripts/audit-file-ledger.ts",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:changed": "bun run scripts/check-changed-format.ts",
+    "build:ci": "bun run write-compat-hash && bun run --filter backend build && bun run --filter frontend build",
+    "dev:workspace": "bun run --filter \"*\" dev"
+  },
+  "workspaces": [
+    "backend",
+    "frontend",
+    "shared",
+    "desktop",
+    "mcp-server"
+  ]
 }

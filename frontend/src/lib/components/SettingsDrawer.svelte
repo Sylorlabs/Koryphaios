@@ -38,6 +38,7 @@
   import EyeOff from 'lucide-svelte/icons/eye-off';
   import AudioLines from 'lucide-svelte/icons/audio-lines';
   import ImageIcon from 'lucide-svelte/icons/image';
+  import Plug from 'lucide-svelte/icons/plug';
   import Clock3 from 'lucide-svelte/icons/clock-3';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
@@ -67,6 +68,8 @@
   import KorySelect from './KorySelect.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import ImageSettings from './ImageSettings.svelte';
+  import McpServersSettings from './McpServersSettings.svelte';
+  import { mcpServersStore } from '$lib/stores/mcp-servers.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import {
@@ -107,6 +110,7 @@
     billing: CreditCard,
     experimental: Shield,
     images: ImageIcon,
+    mcp: Plug,
   };
   const filteredSettingsCatalog = $derived(filterSettingsCatalog(SETTINGS_CATALOG, settingsSearch));
   const selectedSettingsEntry = $derived(
@@ -418,6 +422,7 @@
     // Project-aware effects above own Memory and Agent initialization. Calling
     // them again here caused duplicate requests and visible loading flicker.
     if (activeTab === 'experimental') void experimentalStore.loadAll();
+    if (activeTab === 'mcp') void mcpServersStore.loadAll();
   });
 
   $effect(() => {
@@ -2213,6 +2218,9 @@
         <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
           <ImageSettings />
         </div>
+        <div class={activeTab === 'mcp' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+          <McpServersSettings />
+        </div>
 
         <div class={activeTab === 'appearance' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
           <AppearanceSettings bind:showColorPicker />
@@ -2435,6 +2443,13 @@
                             >{cli.planType}</span
                           >
                         {/if}
+                        {#if cli.apiProviderName}
+                          <span
+                            class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                            title="Raw inference API provider backing this CLI subscription"
+                            >API: {cli.apiProviderName}</span
+                          >
+                        {/if}
                       </div>
                       <span class="text-[10px] text-[var(--color-text-muted)]"
                         >{cli.usageSource === 'codex-app-server'
@@ -2620,15 +2635,31 @@
                       {/if}
 
                       {#if cli.byModel?.length}
-                        <div class="space-y-1">
+                        <div class="space-y-1.5">
                           {#each cli.byModel.slice(0, 4) as m (m.model)}
-                            <div class="flex items-center justify-between text-[11px]">
-                              <span class="font-mono text-[var(--color-text-secondary)] truncate"
-                                >{m.model}</span
-                              >
-                              <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
-                                {formatTokens(m.tokensIn + m.tokensOut)} tokens
-                              </span>
+                            <div class="rounded-lg bg-[var(--color-surface-1)] px-2.5 py-1.5">
+                              <div class="flex items-center justify-between text-[11px]">
+                                <span class="font-mono text-[var(--color-text-secondary)] truncate"
+                                  >{m.model}</span
+                                >
+                                <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
+                                  {formatTokens(m.tokensIn + m.tokensOut)} tokens
+                                </span>
+                              </div>
+                              {#if m.apiEquivalent || m.apiProvider}
+                                <div class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]">
+                                  <span class="uppercase tracking-wider font-bold">API equiv</span>
+                                  <span
+                                    class="font-mono text-[var(--color-accent)]/80 truncate"
+                                    title={m.apiEquivalent ?? m.apiProvider ?? ''}
+                                  >
+                                    {m.apiProvider ? `${m.apiProvider}/` : ''}{m.apiEquivalent ?? '(unmapped)'}
+                                  </span>
+                                  {#if m.apiEquivalent && m.apiEquivalent === m.model}
+                                    <span class="text-[var(--color-text-muted)] italic">(same)</span>
+                                  {/if}
+                                </div>
+                              {/if}
                             </div>
                           {/each}
                         </div>

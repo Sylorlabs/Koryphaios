@@ -22,6 +22,7 @@ import { validateLocalBearerToken } from './auth/local-route-auth';
 import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
 import { getDb } from './db';
 import { shutdownAllBrokers } from './pubsub';
+import { getRequestProjectRoot } from './runtime/request-project';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -42,6 +43,7 @@ import { workspaceRoutes } from './routes/v1/workspace';
 import { goalRoutes } from './routes/v1/goals';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
+import { mcpServerRoutes } from './routes/v1/mcp-servers';
 import { voiceRoutes } from './routes/v1/voice';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
@@ -97,6 +99,7 @@ const baseApp = new Elysia()
   .use(goalRoutes)
   .use(nativeCommandRoutes)
   .use(mcpBridgeRoutes)
+  .use(mcpServerRoutes)
   .use(voiceRoutes);
 
 export type App = typeof baseApp;
@@ -299,7 +302,17 @@ async function main() {
     // 1b. MCP endpoint — Koryphaios's own tools (notes/memory) for any
     // MCP-capable CLI harness (grok, claude-code, codex…).
     if (url.pathname === '/mcp') {
-      return serveMcp(req, PROJECT_ROOT, (t) => !!validateLocalBearerToken(t));
+      try {
+        return serveMcp(req, getRequestProjectRoot(req), (t) => !!validateLocalBearerToken(t));
+      } catch (error) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: error instanceof Error ? error.message : 'Invalid project',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
     }
 
     // 2. API Routes

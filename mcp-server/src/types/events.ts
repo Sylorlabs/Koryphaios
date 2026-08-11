@@ -2,8 +2,8 @@
  * Event system type definitions
  */
 
-import type { DetectedError, ErrorAnalysis } from './errors.js';
 import type { DebugSession, PerformanceProfile } from './debugging.js';
+import type { DetectedError, ErrorAnalysis } from './errors.js';
 
 export interface EventEmitter<T extends Record<string, unknown[]>> {
   on<K extends keyof T>(event: K, listener: (...args: T[K]) => void): void;
@@ -14,7 +14,14 @@ export interface EventEmitter<T extends Record<string, unknown[]>> {
 }
 
 export interface ServerEvents extends Record<string, unknown[]> {
-  'server:started': [{ port: number; host: string }];
+  'server:started': [
+    {
+      transport: string;
+      transportType: string;
+      description: string;
+      protocolRevision?: string;
+    },
+  ];
   'server:stopped': [];
   'server:error': [Error];
   'client:connected': [{ clientId: string; clientInfo: unknown }];
@@ -86,10 +93,7 @@ export interface WorkspaceEvent {
 
 export interface SystemEvent {
   type:
-    | 'system:memory-warning'
-    | 'system:cpu-warning'
-    | 'system:disk-warning'
-    | 'system:network-error';
+    'system:memory-warning' | 'system:cpu-warning' | 'system:disk-warning' | 'system:network-error';
   timestamp: Date;
   severity: 'low' | 'medium' | 'high' | 'critical';
   message: string;
@@ -97,12 +101,7 @@ export interface SystemEvent {
 }
 
 export type AnyEvent =
-  | ErrorEvent
-  | DebugEvent
-  | PerformanceEvent
-  | ConfigEvent
-  | WorkspaceEvent
-  | SystemEvent;
+  ErrorEvent | DebugEvent | PerformanceEvent | ConfigEvent | WorkspaceEvent | SystemEvent;
 
 export interface EventFilter {
   types?: string[];
