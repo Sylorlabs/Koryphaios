@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { resolve } from 'node:path';
 import {
   isLauncherBackendReady,
   mergeCorsOriginEnv,
@@ -17,6 +18,24 @@ const HEALTHY_BACKEND: LauncherBackendHealth = {
 };
 
 describe('native desktop launcher CORS contract', () => {
+  it('pre-optimizes every Tauri module used by the native WebView', async () => {
+    const viteConfig = await Bun.file(
+      resolve(import.meta.dir, '../frontend/vite.config.ts'),
+    ).text();
+    for (const entry of [
+      '@tauri-apps/api/app',
+      '@tauri-apps/api/core',
+      '@tauri-apps/api/event',
+      '@tauri-apps/api/window',
+      '@tauri-apps/plugin-clipboard-manager',
+      '@tauri-apps/plugin-notification',
+      '@tauri-apps/plugin-process',
+      '@tauri-apps/plugin-shell',
+    ]) {
+      expect(viteConfig).toContain(`'${entry}'`);
+    }
+  });
+
   it('allows both exact loopback browser origins for the default native dev port', () => {
     expect(resolveFrontendCorsOrigins('http://127.0.0.1:3003')).toEqual([
       'http://127.0.0.1:3003',

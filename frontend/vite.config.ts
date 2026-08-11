@@ -115,6 +115,24 @@ const frontendBundleHash = readFrontendBundleHash();
 
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
+  // Tauri's WebKit shell loads several native-only modules lazily. If Vite
+  // discovers one of them only after the first WebView request, it reloads
+  // the module graph while the shell is mounting and WebKit can report a
+  // fatal "Importing a module script failed" before Svelte recovers. Keep
+  // every native entry in the initial dependency optimization set so the
+  // launcher can hand Tauri a stable graph on a cold start.
+  optimizeDeps: {
+    include: [
+      '@tauri-apps/api/app',
+      '@tauri-apps/api/core',
+      '@tauri-apps/api/event',
+      '@tauri-apps/api/window',
+      '@tauri-apps/plugin-clipboard-manager',
+      '@tauri-apps/plugin-notification',
+      '@tauri-apps/plugin-process',
+      '@tauri-apps/plugin-shell',
+    ],
+  },
   server: {
     host: '0.0.0.0',
     fs: {
