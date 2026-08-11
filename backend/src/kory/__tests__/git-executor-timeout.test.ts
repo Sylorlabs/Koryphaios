@@ -179,6 +179,17 @@ esac
     expect(preview.endsWith('…')).toBe(true);
   });
 
+  test('delivers one-shot stdin before short-lived Git commands exit', async () => {
+    const git = new GitExecutor(TEST_DIR);
+    const result = await git.exec(['hash-object', '--stdin'], {
+      stdin: 'abc\n',
+      timeoutMs: 2_000,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.stdout.trim()).toBe('8baef1b4abc478178b004d62031cf7fe6db6f903');
+  });
+
   test.skipIf(process.platform === 'win32')(
     'fails visibly when a repository-configured diff helper exceeds stdout limits',
     async () => {

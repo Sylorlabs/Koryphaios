@@ -649,26 +649,52 @@ export class MCPClient {
       this.clearIdleShutdown();
 
       if (this.config.transport === 'stdio') {
-        const stdin = this.process!.stdin as unknown as {
-          write: (chunk: string | Uint8Array) => void;
-          flush: () => void;
-        };
-        stdin.write(JSON.stringify(request) + '\n');
-        stdin.flush();
+        const processHandle = this.process;
+        if (!processHandle) {
+          this.pending.delete(id);
+          clearTimeout(timeout);
+          reject(new Error('MCP stdio process is no longer available'));
+          return;
+        }
+        try {
+          this.writeStdioMessage(processHandle, JSON.stringify(request) + '\n');
+        } catch (error: unknown) {
+          // A child can close its stdin between the liveness check and the
+          // write. Fail the transport and every waiter immediately instead of
+          // leaking a pending request until the 30-second request timeout.
+          const failure = new Error('MCP stdio request write failed');
+          this.failStdioTransport(processHandle, failure);
+          if (this.pending.delete(id)) {
+            clearTimeout(timeout);
+            reject(failure);
+          }
+        }
       }
     });
   }
 
   private notify(method: string, params: unknown): void {
     const notification = { jsonrpc: '2.0', method, params };
-    if (this.config.transport === 'stdio' && this.process) {
-      const stdin = this.process!.stdin as unknown as {
-        write: (chunk: string | Uint8Array) => void;
-        flush: () => void;
-      };
-      stdin.write(JSON.stringify(notification) + '\n');
-      stdin.flush();
+    const processHandle = this.process;
+    if (this.config.transport === 'stdio' && processHandle) {
+      try {
+        this.writeStdioMessage(processHandle, JSON.stringify(notification) + '\n');
+      } catch {
+        this.failStdioTransport(processHandle, new Error('MCP stdio notification write failed'));
+      }
     }
+  }
+
+  private writeStdioMessage(processHandle: ReturnType<typeof Bun.spawn>, payload: string): void {
+    const stdin = processHandle.stdin as unknown as {
+      write: (chunk: string | Uint8Array) => void;
+      flush: () => void;
+    } | null;
+    if (!stdin || this.process !== processHandle) {
+      throw new Error('MCP stdio process is no longer available');
+    }
+    stdin.write(payload);
+    stdin.flush();
   }
 
   private acceptStdoutText(processHandle: ReturnType<typeof Bun.spawn>, text: string): void {

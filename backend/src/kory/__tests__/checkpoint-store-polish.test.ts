@@ -14,7 +14,15 @@ import { CheckpointStore } from '../checkpoint-store';
 import { GitExecutor } from '../git-executor';
 import { ShadowRepo } from '../shadow-repo';
 import { spawnSync } from 'bun';
-import { writeFileSync, mkdirSync, realpathSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import {
+  writeFileSync,
+  mkdirSync,
+  realpathSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  chmodSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -523,14 +531,32 @@ describe('CheckpointStore polish features', () => {
     });
 
     test('timeout kills process and returns promptly', async () => {
+      if (process.platform === 'win32') return;
       const git = new GitExecutor(TEST_DIR);
-      // Use a command that genuinely hangs: `git fetch` with a bogus URL
-      // and a very short timeout. The abort controller should kick in.
-      const result = await git.exec(['fetch', 'https://10.255.255.1/nonexistent/repo.git'], {
-        timeoutMs: 100,
-      });
-      expect(result.success).toBe(false);
-      expect(result.stderr).toContain('timed out');
+      // Do not rely on a public unroutable URL: in CI/sandbox environments
+      // networking may fail immediately, which would never exercise the
+      // timeout/TERM→KILL path. Put a deterministic TERM-ignoring fake git
+      // first on PATH instead.
+      const fakeBin = join(
+        tmpdir(),
+        `kory-checkpoint-timeout-git-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      );
+      const fakeGit = join(fakeBin, 'git');
+      mkdirSync(fakeBin, { recursive: true });
+      writeFileSync(fakeGit, '#!/bin/sh\ntrap "" TERM\nwhile :; do sleep 1; done\n');
+      chmodSync(fakeGit, 0o700);
+      try {
+        const result = await git.exec(['fetch', 'synthetic-timeout'], {
+          timeoutMs: 100,
+          env: {
+            PATH: `${fakeBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
+          },
+        });
+        expect(result.success).toBe(false);
+        expect(result.stderr).toContain('timed out');
+      } finally {
+        rmSync(fakeBin, { recursive: true, force: true });
+      }
     });
   });
 

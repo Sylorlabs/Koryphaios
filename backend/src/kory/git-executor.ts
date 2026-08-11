@@ -169,7 +169,11 @@ export class GitExecutor {
         // credential helpers, transports, and other descendants that may keep
         // inherited stdout/stderr pipes open after the direct process exits.
         detached: true,
-        stdin: stdin !== undefined ? 'pipe' : undefined,
+        // One-shot Git commands do not need an interactive stdin pipe. Passing
+        // the complete buffer to Bun atomically avoids the FileSink
+        // write/flush/close race (and makes short rev-list/pack/hash commands
+        // deterministic even when Git exits immediately).
+        stdin: stdin !== undefined ? new TextEncoder().encode(stdin) : undefined,
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -183,12 +187,6 @@ export class GitExecutor {
       let timer: ReturnType<typeof setTimeout> | undefined;
 
       try {
-        // Write stdin if provided, then close stdin to signal EOF.
-        if (stdin !== undefined && proc.stdin) {
-          proc.stdin.write(stdin);
-          proc.stdin.end();
-        }
-
         const completed = Promise.all([proc.exited, stdoutPromise, stderrPromise]).then(
           ([exitCode, stdout, stderr]) => ({
             kind: 'completed' as const,

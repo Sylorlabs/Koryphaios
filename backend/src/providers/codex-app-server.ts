@@ -215,9 +215,7 @@ export class CodexAppServer {
       limit: 100,
       includeHidden: false,
     })) as { data?: CodexAppServerModel[] } | null;
-    return Array.isArray(result?.data)
-      ? result.data.filter((model) => !model?.hidden)
-      : [];
+    return Array.isArray(result?.data) ? result.data.filter((model) => !model?.hidden) : [];
   }
 
   private async ensureStarted(): Promise<void> {
@@ -293,7 +291,14 @@ export class CodexAppServer {
         timeout,
       });
       this.clearIdleShutdown();
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      try {
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      } catch {
+        // A Codex process can disappear between the writable check and the
+        // write. Resolve that race as a transport failure rather than leaving
+        // an RPC pending until the 30-second timeout.
+        this.fail(new Error('Codex app-server stdin write failed'));
+      }
     });
   }
 
@@ -310,7 +315,11 @@ export class CodexAppServer {
   }
 
   private notify(method: string, params: Record<string, unknown>): void {
-    this.child?.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+    try {
+      this.child?.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+    } catch {
+      this.fail(new Error('Codex app-server notification write failed'));
+    }
   }
 
   private consume(chunk: string): void {

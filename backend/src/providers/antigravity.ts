@@ -368,7 +368,10 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
   const events: ProviderEvent[] = [];
   let gotContent = false;
   if (debug && chunk.trim())
-    providerLog.debug({ chunk: chunk.slice(0, 500) }, '[agy-debug] raw log chunk');
+    providerLog.debug(
+      safeProviderDiagnostic('antigravity', 'stdout', chunk),
+      '[agy-debug] log chunk received',
+    );
 
   for (const line of chunk.split('\n')) {
     const trimmed = line.trim();
