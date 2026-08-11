@@ -98,6 +98,12 @@ export const SECURITY = {
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3003',
+    // Tauri's production WebView uses an application-owned origin. The
+    // concrete scheme differs by platform/WebView implementation, so keep
+    // each known origin explicit rather than weakening the policy to `*`.
+    'http://tauri.localhost',
+    'https://tauri.localhost',
+    'tauri://localhost',
   ],
 } as const;
 

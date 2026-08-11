@@ -20,9 +20,50 @@ static CACHED_UPDATE: Mutex<Option<tauri_plugin_updater::Update>> = Mutex::new(N
 // (tauri-plugin-updater hardcodes Update.timeout = None on check()).
 const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 
+// Tauri's production WebView origin is application-owned rather than the
+// dev server's loopback HTTP origin. Different WebView implementations use
+// one of these exact origins, so the bundled backend gets all known forms
+// explicitly. Never replace this with a wildcard: the backend may be bound
+// beyond loopback by an operator configuration.
+const PACKAGED_TAURI_CORS_ORIGINS: &[&str] = &[
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost",
+];
+
 // Global backend process handle
 static BACKEND_PROCESS: Mutex<Option<Arc<std::sync::Mutex<std::process::Child>>>> =
     Mutex::new(None);
+
+/// Merge the exact Tauri application origins into a packaged backend's CORS
+/// environment without widening it to a wildcard. Config-file origins are
+/// still loaded by the backend itself; this only covers origins that are
+/// inherent to the native shell.
+fn merge_packaged_cors_origins(existing: Option<&str>) -> Result<String, String> {
+    let mut origins = Vec::new();
+    if let Some(value) = existing {
+        for origin in value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if origin == "*" {
+                return Err(
+                    "Refusing to launch bundled backend with wildcard CORS_ORIGINS".to_string(),
+                );
+            }
+            if !origins.iter().any(|known| known == &origin) {
+                origins.push(origin.to_string());
+            }
+        }
+    }
+    for origin in PACKAGED_TAURI_CORS_ORIGINS {
+        if !origins.iter().any(|known| known == origin) {
+            origins.push((*origin).to_string());
+        }
+    }
+    Ok(origins.join(","))
+}
 
 include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
 
@@ -458,6 +499,9 @@ fn spawn_bundled_backend(
     cmd.env("KORYPHAIOS_PORT", config.server.port.to_string());
     cmd.env("KORYPHAIOS_HOST", &config.server.host);
     cmd.env("NODE_ENV", "production");
+    let packaged_cors_origins =
+        merge_packaged_cors_origins(std::env::var("CORS_ORIGINS").ok().as_deref())?;
+    cmd.env("CORS_ORIGINS", packaged_cors_origins);
 
     // Collaboration relay config. RELAY_URL is baked into the backend at build
     // time (so shipped clients can join out of the box), but the host secret and
@@ -1953,12 +1997,35 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_backend_resource, open_private_backend_logs, validate_log_file_name};
+    use super::{
+        copy_backend_resource, merge_packaged_cors_origins, open_private_backend_logs,
+        validate_log_file_name,
+    };
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn packaged_cors_origins_include_exact_tauri_application_origins() {
+        let origins = merge_packaged_cors_origins(Some(
+            "https://app.example.test,http://tauri.localhost,https://app.example.test",
+        ))
+        .expect("explicit origins should be accepted");
+        assert_eq!(
+            origins,
+            "https://app.example.test,http://tauri.localhost,https://tauri.localhost,tauri://localhost"
+        );
+        assert!(!origins.split(',').any(|origin| origin == "*"));
+    }
+
+    #[test]
+    fn packaged_cors_origins_reject_wildcard_configuration() {
+        let error = merge_packaged_cors_origins(Some("*,http://tauri.localhost"))
+            .expect_err("wildcard configuration must fail closed");
+        assert!(error.contains("wildcard CORS_ORIGINS"));
+    }
 
     struct TestDirectory(PathBuf);
 

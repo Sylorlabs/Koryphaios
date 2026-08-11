@@ -229,6 +229,11 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('API Integration Tests', () => {
 
   describe('CORS Headers', () => {
     const nativeDevOrigins = ['http://127.0.0.1:3003', 'http://localhost:3003'];
+    const packagedTauriOrigins = [
+      'http://tauri.localhost',
+      'https://tauri.localhost',
+      'tauri://localhost',
+    ];
 
     test.each(nativeDevOrigins)('allows native dev GET origin %s', async (origin) => {
       const res = await fetch(`${BASE_URL}/api/health`, { headers: { Origin: origin } });
@@ -239,6 +244,28 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('API Integration Tests', () => {
     });
 
     test.each(nativeDevOrigins)('allows native dev OPTIONS origin %s', async (origin) => {
+      const res = await fetch(`${BASE_URL}/api/sessions`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'GET',
+        },
+      });
+
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(res.headers.get('access-control-allow-methods')).toContain('GET');
+    });
+
+    test.each(packagedTauriOrigins)('allows packaged Tauri GET origin %s', async (origin) => {
+      const res = await fetch(`${BASE_URL}/api/health`, { headers: { Origin: origin } });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe(origin);
+      expect(res.headers.get('vary')).toContain('Origin');
+    });
+
+    test.each(packagedTauriOrigins)('allows packaged Tauri OPTIONS origin %s', async (origin) => {
       const res = await fetch(`${BASE_URL}/api/sessions`, {
         method: 'OPTIONS',
         headers: {

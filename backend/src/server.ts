@@ -14,6 +14,7 @@ import { setContext } from './context';
 import { serverLog } from './logger';
 import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
+import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
@@ -189,6 +190,10 @@ async function main() {
   const corsOrigins = config.corsOrigins?.length
     ? config.corsOrigins
     : [...SECURITY.ALLOWED_ORIGINS];
+  // Keep the low-level CORS helper used by OPTIONS/error paths in sync with
+  // Elysia's configured allowlist. Packaged Tauri origins are included in
+  // SECURITY.ALLOWED_ORIGINS; configured origins are merged here as well.
+  addCorsOrigins(corsOrigins);
 
   // Trusted proxy CIDRs for X-Forwarded-For. When the backend is behind a
   // reverse proxy, the operator sets KORYPHAIOS_TRUSTED_PROXIES to the
