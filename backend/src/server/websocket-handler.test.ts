@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { handleWSMessage, type WSClientData } from './websocket-handler';
+
+// Resolve relative to this test file so the path is correct regardless of CWD.
+const wsHandlerModulePath = resolve(import.meta.dir, 'websocket-handler.ts');
 
 describe('websocket heartbeat handling', () => {
   test('marks the exact client alive when it answers an application heartbeat', async () => {
@@ -28,7 +32,7 @@ describe('websocket heartbeat handling', () => {
   test('logs only structural metadata when downstream user input handling fails', () => {
     const sentinel = 'SYNTHETIC_PRIVATE_PROMPT_7f2b1c';
     const childCode = `
-      import { handleWSMessage } from './backend/src/server/websocket-handler.ts';
+      import { handleWSMessage } from ${JSON.stringify(wsHandlerModulePath)};
       const sentinel = ${JSON.stringify(sentinel)};
       const socket = { data: { id: 'audit-client' } };
       const dependencies = {

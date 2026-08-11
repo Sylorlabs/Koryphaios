@@ -6,44 +6,39 @@
 // returns `undefined` (concurrent modification detected). On a successful
 // update the version is incremented so that stale readers fail on retry.
 //
-// These tests use an in-memory SQLite database (mocked via bun:test's
-// mock.module) so no on-disk state is touched.
+// These tests use a temp-file SQLite database via `reopenDatabase()` so the
+// real `db` module singleton points at an isolated database. We avoid
+// `mock.module()` because it is process-wide in Bun and `mock.restore()` does
+// NOT undo it — any `mock.module('../../db', ...)` would permanently replace
+// the `db` module for all subsequent test files, breaking e.g.
+// routes/v1/__tests__/providers.test.ts.
 
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
-import { Database } from 'bun:sqlite';
-import { drizzle } from 'drizzle-orm/bun-sqlite';
-import { eq, and, desc } from 'drizzle-orm';
-import * as schema from '../../db/schema';
-import { runMigrations } from '../../db/migrations';
+import { describe, test, expect, beforeEach, afterEach, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-// ---------------------------------------------------------------------------
-// In-memory database setup
-// ---------------------------------------------------------------------------
+// Reopen the shared `db` singleton at a temp file BEFORE importing
+// SessionStore, so SessionStore's module-level `import { db } from '../db'`
+// captures the same drizzle instance that now points at our temp database.
+const tempDir = mkdtempSync(join(tmpdir(), 'kory-session-store-optimistic-'));
+const tempDbPath = join(tempDir, 'test.sqlite');
 
-const sqlite = new Database(':memory:');
-sqlite.exec('PRAGMA foreign_keys = OFF;');
+const { db, reopenDatabase, getDb } = await import('../../db');
+await reopenDatabase(tempDbPath);
 
-// Run all migrations so every table exists. mock.module is process-wide in
-// Bun — subsequent test files that import db will get this in-memory instance,
-// so it must have all tables, not just sessions.
-await runMigrations(sqlite);
-
-const db = drizzle(sqlite, { schema });
-
-// Replace the singleton `db` module with our in-memory instance so the
-// SessionStore (which imports `db` and `sessions` from '../db') operates
-// against the test database. Include initDb/getDb stubs so subsequent
-// test files that need the real db don't crash (mock.module is process-wide).
-mock.module('../../db', () => ({
-  db,
-  ...schema,
-  initDb: () => Promise.resolve(),
-  getDb: () => sqlite,
-}));
-
-// Import SessionStore AFTER registering the mock so it picks up the
-// in-memory drizzle instance.
+// Import SessionStore AFTER reopening the database so it picks up the
+// temp-file drizzle instance.
 const { SessionStore } = await import('../session-store');
+
+afterAll(async () => {
+  // Restore the shared `db` singleton to its original path so subsequent
+  // test files see the real database. Then clean up the temp directory.
+  // Do NOT close getDb() — reopenDatabase() already created a fresh live
+  // connection that subsequent tests need.
+  await reopenDatabase();
+  rmSync(tempDir, { recursive: true, force: true });
+});
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -54,12 +49,12 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
 
   beforeEach(async () => {
     // Wipe any rows left over from a previous test so each test starts clean.
-    sqlite.run('DELETE FROM sessions;');
+    getDb().run('DELETE FROM sessions;');
     store = new SessionStore();
   });
 
   afterEach(() => {
-    sqlite.run('DELETE FROM sessions;');
+    getDb().run('DELETE FROM sessions;');
   });
 
   test('update() with correct expectedVersion succeeds and increments the version', async () => {
@@ -83,7 +78,11 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
     expect(created.version).toBe(1);
 
     // A version that was never the row's version (e.g. version + 1).
-    const result = await store.update(created.id, { title: 'should not apply' }, created.version + 1);
+    const result = await store.update(
+      created.id,
+      { title: 'should not apply' },
+      created.version + 1,
+    );
 
     expect(result).toBeUndefined();
 

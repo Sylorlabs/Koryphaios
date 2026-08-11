@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 import { sanitizeLogMetadata } from '../logger';
+
+// Resolve relative to this test file so the path is correct regardless of CWD.
+const loggerModulePath = resolve(import.meta.dir, '../logger.ts');
 
 const SENTINEL = 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const BASIC_SENTINEL = 'QWxhZGRpbjpPcGVuU2VzYW1l';
@@ -57,7 +61,7 @@ describe('central logger confidentiality boundary', () => {
 
   test('sanitizes raw manager-style command and Error metadata at the actual logger sink', () => {
     const childCode = `
-      import { koryLog } from './backend/src/logger.ts';
+      import { koryLog } from ${JSON.stringify(loggerModulePath)};
       const sentinel = ${JSON.stringify(SENTINEL)};
       koryLog.warn(
         { sessionId: 'session-safe', command: 'agent --token ' + sentinel, error: new Error('token=' + sentinel) },

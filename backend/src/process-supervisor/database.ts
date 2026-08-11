@@ -366,6 +366,15 @@ export function initProcessSupervisorTables(): void {
   serverLog.info('Process supervisor tables initialized');
 }
 
+/**
+ * Reset the schema-ensured flag so the next `ensureSchema()` call re-creates
+ * tables on a fresh database connection. Used by tests that close and reopen
+ * the database singleton via `reopenDatabase()`.
+ */
+export function resetSchemaEnsured(): void {
+  schemaEnsured = false;
+}
+
 export async function persistProcess(process: PersistedProcess): Promise<void> {
   try {
     ensureSchema();
@@ -577,9 +586,7 @@ export async function listProcesses(
       .select()
       .from(supervisedProcesses)
       .where(
-        includeInactive
-          ? undefined
-          : inArray(supervisedProcesses.status, ['starting', 'running']),
+        includeInactive ? undefined : inArray(supervisedProcesses.status, ['starting', 'running']),
       )
       .orderBy(desc(supervisedProcesses.createdAt))
       .limit(limit);

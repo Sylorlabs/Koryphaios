@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,11 +6,20 @@ import type { ProcessLifecycleEvent, ProcessSupervisor } from '../supervisor';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET ??= 'test_only_not_for_production_aaaaaaaaaa';
-process.env.DATABASE_URL = 'sqlite::memory:';
 
 const database = await import('../database');
-const { getDb } = await import('../../db');
+const { db, reopenDatabase } = await import('@/db');
+const { resetSchemaEnsured, initProcessSupervisorTables } = await import('../database');
 const supervisorModule = await import('../supervisor');
+
+// This test intentionally closes the shared database singleton to simulate a
+// recovery database failure. Reopen it after the test so subsequent tests in
+// the same process don't inherit a closed database.
+afterEach(async () => {
+  await reopenDatabase();
+  resetSchemaEnsured();
+  initProcessSupervisorTables();
+});
 
 describe('process restart recovery database boundary', () => {
   test('rejects initialization instead of treating a failed active-process read as empty', async () => {
@@ -18,6 +27,9 @@ describe('process restart recovery database boundary', () => {
     // (process.kill(-pid, 0/SIGKILL)) to verify orphan ownership. Windows
     // has no /bin/sh and no process-group signal delivery, so skip there.
     if (process.platform === 'win32') return;
+    // Reset the schema-ensured flag in case a previous test left it set
+    // without creating tables on the current database connection.
+    resetSchemaEnsured();
     database.initProcessSupervisorTables();
     const directory = mkdtempSync(join(tmpdir(), 'kory-recovery-db-failure-'));
     const child = Bun.spawn(['/bin/sh', '-c', 'while :; do sleep 1; done'], {
@@ -45,7 +57,12 @@ describe('process restart recovery database boundary', () => {
       createdAt: now,
       updatedAt: now,
     });
-    getDb().close();
+    // Close the drizzle session's internal SQLite handle. We close
+    // `db.$client` directly (the raw Database that drizzle's session uses
+    // for all queries) rather than `getDb()` because the two may be
+    // different instances when the module is loaded with different
+    // DATABASE_URL values across test files.
+    (db as unknown as { $client: { close(): void } }).$client.close();
 
     (
       supervisorModule.ProcessSupervisor as unknown as {

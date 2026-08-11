@@ -5,6 +5,10 @@ import { resolve } from 'node:path';
 
 import { summarizeBashCommandForAudit, summarizeToolErrorForAudit } from '../bash-sandbox';
 
+// Resolve relative to this test file so the path is correct regardless of CWD.
+const bashSandboxModulePath = resolve(import.meta.dir, '../bash-sandbox.ts');
+const registryModulePath = resolve(import.meta.dir, '../../tools/registry.ts');
+
 const SENTINEL = 'SYNTHETIC_PRIVATE_TOOL_AUDIT_7ea9';
 
 describe('tool and command audit confidentiality', () => {
@@ -41,8 +45,8 @@ describe('tool and command audit confidentiality', () => {
         auditBashCommand,
         logBackgroundRegistrationFailure,
         logBashExecutionAudit,
-      } from './backend/src/security/bash-sandbox.ts';
-      import { ToolRegistry } from './backend/src/tools/registry.ts';
+      } from ${JSON.stringify(bashSandboxModulePath)};
+      import { ToolRegistry } from ${JSON.stringify(registryModulePath)};
 
       const sentinel = ${JSON.stringify(SENTINEL)};
       auditBashCommand('printf -- ' + sentinel, {

@@ -1,12 +1,21 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { ProcessLifecycleEvent, ProcessSupervisor } from '../supervisor';
 
 process.env.NODE_ENV = 'test';
 process.env.SESSION_TOKEN_SECRET ??= 'test_only_not_for_production_aaaaaaaaaa';
-process.env.DATABASE_URL = 'sqlite::memory:';
 
 const supervisorModule = await import('../supervisor');
-const { getDb } = await import('../../db');
+const { db, reopenDatabase } = await import('@/db');
+const { resetSchemaEnsured, initProcessSupervisorTables } = await import('../database');
+
+// This test intentionally closes the shared database singleton to simulate a
+// persistence failure. Reopen it after the test so subsequent tests in the
+// same process don't inherit a closed database.
+afterEach(async () => {
+  await reopenDatabase();
+  resetSchemaEnsured();
+  initProcessSupervisorTables();
+});
 
 describe('post-spawn persistence failure boundary', () => {
   test('reaps the detached child and retains degraded barrier truth without a false terminal event', async () => {
@@ -23,9 +32,13 @@ describe('post-spawn persistence failure boundary', () => {
       killReapTimeoutMs: 1_000,
       spawnProcess: (command, options) => {
         child = Bun.spawn(command, options as any);
-        // The initial `starting` row exists. Closing SQLite here injects the
-        // exact second-write failure after an OS child has been created.
-        getDb().close();
+        // The initial `starting` row exists. Closing the drizzle session's
+        // internal SQLite handle here injects the exact second-write failure
+        // after an OS child has been created. We close `db.$client` directly
+        // (the raw Database that drizzle's session uses for all queries)
+        // rather than `getDb()` because the two may be different instances
+        // when the module is loaded with different DATABASE_URL values.
+        (db as unknown as { $client: { close(): void } }).$client.close();
         return child;
       },
     });
