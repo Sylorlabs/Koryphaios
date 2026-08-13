@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { discoverCliAccounts } from '../cli-accounts';
+import { discoverCliAccounts, resetCliAccountJsonCacheForTests } from '../cli-accounts';
+import { serverLog } from '../../logger';
 
 const roots: string[] = [];
 
@@ -11,6 +12,7 @@ function jwt(payload: Record<string, unknown>): string {
 }
 
 afterEach(() => {
+  resetCliAccountJsonCacheForTests();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -53,5 +55,35 @@ describe('CLI account autodetection', () => {
     expect(JSON.stringify(accounts)).not.toContain('"plan":"plus"');
     expect(JSON.stringify(accounts)).not.toContain('"plan":"pro"');
     expect(JSON.stringify(accounts)).not.toContain('must-never-be-returned');
+  });
+
+  test('reports a malformed account file once per filesystem revision', () => {
+    const home = join(tmpdir(), `kory-cli-accounts-${crypto.randomUUID()}`);
+    roots.push(home);
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    const authFile = join(home, '.codex', 'auth.json');
+    writeFileSync(authFile, '{broken');
+    const debug = spyOn(serverLog, 'debug').mockImplementation(() => serverLog);
+
+    discoverCliAccounts(home);
+    discoverCliAccounts(home);
+
+    const malformed = debug.mock.calls.filter(
+      (call) => call[1] === 'cli-accounts: account JSON is malformed',
+    );
+    expect(malformed).toHaveLength(1);
+    expect(malformed[0]?.[0]).toEqual({
+      fileName: 'auth.json',
+      bytes: 7,
+      errorType: 'SyntaxError',
+    });
+    expect(JSON.stringify(malformed)).not.toContain('{broken');
+
+    writeFileSync(authFile, JSON.stringify({ repaired: true }));
+    discoverCliAccounts(home);
+    expect(
+      debug.mock.calls.filter((call) => call[1] === 'cli-accounts: account JSON is malformed'),
+    ).toHaveLength(1);
+    debug.mockRestore();
   });
 });

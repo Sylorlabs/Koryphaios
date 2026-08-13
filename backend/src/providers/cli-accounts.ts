@@ -27,6 +27,9 @@ type ProfileDefinition = {
   authFiles: string[];
 };
 
+const jsonHealthCache = new Map<string, { fingerprint: string; valid: boolean }>();
+const MAX_JSON_HEALTH_CACHE_ENTRIES = 256;
+
 /** A stable, human-facing name for a local CLI profile. This deliberately
  * describes the command context, not an email address or extracted token. */
 export function cliAccountCommandLabel(
@@ -104,23 +107,57 @@ const PROFILE_DEFINITIONS: ProfileDefinition[] = [
   },
 ];
 
-function safeJson(path: string): Record<string, unknown> | null {
+function hasValidJson(path: string): boolean {
+  let size = 0;
+  let modifiedAt = 0;
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    const stat = statSync(path);
+    size = stat.size;
+    modifiedAt = stat.mtimeMs;
   } catch (err: unknown) {
     serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'cli-accounts: JSON file parse failed',
+      { errorType: err instanceof Error ? err.name : 'UnknownError' },
+      'cli-accounts: account file metadata unavailable',
     );
-    return null;
+    return false;
   }
+
+  const fingerprint = `${modifiedAt}:${size}`;
+  const cached = jsonHealthCache.get(path);
+  if (cached?.fingerprint === fingerprint) return cached.valid;
+
+  let valid = false;
+  try {
+    JSON.parse(readFileSync(path, 'utf8'));
+    valid = true;
+  } catch (err: unknown) {
+    serverLog.debug(
+      {
+        fileName: basename(path),
+        bytes: size,
+        errorType: err instanceof Error ? err.name : 'UnknownError',
+      },
+      'cli-accounts: account JSON is malformed',
+    );
+  }
+
+  jsonHealthCache.set(path, { fingerprint, valid });
+  if (jsonHealthCache.size > MAX_JSON_HEALTH_CACHE_ENTRIES) {
+    jsonHealthCache.delete(jsonHealthCache.keys().next().value as string);
+  }
+  return valid;
+}
+
+export function resetCliAccountJsonCacheForTests(): void {
+  jsonHealthCache.clear();
 }
 
 function identityFromAuth(
   path: string,
 ): Pick<DiscoveredCliAccount, 'email' | 'plan' | 'expiresAt' | 'health'> {
-  const data = safeJson(path);
-  if (!data) return { email: null, plan: null, expiresAt: null, health: 'unknown' };
+  if (!hasValidJson(path)) {
+    return { email: null, plan: null, expiresAt: null, health: 'unknown' };
+  }
   // These files are merely local CLI state. JWT payloads are unsigned input
   // until their signatures and issuer are verified, while email, plan, and
   // expiry fields in local JSON can be stale or user-edited. Do not present
