@@ -241,7 +241,9 @@ export type {
   VoiceProviderDescriptor,
   VoicePackManifest,
   VoicePackStatus,
+  TranscriptionResult,
   SynthesisRequest,
+  SynthesisResult,
 } from './types/VoiceTypes';
 
 // ─────────────────────────────────────────────────────────────────────────────
