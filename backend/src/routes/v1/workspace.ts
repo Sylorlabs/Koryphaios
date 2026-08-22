@@ -1,13 +1,17 @@
 import { Elysia } from 'elysia';
 import { homedir } from 'node:os';
 import { requireLocalRouteAuth, validateLocalBearerToken } from '../../auth/local-route-auth';
-import { PROJECT_ROOT } from '../../runtime/paths';
 import { registerWorkspaceRoot } from '../../memory/unified-memory';
 import { loadAgentSettings } from '../../agent-settings';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { IMAGE_MIME_TYPES } from '../../tools/image';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
+import { getDb } from '../../db';
+import {
+  validateWorkspaceRoot,
+  WorkspaceNavigationStore,
+} from '../../stores/workspace-navigation-store';
 
 const SKIP_SEGMENTS = new Set([
   'node_modules',
@@ -26,6 +30,56 @@ function shouldSkipPath(relativePath: string): boolean {
 }
 
 export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
+  .get('/state', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: new WorkspaceNavigationStore(getDb()).snapshot() };
+  })
+  .post('/open', ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const root = String((body as { root?: string })?.root ?? '').trim();
+    try {
+      const canonicalRoot = validateWorkspaceRoot(root);
+      registerWorkspaceRoot(canonicalRoot);
+      return {
+        ok: true,
+        data: new WorkspaceNavigationStore(getDb()).openWorkspace(canonicalRoot),
+      };
+    } catch (error) {
+      set.status = 400;
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Invalid workspace root',
+      };
+    }
+  })
+  .post('/select', ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const path = String((body as { path?: string })?.path ?? '').trim();
+    try {
+      return { ok: true, data: new WorkspaceNavigationStore(getDb()).selectProject(path) };
+    } catch (error) {
+      set.status = 400;
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Invalid project directory',
+      };
+    }
+  })
+  .post('/deselect', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: new WorkspaceNavigationStore(getDb()).deselectProject() };
+  })
+  .post('/acknowledge-unavailable', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return {
+      ok: true,
+      data: new WorkspaceNavigationStore(getDb()).acknowledgeUnavailable(),
+    };
+  })
+  .delete('/state', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: new WorkspaceNavigationStore(getDb()).clear() };
+  })
   .get('/raw', ({ request, query, set }) => {
     // <img src> can't send Authorization headers, so accept the bearer token
     // via ?auth= as well (same validation, local session token either way).
@@ -55,26 +109,6 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     (set.headers as Record<string, string>)['Cache-Control'] = 'private, max-age=60';
     return readFileSync(abs);
   })
-  .post('/register', ({ request, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const root = String((body as { root?: string })?.root ?? '').trim();
-    const home = homedir();
-    const abs = resolve(root);
-    // Only real folders inside the user's home may become workspace roots —
-    // and never home itself (that would share memory across everything).
-    if (
-      !abs ||
-      abs === home ||
-      !abs.startsWith(home + '/') ||
-      !existsSync(abs) ||
-      !statSync(abs).isDirectory()
-    ) {
-      set.status = 400;
-      return { ok: false, error: 'Invalid workspace root' };
-    }
-    registerWorkspaceRoot(abs);
-    return { ok: true };
-  })
   .get('/files', async ({ request, query, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
 
@@ -84,7 +118,8 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     const glob = new Bun.Glob('**/*');
     const files: string[] = [];
 
-    for await (const match of glob.scan({ cwd: PROJECT_ROOT, onlyFiles: true })) {
+    const requestRoot = getRequestProjectRoot(request);
+    for await (const match of glob.scan({ cwd: requestRoot, onlyFiles: true })) {
       if (shouldSkipPath(match)) continue;
       if (search && !match.toLowerCase().includes(search)) continue;
       files.push(match);
@@ -93,10 +128,4 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
 
     files.sort((a, b) => a.localeCompare(b));
     return { ok: true, data: files };
-  })
-  .get('/home', ({ request, set }) => {
-    // Used by the no-project prompt: lets the user run a quick task scoped to
-    // their home folder instead of being forced to open a project.
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: homedir() };
   });

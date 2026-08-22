@@ -68,7 +68,6 @@ const EXPLICITLY_UNAVAILABLE = new Set<ProviderName>([
   'gitlab',
   'freebuff',
   'jules',
-  'kilocode',
 ]);
 
 const DEDICATED = new Set<ProviderName>([
@@ -599,7 +598,6 @@ describe('provider synthetic request-shape conformance', () => {
     expect(evidence.get('bedrock')?.evidence).toContain('SDK-specific');
     expect(evidence.get('gitlab')?.evidence).toContain('fails closed');
     expect(evidence.get('jules')?.kind).toBe('unavailable');
-    expect(evidence.get('kilocode')?.kind).toBe('unavailable');
   });
 
   it('intercepts every HTTP attempt, including background discovery, before teardown', async () => {

@@ -1,38 +1,16 @@
-// Kilo Code CLI provider.
+// Kilo Code provider — uses the Kilo AI Gateway OpenAI-compatible API.
 //
-// Kilo can execute tools and mutate a workspace, but its headless CLI does not
-// currently expose a permission/sandbox contract Koryphaios can enforce. Keep
-// the adapter visible as an explicit unavailable state and never spawn it until
-// that boundary is implemented and regression-tested.
+// Kilo exposes a unified, OpenAI-compatible gateway at https://api.kilo.ai/api/gateway.
+// Auth is a Bearer API key from app.kilo.ai. BYOK keys are handled by the gateway itself,
+// so users only enter their Kilo API key here.
 
-import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
-import type { Provider, ProviderEvent, StreamRequest } from './types';
+import type { ProviderConfig } from '@koryphaios/shared';
+import { OpenAIProvider } from './openai';
 
-export const KILO_PERMISSION_BOUNDARY_ERROR =
-  'Kilo Code is unavailable in this build: Koryphaios cannot yet enforce Kilo tool permissions or workspace sandboxing. No Kilo process was started.';
+export const KILO_BASE_URL = 'https://api.kilo.ai/api/gateway';
 
-export class KiloCodeCLIProvider implements Provider {
-  readonly name = 'kilocode' as const;
-
-  constructor(readonly config: ProviderConfig) {}
-
-  isAvailable(): boolean {
-    return false;
-  }
-
-  getModelDiscoveryError(): string {
-    return KILO_PERMISSION_BOUNDARY_ERROR;
-  }
-
-  getCliCommands(): [] {
-    return [];
-  }
-
-  listModels(): ModelDef[] {
-    return [];
-  }
-
-  async *streamResponse(_request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    yield { type: 'error', error: KILO_PERMISSION_BOUNDARY_ERROR };
+export class KiloCodeProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'kilocode', KILO_BASE_URL);
   }
 }

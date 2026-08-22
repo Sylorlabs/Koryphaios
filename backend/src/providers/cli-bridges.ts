@@ -166,7 +166,15 @@ export function getKoryphaiosAntigravityHome(): string {
 }
 
 export function getKoryphaiosGrokHome(): string {
-  return makeIsolatedHome('grok-home', join(homedir(), '.grok'), []);
+  // Grok stores its login outside the environment. Keep the child isolated for
+  // sessions/configuration, but make the CLI-owned auth and model cache visible
+  // to it. Without this, Koryphaios can detect a working terminal login and
+  // then launch a child that quite correctly says "sign in" because it has an
+  // empty HOME.
+  return makeIsolatedHome('grok-home', join(homedir(), '.grok'), [
+    'auth.json',
+    'models_cache.json',
+  ]);
 }
 
 // ─── Claude Code bridge ────────────────────────────────────────────────────

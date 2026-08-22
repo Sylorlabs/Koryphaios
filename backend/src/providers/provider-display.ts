@@ -172,9 +172,10 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
   kilocode: {
     label: 'Kilo Code',
     iconPath: '/provider-icons/lobehub/kilocode.svg',
-    deployment: 'local',
+    deployment: 'api',
+    credentialUrl: 'https://app.kilo.ai',
     description:
-      'CLI only. Runs the official kilo CLI (a fork of OpenCode) on your machine. Install kilo, run "kilo" and use /connect to sign in — no API key needed.',
+      'Kilo AI Gateway — one API key for hundreds of OpenAI-compatible models. Add your key from app.kilo.ai. BYOK provider keys are configured on the Kilo dashboard.',
   },
   jules: {
     label: 'Google Jules',

@@ -177,12 +177,8 @@ export function parseCursorModelList(output: string): ModelDef[] {
   try {
     const jsonValue = JSON.parse(output);
     parseCursorModelJsonChunk(jsonValue, models);
-  } catch (err: unknown) {
-    /* not json */
-    providerLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'Cursor model list output is not JSON',
-    );
+  } catch {
+    // Human-readable CLI output is the normal fallback format.
   }
 
   for (const line of lines) {
@@ -197,12 +193,8 @@ export function parseCursorModelList(output: string): ModelDef[] {
       try {
         parseCursorModelJsonChunk(JSON.parse(jsonLine), models);
         if (models.length > 0) continue;
-      } catch (err: unknown) {
-        /* not json */
-        providerLog.debug(
-          { err: err instanceof Error ? err.message : String(err) },
-          'Cursor model list line is not JSON',
-        );
+      } catch {
+        // Continue through the bounded text formats below.
       }
     }
 
@@ -320,7 +312,15 @@ export class CursorProvider implements Provider {
 
     const runCandidate = (index: number): void => {
       if (index >= CURSOR_MODEL_COMMANDS.length) {
+        // Cache a truthful empty result. Without a negative cache every
+        // provider-status read immediately spawned both CLI probes again.
+        this.cachedModels = [];
+        this.modelsFetchedAt = Date.now();
         this.modelsInFlight = false;
+        providerLog.debug(
+          { provider: 'cursor', candidateCount: CURSOR_MODEL_COMMANDS.length },
+          'Cursor model discovery returned no supported catalog',
+        );
         return;
       }
 
@@ -338,7 +338,10 @@ export class CursorProvider implements Provider {
       child.stdout.on('data', (c: Buffer) => (out += c.toString()));
       child.stderr.on('data', (c: Buffer) => (out += c.toString()));
 
+      let finished = false;
       const finish = () => {
+        if (finished) return;
+        finished = true;
         const models = parseCursorModelList(out);
         if (models.length > 0) {
           this.cachedModels = models;

@@ -326,6 +326,7 @@ function catalogEntryFor(
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let refreshInProgress = false;
+let refreshPromise: Promise<void> | null = null;
 
 /** Reset the module-level model cache. Test-only — prevents state leakage
  *  between test files that trigger refreshModelsInBackground(). */
@@ -333,6 +334,7 @@ export function __resetClaudeCodeModelCacheForTesting(): void {
   cachedModels = null;
   cachedModelsAt = 0;
   refreshInProgress = false;
+  refreshPromise = null;
 }
 
 /**
@@ -484,11 +486,11 @@ function readCliExtraModels(): ModelDef[] {
   }
 }
 
-function refreshModelsInBackground(): void {
-  if (refreshInProgress) return;
+function refreshModelsInBackground(): Promise<void> {
+  if (refreshInProgress) return refreshPromise ?? Promise.resolve();
   refreshInProgress = true;
 
-  Promise.all([detectEffortLevels()])
+  refreshPromise = Promise.all([detectEffortLevels()])
     .then(([effortLevels]) => {
       const base = readCliExtraModels();
       // Server-driven extras from the CLI's own cache (skip any that duplicate a
@@ -532,7 +534,9 @@ function refreshModelsInBackground(): void {
     })
     .finally(() => {
       refreshInProgress = false;
+      refreshPromise = null;
     });
+  return refreshPromise;
 }
 
 // Claude Code runs as a FULL AGENT here: it executes its OWN tools (Write/Edit/Bash/…) in
@@ -736,6 +740,15 @@ export class ClaudeCodeProvider implements Provider {
     refreshModelsInBackground();
     if (cachedModels) return cachedModels;
     return [];
+  }
+
+  /** Await the installed Claude CLI's live alias/capability discovery. */
+  refreshModels(forceRefresh = false): Promise<void> {
+    if (forceRefresh) {
+      cachedModels = null;
+      cachedModelsAt = 0;
+    }
+    return refreshModelsInBackground();
   }
 
   private resolveCliModel(modelId: string): string | undefined {

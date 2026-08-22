@@ -21,11 +21,8 @@
 // calls back to the Kory session that owns the turn.
 
 import {
-  Server,
-  ProtocolError,
-  ProtocolErrorCode,
-  type ListToolsResult,
-  type CallToolResult,
+  McpServer,
+  fromJsonSchema,
 } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
@@ -641,7 +638,7 @@ export function toolsForRole(role: string): KoryToolDef[] {
 
 // ─── Backend proxy ─────────────────────────────────────────────────────────
 
-type RuntimeKoryToolDef = Omit<KoryToolDef, 'role'>;
+export type RuntimeKoryToolDef = Omit<KoryToolDef, 'role'>;
 
 async function fetchAuthoritativeToolCatalog(
   config: ReturnType<typeof parseArgs>,
@@ -736,9 +733,14 @@ async function proxyToolCall(
 // ─── Server factory ────────────────────────────────────────────────────────
 
 /**
- * Build a v2 MCP Server wired with the bridge's tools/list and tools/call
- * handlers. Exported so protocol tests can drive the server through a real
- * Client without spawning a subprocess or providing a bridge grant file.
+ * Build a v2 McpServer wired with the bridge's tools via the high-level
+ * registerTool API. Each tool's JSON Schema is wrapped with fromJsonSchema()
+ * so the SDK validates every call against the schema before the proxy handler
+ * runs — the same automatic validation that Zod-based tools get, but for
+ * the dynamic JSON Schemas fetched from the backend catalog at runtime.
+ *
+ * Exported so protocol tests can drive the server through a real Client
+ * without spawning a subprocess or providing a bridge grant file.
  */
 export function buildServer(
   allowedTools: RuntimeKoryToolDef[],
@@ -746,33 +748,31 @@ export function buildServer(
     toolName: string,
     input: Record<string, unknown>,
   ) => Promise<{ content: string; isError: boolean }>,
-): Server {
-  const allowedToolNames = new Set(allowedTools.map((tool) => tool.name));
-
-  const server = new Server(
+): McpServer {
+  const server = new McpServer(
     { name: 'kory-control-plane', version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => ({
-    tools: allowedTools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })) as ListToolsResult['tools'],
-  }));
-
-  server.setRequestHandler('tools/call', async (req) => {
-    const { name, arguments: args } = req.params;
-    if (!name?.startsWith('kory__') || !allowedToolNames.has(name)) {
-      throw new ProtocolError(ProtocolErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-    }
-    const result = await proxy(name, (args ?? {}) as Record<string, unknown>);
-    return {
-      content: [{ type: 'text', text: result.content }],
-      isError: result.isError,
-    } as CallToolResult;
-  });
+  for (const tool of allowedTools) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        inputSchema: fromJsonSchema(tool.inputSchema),
+      },
+      // fromJsonSchema wraps a raw JSON Schema; the SDK validates args against
+      // it before the handler runs, but the TypeScript type is `unknown` since
+      // JSON Schema carries no TS types. Cast to Record at the call site.
+      async (args: unknown) => {
+        const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
+        return {
+          content: [{ type: 'text' as const, text: result.content }],
+          isError: result.isError,
+        };
+      },
+    );
+  }
 
   return server;
 }
@@ -798,6 +798,9 @@ async function main(): Promise<void> {
 
   // serveStdio owns the stdio transport and serves the 2026-07-28 protocol
   // revision by default, with 2025-era fallback for legacy clients.
+  // buildServer() returns a McpServer with tools registered via the
+  // high-level registerTool API using fromJsonSchema() for automatic
+  // input validation of the dynamic backend-provided JSON Schemas.
   serveStdio(() =>
     buildServer(allowedTools, (toolName, input) => proxyToolCall(config, toolName, input)),
   );

@@ -17,7 +17,6 @@
 //   devin        ~/.local/share/devin/cli/transcripts/*.json  ATIF final_metrics (session totals)
 //   cline        ~/.cline/data/sessions/<id>/*.messages.json  per-message metrics + modelInfo
 //   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
-//   kilocode     detected-only (fail-closed; no usage recorded)
 //   freebuff     detected-only (fail-closed; no usage recorded)
 //   jules        detected-only (approval-required; no local usage)
 //
@@ -38,7 +37,6 @@ import { getUsageSamplesByProvider } from '../credit-accountant';
 import { getContext } from '../context';
 import { serverLog } from '../logger';
 import {
-  detectKiloCLILogin,
   detectFreebuffCLILogin,
   detectJulesApiKey,
 } from '../providers/auth-utils';
@@ -1514,13 +1512,6 @@ async function collectCliUsageReports(opts?: {
 
   // ── Unavailable CLI providers: surface only when detected on-disk ──────────
   const unavailableReaders: Array<(now: number) => CliUsageReport | null> = [
-    (at) =>
-      readUnavailableCli(
-        'kilocode',
-        detectKiloCLILogin,
-        'Kilo Code is unavailable in this build: Koryphaios cannot enforce its tool permission boundary, so no sessions are run and no usage is recorded.',
-        at,
-      ),
     (at) =>
       readUnavailableCli(
         'freebuff',

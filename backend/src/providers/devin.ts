@@ -122,6 +122,7 @@ export class DevinProvider implements Provider {
       provider: 'devin' as const,
       apiModelId: m.id,
       contextWindow: m.contextWindow ?? 0,
+      contextVerified: typeof m.contextWindow === 'number' && m.contextWindow >= 1024,
       maxOutputTokens: 0,
     }));
     return live;

@@ -38,7 +38,7 @@ import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
 import { ClineProvider } from './cline';
-import { KILO_PERMISSION_BOUNDARY_ERROR, KiloCodeCLIProvider } from './kilo-cli';
+import { KiloCodeProvider } from './kilo-cli';
 import { JulesProvider } from './jules';
 import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
 import { BedrockProvider } from './bedrock';
@@ -60,7 +60,7 @@ import {
   detectDevinCLILogin,
   detectClineCLILogin,
 } from './auth-utils';
-import { cliAutoEnableCreds, whichBinary } from './cli-detection';
+import { cliAutoEnableCreds, probeCliVersion, whichBinary } from './cli-detection';
 import { discoverCliAccounts } from './cli-accounts';
 import { type ProviderDeployment, getProviderDisplay } from './provider-display';
 import { KimiCodeProvider } from './kimicode';
@@ -110,7 +110,6 @@ const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'devin',
   'cline',
   'freebuff',
-  'kilocode',
 ]);
 
 // CLI harness providers that use a managed app-server instead of a CLI binary
@@ -150,11 +149,7 @@ function unavailableProviderReason(name: ProviderName): string | undefined {
     unsupportedChatReason(name) ??
     (name === 'gitlab' ? GITLAB_DUO_UNAVAILABLE_ERROR : undefined) ??
     (name === 'freebuff' ? FREEBUFF_UNAVAILABLE_ERROR : undefined) ??
-    (name === 'jules'
-      ? JULES_APPROVAL_REQUIRED_ERROR
-      : name === 'kilocode'
-        ? KILO_PERMISSION_BOUNDARY_ERROR
-        : undefined)
+    (name === 'jules' ? JULES_APPROVAL_REQUIRED_ERROR : undefined)
   );
 }
 
@@ -357,8 +352,8 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   cline: (c) => new ClineProvider(c),
   // Visible for explicit recovery messaging; execution fails closed.
   freebuff: (c) => new FreebuffProvider(c),
-  // Fail-closed until Koryphaios can enforce Kilo's permission boundary.
-  kilocode: (c) => new KiloCodeCLIProvider(c),
+  // Kilo Code AI Gateway — OpenAI-compatible, API key auth.
+  kilocode: (c) => new KiloCodeProvider(c),
   // Visible as approval-required; this adapter cannot mutate remote state.
   jules: (c) => new JulesProvider(c),
   kimicode: (c) => new KimiCodeProvider(c),
@@ -995,6 +990,15 @@ class ProviderRegistry {
         }
 
         if (hasContent) {
+          // A successful provider turn is the strongest account proof we have.
+          // Local files, env vars, and CLI presence remain "detected" until the
+          // provider actually accepts a request; after that, Billing and
+          // Settings may truthfully show the connection as active.
+          this.verificationRecords.set(provider.name, {
+            state: 'verified',
+            checkedAt: Date.now(),
+            scope: this.verificationScopeFor(provider.name),
+          });
           if (accTokensIn > 0 || accTokensOut > 0) {
             creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut, {
               accountId: usageAccountId,
@@ -1089,90 +1093,156 @@ class ProviderRegistry {
           // Claude Code subscription is verified by confirming the official CLI is
           // logged in. We never validate a raw token against the API — the CLI owns
           // auth and runs every request, keeping us compliant with Anthropic's terms.
-          if (!whichBinary('claude')) {
+          const claudeBin = whichBinary('claude');
+          if (!claudeBin) {
             return {
               success: false,
               error: 'Claude Code CLI (claude) was not found on PATH. Install it, then reconnect.',
             };
           }
-          if (detectClaudeCodeLogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Claude Code login material was detected. Run "claude login" in your terminal, then check again.',
-          };
+          if (!detectClaudeCodeLogin()) {
+            return {
+              success: false,
+              error:
+                'No Claude Code login material was detected. Run "claude login" in your terminal, then check again.',
+            };
+          }
+          if (!probeCliVersion(claudeBin, 'claude')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Claude Code CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'grok': {
-          if (!whichBinary('grok')) {
+          const grokBin = whichBinary('grok');
+          if (!grokBin) {
             return {
               success: false,
               error: 'Grok Build CLI (grok) was not found on PATH. Install it, then reconnect.',
             };
           }
-          if (detectGrokCLILogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Grok Build login material was detected. Install the grok CLI, run "grok login", then check again.',
-          };
+          if (!detectGrokCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Grok Build login material was detected. Install the grok CLI, run "grok login", then check again.',
+            };
+          }
+          if (!probeCliVersion(grokBin, 'grok')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Grok Build CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'antigravity': {
-          if (!whichBinary('agy')) {
+          const agyBin = whichBinary('agy');
+          if (!agyBin) {
             return {
               success: false,
               error: 'Antigravity CLI (agy) was not found on PATH. Install it, then reconnect.',
             };
           }
-          if (detectAntigravityCLILogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Antigravity login material was detected. Install agy, run "agy login", then check again.',
-          };
+          if (!detectAntigravityCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Antigravity login material was detected. Install agy, run "agy login", then check again.',
+            };
+          }
+          if (!probeCliVersion(agyBin, 'antigravity')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Antigravity CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'cursor': {
           // Subscription CLI harness — no API key; the logged-in cursor-agent
           // binary authenticates itself.
-          if (!whichBinary('cursor-agent')) {
+          const cursorBin = whichBinary('cursor-agent');
+          if (!cursorBin) {
             return {
               success: false,
               error: 'Cursor CLI (cursor-agent) was not found on PATH. Install it, then reconnect.',
             };
           }
-          if (detectCursorCLILogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Cursor login material was detected. Install cursor-agent, run "cursor-agent login", then check again.',
-          };
+          if (!detectCursorCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Cursor login material was detected. Install cursor-agent, run "cursor-agent login", then check again.',
+            };
+          }
+          if (!probeCliVersion(cursorBin, 'cursor')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Cursor CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'devin': {
-          if (!whichBinary('devin')) {
+          const devinBin = whichBinary('devin');
+          if (!devinBin) {
             return {
               success: false,
               error: 'Devin CLI (devin) was not found on PATH. Install it, then reconnect.',
             };
           }
-          if (detectDevinCLILogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Devin login material was detected. Install devin, run "devin auth login", then check again.',
-          };
+          if (!detectDevinCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Devin login material was detected. Install devin, run "devin auth login", then check again.',
+            };
+          }
+          if (!probeCliVersion(devinBin, 'devin')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Devin CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'cline': {
-          if (!whichBinary('cline')) {
+          const clineBin = whichBinary('cline');
+          if (!clineBin) {
             return {
               success: false,
               error: 'Cline CLI was not found on PATH. Install the Cline CLI, then reconnect.',
             };
           }
-          if (detectClineCLILogin()) return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Cline credential material was detected. Install cline, configure it with "cline auth --provider <p> --apikey <k>", then check again.',
-          };
+          if (!detectClineCLILogin()) {
+            return {
+              success: false,
+              error:
+                'No Cline credential material was detected. Install cline, configure it with "cline auth --provider <p> --apikey <k>", then check again.',
+            };
+          }
+          if (!probeCliVersion(clineBin, 'cline')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Cline CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'anthropic': {
           if (!apiKey && !authToken)
@@ -1384,22 +1454,32 @@ class ProviderRegistry {
             };
           return this.verifyVertexExpressKey(apiKey);
         case 'codex': {
-          if (!whichBinary('codex')) {
+          const codexBin = whichBinary('codex');
+          if (!codexBin) {
             return {
               success: false,
               error: 'Codex CLI (codex) was not found on PATH. Install it, then reconnect.',
             };
           }
           if (
-            detectCodexCLILogin() ||
-            discoverCliAccounts().some((account) => account.provider === 'codex')
-          )
-            return { success: true, state: 'detected' };
-          return {
-            success: false,
-            error:
-              'No Codex CLI login material was detected. Run "codex login" in your terminal, then check again.',
-          };
+            !detectCodexCLILogin() &&
+            !discoverCliAccounts().some((account) => account.provider === 'codex')
+          ) {
+            return {
+              success: false,
+              error:
+                'No Codex CLI login material was detected. Run "codex login" in your terminal, then check again.',
+            };
+          }
+          if (!probeCliVersion(codexBin, 'codex')) {
+            return {
+              success: true,
+              state: 'detected',
+              error:
+                'Codex CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+            };
+          }
+          return { success: true, state: 'verified' };
         }
         case 'opencodezen': {
           if (!apiKey)

@@ -593,28 +593,4 @@ export function detectKimiCodeCLILogin(): boolean {
   return !!home && existsSync(join(home, '.kimi', 'credentials', 'kimi-code.json'));
 }
 
-// ─── Kilo Code CLI login detection ──────────────────────────────────────────
-// The official `kilo` CLI (a fork of OpenCode) stores credentials at
-// ~/.local/share/kilo/auth.json (honoring XDG_DATA_HOME). Koryphaios drives
-// the CLI as a headless harness, so this is a login-signal check only — the
-// CLI owns the actual auth at request time.
 
-const KILO_CLI_AUTH_PREFIX = 'cli:kilo:';
-
-export function isKiloCLIAuthMarker(value: string | null | undefined): boolean {
-  return typeof value === 'string' && value.startsWith(KILO_CLI_AUTH_PREFIX);
-}
-export function createKiloCLIAuthMarker(): string {
-  return `${KILO_CLI_AUTH_PREFIX}${Date.now()}`;
-}
-
-/**
- * Detects whether the official `kilo` CLI is logged in: an auth.json file
- * exists in the kilo data directory (~/.local/share/kilo/ or XDG_DATA_HOME/kilo/).
- */
-export function detectKiloCLILogin(): boolean {
-  const dataHome =
-    process.env.XDG_DATA_HOME?.trim() || (homeDir() ? join(homeDir(), '.local', 'share') : '');
-  if (!dataHome) return false;
-  return existsSync(join(dataHome, 'kilo', 'auth.json'));
-}

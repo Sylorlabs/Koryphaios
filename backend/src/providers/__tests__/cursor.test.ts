@@ -3,10 +3,38 @@ import { parseCursorModelList, shouldStartCursorModelRefresh } from '../cursor';
 
 describe('Cursor model refresh lifecycle', () => {
   it('coalesces in-flight and duplicate forced refresh requests', () => {
-    expect(shouldStartCursorModelRefresh({ forceRefresh: true, inFlight: true, lastStartedAt: 0, now: 20_000 })).toBe(false);
-    expect(shouldStartCursorModelRefresh({ forceRefresh: true, inFlight: false, lastStartedAt: 15_000, now: 20_000 })).toBe(false);
-    expect(shouldStartCursorModelRefresh({ forceRefresh: true, inFlight: false, lastStartedAt: 5_000, now: 20_000 })).toBe(true);
-    expect(shouldStartCursorModelRefresh({ forceRefresh: false, inFlight: false, lastStartedAt: 19_999, now: 20_000 })).toBe(true);
+    expect(
+      shouldStartCursorModelRefresh({
+        forceRefresh: true,
+        inFlight: true,
+        lastStartedAt: 0,
+        now: 20_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStartCursorModelRefresh({
+        forceRefresh: true,
+        inFlight: false,
+        lastStartedAt: 15_000,
+        now: 20_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStartCursorModelRefresh({
+        forceRefresh: true,
+        inFlight: false,
+        lastStartedAt: 5_000,
+        now: 20_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStartCursorModelRefresh({
+        forceRefresh: false,
+        inFlight: false,
+        lastStartedAt: 19_999,
+        now: 20_000,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -94,5 +122,15 @@ describe('parseCursorModelList', () => {
 
   it('returns empty list for CLI no-model message', () => {
     expect(parseCursorModelList('No models available for this account.')).toEqual([]);
+  });
+});
+
+describe('CursorProvider negative model cache contract', () => {
+  it('records an empty catalog as a fetched result instead of probing on every read', async () => {
+    const source = await Bun.file(new URL('../cursor.ts', import.meta.url)).text();
+    expect(source).toContain('this.cachedModels = [];');
+    expect(source).toContain('this.modelsFetchedAt = Date.now();');
+    expect(source).toContain('if (finished) return;');
+    expect(source).not.toContain('Cursor model list output is not JSON');
   });
 });

@@ -45,7 +45,9 @@ import { goalRoutes } from './routes/v1/goals';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
 import { mcpServerRoutes } from './routes/v1/mcp-servers';
+import { mcpRegistryRoutes } from './routes/v1/mcp-registry';
 import { voiceRoutes } from './routes/v1/voice';
+import { imageRoutes } from './routes/v1/images';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
 const SERVER_STARTED_AT = Date.now();
@@ -101,7 +103,9 @@ const baseApp = new Elysia()
   .use(nativeCommandRoutes)
   .use(mcpBridgeRoutes)
   .use(mcpServerRoutes)
-  .use(voiceRoutes);
+  .use(mcpRegistryRoutes)
+  .use(voiceRoutes)
+  .use(imageRoutes);
 
 export type App = typeof baseApp;
 

@@ -54,9 +54,9 @@ export function cliAccountCommandLabel(
 // suffixed sibling homes are intentionally included: users commonly isolate
 // work/personal subscriptions with wrappers such as CODEX_HOME=~/.codex2.
 //
-// kilocode, freebuff, and jules are deliberately NOT listed here even though
-// they have local credential files (~/.local/share/kilo/auth.json,
-// ~/.config/manicode/credentials.json, ~/.jules/config.yaml). These providers
+// freebuff and jules are deliberately NOT listed here even though
+// they have local credential files
+// (~/.config/manicode/credentials.json, ~/.jules/config.yaml). These providers
 // are fail-closed or approval-required in this build — adding them to
 // PROFILE_DEFINITIONS would make them appear in model pickers, account
 // selection, and the billing "Indexing usage…" loading state, which would

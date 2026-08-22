@@ -26,6 +26,7 @@ const { spendCapsRoutes } = await import('../routes/v1/spend-caps');
 const { billingRoutes } = await import('../routes/v1/billing');
 const { processRoutes } = await import('../routes/v1/processes');
 const { voiceRoutes } = await import('../routes/v1/voice');
+const { imageRoutes } = await import('../routes/v1/images');
 const { errorHandler } = await import('../middleware/error-handling');
 
 const app = new Elysia()
@@ -57,7 +58,8 @@ const app = new Elysia()
   .use(spendCapsRoutes)
   .use(billingRoutes)
   .use(processRoutes)
-  .use(voiceRoutes);
+  .use(voiceRoutes)
+  .use(imageRoutes);
 
 afterAll(() => {
   if (apiSurfaceDatabaseDir) {
@@ -206,6 +208,10 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'GET', path: '/api/voice/providers' },
   { method: 'GET', path: '/api/voice/packs' },
   { method: 'POST', path: '/api/voice/packs/moonshine-tiny-en-int8/download' },
+  { method: 'POST', path: '/api/voice/transcribe', body: { audioBase64: 'dGVzdA==' } },
+  { method: 'POST', path: '/api/voice/synthesize', body: { text: 'Hello' } },
+  { method: 'GET', path: '/api/images/providers' },
+  { method: 'POST', path: '/api/images/generate', body: { prompt: 'A test image' } },
   { method: 'GET', path: '/api/processes?includeInactive=true&limit=100' },
   {
     method: 'POST',

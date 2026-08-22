@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { KoryphaiosConfig, ProviderConfig } from '@koryphaios/shared';
@@ -205,7 +205,8 @@ describe('provider verification truth', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kory-cli-detection-truth-'));
     const originalPath = process.env.PATH;
     const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    writeFileSync(join(dir, 'claude'), '#!/bin/sh\nexit 0\n');
+    writeFileSync(join(dir, 'claude'), '#!/bin/sh\necho "1.0.0-test"\nexit 0\n');
+    chmodSync(join(dir, 'claude'), 0o755);
     process.env.PATH = `${dir}${delimiter}${originalPath ?? ''}`;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'synthetic-local-login-material';
     clearTokenCache();
@@ -214,7 +215,7 @@ describe('provider verification truth', () => {
       const result = await registry.verifyConnection('claude', {
         authToken: 'cli:claude:synthetic-marker',
       });
-      expect(result).toEqual({ success: true, state: 'detected' });
+      expect(result).toEqual({ success: true, state: 'verified' });
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;

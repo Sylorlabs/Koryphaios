@@ -91,11 +91,6 @@ describe('built-in provider catalog truth', () => {
       apiKey: 'present-but-not-approved',
       disabled: false,
     };
-    const kiloConfig: ProviderConfig = {
-      name: 'kilocode',
-      authToken: 'detected-cli-login',
-      disabled: false,
-    };
     const replicateConfig: ProviderConfig = {
       name: 'replicate',
       apiKey: 'present-but-not-a-chat-contract',
@@ -103,13 +98,9 @@ describe('built-in provider catalog truth', () => {
       disabled: false,
     };
     Object.assign(registry, {
-      providers: new Map([
-        ['jules', createProvider('jules', julesConfig)],
-        ['kilocode', createProvider('kilocode', kiloConfig)],
-      ]),
+      providers: new Map([['jules', createProvider('jules', julesConfig)]]),
       providerConfigs: new Map([
         ['jules', julesConfig],
-        ['kilocode', kiloConfig],
         ['replicate', replicateConfig],
       ]),
       circuitStates: new Map(),
@@ -117,7 +108,7 @@ describe('built-in provider catalog truth', () => {
       verificationRecords: new Map(),
     });
     const statuses = registry.getStatus();
-    for (const name of ['jules', 'kilocode', 'replicate'] as const) {
+    for (const name of ['jules', 'replicate'] as const) {
       const status = statuses.find((entry) => entry.name === name);
       expect(status?.authenticated).toBe(false);
       expect(status?.supportsApiKey).toBe(false);

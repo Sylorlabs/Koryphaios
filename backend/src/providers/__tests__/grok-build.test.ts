@@ -153,12 +153,22 @@ describe('parseGrokCliModelsCache', () => {
     const parsed = parseGrokCliModelsCache(
       JSON.stringify({
         models: {
-          'grok-build': { info: { name: 'Grok Build', context_window: 512_000, hidden: false } },
+          'grok-build': {
+            info: {
+              name: 'Grok Build',
+              context_window: 512_000,
+              supports_reasoning_effort: true,
+              reasoning_efforts: [{ id: 'low' }, { value: 'high' }],
+              hidden: false,
+            },
+          },
           broken: { info: { context_window: 1, hidden: false } },
         },
       }),
     );
     expect(parsed?.get('grok-build')?.contextWindow).toBe(512_000);
+    expect(parsed?.get('grok-build')?.supportsReasoningEffort).toBe(true);
+    expect(parsed?.get('grok-build')?.reasoningLevels).toEqual(['low', 'high']);
     expect(parsed?.get('broken')?.contextWindow).toBeUndefined();
   });
 });

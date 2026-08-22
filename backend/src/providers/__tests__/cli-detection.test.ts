@@ -67,7 +67,6 @@ describe('detectAgentClis', () => {
       'devin',
       'freebuff',
       'grok',
-      'kilo',
       'kimi',
     ]);
     const byId = Object.fromEntries(list.map((c) => [c.id, c]));
@@ -79,7 +78,6 @@ describe('detectAgentClis', () => {
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
     expect(byId.cline.provider).toBe('cline'); // Cline CLI harness provider
-    expect(byId.kilo.provider).toBe('kilocode'); // Kilo Code CLI harness provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {
@@ -192,28 +190,7 @@ describe('canAutoEnable gate', () => {
   it('never auto-enables a provider with no backing CLI', () => {
     expect(canAutoEnable('openai')).toBe(false);
     expect(canAutoEnable('anthropic')).toBe(false);
-  });
-
-  it('never auto-enables Kilo until its permission and sandbox boundary is enforceable', () => {
-    const bin = join(tmpHome, 'bin');
-    mkdirSync(bin, { recursive: true });
-    const fake = join(bin, 'kilo');
-    writeFileSync(fake, '#!/bin/sh\n');
-    chmodSync(fake, 0o755);
-    process.env.PATH = `${bin}${delimiter}${saved.PATH ?? ''}`;
-    mkdirSync(join(tmpHome, '.local', 'share', 'kilo'), { recursive: true });
-    writeFileSync(
-      join(tmpHome, '.local', 'share', 'kilo', 'auth.json'),
-      JSON.stringify({ kilocode: { type: 'oauth', refresh: 'test-refresh-token' } }),
-    );
-
     expect(canAutoEnable('kilocode')).toBe(false);
-    const kilo = detectAgentClis().find((entry) => entry.id === 'kilo');
-    expect(kilo?.installed).toBe(true);
-    expect(kilo?.loggedIn).toBe(true);
-    expect(kilo?.loginDetected).toBe(true);
-    expect(kilo?.autoEnabled).toBe(false);
-    expect(kilo?.note).toContain('cannot yet enforce');
   });
 
   it('does not auto-enable xai from a bare env key when the grok CLI is absent', () => {

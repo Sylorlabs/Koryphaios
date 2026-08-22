@@ -29,17 +29,22 @@ const LIVE_BILLING_BUDGET_MS = 2_400;
 let latestCliUsage: CliUsageReport[] = [];
 let latestBalances: ProviderBalance[] = [];
 
-function withinBillingBudget<T>(work: Promise<T>, fallback: T): Promise<{ value: T; refreshing: boolean }> {
+function withinBillingBudget<T>(
+  work: Promise<T>,
+  fallback: T,
+): Promise<{ value: T; refreshing: boolean }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const budget = new Promise<{ value: T; refreshing: boolean }>((resolve) => {
-    timer = setTimeout(() => resolve({ value: fallback, refreshing: true }), LIVE_BILLING_BUDGET_MS);
+    timer = setTimeout(
+      () => resolve({ value: fallback, refreshing: true }),
+      LIVE_BILLING_BUDGET_MS,
+    );
   });
-  return Promise.race([
-    work.then((value) => ({ value, refreshing: false })),
-    budget,
-  ]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
+  return Promise.race([work.then((value) => ({ value, refreshing: false })), budget]).finally(
+    () => {
+      if (timer) clearTimeout(timer);
+    },
+  );
 }
 
 /**
@@ -52,7 +57,10 @@ export function summarizeProviderBalances(balances: ProviderBalance[]) {
   const reported = balances.filter((balance) => balance.availableUsd != null);
   return {
     availableCents: reported.length
-      ? Math.max(0, Math.round(reported.reduce((sum, balance) => sum + balance.availableUsd!, 0) * 100))
+      ? Math.max(
+          0,
+          Math.round(reported.reduce((sum, balance) => sum + balance.availableUsd!, 0) * 100),
+        )
       : null,
     providers: reported.map((balance) => balance.provider),
   };
@@ -75,14 +83,17 @@ function credentialMetadata(credential: UserCredential): { accountId?: string; l
 }
 
 export function configuredAccounts(credentials: UserCredential[]) {
-  const accounts = new Map<string, {
-    id: string;
-    provider: string;
-    label: string;
-    credentialTypes: Set<string>;
-    createdAt: number;
-    lastUsedAt?: number;
-  }>();
+  const accounts = new Map<
+    string,
+    {
+      id: string;
+      provider: string;
+      label: string;
+      credentialTypes: Set<string>;
+      createdAt: number;
+      lastUsedAt?: number;
+    }
+  >();
   for (const credential of credentials.filter((entry) => entry.isActive)) {
     const metadata = credentialMetadata(credential);
     const id = metadata.accountId ?? credential.id;
@@ -116,7 +127,8 @@ export function withDetectedCliAccounts(
   detected = discoverCliAccounts(),
 ) {
   const counts = new Map<string, number>();
-  for (const account of detected) counts.set(account.provider, (counts.get(account.provider) ?? 0) + 1);
+  for (const account of detected)
+    counts.set(account.provider, (counts.get(account.provider) ?? 0) + 1);
   const existing = new Set(accounts.map((account) => `${account.provider}:${account.id}`));
   const cliAccounts = detected
     // A single implicit CLI login is normal provider configuration, not a
@@ -174,19 +186,17 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
     // `gemini` was previously emitted by an obsolete provider path even though
     // it is a model family, not a configured provider. Do not resurrect those
     // stale rows; Google providers are google, aistudio, vertexai, and jules.
-    const providerTotals = (await safeResult(
-      'providerTotals',
-      async () => getLocalTotalsByProvider(),
-      [],
-    )).filter((entry) => entry.provider !== 'gemini');
+    const providerTotals = (
+      await safeResult('providerTotals', async () => getLocalTotalsByProvider(), [])
+    ).filter((entry) => entry.provider !== 'gemini');
     const byProvider = providerTotals
       .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
       .map((entry) => ({
-      name: entry.provider,
-      spendCents: Math.round(entry.costUsd * 100),
-      tokensIn: entry.tokensIn,
-      tokensOut: entry.tokensOut,
-    }));
+        name: entry.provider,
+        spendCents: Math.round(entry.costUsd * 100),
+        tokensIn: entry.tokensIn,
+        tokensOut: entry.tokensOut,
+      }));
     const meteredSpendUsd = providerTotals
       .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
       .reduce((sum, entry) => sum + entry.costUsd, 0);
@@ -196,37 +206,71 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       tokensIn: m.tokensIn,
       tokensOut: m.tokensOut,
       // cost 0 with real tokens = we had no verified price when it was recorded
-      unpriced: m.costUsd === 0 && (m.tokensIn > 0 || m.tokensOut > 0) && resolvePricing('', m.model) == null,
+      unpriced:
+        m.costUsd === 0 &&
+        (m.tokensIn > 0 || m.tokensOut > 0) &&
+        resolvePricing('', m.model) == null,
     }));
 
     // Live balances for the providers that expose one to a normal API key.
-    const configs = await safeResult('providerConfig', async () => getContext().providers.getConfigs(), {});
+    const configs = await safeResult(
+      'providerConfig',
+      async () => getContext().providers.getConfigs(),
+      {},
+    );
     const keys: Record<string, string | undefined> = {};
-    for (const [name, cfg] of Object.entries(configs)) keys[name] = (cfg as { apiKey?: string }).apiKey;
+    for (const [name, cfg] of Object.entries(configs))
+      keys[name] = (cfg as { apiKey?: string }).apiKey;
     const cliUsageWork = safeResult(
       'cliUsage',
-      () => getCliUsageReports({
-        githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
-        forceRefresh,
-      }),
+      () =>
+        getCliUsageReports({
+          githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
+          forceRefresh,
+        }),
       latestCliUsage,
     ).then((value) => {
       latestCliUsage = value;
       return value;
     });
-    const balanceWork = safeResult('providerBalances', () => getProviderBalances(keys, { forceRefresh }), latestBalances)
-      .then((value) => {
-        latestBalances = value;
-        return value;
-      });
+    const balanceWork = safeResult(
+      'providerBalances',
+      () => getProviderBalances(keys, { forceRefresh }),
+      latestBalances,
+    ).then((value) => {
+      latestBalances = value;
+      return value;
+    });
     // Discovery is local and synchronous. Return the complete inventory even
     // while the slower usage readers are still running so the loading state
     // and the settled state describe the same set of CLI profiles.
-    const detectedCliAccounts = discoverCliAccounts();
+    const providerStates = new Map(
+      getContext()
+        .providers.getStatus()
+        .map((provider) => [provider.name, provider] as const),
+    );
+    const detectedCliAccounts = discoverCliAccounts().map((account) => {
+      const providerState = providerStates.get(account.provider);
+      return {
+        ...account,
+        // Discovery is local evidence only. "connected" is reserved for a
+        // provider probe that actually succeeded during this backend run.
+        connectionState:
+          providerState?.connectionState === 'verified'
+            ? ('connected' as const)
+            : providerState?.connectionState === 'failed'
+              ? ('failed' as const)
+              : ('detected' as const),
+      };
+    });
     const [cliUsageResult, balancesResult, savedCredentials, koryAccountUsage] = await Promise.all([
       withinBillingBudget(cliUsageWork, latestCliUsage),
       withinBillingBudget(balanceWork, latestBalances),
-      safeResult('savedCredentials', () => credentialsService.list(LOCAL_USER_ID, { isActive: true }), []),
+      safeResult(
+        'savedCredentials',
+        () => credentialsService.list(LOCAL_USER_ID, { isActive: true }),
+        [],
+      ),
       safeResult('koryAccountUsage', async () => getKoryAccountUsage(), []),
     ]);
     const cliUsage = cliUsageResult.value;

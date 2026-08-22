@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { JulesProvider } from '../jules';
 import { JULES_APPROVAL_REQUIRED_ERROR, runJulesTask } from '../jules-runner';
-import { KILO_PERMISSION_BOUNDARY_ERROR, KiloCodeCLIProvider } from '../kilo-cli';
+
 import { FREEBUFF_UNAVAILABLE_ERROR, FreebuffProvider } from '../freebuff';
 
 const request = {
@@ -65,32 +65,6 @@ describe('Jules fail-closed approval boundary', () => {
     );
     expect(events).toEqual([{ type: 'error', error: JULES_APPROVAL_REQUIRED_ERROR }]);
     expect(requests).toBe(0);
-  });
-});
-
-describe('Kilo fail-closed permission boundary', () => {
-  it('never spawns the CLI for model discovery or chat', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kory-kilo-no-spawn-'));
-    const marker = join(dir, 'spawned');
-    const fakeKilo = join(dir, 'kilo');
-    writeFileSync(fakeKilo, `#!/bin/sh\ntouch "${marker}"\n`);
-    chmodSync(fakeKilo, 0o755);
-    process.env.PATH = `${dir}${delimiter}${originalPath ?? ''}`;
-
-    try {
-      const provider = new KiloCodeCLIProvider({
-        name: 'kilocode',
-        authToken: 'cli-login-marker',
-        disabled: false,
-      });
-      expect(provider.isAvailable()).toBe(false);
-      expect(provider.listModels()).toEqual([]);
-      const events = await collectEvents(provider.streamResponse(request));
-      expect(events).toEqual([{ type: 'error', error: KILO_PERMISSION_BOUNDARY_ERROR }]);
-      expect(existsSync(marker)).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

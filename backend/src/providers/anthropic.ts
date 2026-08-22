@@ -15,18 +15,17 @@ import { withRetry, withTimeoutSignal } from './utils';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
-import {
-  isModelListCacheFresh,
-  mergeModelLists,
-  modelFromRemoteId,
-} from './model-list-cache';
+import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 
 export class AnthropicProvider implements Provider {
   readonly name: ProviderName;
   protected _client: Anthropic | null = null;
 
-  constructor(readonly config: ProviderConfig, name: ProviderName = 'anthropic') {
+  constructor(
+    readonly config: ProviderConfig,
+    name: ProviderName = 'anthropic',
+  ) {
     this.name = name;
   }
 
@@ -57,7 +56,7 @@ export class AnthropicProvider implements Provider {
 
   private cachedModels: ModelDef[] | null = null;
   private lastFetch = 0;
-  private fetchInProgress = false;
+  private refreshInProgress: Promise<void> | null = null;
 
   listModels(): ModelDef[] {
     const fallback: ModelDef[] = [];
@@ -67,11 +66,17 @@ export class AnthropicProvider implements Provider {
     return this.cachedModels ?? [];
   }
 
-  private refreshModelsInBackground(fallback: ModelDef[]) {
-    if (this.fetchInProgress) return;
-    this.fetchInProgress = true;
+  refreshModels(forceRefresh = false): Promise<void> {
+    if (this.refreshInProgress) return this.refreshInProgress;
+    if (!forceRefresh && this.cachedModels && isModelListCacheFresh(this.lastFetch)) {
+      return Promise.resolve();
+    }
+    if (forceRefresh) {
+      this.cachedModels = null;
+      this.lastFetch = 0;
+    }
 
-    void (async () => {
+    this.refreshInProgress = (async () => {
       try {
         // Kick models.dev refresh early so enrichment has data by the time
         // discovery completes (non-blocking, idempotent within TTL).
@@ -81,10 +86,10 @@ export class AnthropicProvider implements Provider {
         for (const model of response.data) {
           const id = model.id;
           if (!id) continue;
-          discovered.push(modelFromRemoteId(id, this.name, fallback));
+          discovered.push(modelFromRemoteId(id, this.name, []));
         }
         if (discovered.length > 0) {
-          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists(fallback, discovered));
+          this.cachedModels = applyModelsDevMetadata(this.name, mergeModelLists([], discovered));
           providerLog.debug(
             { provider: this.name, count: this.cachedModels.length },
             'Model list refreshed from provider API',
@@ -97,9 +102,14 @@ export class AnthropicProvider implements Provider {
           'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
         );
       } finally {
-        this.fetchInProgress = false;
+        this.refreshInProgress = null;
       }
     })();
+    return this.refreshInProgress;
+  }
+
+  private refreshModelsInBackground(_fallback: ModelDef[]) {
+    void this.refreshModels(false);
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -120,10 +130,10 @@ export class AnthropicProvider implements Provider {
           ...m,
           content: m.content.map((b) =>
             b.type === 'image'
-              ? ({
+              ? {
                   type: 'text' as const,
                   text: '[image attachment omitted — the selected model does not support image input]',
-                })
+                }
               : b,
           ),
         };
@@ -281,8 +291,7 @@ export class AnthropicProvider implements Provider {
           case 'message_delta': {
             // SDK types event.usage for message_delta
             const usage = (event as unknown as Record<string, unknown>).usage as
-              | { output_tokens?: number }
-              | undefined;
+              { output_tokens?: number } | undefined;
             yield {
               type: 'usage_update',
               tokensOut: usage?.output_tokens,
@@ -304,11 +313,9 @@ export class AnthropicProvider implements Provider {
               // cache reads + writes separately so context occupancy is real.
               tokensCache:
                 (((usage as unknown as Record<string, unknown>).cache_read_input_tokens as
-                  | number
-                  | undefined) ?? 0) +
+                  number | undefined) ?? 0) +
                 (((usage as unknown as Record<string, unknown>).cache_creation_input_tokens as
-                  | number
-                  | undefined) ?? 0),
+                  number | undefined) ?? 0),
             };
             break;
           }
@@ -379,10 +386,7 @@ export class AnthropicProvider implements Provider {
               source: {
                 type: 'base64',
                 media_type: (b.imageMimeType ?? 'image/png') as
-                  | 'image/png'
-                  | 'image/jpeg'
-                  | 'image/gif'
-                  | 'image/webp',
+                  'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
                 data: b.imageData ?? '',
               },
             };

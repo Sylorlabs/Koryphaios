@@ -8,7 +8,6 @@
 
 import { Elysia, t } from 'elysia';
 import {
-  assertNoCloudFallback,
   downloadVoicePack,
   listVoicePacks,
   listVoiceProviders,
@@ -35,23 +34,18 @@ export const voiceRoutes = new Elysia({ prefix: '/api/voice' })
     ok: true,
     data: await downloadVoicePack(params.id),
   }))
-  .post(
-    '/transcribe',
-    async () => {
-      const settings = await loadVoiceSettings();
-      assertNoCloudFallback(settings, 'stt');
-      return { ok: true, data: await transcribeCloud() };
-    },
-    { body: t.Any() },
-  )
+  .post('/transcribe', async ({ body }) => ({ ok: true, data: await transcribeCloud(body) }), {
+    body: t.Object({
+      audioBase64: t.String(),
+      mimeType: t.Optional(t.String()),
+      language: t.Optional(t.String()),
+    }),
+  })
   .post(
     '/synthesize',
-    async ({ body }) => {
-      const settings = await loadVoiceSettings();
-      assertNoCloudFallback(settings, 'tts');
-      // Elysia body is typed as t.Any() (unvalidated); cast to the shape the
-      // synthesis adapter expects. The adapter validates internally.
-      return { ok: true, data: await synthesizeCloud(body as SynthesisRequest) };
-    },
+    async ({ body }) => ({
+      ok: true,
+      data: await synthesizeCloud(body as SynthesisRequest),
+    }),
     { body: t.Any() },
   );

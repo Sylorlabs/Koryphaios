@@ -103,7 +103,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
-  { name: 'kilocode', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  { name: 'kilocode', baseUrl: 'https://api.kilo.ai/api/gateway', authMode: 'api_key', envKeys: ['KILO_API_KEY'] },
   // Cloud async agent (API key, not a CLI harness)
   {
     name: 'jules',

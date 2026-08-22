@@ -813,6 +813,28 @@ export const MIGRATIONS: Migration[] = [
     `,
     down: `DROP INDEX IF EXISTS idx_notes_project_root;`,
   },
+  {
+    version: '0028',
+    description: 'Persist authoritative desktop workspace navigation',
+    up: `
+      CREATE TABLE IF NOT EXISTS workspace_navigation (
+        id TEXT PRIMARY KEY,
+        workspace_root TEXT,
+        selected_project TEXT,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+    down: `DROP TABLE IF EXISTS workspace_navigation;`,
+  },
+  {
+    version: '0029',
+    description: 'Retain unavailable workspace recovery state across restarts',
+    up: `
+      ALTER TABLE workspace_navigation ADD COLUMN unavailable_workspace TEXT;
+      ALTER TABLE workspace_navigation ADD COLUMN unavailable_project TEXT;
+    `,
+    down: `SELECT 1;`,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

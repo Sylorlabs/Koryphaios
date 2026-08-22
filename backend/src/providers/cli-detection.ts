@@ -11,6 +11,7 @@
 
 import { existsSync } from 'node:fs';
 import { join, delimiter } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import type { ProviderName } from '@koryphaios/shared';
 import {
   detectClaudeCodeLogin,
@@ -31,7 +32,6 @@ import {
   createClineCLIAuthMarker,
   detectKimiCodeCLILogin,
   detectFreebuffCLILogin,
-  detectKiloCLILogin,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
@@ -47,8 +47,7 @@ export interface AgentCliStatus {
     | 'devin'
     | 'cline'
     | 'kimi'
-    | 'freebuff'
-    | 'kilo';
+    | 'freebuff';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -108,6 +107,34 @@ function firstInstalled(binaries: string[]): string | null {
   return null;
 }
 
+const CLI_PROBE_TIMEOUT_MS = 8_000;
+
+function cliVersionArgs(provider: ProviderName): string[] {
+  // Devin uses a subcommand rather than a flag. Everything else that ships a
+  // `--version` flag is probed with it. This is intentionally conservative:
+  // a missing or incompatible flag is treated as a failed probe.
+  return provider === 'devin' ? ['version'] : ['--version'];
+}
+
+/**
+ * Verify the discovered binary is actually executable. A binary on PATH with
+ * local login material is not enough: it may be a shim, a broken install, or
+ * missing runtime dependencies. Running a lightweight `--version`/`version`
+ * probe is the fastest way to prove the CLI can respond.
+ */
+export function probeCliVersion(binary: string, provider: ProviderName): boolean {
+  try {
+    const result = spawnSync(binary, cliVersionArgs(provider), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: CLI_PROBE_TIMEOUT_MS,
+      encoding: 'utf8',
+    });
+    return result.status === 0 && (result.stdout?.trim().length ?? 0) > 0;
+  } catch (err: unknown) {
+    return false;
+  }
+}
+
 /**
  * The single gate for auto-enabling a CLI-backed provider: the CLI binary must be
  * installed and a local credential signal present. A bare env var is intentionally not enough
@@ -117,25 +144,40 @@ function firstInstalled(binaries: string[]): string | null {
 export function canAutoEnable(provider: ProviderName): boolean {
   if (process.env.KORY_DISABLE_CLI_AUTODETECT) return false;
   switch (provider) {
-    case 'claude':
-      return !!whichBinary('claude') && detectClaudeCodeLogin();
-    case 'codex':
+    case 'claude': {
+      const bin = whichBinary('claude');
+      return !!bin && detectClaudeCodeLogin() && probeCliVersion(bin, provider);
+    }
+    case 'codex': {
+      const bin = whichBinary('codex');
       return (
-        !!whichBinary('codex') &&
+        !!bin &&
         (detectCodexCLILogin() ||
-          discoverCliAccounts().some((account) => account.provider === 'codex'))
+          discoverCliAccounts().some((account) => account.provider === 'codex')) &&
+        probeCliVersion(bin, provider)
       );
-    case 'antigravity':
-      return !!whichBinary('agy') && detectAntigravityCLILogin();
-    case 'grok':
+    }
+    case 'antigravity': {
+      const bin = whichBinary('agy');
+      return !!bin && detectAntigravityCLILogin() && probeCliVersion(bin, provider);
+    }
+    case 'grok': {
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
-      return !!whichBinary('grok') && detectGrokCLILogin();
-    case 'cursor':
-      return !!whichBinary('cursor-agent') && detectCursorCLILogin();
-    case 'devin':
-      return !!whichBinary('devin') && detectDevinCLILogin();
-    case 'cline':
-      return !!whichBinary('cline') && detectClineCLILogin();
+      const bin = whichBinary('grok');
+      return !!bin && detectGrokCLILogin() && probeCliVersion(bin, provider);
+    }
+    case 'cursor': {
+      const bin = whichBinary('cursor-agent');
+      return !!bin && detectCursorCLILogin() && probeCliVersion(bin, provider);
+    }
+    case 'devin': {
+      const bin = whichBinary('devin');
+      return !!bin && detectDevinCLILogin() && probeCliVersion(bin, provider);
+    }
+    case 'cline': {
+      const bin = whichBinary('cline');
+      return !!bin && detectClineCLILogin() && probeCliVersion(bin, provider);
+    }
     case 'kimicode':
       // The kimi CLI owns its own OAuth session. Koryphaios reads the stored
       // token directly, so the binary is NOT required — a ~/.kimi session
@@ -150,11 +192,6 @@ export function canAutoEnable(provider: ProviderName): boolean {
     case 'freebuff':
       // Detection remains informational, but the undocumented SDK/backend
       // adapter is fail-closed and must never be auto-enabled.
-      return false;
-    case 'kilocode':
-      // Detection is informational only. Koryphaios cannot currently enforce
-      // Kilo's tool permissions or workspace sandbox, so it must never be
-      // auto-enabled even when the binary and login are present.
       return false;
     default:
       return false;
@@ -199,8 +236,6 @@ export function cliAutoEnableCreds(
           : createKimiCodeAuthMarker(),
       };
     }
-    case 'kilocode':
-      return null;
     default:
       return null;
   }
@@ -349,22 +384,7 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 
-  // ── Kilo Code → `kilocode` provider. The official `kilo` CLI (a fork of
-  // OpenCode) owns its own auth at ~/.local/share/kilo/auth.json. Koryphaios
-  // drives it as a headless harness (kilo run --format json). ──
-  const kiloLogin = detectKiloCLILogin();
-  const kilo = mk('kilo', 'Kilo Code CLI', ['kilo'], 'kilocode', {
-    loggedIn: kiloLogin,
-    authSource: kiloLogin ? '~/.local/share/kilo/auth.json' : null,
-    autoEnabled: canAutoEnable('kilocode'),
-    workingNote:
-      'Kilo Code CLI detected, but Koryphaios cannot yet enforce its tool permissions or workspace sandbox. Chat is unavailable and no Kilo process will be started.',
-    loggedOutNote:
-      'No Kilo login material detected — run "kilo" and use /connect to sign in. Execution remains unavailable in this build.',
-    docsUrl: 'https://kilo.ai/cli',
-  });
-
-  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff, kilo];
+  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff];
 }
 
 function mk(

@@ -55,6 +55,7 @@ const GROK_STREAM_TIMEOUT_MS = 300_000;
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let modelsFetchInProgress = false;
+let modelRefreshPromise: Promise<void> | null = null;
 
 export function grokCapabilityBoundary(profile: StreamRequest['capabilityProfile']) {
   const researchOnly = profile === 'research-only';
@@ -96,6 +97,20 @@ export class GrokBuildProvider implements Provider {
       : cliCachedModels && cliCachedModels.length > 0
         ? cliCachedModels
         : [];
+  }
+
+  /**
+   * Refresh the model catalog before provider status is returned. Grok's model
+   * names, context limits, and reasoning support belong to the installed CLI;
+   * returning before this promise settles is what made the picker intermittently
+   * lose its reasoning controls.
+   */
+  refreshModels(forceRefresh = false): Promise<void> {
+    if (forceRefresh) {
+      cachedModels = null;
+      cachedModelsAt = 0;
+    }
+    return refreshModelsInBackground();
   }
 
   private resolveCliModel(modelId: string): string {
@@ -484,22 +499,23 @@ export class GrokBuildProvider implements Provider {
   }
 }
 
-function refreshModelsInBackground(): void {
-  if (modelsFetchInProgress) return;
+function refreshModelsInBackground(): Promise<void> {
+  if (modelsFetchInProgress) return modelRefreshPromise ?? Promise.resolve();
   const bin = whichBinary('grok');
-  if (!bin) return;
+  if (!bin) return Promise.resolve();
 
   modelsFetchInProgress = true;
-  Promise.all([fetchGrokModels(bin), probeGrokReasoningLevels(bin)])
+  modelRefreshPromise = Promise.all([fetchGrokModels(bin), probeGrokReasoningLevels(bin)])
     .then(([models, reasoningLevels]) => {
       if (models.length > 0) {
         // The CLI's own per-model metadata cache (~/.grok/models_cache.json)
         // is authoritative: real context_window and, critically, whether the
         // model ACTUALLY accepts --reasoning-effort. The flag exists globally
         // in the CLI parser even for models that don't support it, so the
-        // probed levels are only attached when the cache says so.
+        // Cache-provided effort levels are preferred; the CLI probe is only a
+        // fallback for older cache formats that expose the boolean alone.
         const cliMeta = readGrokCliModelsCache();
-        cachedModels = models.map((m) => {
+        const refreshedModels: ModelDef[] = models.map((m) => {
           const key = m.apiModelId ?? m.id;
           const meta = cliMeta?.get(key);
           if (!meta) return m;
@@ -516,14 +532,20 @@ function refreshModelsInBackground(): void {
               : {}),
             canReason: meta.supportsReasoningEffort,
             reasoningLevels:
-              meta.supportsReasoningEffort && reasoningLevels?.length ? reasoningLevels : undefined,
+              meta.supportsReasoningEffort &&
+              (meta.reasoningLevels?.length || reasoningLevels?.length)
+                ? meta.reasoningLevels?.length
+                  ? meta.reasoningLevels
+                  : (reasoningLevels ?? undefined)
+                : undefined,
           };
         });
+        cachedModels = refreshedModels;
         cachedModelsAt = Date.now();
         providerLog.debug(
           {
             provider: 'grok',
-            models: cachedModels.map((m) => m.apiModelId ?? m.id),
+            models: refreshedModels.map((m) => m.apiModelId ?? m.id),
             reasoningLevels,
             cliMetaFound: !!cliMeta,
           },
@@ -539,7 +561,9 @@ function refreshModelsInBackground(): void {
     })
     .finally(() => {
       modelsFetchInProgress = false;
+      modelRefreshPromise = null;
     });
+  return modelRefreshPromise;
 }
 
 interface GrokCliModelMeta {
@@ -547,6 +571,7 @@ interface GrokCliModelMeta {
   contextWindow?: number;
   maxOutputTokens?: number;
   supportsReasoningEffort: boolean;
+  reasoningLevels?: string[];
   hidden: boolean;
 }
 
@@ -574,6 +599,21 @@ export function parseGrokCliModelsCache(raw: string): Map<string, GrokCliModelMe
     const out = new Map<string, GrokCliModelMeta>();
     for (const [id, entry] of Object.entries(parsed.models)) {
       const info = entry?.info ?? {};
+      const reasoningLevels = Array.isArray(info.reasoning_efforts)
+        ? info.reasoning_efforts
+            .map((effort) => {
+              if (typeof effort === 'string') return effort;
+              if (!effort || typeof effort !== 'object') return null;
+              const value = (effort as { value?: unknown }).value;
+              const idValue = (effort as { id?: unknown }).id;
+              return typeof value === 'string'
+                ? value
+                : typeof idValue === 'string'
+                  ? idValue
+                  : null;
+            })
+            .filter((level): level is string => !!level?.trim())
+        : [];
       out.set(id, {
         name: typeof info.name === 'string' ? info.name : undefined,
         contextWindow:
@@ -584,7 +624,9 @@ export function parseGrokCliModelsCache(raw: string): Map<string, GrokCliModelMe
           typeof info.max_completion_tokens === 'number' && info.max_completion_tokens > 0
             ? info.max_completion_tokens
             : undefined,
-        supportsReasoningEffort: info.supports_reasoning_effort === true,
+        supportsReasoningEffort:
+          info.supports_reasoning_effort === true || reasoningLevels.length > 0,
+        ...(reasoningLevels.length > 0 ? { reasoningLevels } : {}),
         hidden: info.hidden === true,
       });
     }
@@ -610,7 +652,7 @@ function modelsFromGrokCliCache(cliMeta: Map<string, GrokCliModelMeta> | null): 
       ...(meta.contextWindow ? { contextWindow: meta.contextWindow, contextVerified: true } : {}),
       ...(meta.maxOutputTokens ? { maxOutputTokens: meta.maxOutputTokens } : {}),
       canReason: meta.supportsReasoningEffort,
-      reasoningLevels: undefined,
+      reasoningLevels: meta.reasoningLevels?.length ? meta.reasoningLevels : undefined,
     });
   }
   return models;

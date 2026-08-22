@@ -426,6 +426,20 @@ export const processHealthChecks = sqliteTable('process_health_checks', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/**
+ * Desktop navigation is durable backend state, not a browser cache.  The
+ * selected paths are revalidated against the filesystem whenever they are
+ * read; workspace children are never persisted here.
+ */
+export const workspaceNavigation = sqliteTable('workspace_navigation', {
+  id: text('id').primaryKey(),
+  workspaceRoot: text('workspace_root'),
+  selectedProject: text('selected_project'),
+  unavailableWorkspace: text('unavailable_workspace'),
+  unavailableProject: text('unavailable_project'),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 export const modelSettings = sqliteTable(
   'model_settings',
   {

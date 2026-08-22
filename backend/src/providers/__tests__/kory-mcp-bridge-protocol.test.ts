@@ -116,7 +116,7 @@ describe('Kory MCP bridge — 2026-07-28 protocol (createMcpHandler + Streamable
 
   it('rejects an unknown tool with a thrown ProtocolError', async () => {
     await expect(client.callTool({ name: 'kory__nonexistent', arguments: {} })).rejects.toThrow(
-      'Unknown tool: kory__nonexistent',
+      'Tool kory__nonexistent not found',
     );
     expect(proxyStub.calls).toHaveLength(0);
   });
@@ -125,7 +125,7 @@ describe('Kory MCP bridge — 2026-07-28 protocol (createMcpHandler + Streamable
     // kory__delete_file exists in KORY_TOOLS but not in TEST_TOOLS.
     await expect(
       client.callTool({ name: 'kory__delete_file', arguments: { path: 'x' } }),
-    ).rejects.toThrow('Unknown tool: kory__delete_file');
+    ).rejects.toThrow('Tool kory__delete_file not found');
     expect(proxyStub.calls).toHaveLength(0);
   });
 });
