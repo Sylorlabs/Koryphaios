@@ -390,8 +390,8 @@
     }
   });
 
-  function showTokenInput(_name: string, _caps: ReturnType<typeof getProviderCaps>): boolean {
-    return false;
+  function showTokenInput(_name: string, caps: ReturnType<typeof getProviderCaps>): boolean {
+    return caps.supportsAuthToken;
   }
 
   function refreshProviderSection() {
@@ -451,14 +451,14 @@
   const PROVIDER_CATEGORIES: Array<{ id: ProviderCategory; label: string }> = [
     { id: 'all', label: 'All' },
     { id: 'ready', label: 'Configured' },
-    { id: 'auth', label: 'ChatGPT subscription' },
+    { id: 'auth', label: 'Auth' },
     { id: 'subscriptions', label: 'CLI subscriptions' },
     { id: 'api', label: 'API' },
     { id: 'local', label: 'Local' },
     { id: 'custom', label: 'Custom' },
   ];
   const LOCAL_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
-  const CHATGPT_AUTH_PROVIDER_KEYS = new Set(['codex-auth']);
+  const AUTH_PROVIDER_KEYS = new Set(['codex-auth']);
   const CUSTOM_PROVIDER_KEYS = new Set(['custom']);
   // Categorization is based on the provider being used, not incidental CLI
   // detection. For example, installing `claude` must not reclassify the
@@ -482,7 +482,7 @@
   }): Exclude<ProviderCategory, 'all' | 'ready'> => {
     if (LOCAL_PROVIDER_KEYS.has(provider.key)) return 'local';
     if (CUSTOM_PROVIDER_KEYS.has(provider.key)) return 'custom';
-    if (CHATGPT_AUTH_PROVIDER_KEYS.has(provider.key)) return 'auth';
+    if (AUTH_PROVIDER_KEYS.has(provider.key)) return 'auth';
     if (CLI_SUBSCRIPTION_PROVIDER_KEYS.has(provider.key)) {
       return 'subscriptions';
     }
@@ -527,7 +527,7 @@
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
-    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey)) return 'ChatGPT subscription';
+    if (AUTH_PROVIDER_KEYS.has(providerKey)) return 'OpenAI Codex';
     if (deployment === 'cloud') return 'Cloud agent';
     if (deployment === 'local')
       return isCliExecutionProvider(providerKey) ? 'CLI' : 'Local endpoint';
@@ -538,8 +538,8 @@
     deployment: 'cloud' | 'api' | 'local' | 'hybrid' | undefined | null,
     providerKey: string,
   ): string | null {
-    if (CHATGPT_AUTH_PROVIDER_KEYS.has(providerKey))
-      return 'ChatGPT subscription sign-in · managed by local Codex app-server';
+    if (AUTH_PROVIDER_KEYS.has(providerKey))
+      return 'OpenAI Codex sign-in · managed by local Codex app-server';
     if (deployment === 'cloud') {
       return 'Cloud agent · sync via git pull / gh pr checkout';
     }
@@ -925,10 +925,10 @@
 
     <div class="flex min-h-0 flex-1 overflow-hidden">
       <aside
-        class="flex w-64 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)]"
+        class="flex w-20 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)] sm:w-64"
         aria-label="Settings navigation"
       >
-        <div class="border-b border-[var(--color-border)] p-3">
+        <div class="hidden border-b border-[var(--color-border)] p-3 sm:block">
           <label for="settings-search" class="sr-only">Search settings</label>
           <div class="relative">
             <Search
@@ -962,7 +962,7 @@
             {#if groupEntries.length}
               <div class="mb-3">
                 <div
-                  class="px-2 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+                  class="hidden px-2 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)] sm:block"
                 >
                   {group}
                 </div>
@@ -971,7 +971,7 @@
                     {@const Icon = settingsIcons[entry.id]}
                     <button
                       type="button"
-                      class="settings-tab flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/65 {activeTab ===
+                      class="settings-tab flex min-h-11 w-full items-center justify-center gap-3 rounded-xl px-2.5 py-2 text-left focus-visible:outline-none sm:justify-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/65 {activeTab ===
                       entry.id
                         ? 'settings-tab-active'
                         : ''}"
@@ -983,7 +983,7 @@
                         class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)]"
                         aria-hidden="true"><Icon size={14} /></span
                       >
-                      <span class="min-w-0 flex-1">
+                      <span class="hidden min-w-0 flex-1 sm:block">
                         <span class="block truncate text-xs font-medium">{entry.label}</span>
                         <span
                           class="mt-0.5 block truncate text-[9px] text-[var(--color-text-muted)]"
@@ -1375,7 +1375,7 @@
             </div>
           {:else}
             <div
-              class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start"
+              class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
               {#each filteredProviderList as prov (prov.key)}
                 {@const status = getProviderStatus(prov.key)}
@@ -1412,15 +1412,15 @@
                           {:else if status?.connectionState === 'verified'}
                             {@const selectedCount = status.models?.length ?? 0}
                             {@const availableCount = status.allAvailableModels?.length ?? 0}
-                            Verified this run{availableCount > 0
+                            Connected{availableCount > 0
                               ? ` · ${selectedCount > 0 ? selectedCount : '—'}/${availableCount} models enabled`
                               : ''}
                           {:else if status?.connectionState === 'failed'}
-                            Verification failed
+                            Connection failed
                           {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
                             Catalog access detected · inference unverified
                           {:else if status?.credentialDetected ?? status?.authenticated}
-                            Credential or login detected · access unverified
+                            Found on system · not yet connected
                           {:else if deployment}
                             {deployment}
                           {:else}
@@ -1433,15 +1433,15 @@
                       {#if status?.connectionState === 'verified'}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-[9px] font-bold"
-                          title="A provider probe succeeded during this backend run"
+                          title="Connected to Koryphaios and working"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
-                          Verified
+                          Connected
                         </div>
                       {:else if status?.connectionState === 'failed'}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-[9px] font-bold"
-                          title={status.verificationError ?? 'The last provider probe failed'}
+                          title={status.verificationError ?? 'The last connection attempt failed'}
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
                           Failed
@@ -1449,7 +1449,7 @@
                       {:else if status?.credentialDetected ?? status?.authenticated}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-[9px] font-bold"
-                          title="Local credential or login material was detected; provider access has not been verified during this backend run"
+                          title="Found on this system but not yet connected to Koryphaios"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
                           Detected
@@ -1488,11 +1488,11 @@
                           class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 px-3 py-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
                         >
                           {#if status?.connectionState === 'verified'}
-                            Provider probe succeeded during this backend run{status.verificationScope
+                            Connected to Koryphaios and working{status.verificationScope
                               ? ` · ${status.verificationScope} scope`
                               : ''}.
                           {:else if status?.connectionState === 'failed'}
-                            Provider verification failed{status.verificationError
+                            Connection failed{status.verificationError
                               ? `: ${status.verificationError}`
                               : '.'}
                           {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
@@ -1500,7 +1500,7 @@
                             inference permission, model entitlement, quota, and request success are
                             still unverified.
                           {:else}
-                            Local configuration was detected. This does not prove the credential,
+                            Found on this system but not yet connected. This does not prove the credential,
                             account, entitlement, quota, or provider endpoint is usable.
                           {/if}
                         </div>
@@ -2676,8 +2676,9 @@
                   CLI subscriptions
                 </h3>
                 <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                  Local profiles were detected; authentication and plan remain unverified while
-                  usage history is indexed.
+                  CLI profiles are being checked while usage history is indexed. Connected means a
+                  provider probe succeeded; a detected profile has not been connected in Koryphaios
+                  yet.
                 </p>
               </div>
               <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -2695,7 +2696,12 @@
                         {account.email || account.label}
                       </div>
                       <div class="text-[10px] text-[var(--color-text-muted)]">
-                        {account.plan ? `${account.plan.toUpperCase()} plan · ` : ''}Indexing usage…
+                        {account.plan ? `${account.plan.toUpperCase()} plan · ` : ''}{account.connectionState ===
+                        'connected'
+                          ? 'Connected · indexing usage…'
+                          : account.connectionState === 'failed'
+                            ? 'Connection failed · indexing usage…'
+                            : 'Detected · not connected · indexing usage…'}
                       </div>
                     </div>
                     <RefreshCw size={14} class="animate-spin text-[var(--color-accent)]" />
@@ -3221,35 +3227,46 @@
             />
 
             <!-- Max context tokens with enable/disable toggle -->
-            <div class="flex items-center justify-between gap-4">
-              <div class="min-w-0 flex-1">
-                <SettingsSwitch
-                  checked={notesStore.settings.maxContextTokensEnabled ?? true}
-                  label="Max context tokens"
-                  description={(notesStore.settings.maxContextTokensEnabled ?? true)
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <div class="text-sm font-medium" style="color: var(--color-text-primary);">
+                  Max context tokens
+                </div>
+                <div class="text-xs mt-1" style="color: var(--color-text-muted);">
+                  {(notesStore.settings.maxContextTokensEnabled ?? true)
                     ? 'Use a custom 100–100,000 token limit for explicitly selected notes'
                     : 'Custom limit off; the 100,000-token safety ceiling still applies'}
-                  onchange={() =>
-                    void notesStore.updateSettings({
-                      maxContextTokensEnabled: !(
-                        notesStore.settings.maxContextTokensEnabled ?? true
-                      ),
-                    })}
-                  flat
-                />
+                </div>
               </div>
-              {#if notesStore.settings.maxContextTokensEnabled ?? true}
-                <div class="w-52 shrink-0">
-                  <NumberStepper
-                    value={notesStore.settings.maxContextTokens}
-                    min={100}
-                    max={100000}
-                    step={100}
-                    label="Maximum note context tokens"
-                    onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+              <div class="flex items-start gap-4">
+                {#if notesStore.settings.maxContextTokensEnabled ?? true}
+                  <div class="w-52 shrink-0">
+                    <NumberStepper
+                      value={notesStore.settings.maxContextTokens}
+                      min={100}
+                      max={100000}
+                      step={100}
+                      label="Maximum note context tokens"
+                      onchange={(value) => notesStore.updateSettings({ maxContextTokens: value })}
+                    />
+                  </div>
+                {/if}
+                <div class="shrink-0">
+                  <SettingsSwitch
+                    checked={notesStore.settings.maxContextTokensEnabled ?? true}
+                    label="Max context tokens"
+                    description=""
+                    onchange={() =>
+                      void notesStore.updateSettings({
+                        maxContextTokensEnabled: !(
+                          notesStore.settings.maxContextTokensEnabled ?? true
+                        ),
+                      })}
+                    minimal
+                    flat
                   />
                 </div>
-              {/if}
+              </div>
             </div>
 
             <div class="flex items-center justify-between gap-4">

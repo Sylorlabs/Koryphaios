@@ -13,6 +13,7 @@
   import Paperclip from 'lucide-svelte/icons/paperclip';
   import Clipboard from 'lucide-svelte/icons/clipboard';
   import ClipboardList from 'lucide-svelte/icons/clipboard-list';
+  import Mic from 'lucide-svelte/icons/mic';
   import X from 'lucide-svelte/icons/x';
   import Check from 'lucide-svelte/icons/check';
   import Search from 'lucide-svelte/icons/search';
@@ -143,6 +144,9 @@
   let previewDialogRef = $state<HTMLDivElement>();
   let previewTriggerRef: HTMLButtonElement | null = null;
   let isReadingClipboard = $state(false);
+  let isRecording = $state(false);
+  let isTranscribing = $state(false);
+  let activeRecorder: MediaRecorder | null = null;
   const pendingAttachmentReads = new Set<Promise<void>>();
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
@@ -452,6 +456,7 @@
         try {
           const response = await apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
             method: 'POST',
+            headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ model, provider }),
           });
           const result = (await response.json()) as {
@@ -485,11 +490,21 @@
   $effect(() => {
     const sid = sessionStore.activeSessionId;
     const model = selectedModel;
+    if (!sid) return;
+    // No model selected — clear stale context metadata from the previous chat
+    // instead of continuing to show the previous model's window.
+    if (!model) {
+      const key = `${sid}:none`;
+      if (key === lastContextPreviewKey) return;
+      lastContextPreviewKey = key;
+      wsStore.setManagerContextWindow(sid, undefined);
+      return;
+    }
     // Track catalog changes so a late provider discovery can replace an
     // initially unknown window with verified metadata.
     const targetWindow = availableModels.find((m) => m.value === model)?.contextWindow ?? 0;
-    const key = sid && model ? `${sid}:${model}:${targetWindow}` : '';
-    if (!key || key === lastContextPreviewKey) return;
+    const key = `${sid}:${model}:${targetWindow}`;
+    if (key === lastContextPreviewKey) return;
     lastContextPreviewKey = key;
     previewSelectedModelContext(model);
   });
@@ -752,6 +767,81 @@
     inputRef.style.height = Math.max(minHeightPx, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
 
+  function audioMimeType(): string | undefined {
+    return ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find((type) =>
+      MediaRecorder.isTypeSupported(type),
+    );
+  }
+
+  function blobBase64(blob: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read the recording'));
+      reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '');
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function transcribeRecording(blob: Blob, language: string) {
+    isTranscribing = true;
+    try {
+      const audioBase64 = await blobBase64(blob);
+      const response = await apiFetch(apiUrl('/api/voice/transcribe'), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ audioBase64, mimeType: blob.type, language }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.data?.text)
+        throw new Error(result.error || 'Transcription failed');
+      value = `${value}${value && !value.endsWith(' ') ? ' ' : ''}${result.data.text}`;
+      requestAnimationFrame(() => {
+        autoResize();
+        inputRef?.focus();
+      });
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Transcription failed');
+    } finally {
+      isTranscribing = false;
+    }
+  }
+
+  async function toggleRecording() {
+    if (activeRecorder && isRecording) {
+      activeRecorder.stop();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toastStore.error('Microphone recording is unavailable in this runtime');
+      return;
+    }
+    try {
+      const settingsResponse = await apiFetch(apiUrl('/api/voice/settings'));
+      const settingsResult = await settingsResponse.json();
+      if (!settingsResponse.ok || !settingsResult.data?.voiceModeEnabled)
+        throw new Error('Enable the composer microphone in Voice settings first');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: BlobPart[] = [];
+      const type = audioMimeType();
+      const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      activeRecorder = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunks.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
+        activeRecorder = null;
+        isRecording = false;
+        if (blob.size) void transcribeRecording(blob, settingsResult.data.input.language || 'en');
+      };
+      recorder.start();
+      isRecording = true;
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Could not access the microphone');
+    }
+  }
+
   onMount(() => {
     if (typeof window === 'undefined') return;
 
@@ -793,6 +883,8 @@
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('keydown', handleGlobalEsc);
+      if (activeRecorder?.state !== 'inactive') activeRecorder?.stop();
+      activeRecorder?.stream.getTracks().forEach((track) => track.stop());
       nowClock.unsubscribe();
     };
   });
@@ -1826,6 +1918,17 @@
               title="Paste image from clipboard (Ctrl+Shift+V)"
             >
               <Clipboard size={16} />
+            </button>
+            <button
+              type="button"
+              class="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 {isRecording ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-error)_14%,transparent)]' : 'text-[var(--color-text-muted)]'}"
+              onclick={() => void toggleRecording()}
+              disabled={disabled || !!configurationWarning || isTranscribing}
+              aria-pressed={isRecording}
+              aria-label={isTranscribing ? 'Transcribing recording' : isRecording ? 'Stop recording' : 'Record voice prompt'}
+              title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop and transcribe' : 'Record voice prompt'}
+            >
+              <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
             </button>
           </div>
         </div>

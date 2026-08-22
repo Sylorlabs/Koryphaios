@@ -8,6 +8,7 @@
     flat?: boolean;
     large?: boolean;
     disabled?: boolean;
+    minimal?: boolean;
   }
 
   let {
@@ -19,6 +20,7 @@
     flat = false,
     large = false,
     disabled = false,
+    minimal = false,
   }: Props = $props();
 </script>
 
@@ -29,7 +31,7 @@
   aria-label={label}
   {disabled}
   onclick={onchange}
-  class="group flex w-full items-start justify-between gap-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {flat
+  class="group flex w-full items-start {minimal ? 'justify-end' : 'justify-between'} gap-4 text-left transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-55 {flat
     ? 'py-3'
     : `rounded-xl border ${compact ? 'p-3' : 'p-4'}`}"
   style="border-color: {flat
@@ -42,12 +44,14 @@
       ? 'color-mix(in srgb, var(--color-accent) 7%, var(--color-surface-2))'
       : 'var(--color-surface-2)'};"
 >
-  <span class="min-w-0">
-    <span class="block text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
-    <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]"
-      >{description}</span
-    >
-  </span>
+  {#if !minimal}
+    <span class="min-w-0">
+      <span class="block text-sm font-medium text-[var(--color-text-primary)]">{label}</span>
+      <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]"
+        >{description}</span
+      >
+    </span>
+  {/if}
   <span
     class="relative mt-0.5 inline-flex shrink-0 items-center rounded-full border transition-all duration-200 {large
       ? 'h-8 w-14'
