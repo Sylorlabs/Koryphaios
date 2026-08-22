@@ -1,12 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
+import {
+  E2E_BACKEND_PORT as backendPort,
+  E2E_BACKEND_URL as backendUrl,
+  E2E_FRONTEND_ORIGIN,
+  E2E_FRONTEND_PORT as frontendPort,
+} from './e2e/helpers/urls';
 
-const backendPort = 3011;
-const frontendPort = 5174;
-const backendUrl = `http://127.0.0.1:${backendPort}`;
-const frontendOrigins = [
-  `http://127.0.0.1:${frontendPort}`,
-  `http://localhost:${frontendPort}`,
-].join(',');
+const frontendOrigins = [E2E_FRONTEND_ORIGIN, `http://localhost:${frontendPort}`].join(',');
 const dataDirectory = `/tmp/koryphaios-playwright-${process.pid}`;
 const testKmsPassphrase = 'koryphaios-e2e-isolated-local-kms-v1';
 
@@ -19,7 +19,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
-    baseURL: `http://127.0.0.1:${frontendPort}`,
+    baseURL: E2E_FRONTEND_ORIGIN,
     trace: 'retain-on-failure',
     ...devices['Desktop Chrome'],
   },
@@ -36,7 +36,7 @@ export default defineConfig({
     },
     {
       command: `KORYPHAIOS_PORT=${backendPort} bun run --cwd frontend dev --host 127.0.0.1 --port ${frontendPort}`,
-      url: `http://127.0.0.1:${frontendPort}`,
+      url: E2E_FRONTEND_ORIGIN,
       reuseExistingServer: false,
       timeout: 120_000,
     },

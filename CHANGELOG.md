@@ -4,7 +4,7 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
-## [0.2.0] - 2026-08-06
+## [0.2.0] - 2026-08-22
 
 ### ✨ Features
 
@@ -16,6 +16,9 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 - **Appearance settings**: a new frontend settings panel for theme and appearance preferences.
 - **Context-window tracker**: a frontend utility for tracking and displaying context-window usage.
 - **Agent skills**: six new bundled skills — `imagegen`, `openai-docs`, `plugin-creator`, `review-agent`, `skill-creator`, and `skill-installer`.
+- **MCP v2 protocol**: both stdio servers use `@modelcontextprotocol/server` v2 with the 2026-07-28 protocol and legacy negotiation fallback.
+- **Image studio**: OpenAI image generation includes canvas, quality, format, transparency, visual-effect presets, animated previews, and downloads.
+- **Voice workflows**: composer microphone recording, OpenAI transcription and speech synthesis, system voice playback, reply read-aloud controls, and verified Moonshine model downloads.
 
 ### 🐛 Fixes
 
@@ -24,6 +27,9 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 - Fixed feedback delivery error handling.
 - Fixed macOS startup window and public feedback path.
 - Fixed AppImage extraction validation and cross-platform install release paths.
+- Restored native macOS cut, copy, paste, select-all, undo, and redo behavior with predefined Edit menu actions.
+- Replaced forced macOS startup fullscreen with a resizable maximized window and added cross-platform edge resize handles.
+- Restored auth-token inputs for providers that advertise token authentication and expanded branded provider icon coverage.
 - Enforced saved permissions across internal tool paths and CLI bridge approvals.
 
 ### 🚀 Improvements

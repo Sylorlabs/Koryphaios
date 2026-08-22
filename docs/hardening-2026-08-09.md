@@ -112,6 +112,22 @@ does not report clean until the exact queued revision is durable. Context
 injection distinguishes pinned content from automatic inclusion and records
 per-source omissions/errors rather than silently exceeding the budget.
 
+### Workspace navigation
+
+Desktop workspace navigation stores only the canonical workspace root and
+selected project in the backend database. Folder listings are never restored
+from browser storage or a native cache: every snapshot enumerates the current
+immediate directories on disk, and the visible list is replaced on focus,
+visibility changes, and the bounded foreground refresh interval. Project-
+scoped requests retain the unavailable path long enough to fail closed while
+the recovery UI is shown; they never fall back to the backend launch directory.
+
+Moved or deleted roots and projects clear the active selection and retain a
+durable recovery notice across backend restart until the user opens a current
+location or dismisses it. Session history remains backend-owned, while the
+retired browser project, workspace, recent-project, and last-session keys are
+neither read nor written.
+
 ### Settings and skills
 
 Settings displays only implemented controls and uses Koryphaios-native selects,
@@ -136,6 +152,8 @@ creation uses an atomic no-replace publication boundary across processes. See
 - `0026` retains message parent lineage and the active session message while
   separating provider transcript invalidation from the active context revision.
 - `0027` adds project ownership and optimistic revision numbers to Notes.
+- `0028` stores the canonical desktop workspace root and selected project;
+  `0029` retains moved/deleted recovery state without persisting folder lists.
 - Process-supervisor startup performs additive, idempotent migration for
   provenance, supervision, background ownership, terminal outcomes, bounded
   evidence, and command replayability. Legacy rows remain explicitly unknown;
