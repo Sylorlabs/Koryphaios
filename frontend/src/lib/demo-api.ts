@@ -733,7 +733,45 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
           headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         });
   }
-  if (path === '/api/workspace/register') return ok({ path: '/demo/starter-project', trial: true });
+  if (path === '/api/workspace/state') {
+    return ok({
+      workspaceRoot: '/demo',
+      selectedProject: '/demo/starter-project',
+      projects: [
+        { path: '/demo/starter-project', name: 'starter-project', modifiedAt: 0 },
+        { path: '/demo/analytics-dashboard', name: 'analytics-dashboard', modifiedAt: 0 },
+      ],
+      revision: 'demo-workspace-v1',
+      unavailableWorkspace: null,
+      unavailableProject: null,
+    });
+  }
+  if (path === '/api/workspace/open' || path === '/api/workspace/select') {
+    return ok({
+      workspaceRoot: '/demo',
+      selectedProject: '/demo/starter-project',
+      projects: [
+        { path: '/demo/starter-project', name: 'starter-project', modifiedAt: 0 },
+        { path: '/demo/analytics-dashboard', name: 'analytics-dashboard', modifiedAt: 0 },
+      ],
+      revision: 'demo-workspace-v1',
+      unavailableWorkspace: null,
+      unavailableProject: null,
+    });
+  }
+  if (path === '/api/workspace/deselect' || path === '/api/workspace/acknowledge-unavailable') {
+    return ok({
+      workspaceRoot: '/demo',
+      selectedProject: null,
+      projects: [
+        { path: '/demo/starter-project', name: 'starter-project', modifiedAt: 0 },
+        { path: '/demo/analytics-dashboard', name: 'analytics-dashboard', modifiedAt: 0 },
+      ],
+      revision: 'demo-workspace-v1',
+      unavailableWorkspace: null,
+      unavailableProject: null,
+    });
+  }
 
   // Virtual Git review. Changes are real state transitions inside this tab:
   // inspect, stage, restore, commit, and branch operations all mutate only the
@@ -924,8 +962,6 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   if (path.startsWith('/api/collab/')) {
     return json({ ok: false, error: 'Team hosting is not available in the demo' });
   }
-
-  if (path === '/api/workspace/home') return ok('/demo/starter-project');
 
   // Default: fast, well-formed failure — callers show a toast at worst,
   // and nothing ever hangs waiting on a dead backend.

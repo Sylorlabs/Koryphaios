@@ -1,30 +1,33 @@
-const PROJECT_KEY = 'koryphaios-current-project';
-const PROJECTS_KEY = 'koryphaios-open-projects';
-const WORKSPACE_KEY = 'koryphaios-workspace-root';
-const SCOPE_KEY = 'koryphaios-session-scope';
-
 export type SessionScope = 'project' | 'all';
 
-function readString(key: string): string | null {
-  try { return typeof localStorage === 'undefined' ? null : localStorage.getItem(key); } catch (err: unknown) { console.debug('Failed to read localStorage key:', err instanceof Error ? err.message : String(err)); return null; }
-}
-function readList(key: string): string[] {
-  try { return JSON.parse(readString(key) || '[]') as string[]; } catch (err: unknown) { console.debug('Failed to parse localStorage list:', err instanceof Error ? err.message : String(err)); return []; }
-}
-function persist(key: string, value: string | string[] | null) {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, Array.isArray(value) ? JSON.stringify(value) : value);
-  } catch (err: unknown) { /* private mode */ console.debug('Failed to persist to localStorage:', err instanceof Error ? err.message : String(err)); }
+export interface WorkspaceProjectEntry {
+  path: string;
+  name: string;
+  modifiedAt: number;
 }
 
-const initialCurrentPath = readString(PROJECT_KEY);
-const initialOpenProjects = readList(PROJECTS_KEY);
-let currentPath = $state<string | null>(initialCurrentPath);
-let openProjects = $state<string[]>(initialCurrentPath && !initialOpenProjects.includes(initialCurrentPath) ? [initialCurrentPath, ...initialOpenProjects] : initialOpenProjects);
-let workspaceRoot = $state<string | null>(readString(WORKSPACE_KEY));
-let scope = $state<SessionScope>(readString(SCOPE_KEY) === 'all' ? 'all' : 'project');
+export interface WorkspaceNavigationSnapshot {
+  workspaceRoot: string | null;
+  selectedProject: string | null;
+  projects: WorkspaceProjectEntry[];
+  revision: string;
+  unavailableWorkspace: string | null;
+  unavailableProject: string | null;
+}
+
+export interface WorkspaceReconciliation {
+  projectBecameUnavailable: string | null;
+  workspaceBecameUnavailable: string | null;
+  changed: boolean;
+}
+
+let currentPath = $state<string | null>(null);
+let openProjects = $state<string[]>([]);
+let workspaceProjects = $state<WorkspaceProjectEntry[]>([]);
+let workspaceRoot = $state<string | null>(null);
+let unavailablePath = $state<string | null>(null);
+let revision = $state('');
+let scope = $state<SessionScope>('project');
 
 export function projectDisplayName(path: string | null | undefined): string {
   if (!path) return '';
@@ -32,45 +35,110 @@ export function projectDisplayName(path: string | null | undefined): string {
   return parts[parts.length - 1] || path;
 }
 
+function cleanPath(path: string | null | undefined): string | null {
+  return path?.trim() || null;
+}
+
+function uniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+}
+
 export const projectStore = {
-  get currentPath() { return currentPath; },
-  get openProjects() { return openProjects; },
-  get workspaceRoot() { return workspaceRoot; },
-  get scope(): SessionScope { return currentPath ? scope : 'all'; },
-  get displayName() { return projectDisplayName(currentPath); },
-  setProject(path: string | null) {
-    currentPath = path?.trim() || null;
-    persist(PROJECT_KEY, currentPath);
-    if (currentPath) {
-      this.addProject(currentPath);
-      // Scope is a sticky user toggle — never auto-flip it here. Switching
-      // chats calls setProject(session.workingDirectory), so forcing 'project'
-      // would stomp a deliberate 'All' choice on every chat hop. The toggle
-      // (setScope) is the only thing that changes scope.
-    }
+  get currentPath() {
+    return currentPath;
   },
-  addProject(path: string) {
-    const clean = path.trim();
-    if (!clean) return;
-    openProjects = [clean, ...openProjects.filter((item) => item !== clean)];
-    persist(PROJECTS_KEY, openProjects);
+  /** Path used to keep project-scoped requests fail-closed during recovery. */
+  get requestPath() {
+    return currentPath ?? unavailablePath;
+  },
+  get unavailablePath() {
+    return unavailablePath;
+  },
+  get openProjects() {
+    return openProjects;
+  },
+  get workspaceProjects() {
+    return workspaceProjects;
+  },
+  get workspaceRoot() {
+    return workspaceRoot;
+  },
+  get revision() {
+    return revision;
+  },
+  get scope(): SessionScope {
+    return currentPath ? scope : 'all';
+  },
+  get displayName() {
+    return projectDisplayName(currentPath);
+  },
+  setProject(path: string | null) {
+    const next = cleanPath(path);
+    if (workspaceRoot && next && !openProjects.includes(next)) return false;
+    currentPath = next;
+    unavailablePath = null;
+    if (next && !workspaceRoot) {
+      openProjects = uniquePaths([next]);
+      workspaceProjects = [{ path: next, name: projectDisplayName(next), modifiedAt: Date.now() }];
+    }
+    return true;
   },
   removeProject(path: string) {
     openProjects = openProjects.filter((item) => item !== path);
-    persist(PROJECTS_KEY, openProjects);
-    if (currentPath === path) this.setProject(null);
+    workspaceProjects = workspaceProjects.filter((item) => item.path !== path);
+    if (currentPath === path) currentPath = null;
   },
-  setWorkspace(root: string | null, projects: string[] = []) {
-    workspaceRoot = root?.trim() || null;
-    persist(WORKSPACE_KEY, workspaceRoot);
-    for (const project of projects) this.addProject(project);
-    // Workspaces restore without silently choosing an agent working directory.
-    this.setProject(null);
+  reconcile(snapshot: WorkspaceNavigationSnapshot): WorkspaceReconciliation {
+    const previousRoot = workspaceRoot;
+    const previousProject = currentPath;
+    const previousUnavailablePath = unavailablePath;
+    const previousRevision = revision;
+    const nextProjects = snapshot.projects.map((project) => project.path);
+
+    workspaceRoot = snapshot.workspaceRoot;
+    workspaceProjects = snapshot.projects;
+    openProjects = uniquePaths(nextProjects);
+    currentPath = snapshot.selectedProject;
+    unavailablePath = snapshot.selectedProject
+      ? null
+      : (snapshot.unavailableProject ?? snapshot.unavailableWorkspace);
+    revision = snapshot.revision;
+
+    return {
+      projectBecameUnavailable:
+        snapshot.unavailableProject && snapshot.unavailableProject !== previousUnavailablePath
+          ? snapshot.unavailableProject
+          : null,
+      workspaceBecameUnavailable:
+        snapshot.unavailableWorkspace && snapshot.unavailableWorkspace !== previousUnavailablePath
+          ? snapshot.unavailableWorkspace
+          : null,
+      changed:
+        previousRoot !== workspaceRoot ||
+        previousProject !== currentPath ||
+        snapshot.revision !== previousRevision,
+    };
   },
-  /** Exit workspace mode (e.g. File → Open Folder outside the workspace). */
+  markUnavailable(path: string) {
+    if (currentPath !== path && unavailablePath !== path) return false;
+    currentPath = null;
+    unavailablePath = path;
+    openProjects = openProjects.filter((item) => item !== path);
+    workspaceProjects = workspaceProjects.filter((item) => item.path !== path);
+    return true;
+  },
+  clearUnavailable() {
+    unavailablePath = null;
+  },
   clearWorkspace() {
+    currentPath = null;
+    openProjects = [];
+    workspaceProjects = [];
     workspaceRoot = null;
-    persist(WORKSPACE_KEY, null);
+    unavailablePath = null;
+    revision = '';
   },
-  setScope(next: SessionScope) { scope = next; persist(SCOPE_KEY, next); },
+  setScope(next: SessionScope) {
+    scope = next;
+  },
 };

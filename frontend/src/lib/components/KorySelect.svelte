@@ -18,6 +18,7 @@
     options: KorySelectOption[];
     onchange: (value: string) => unknown | Promise<unknown>;
     label?: string;
+    description?: string;
     placeholder?: string;
     compact?: boolean;
     disabled?: boolean;
@@ -27,6 +28,7 @@
     options,
     onchange,
     label = 'Select option',
+    description,
     placeholder = 'Select…',
     compact = false,
     disabled = false,
@@ -113,6 +115,7 @@
     aria-haspopup="listbox"
     aria-expanded={open}
     aria-controls={open ? listboxId : undefined}
+    aria-describedby={description ? `${listboxId}-description` : undefined}
     aria-activedescendant={open && options[activeIndex]
       ? `${listboxId}-option-${activeIndex}`
       : undefined}
@@ -130,6 +133,14 @@
         : ''}"
     />
   </button>
+  {#if description}
+    <p
+      id={`${listboxId}-description`}
+      class="mt-1.5 text-xs leading-relaxed text-[var(--color-text-muted)]"
+    >
+      {description}
+    </p>
+  {/if}
   {#if open}
     <div
       id={listboxId}

@@ -94,6 +94,20 @@
     antigravity: ['antigravity'],
     jules: ['jules'],
     cursor: ['cursor'],
+    hyperbolic: ['hyperbolic'],
+    portkey: ['portkey'],
+    luma: ['luma'],
+    fal: ['fal'],
+    elevenlabs: ['elevenlabs'],
+    deepgram: ['deepgram'],
+    gladia: ['gladia'],
+    assemblyai: ['assemblyai'],
+    lmnt: ['lmnt'],
+    modelscope: ['modelscope'],
+    inference: ['inference'],
+    submodel: ['submodel'],
+    synthetic: ['synthetic'],
+    moark: ['moark'],
   };
 
   // All monochrome (currentColor) SVGs render black inside an <img> tag
@@ -310,7 +324,7 @@
     }}
   />
 {:else}
-  <div class={`provider-icon-placeholder ${className}`} style="width: {size}px; height: {size}px;">
+  <div class={`provider-icon-placeholder ${className}`} style="width: {size}px; height: {size}px;" role="img" aria-label={`${provider} logo`}>
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" fill="none" style="color: var(--color-text-muted);" />
       <circle cx="12" cy="12" r="3" fill="currentColor" style="color: var(--color-text-muted);" />

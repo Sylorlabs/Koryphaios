@@ -30,6 +30,7 @@
   } from '$lib/stores/memory.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
+  import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import { toastStore } from '$lib/stores/toast.svelte';
   import SettingsSwitch from '$lib/components/SettingsSwitch.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
@@ -529,7 +530,11 @@
   async function recoverStrandedDraft() {
     const draft = strandedDraft;
     if (!draft) return;
-    projectStore.setProject(draft.projectPath);
+    const selection = await selectProjectNavigation(draft.projectPath);
+    if (!selection.ok) {
+      toastStore.error(selection.error);
+      return;
+    }
     await tick();
     await projectLoadPromise;
     if (projectStore.currentPath !== draft.projectPath) return;

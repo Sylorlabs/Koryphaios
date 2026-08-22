@@ -24,7 +24,7 @@ const defaultShortcuts: Shortcut[] = [
   },
   {
     id: 'toggle_zen_mode',
-    keys: ['Mod', 'Shift', 'Z'],
+    keys: ['Mod', 'Shift', 'Y'],
     action: 'Toggle Zen mode',
     description: 'Focus',
   },
@@ -44,7 +44,14 @@ function loadShortcuts(): Shortcut[] {
         .filter((s) => s.id !== 'toggle_yolo')
         .map((s) => ({
           ...s,
-          keys: s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
+          keys:
+            s.id === 'toggle_zen_mode' &&
+            s.keys.length === 3 &&
+            s.keys.includes('Mod') &&
+            s.keys.includes('Shift') &&
+            s.keys.includes('Z')
+              ? ['Mod', 'Shift', 'Y']
+              : s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
         }));
 
       // Merge in missing default shortcuts

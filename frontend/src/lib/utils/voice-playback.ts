@@ -70,7 +70,30 @@ export async function playVoiceResponse(id: string, markdown: string): Promise<v
         });
       }
     } else {
-      throw new Error('Only explicit operating-system speech is available in this build');
+      for (const text of chunks) {
+        if (token !== activeToken) return;
+        const response = await apiFetch(apiUrl('/api/voice/synthesize'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            provider: settings.output.provider,
+            modelId: settings.output.modelId,
+            voiceId: settings.output.voiceId,
+            speed: settings.output.speed,
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.data?.audioBase64)
+          throw new Error(result.error || 'Speech synthesis failed');
+        const audio = new Audio(`data:${result.data.mimeType};base64,${result.data.audioBase64}`);
+        activeAudio = audio;
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => reject(new Error('Generated speech could not be played'));
+          void audio.play().catch(reject);
+        });
+      }
     }
   } finally {
     if (token === activeToken) {

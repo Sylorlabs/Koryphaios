@@ -38,12 +38,43 @@ export interface McpServerInput {
   addedBy?: string;
 }
 
+export interface McpRegistrySearchResult {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  version: string;
+  websiteUrl: string | null;
+  repositoryUrl: string | null;
+  transport: 'stdio' | 'sse';
+  command: string | null;
+  args: string[];
+  envVars: Array<{
+    name: string;
+    description: string;
+    isRequired: boolean;
+    isSecret: boolean;
+    defaultValue: string | null;
+  }>;
+  url: string | null;
+  headerVars: Array<{
+    name: string;
+    description: string;
+    isSecret: boolean;
+  }>;
+}
+
 type McpListResponse = { ok?: boolean; data?: McpServerStatus[]; error?: string };
 type McpStatusResponse = { ok?: boolean; data?: unknown; error?: string };
 type McpTestResponse = { ok?: boolean; data?: McpServerTestResult; error?: string };
 type McpEnvResponse = {
   ok?: boolean;
   data?: { keys: string[]; valuesMasked: true };
+  error?: string;
+};
+type McpRegistrySearchResponse = {
+  ok?: boolean;
+  data?: { results: McpRegistrySearchResult[]; nextCursor: string | null };
   error?: string;
 };
 
@@ -193,6 +224,50 @@ function createMcpServersStore() {
     }
   }
 
+  let registryResults = $state<McpRegistrySearchResult[]>([]);
+  let registrySearching = $state(false);
+  let registryError = $state<string | undefined>(undefined);
+  let registryNextCursor = $state<string | null>(null);
+  let registryQuery = $state('');
+
+  async function searchRegistry(query: string, cursor?: string): Promise<void> {
+    const q = query.trim();
+    if (!q) {
+      registryResults = [];
+      registryNextCursor = null;
+      registryError = undefined;
+      return;
+    }
+    registrySearching = true;
+    registryError = undefined;
+    if (!cursor) registryResults = [];
+    try {
+      const params = new URLSearchParams({ q, limit: '20' });
+      if (cursor) params.set('cursor', cursor);
+      const res = await apiFetch(apiUrl(`/api/v1/mcp-registry/search?${params.toString()}`));
+      const json = await parseJsonResponse<McpRegistrySearchResponse>(res);
+      if (!json?.ok || !json.data) throw new Error(json?.error ?? 'Registry search failed');
+      if (cursor) {
+        registryResults = [...registryResults, ...json.data.results];
+      } else {
+        registryResults = json.data.results;
+      }
+      registryNextCursor = json.data.nextCursor;
+    } catch (err) {
+      registryError = err instanceof Error ? err.message : 'Registry search failed';
+      toastStore.error(registryError);
+    } finally {
+      registrySearching = false;
+    }
+  }
+
+  function clearRegistry(): void {
+    registryResults = [];
+    registryNextCursor = null;
+    registryError = undefined;
+    registryQuery = '';
+  }
+
   return {
     get servers() {
       return servers;
@@ -210,6 +285,27 @@ function createMcpServersStore() {
     testServer,
     reloadServer,
     getEnvKeys,
+    // Registry search
+    get registryResults() {
+      return registryResults;
+    },
+    get registrySearching() {
+      return registrySearching;
+    },
+    get registryError() {
+      return registryError;
+    },
+    get registryNextCursor() {
+      return registryNextCursor;
+    },
+    get registryQuery() {
+      return registryQuery;
+    },
+    set registryQuery(value: string) {
+      registryQuery = value;
+    },
+    searchRegistry,
+    clearRegistry,
   };
 }
 

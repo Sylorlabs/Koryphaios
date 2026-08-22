@@ -7,6 +7,7 @@ import { authStore } from '$lib/stores/auth.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { demoFetch } from '$lib/demo-api';
 import { untrack } from 'svelte';
+import { projectStore } from '$lib/stores/project.svelte';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -78,10 +79,13 @@ async function apiFetchUntracked(
   // endpoint before a route such as /api/processes can produce a browser 401.
   const authenticated = await authStore.ensureSession();
   if (!authenticated) {
-    return new Response(JSON.stringify({ ok: false, error: 'Backend authentication unavailable' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({ ok: false, error: 'Backend authentication unavailable' }),
+      {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   _inflight++;
@@ -90,23 +94,33 @@ async function apiFetchUntracked(
     for (const [key, value] of Object.entries(getAuthHeaders())) {
       if (!headers.has(key)) headers.set(key, value);
     }
-    try {
-      const projectPath = localStorage.getItem('koryphaios-current-project');
-      if (projectPath && !headers.has('X-Koryphaios-Project'))
-        headers.set('X-Koryphaios-Project', projectPath);
-    } catch (err: unknown) {
-      console.debug('Failed to read project path from localStorage:', err instanceof Error ? err.message : String(err));
-      /* SSR/private storage */
+    const projectPath = projectStore.requestPath;
+    if (projectPath && !headers.has('X-Koryphaios-Project')) {
+      headers.set('X-Koryphaios-Project', projectPath);
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetch(url, {
+      const response = await fetch(url, {
         ...init,
         headers,
         credentials: 'include',
         signal: init.signal ?? controller.signal,
       });
+      if (response.status === 400 && projectPath) {
+        try {
+          const body = (await response.clone().json()) as { error?: string };
+          if (body.error?.includes('selected project directory is unavailable')) {
+            projectStore.markUnavailable(projectPath);
+            window.dispatchEvent(
+              new CustomEvent('kory-project-unavailable', { detail: { path: projectPath } }),
+            );
+          }
+        } catch {
+          // Non-JSON 400 responses are unrelated to project reconciliation.
+        }
+      }
+      return response;
     } finally {
       clearTimeout(timeout);
     }
@@ -120,6 +134,7 @@ type LooseApiResponse = {
   error?: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- callers access varied response shapes without narrowing
   data?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- compatibility boundary for legacy untyped API responses
   [key: string]: any;
 };
 
@@ -135,7 +150,10 @@ export async function parseJsonResponse<T = LooseApiResponse>(res: Response): Pr
   try {
     return JSON.parse(text) as T;
   } catch (err: unknown) {
-    console.debug('Failed to parse JSON response:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse JSON response:',
+      err instanceof Error ? err.message : String(err),
+    );
     const message = res.ok
       ? 'Invalid JSON from server'
       : `Request failed: ${res.status} ${res.statusText}`;

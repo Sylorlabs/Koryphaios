@@ -33,6 +33,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch } from '$lib/api.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
+  import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import NotesGraph from './NotesGraph.svelte';
   import NotesCanvas from './NotesCanvas.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -1063,7 +1064,11 @@
     const draft = strandedDraft;
     if (!draft) return;
 
-    projectStore.setProject(draft.projectPath);
+    const selection = await selectProjectNavigation(draft.projectPath);
+    if (!selection.ok) {
+      toastStore.error(selection.error);
+      return;
+    }
     // Let the project-transition effect clear the previous view before asking
     // for the note under the restored project header.
     await tick();

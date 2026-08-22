@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { mergeVerifiedContextWindow } from './context-window';
 
@@ -18,5 +20,18 @@ describe('mergeVerifiedContextWindow', () => {
         { max: 1_000_000, known: true },
       ),
     ).toEqual({ max: 1_000_000, known: true });
+  });
+
+  it('sends model-preview bodies as JSON so backend schema validation can parse them', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/lib/components/CommandInput.svelte'),
+      'utf8',
+    );
+    const request = source.slice(
+      source.indexOf("context/model-preview`), {"),
+      source.indexOf('const result =', source.indexOf("context/model-preview`), {")),
+    );
+    expect(request).toContain("headers: { 'content-type': 'application/json' }");
+    expect(request).toContain('body: JSON.stringify({ model, provider })');
   });
 });

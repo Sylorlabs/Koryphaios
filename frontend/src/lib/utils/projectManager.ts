@@ -19,7 +19,6 @@ export type PromptTemplate = {
   content: string;
 };
 
-const RECENT_PROJECTS_KEY = 'koryphaios-recent-projects';
 const MAX_RECENT_PROJECTS = 12;
 
 export const promptTemplates: PromptTemplate[] = [
@@ -106,36 +105,14 @@ export function buildNewProjectTemplate(): string {
 }
 
 export function parseRecentProjects(): RecentProject[] {
-  try {
-    const raw = localStorage.getItem(RECENT_PROJECTS_KEY);
-    if (!raw) return [];
-
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-
-    return parsed
-      .filter(
-        (entry): entry is RecentProject =>
-          typeof entry === 'object' &&
-          entry !== null &&
-          typeof (entry as RecentProject).id === 'string' &&
-          typeof (entry as RecentProject).title === 'string' &&
-          typeof (entry as RecentProject).content === 'string' &&
-          typeof (entry as RecentProject).source === 'string' &&
-          typeof (entry as RecentProject).updatedAt === 'number',
-      )
-      .slice(0, MAX_RECENT_PROJECTS);
-  } catch (err: unknown) {
-    console.debug(
-      'Failed to parse recent projects:',
-      err instanceof Error ? err.message : String(err),
-    );
-    return [];
-  }
+  // Durable project history comes from backend sessions; filesystem folders
+  // are enumerated live and are never restored from browser storage.
+  return [];
 }
 
-export function persistRecentProjects(projects: RecentProject[]): void {
-  localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(projects));
+export function persistRecentProjects(_projects: RecentProject[]): void {
+  // Intentionally in-memory. Session history is the durable recent-project
+  // source and workspace folder lists always come from the filesystem.
 }
 
 /** Check whether a filesystem path exists via the Tauri `path_exists` command.

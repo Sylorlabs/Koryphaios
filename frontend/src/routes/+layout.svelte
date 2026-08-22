@@ -11,6 +11,7 @@
 	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
 	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
+	import WindowResizeHandles from '$lib/components/WindowResizeHandles.svelte';
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
@@ -166,6 +167,7 @@
 </svelte:head>
 
 <div class="layout-root">
+	<WindowResizeHandles />
 	<a href="#main-content" class="skip-link">Skip to main content</a>
 	{#if isOffline}
 		<div class="offline-banner" role="alert" data-tauri-drag-region>

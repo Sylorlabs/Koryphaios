@@ -10,6 +10,7 @@
   import { notesStore } from '$lib/stores/notes.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
+  import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import KorySelect from '$lib/components/KorySelect.svelte';
   import {
     createDraftRegistry,
@@ -463,7 +464,11 @@
   async function recoverStrandedCanvas() {
     const snapshot = strandedCanvas;
     if (!snapshot) return;
-    projectStore.setProject(snapshot.projectPath);
+    const selection = await selectProjectNavigation(snapshot.projectPath);
+    if (!selection.ok) {
+      toastStore.error(selection.error);
+      return;
+    }
     await tick();
     await notesStore.fetchNotes();
     if (projectStore.currentPath !== snapshot.projectPath) return;

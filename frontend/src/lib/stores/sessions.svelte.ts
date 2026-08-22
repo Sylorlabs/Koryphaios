@@ -10,7 +10,6 @@ import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 import { wsStore } from './websocket.svelte';
 
-const LAST_SESSION_KEY = 'koryphaios-last-session';
 const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
 
 export type NewChatBehavior = 'always-create';
@@ -57,38 +56,14 @@ function setNewChatBehavior(behavior: NewChatBehavior): void {
   }
 }
 
-// Load last session from localStorage on startup
+// Active-session navigation is derived from the backend's authoritative
+// updated order. Browser storage must not resurrect a chat whose project was
+// moved or deleted outside Koryphaios.
 function loadLastSession(): string {
-  if (!browser) return '';
-  try {
-    const stored = localStorage.getItem(LAST_SESSION_KEY);
-    return stored || '';
-  } catch (err: unknown) {
-    console.debug(
-      'Failed to read last session from localStorage:',
-      err instanceof Error ? err.message : String(err),
-    );
-    return '';
-  }
+  return '';
 }
 
-// Save active session to localStorage
-function saveLastSession(id: string): void {
-  if (!browser) return;
-  try {
-    if (id) {
-      localStorage.setItem(LAST_SESSION_KEY, id);
-    } else {
-      localStorage.removeItem(LAST_SESSION_KEY);
-    }
-  } catch (err: unknown) {
-    // Ignore localStorage errors
-    console.debug(
-      'Failed to save last session to localStorage:',
-      err instanceof Error ? err.message : String(err),
-    );
-  }
-}
+function saveLastSession(_id: string): void {}
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
@@ -158,14 +133,9 @@ async function fetchSessions(): Promise<boolean> {
       // Save the resolved active session
       if (activeSessionId) {
         saveLastSession(activeSessionId);
-        const active = sessions.find((session) => session.id === activeSessionId);
-        // Adopt the session's project only when the user hasn't chosen one —
-        // never override a persisted choice, and never yank someone off the
-        // workspace chooser (currentPath === null is a deliberate, persisted
-        // state whenever a workspace is open).
-        if (active?.workingDirectory && !projectStore.currentPath && !projectStore.workspaceRoot) {
-          projectStore.setProject(active.workingDirectory);
-        }
+        // Project/workspace navigation is restored through the authenticated
+        // backend workspace state, never a browser cache or an unchecked
+        // session path. The page reconciler handles the selected session.
       }
       return true;
     }
@@ -491,8 +461,6 @@ export const sessionStore = {
   set activeSessionId(id: string) {
     activeSessionId = id;
     saveLastSession(id);
-    const session = sessions.find((item) => item.id === id);
-    if (session?.workingDirectory) projectStore.setProject(session.workingDirectory);
   },
   get searchQuery() {
     return searchQuery;

@@ -895,11 +895,12 @@
                         <div class="grid gap-3 sm:grid-cols-2">
                           <KorySelect
                             label="Intent interview"
+                            description="How many clarifying questions Kory asks before starting work."
                             value={agentSettingsStore.settings.intentInterview ?? 'adaptive'}
                             options={[
-                              { value: 'off', label: 'Off' },
-                              { value: 'adaptive', label: 'Adaptive' },
-                              { value: 'deep', label: 'Deep' },
+                              { value: 'off', label: 'Off', description: 'Start working immediately without follow-up questions.' },
+                              { value: 'adaptive', label: 'Adaptive', description: 'Ask a few targeted questions when the task is vague or complex.' },
+                              { value: 'deep', label: 'Deep', description: 'Conduct a thorough Q&A to fully define the request before acting.' },
                             ]}
                             onchange={(value) =>
                               agentSettingsStore.saveSettings(
@@ -909,11 +910,12 @@
                           />
                           <KorySelect
                             label="Execution strategy"
+                            description="How Kory distributes work across one or many agents."
                             value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
                             options={[
-                              { value: 'auto', label: 'Auto — choose for the task' },
-                              { value: 'single', label: 'Single agent' },
-                              { value: 'multi', label: 'Multi-agent when available' },
+                              { value: 'auto', label: 'Auto — choose for the task', description: 'Let Kory decide when a single agent or multiple agents fit best.' },
+                              { value: 'single', label: 'Single agent', description: 'Run the entire task through one agent.' },
+                              { value: 'multi', label: 'Multi-agent when available', description: 'Use multiple agents in parallel whenever the task allows it.' },
                             ]}
                             onchange={(value) =>
                               agentSettingsStore.saveSettings(
@@ -923,11 +925,12 @@
                           />
                           <KorySelect
                             label="Goal planning"
+                            description="How Kory breaks tasks into tracked goals before acting."
                             value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
                             options={[
-                              { value: 'minimal', label: 'Minimal' },
-                              { value: 'adaptive', label: 'Adaptive' },
-                              { value: 'structured', label: 'Structured' },
+                              { value: 'minimal', label: 'Minimal', description: 'Use goals only when the task is large or complex.' },
+                              { value: 'adaptive', label: 'Adaptive', description: 'Plan goals based on task size and uncertainty.' },
+                              { value: 'structured', label: 'Structured', description: 'Always create a step-by-step goal plan before starting work.' },
                             ]}
                             onchange={(value) =>
                               agentSettingsStore.saveSettings(
@@ -939,12 +942,13 @@
                           />
                           <KorySelect
                             label="Skill learning"
+                            description="How Kory may create or install new skills from your sessions."
                             value={agentSettingsStore.settings.skillLearningMode ??
                               'propose-then-verify'}
                             options={[
-                              { value: 'human-only', label: 'Human only' },
-                              { value: 'propose-then-verify', label: 'Propose then verify' },
-                              { value: 'automatic', label: 'Automatic, reversible' },
+                              { value: 'human-only', label: 'Human only', description: 'Never create or install a skill without your explicit approval.' },
+                              { value: 'propose-then-verify', label: 'Propose then verify', description: 'Suggest new skills and wait for your approval before installing.' },
+                              { value: 'automatic', label: 'Automatic, reversible', description: 'Create skills automatically; you can undo or remove them later.' },
                             ]}
                             onchange={(value) =>
                               agentSettingsStore.saveSettings(

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
   import Check from 'lucide-svelte/icons/check';
-  import MicOff from 'lucide-svelte/icons/mic-off';
+  import Download from 'lucide-svelte/icons/download';
+  import Mic from 'lucide-svelte/icons/mic';
   import Play from 'lucide-svelte/icons/play';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Square from 'lucide-svelte/icons/square';
@@ -12,42 +12,40 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { playVoiceResponse, stopVoicePlayback } from '$lib/utils/voice-playback';
+  import KorySelect from './KorySelect.svelte';
   import KorySlider from './KorySlider.svelte';
+  import SettingsSwitch from './SettingsSwitch.svelte';
 
   const DEFAULT_SETTINGS: VoiceSettings = {
-    input: { provider: 'system', modelId: 'stt-unavailable', language: 'en' },
-    output: {
-      provider: 'system',
-      modelId: 'web-speech-synthesis',
-      voiceId: 'system-default',
-      speed: 1,
-    },
+    input: { provider: 'openai', modelId: 'gpt-4o-mini-transcribe', language: 'en' },
+    output: { provider: 'system', modelId: 'web-speech-synthesis', voiceId: 'system-default', speed: 1 },
     autoReadFinalReplies: false,
-    voiceModeEnabled: false,
+    voiceModeEnabled: true,
     liveTranscription: false,
   };
-  const DEFAULT_PROVIDERS: VoiceProviderDescriptor[] = [
-    {
-      id: 'system',
-      name: 'Operating system speech',
-      capabilities: ['tts'],
-      local: false,
-      configured: true,
-      supportsDiscovery: true,
-    },
-  ];
+  const openAIVoices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'].map((voice) => ({ value: voice, label: voice.charAt(0).toUpperCase() + voice.slice(1) }));
 
   let settings = $state<VoiceSettings>(structuredClone(DEFAULT_SETTINGS));
-  let providers = $state<VoiceProviderDescriptor[]>(DEFAULT_PROVIDERS);
+  let providers = $state<VoiceProviderDescriptor[]>([]);
   let voicePacks = $state<VoicePackStatus[]>([]);
+  let systemVoices = $state<Array<{ value: string; label: string }>>([]);
   let loading = $state(true);
   let saving = $state(false);
+  let downloading = $state(false);
   let previewing = $state(false);
   let systemSpeechSupported = $state(false);
-  let systemProvider = $derived(providers.find((provider) => provider.id === 'system'));
-  let englishDictation = $derived(
-    voicePacks.find((pack) => pack.manifest.id === 'moonshine-tiny-en-int8'),
-  );
+  let openAIConfigured = $derived(providers.find((provider) => provider.id === 'openai')?.configured === true);
+  let englishDictation = $derived(voicePacks.find((pack) => pack.manifest.id === 'moonshine-tiny-en-int8'));
+  let outputOptions = $derived([
+    { value: 'system', label: 'Operating system', description: 'Uses voices installed on this device' },
+    { value: 'openai', label: 'OpenAI Audio', description: openAIConfigured ? 'Cloud speech is ready' : 'Connect OpenAI first', disabled: !openAIConfigured },
+  ]);
+  let voiceOptions = $derived(settings.output.provider === 'openai' ? openAIVoices : [{ value: 'system-default', label: 'System default' }, ...systemVoices]);
+
+  function refreshSystemVoices() {
+    if (!systemSpeechSupported) return;
+    systemVoices = speechSynthesis.getVoices().map((voice) => ({ value: voice.voiceURI, label: `${voice.name} · ${voice.lang}` }));
+  }
 
   async function load() {
     loading = true;
@@ -56,31 +54,20 @@
       apiFetch(apiUrl('/api/voice/providers')).then((response) => response.json()),
       apiFetch(apiUrl('/api/voice/packs')).then((response) => response.json()),
     ]);
-    if (settingsResult.status === 'fulfilled' && settingsResult.value.data)
-      settings = settingsResult.value.data;
-    providers =
-      providerResult.status === 'fulfilled' &&
-      Array.isArray(providerResult.value.data) &&
-      providerResult.value.data.length
-        ? providerResult.value.data
-        : DEFAULT_PROVIDERS;
-    if (packResult.status === 'fulfilled' && Array.isArray(packResult.value.data))
-      voicePacks = packResult.value.data;
+    if (settingsResult.status === 'fulfilled' && settingsResult.value.data) settings = settingsResult.value.data;
+    if (providerResult.status === 'fulfilled' && Array.isArray(providerResult.value.data)) providers = providerResult.value.data;
+    if (packResult.status === 'fulfilled' && Array.isArray(packResult.value.data)) voicePacks = packResult.value.data;
     loading = false;
   }
 
   async function save(showConfirmation = true): Promise<boolean> {
     saving = true;
     try {
-      const response = await apiFetch(apiUrl('/api/voice/settings'), {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(settings),
-      });
+      const response = await apiFetch(apiUrl('/api/voice/settings'), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(settings) });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'Save failed');
       settings = result.data;
-      if (showConfirmation) toastStore.success('System voice settings saved');
+      if (showConfirmation) toastStore.success('Voice settings saved');
       return true;
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Could not save voice settings');
@@ -90,159 +77,99 @@
     }
   }
 
-  async function previewSystemVoice() {
-    if (!systemSpeechSupported || previewing || !(await save(false))) return;
+  function selectOutput(provider: string) {
+    settings.output.provider = provider;
+    settings.output.modelId = provider === 'openai' ? 'gpt-4o-mini-tts' : 'web-speech-synthesis';
+    settings.output.voiceId = provider === 'openai' ? 'alloy' : 'system-default';
+  }
+
+  async function previewVoice() {
+    if (previewing || !(await save(false))) return;
     previewing = true;
     try {
-      await playVoiceResponse(
-        'voice-settings-preview',
-        'Koryphaios is using your operating system speech service.',
-      );
+      await playVoiceResponse('voice-settings-preview', 'Koryphaios voice input and speech playback are ready.');
     } catch (error) {
-      toastStore.error(error instanceof Error ? error.message : 'System speech is unavailable');
+      toastStore.error(error instanceof Error ? error.message : 'Speech preview failed');
     } finally {
       previewing = false;
     }
   }
 
-  function stopPreview() {
-    stopVoicePlayback();
-    previewing = false;
+  async function downloadPack() {
+    if (!englishDictation || downloading) return;
+    downloading = true;
+    try {
+      const response = await apiFetch(apiUrl(`/api/voice/packs/${englishDictation.manifest.id}/download`), { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Model download failed');
+      await load();
+      toastStore.success('Speech model downloaded and verified');
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Model download failed');
+    } finally {
+      downloading = false;
+    }
   }
+
   onMount(() => {
-    systemSpeechSupported =
-      typeof window !== 'undefined' &&
-      'speechSynthesis' in window &&
-      typeof SpeechSynthesisUtterance !== 'undefined';
+    systemSpeechSupported = 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+    refreshSystemVoices();
+    if (systemSpeechSupported) speechSynthesis.addEventListener('voiceschanged', refreshSystemVoices);
     void load();
-    return () => stopVoicePlayback();
+    return () => {
+      stopVoicePlayback();
+      if (systemSpeechSupported) speechSynthesis.removeEventListener('voiceschanged', refreshSystemVoices);
+    };
   });
 </script>
 
 <div class="mx-auto w-full max-w-4xl space-y-6 p-6">
   <header>
     <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Voice</h3>
-    <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-      This build exposes only the operating system's speech-synthesis service. Cloud adapters,
-      dictation, and bundled local speech engines stay unavailable until their real runtimes and
-      privacy boundaries are implemented.
-    </p>
+    <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">Record prompts with OpenAI transcription and hear replies through system or OpenAI voices.</p>
   </header>
   {#if loading}
     <p class="text-sm text-[var(--color-text-muted)]">Checking voice capabilities…</p>
   {:else}
-    <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-    >
-      <div class="flex flex-wrap items-start gap-4">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]"
-        >
-          <Volume2 size={19} />
+    <div class="grid gap-4 md:grid-cols-2">
+      <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+        <div class="flex items-start gap-3">
+          <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]"><Mic size={18} /></div>
+          <div><h4 class="font-medium text-[var(--color-text-primary)]">Speech to text</h4><p class="mt-1 text-xs text-[var(--color-text-muted)]">OpenAI · gpt-4o-mini-transcribe</p></div>
         </div>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h4 class="font-medium text-[var(--color-text-primary)]">
-              {systemProvider?.name ?? 'Operating system speech'}
-            </h4>
-            {#if systemSpeechSupported}<span
-                class="inline-flex items-center gap-1 rounded-full bg-[var(--color-success-bg)] px-2 py-0.5 text-[10px] text-[var(--color-success)]"
-                ><Check size={10} /> Runtime detected</span
-              >{:else}<span
-                class="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[10px] text-[var(--color-warning)]"
-                ><AlertTriangle size={10} /> Runtime unavailable</span
-              >{/if}
-          </div>
-          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-            Uses the speech service exposed by this desktop webview. Availability, voices, and
-            whether processing stays on-device are controlled by the operating system vendor;
-            Koryphaios does not treat runtime detection as a privacy guarantee.
-          </p>
+        <div class="flex items-center gap-2 text-xs {openAIConfigured ? 'text-[var(--color-success)]' : 'text-[var(--color-warning)]'}">
+          {#if openAIConfigured}<Check size={13} /> Ready{:else}Connect OpenAI in Providers to enable the composer microphone.{/if}
         </div>
-      </div>
-      <div class="mt-5">
-        <KorySlider
-          id="voice-preview-speed"
-          label="Preview speed"
-          value={settings.output.speed}
-          min={0.5}
-          max={2}
-          step={0.1}
-          unit="×"
-          displayValue={`${settings.output.speed.toFixed(1)}×`}
-          valueText={`${settings.output.speed.toFixed(1)} times normal speed`}
-          onchange={(value) => (settings.output.speed = value)}
-        />
-      </div>
-      <div class="mt-4 flex flex-wrap gap-2">
-        {#if previewing}<button class="btn" type="button" onclick={stopPreview}
-            ><Square size={13} /> Stop preview</button
-          >{:else}<button
-            class="btn"
-            type="button"
-            disabled={!systemSpeechSupported || saving}
-            onclick={() => void previewSystemVoice()}><Play size={13} /> Test system voice</button
-          >{/if}
-      </div>
-    </section>
-    <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
-    >
-      <div class="flex items-start gap-4">
-        <div
-          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
-        >
-          <MicOff size={19} />
+        <KorySelect value={settings.input.language} options={[{ value: 'en', label: 'English' }, { value: 'es', label: 'Spanish' }, { value: 'fr', label: 'French' }, { value: 'de', label: 'German' }, { value: 'ja', label: 'Japanese' }, { value: 'zh', label: 'Chinese' }]} label="Input language" onchange={(value) => (settings.input.language = value)} />
+      </section>
+
+      <section class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+        <div class="flex items-start gap-3">
+          <div class="rounded-xl bg-[var(--color-surface-3)] p-2 text-[var(--color-accent)]"><Volume2 size={18} /></div>
+          <div><h4 class="font-medium text-[var(--color-text-primary)]">Text to speech</h4><p class="mt-1 text-xs text-[var(--color-text-muted)]">Choose local system playback or generated cloud audio.</p></div>
         </div>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <h4 class="font-medium text-[var(--color-text-primary)]">Speech input</h4>
-            <span
-              class="rounded-full bg-[var(--color-warning-bg)] px-2 py-0.5 text-[10px] text-[var(--color-warning)]"
-              >Unavailable in this build</span
-            >
-          </div>
-          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-            There is no active composer microphone, system transcription, or local inference
-            runtime. Koryphaios will not upload audio to a cloud provider as a fallback.
-          </p>
-        </div>
-      </div>
-    </section>
-    <section class="space-y-3">
-      <div>
-        <h4 class="font-medium text-[var(--color-text-primary)]">Local model assets</h4>
-        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-          Existing downloads are preserved, but model files are not presented as a working voice
-          engine without inference code.
-        </p>
-      </div>
-      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-        <div class="flex flex-wrap items-center gap-2 font-medium text-[var(--color-text-primary)]">
-          Moonshine English Dictation <span
-            class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-            >Model files only</span
-          >{#if englishDictation?.state === 'installed'}<span
-              class="rounded-full bg-[var(--color-info-bg)] px-2 py-0.5 text-[10px] text-[var(--color-info)]"
-              >Files installed</span
-            >{/if}
-        </div>
-        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-          The verified pack inventory is retained. Transcription remains unavailable because this
-          build has no Moonshine inference adapter.
-        </p>
-      </div>
-      <p class="text-xs text-[var(--color-text-muted)]">
-        KittenTTS and cloud voice providers are intentionally absent: their adapters are not
-        implemented, so this screen does not accept credentials or label them as built in.
-      </p>
-    </section>
-    <div class="flex justify-end gap-2">
-      <button class="btn" type="button" onclick={() => void load()}
-        ><RefreshCw size={14} /> Reload</button
-      ><button class="btn btn-primary" type="button" disabled={saving} onclick={() => void save()}
-        >{saving ? 'Saving…' : 'Save system voice'}</button
-      >
+        <KorySelect value={settings.output.provider} options={outputOptions} label="Speech provider" onchange={selectOutput} />
+        <KorySelect value={settings.output.voiceId} options={voiceOptions} label="Voice" onchange={(value) => (settings.output.voiceId = value)} />
+        <KorySlider id="voice-preview-speed" label="Speech speed" value={settings.output.speed} min={0.5} max={2} step={0.1} unit="×" displayValue={`${settings.output.speed.toFixed(1)}×`} valueText={`${settings.output.speed.toFixed(1)} times normal speed`} onchange={(value) => (settings.output.speed = value)} />
+        {#if previewing}<button class="btn" type="button" onclick={() => { stopVoicePlayback(); previewing = false; }}><Square size={13} /> Stop</button>{:else}<button class="btn" type="button" disabled={(settings.output.provider === 'system' && !systemSpeechSupported) || (settings.output.provider === 'openai' && !openAIConfigured)} onclick={() => void previewVoice()}><Play size={13} /> Test voice</button>{/if}
+      </section>
     </div>
+
+    <section class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+      <SettingsSwitch checked={settings.voiceModeEnabled} label="Composer microphone" description="Show and enable audio recording in the message composer." onchange={() => { settings.voiceModeEnabled = !settings.voiceModeEnabled; }} />
+      <SettingsSwitch checked={settings.autoReadFinalReplies} label="Read final replies aloud" description="Automatically play completed assistant replies with the selected voice." onchange={() => { settings.autoReadFinalReplies = !settings.autoReadFinalReplies; }} />
+    </section>
+
+    {#if englishDictation}
+      <section class="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+        <div>
+          <h4 class="font-medium text-[var(--color-text-primary)]">{englishDictation.manifest.name}</h4>
+          <p class="mt-1 text-xs text-[var(--color-text-muted)]">Verified local assets for the upcoming on-device runtime · current transcription uses OpenAI · {(englishDictation.manifest.sizeBytes / 1024 / 1024).toFixed(0)} MB</p>
+        </div>
+        {#if englishDictation.state === 'installed'}<span class="rounded-full bg-[var(--color-success-bg)] px-3 py-1.5 text-xs text-[var(--color-success)]"><Check size={12} class="inline" /> Installed</span>{:else}<button class="btn" type="button" disabled={downloading} onclick={() => void downloadPack()}><Download size={14} /> {downloading ? 'Downloading…' : 'Download model'}</button>{/if}
+      </section>
+    {/if}
+
+    <div class="flex justify-end gap-2"><button class="btn" type="button" onclick={() => void load()}><RefreshCw size={14} /> Reload</button><button class="btn btn-primary" type="button" disabled={saving} onclick={() => void save()}>{saving ? 'Saving…' : 'Save voice settings'}</button></div>
   {/if}
 </div>

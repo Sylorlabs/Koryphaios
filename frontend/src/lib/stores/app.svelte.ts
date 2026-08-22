@@ -7,8 +7,6 @@ import { authStore } from './auth.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { getAuthHeaders } from '$lib/api.svelte';
 
-const LAST_PROJECT_KEY = 'koryphaios-last-project';
-
 interface AppState {
   authReady: boolean;
   authError: string | null;
@@ -17,30 +15,12 @@ interface AppState {
   projectName: string;
 }
 
-// Load last project from localStorage
-function loadLastProject(): string {
-  if (!browser) return '';
-  try {
-    return localStorage.getItem(LAST_PROJECT_KEY) || '';
-  } catch (err: unknown) {
-    console.debug('Failed to read last project from localStorage:', err instanceof Error ? err.message : String(err));
-    return '';
-  }
+interface AuthStoreInitializer {
+  initialize(): Promise<boolean>;
 }
 
-// Save project to localStorage
-function saveLastProject(name: string): void {
-  if (!browser) return;
-  try {
-    if (name) {
-      localStorage.setItem(LAST_PROJECT_KEY, name);
-    } else {
-      localStorage.removeItem(LAST_PROJECT_KEY);
-    }
-  } catch (err: unknown) {
-    console.debug('Failed to persist last project to localStorage:', err instanceof Error ? err.message : String(err));
-    // Ignore localStorage errors
-  }
+interface SessionStoreInitializer {
+  fetchSessions(): Promise<boolean>;
 }
 
 let state = $state<AppState>({
@@ -48,7 +28,7 @@ let state = $state<AppState>({
   authError: null,
   sessionsLoaded: false,
   backendUnreachable: false,
-  projectName: loadLastProject(),
+  projectName: '',
 });
 
 export const appStore = {
@@ -69,13 +49,12 @@ export const appStore = {
   },
   set projectName(name: string) {
     state.projectName = name;
-    saveLastProject(name);
   },
   get isReady() {
     return state.authReady && state.sessionsLoaded;
   },
 
-  async initialize(authStoreInit: any, sessionStore: any) {
+  async initialize(authStoreInit: AuthStoreInitializer, sessionStore: SessionStoreInitializer) {
     if (!browser) return;
     state.backendUnreachable = false;
 
@@ -115,17 +94,17 @@ export const appStore = {
         if (res.ok) {
           const json = await res.json();
           const serverProjectName = json?.data?.projectName ?? '';
-          // Only override localStorage value if server has a project
-          // Otherwise, keep the last project from localStorage for continuity
           if (serverProjectName) {
             state.projectName = serverProjectName;
-            saveLastProject(serverProjectName);
           }
         }
       }
     } catch (err: unknown) {
-      console.warn('Failed to fetch project name:', err instanceof Error ? err.message : String(err));
-      // Keep the localStorage value on error
+      console.warn(
+        'Failed to fetch project name:',
+        err instanceof Error ? err.message : String(err),
+      );
+      // The backend remains authoritative; do not restore stale browser state.
     }
   },
 

@@ -3,7 +3,11 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
-  import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
+  import {
+    projectStore,
+    projectDisplayName,
+    type WorkspaceNavigationSnapshot,
+  } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { isDemoMode, isFullDemo, isGuidedDemo } from '$lib/demo.svelte';
   import { appStore } from '$lib/stores/app.svelte';
@@ -105,6 +109,8 @@
   let planReady = $derived(validatePlanReadiness(currentPlanText).ready);
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
+  let workspaceRefreshPromise: Promise<void> | null = null;
+  let lastReconciledSessionId = '';
   let contextBarHover = $state(false);
   // Set when the user tries to send without a project open — holds the pending
   // message so it can be dispatched after they pick a project or opt into home.
@@ -346,7 +352,8 @@
   onMount(() => {
     const cleanupTheme = theme.init();
     if (!isDemoMode) {
-      appStore.initialize(authStore, sessionStore).then(() => {
+      appStore.initialize(authStore, sessionStore).then(async () => {
+        await refreshWorkspaceNavigation({ restoreFromActiveSession: true });
         if (authStore.isAuthenticated) {
           wsStore.connect();
         }
@@ -398,6 +405,24 @@
     const handleFocusInput = () => inputRef?.focus();
     window.addEventListener('kory:focus-input', handleFocusInput);
 
+    const handleWorkspaceFocus = () => {
+      if (document.visibilityState === 'visible') void refreshWorkspaceNavigation();
+    };
+    const handleProjectUnavailable = () => {
+      lastReconciledSessionId = '';
+      sessionStore.activeSessionId = '';
+      toastStore.error(
+        'The open project moved or was deleted. Choose a current folder to continue.',
+      );
+      void refreshWorkspaceNavigation();
+    };
+    const workspaceRefreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshWorkspaceNavigation();
+    }, 2_000);
+    window.addEventListener('focus', handleWorkspaceFocus);
+    document.addEventListener('visibilitychange', handleWorkspaceFocus);
+    window.addEventListener('kory-project-unavailable', handleProjectUnavailable);
+
     return () => {
       cleanupTheme?.();
       wsStore.disconnect();
@@ -411,7 +436,118 @@
       );
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
+      window.clearInterval(workspaceRefreshTimer);
+      window.removeEventListener('focus', handleWorkspaceFocus);
+      document.removeEventListener('visibilitychange', handleWorkspaceFocus);
+      window.removeEventListener('kory-project-unavailable', handleProjectUnavailable);
     };
+  });
+
+  function reconcileWorkspaceSnapshot(snapshot: WorkspaceNavigationSnapshot): void {
+    const result = projectStore.reconcile(snapshot);
+    if (result.projectBecameUnavailable || result.workspaceBecameUnavailable) {
+      lastReconciledSessionId = '';
+      sessionStore.activeSessionId = '';
+      const missing = result.projectBecameUnavailable ?? result.workspaceBecameUnavailable;
+      toastStore.error(
+        `${projectDisplayName(missing)} moved or was deleted. The folder list has been refreshed.`,
+      );
+    }
+    if (result.changed && projectStore.currentPath) void refreshComposerFileMentions();
+  }
+
+  async function readWorkspaceNavigation(): Promise<WorkspaceNavigationSnapshot | null> {
+    const response = await apiFetch(apiUrl('/api/workspace/state'));
+    const body = (await response.json()) as {
+      ok?: boolean;
+      data?: WorkspaceNavigationSnapshot;
+      error?: string;
+    };
+    if (!response.ok || !body.ok || !body.data) return null;
+    return body.data;
+  }
+
+  async function selectAuthoritativeProject(path: string): Promise<boolean> {
+    const response = await apiFetch(apiUrl('/api/workspace/select'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const body = (await response.json()) as {
+      ok?: boolean;
+      data?: WorkspaceNavigationSnapshot;
+      error?: string;
+    };
+    if (!response.ok || !body.ok || !body.data) {
+      toastStore.error(body.error || 'Project folder is unavailable');
+      return false;
+    }
+    reconcileWorkspaceSnapshot(body.data);
+    return true;
+  }
+
+  async function deselectAuthoritativeProject(): Promise<void> {
+    const response = await apiFetch(apiUrl('/api/workspace/deselect'), { method: 'POST' });
+    const body = (await response.json()) as { ok?: boolean; data?: WorkspaceNavigationSnapshot };
+    if (response.ok && body.ok && body.data) reconcileWorkspaceSnapshot(body.data);
+  }
+
+  async function acknowledgeUnavailableProject(): Promise<void> {
+    const response = await apiFetch(apiUrl('/api/workspace/acknowledge-unavailable'), {
+      method: 'POST',
+    });
+    const body = (await response.json()) as { ok?: boolean; data?: WorkspaceNavigationSnapshot };
+    if (response.ok && body.ok && body.data) reconcileWorkspaceSnapshot(body.data);
+  }
+
+  function refreshWorkspaceNavigation(
+    options: { restoreFromActiveSession?: boolean } = {},
+  ): Promise<void> {
+    if (workspaceRefreshPromise) return workspaceRefreshPromise;
+    workspaceRefreshPromise = (async () => {
+      const snapshot = await readWorkspaceNavigation();
+      if (!snapshot) return;
+      reconcileWorkspaceSnapshot(snapshot);
+      if (
+        options.restoreFromActiveSession &&
+        !snapshot.workspaceRoot &&
+        !snapshot.selectedProject
+      ) {
+        const active = sessionStore.sessions.find(
+          (session) => session.id === sessionStore.activeSessionId,
+        );
+        if (active?.workingDirectory) await selectAuthoritativeProject(active.workingDirectory);
+      }
+    })()
+      .catch((error: unknown) => {
+        console.warn(
+          'Workspace refresh failed:',
+          error instanceof Error ? error.message : String(error),
+        );
+      })
+      .finally(() => {
+        workspaceRefreshPromise = null;
+      });
+    return workspaceRefreshPromise;
+  }
+
+  $effect(() => {
+    const authenticated = appStore.authReady;
+    const sessionId = sessionStore.activeSessionId;
+    if (!authenticated || !sessionId || sessionId === lastReconciledSessionId) return;
+    lastReconciledSessionId = sessionId;
+    const session = sessionStore.sessions.find((item) => item.id === sessionId);
+    if (session?.workingDirectory) {
+      if (session.workingDirectory !== projectStore.currentPath) {
+        void selectAuthoritativeProject(session.workingDirectory).then((selected) => {
+          if (selected) return;
+          lastReconciledSessionId = '';
+          sessionStore.activeSessionId = '';
+        });
+      }
+    } else if (projectStore.workspaceRoot && projectStore.currentPath) {
+      void deselectAuthoritativeProject();
+    }
   });
 
   // Enforce the product setting immediately: closing a currently open panel
@@ -841,11 +977,7 @@
     path: string,
     fresh: { title: string; text: string; fileName?: string },
   ) {
-    // Opening a folder outside the current workspace exits workspace mode —
-    // projects inside the workspace root stay workspace members.
-    const root = projectStore.workspaceRoot;
-    if (root && !path.startsWith(root.replace(/[/\\]+$/, '') + '/')) projectStore.clearWorkspace();
-    projectStore.setProject(path);
+    if (!(await selectAuthoritativeProject(path))) return;
     // Refresh session list from DB so we find prior chats for this path.
     await sessionStore.fetchSessions();
     const existing = sessionStore.sessionsForProject(path);
@@ -996,11 +1128,12 @@
       });
       toastStore.success(`Created project folder: ${projectPath}`);
       // Brand-new folder → scope future chats to it and start fresh.
-      projectStore.setProject(projectPath);
-      await createProjectFromText(projectName, buildNewProjectTemplate(), {
-        source: 'new',
-        path: projectPath,
-      });
+      if (await selectAuthoritativeProject(projectPath)) {
+        await createProjectFromText(projectName, buildNewProjectTemplate(), {
+          source: 'new',
+          path: projectPath,
+        });
+      }
     } catch (error) {
       toastStore.error(String(error));
     }
@@ -1087,25 +1220,24 @@
         try {
           const selectedPath = await invoke<string | null>('select_folder_dialog');
           if (!selectedPath) break;
-          const projects = await invoke<string[]>('list_workspace_projects', {
-            folderPath: selectedPath,
-          });
-          projectStore.setWorkspace(selectedPath, projects);
-          // Mark the root server-side so all its projects share ONE .koryphaios
-          // (memory/rules/preferences) instead of one per project.
-          apiFetch(apiUrl('/api/workspace/register'), {
+          const response = await apiFetch(apiUrl('/api/workspace/open'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ root: selectedPath }),
-          }).catch((err: unknown) => {
-            console.warn(
-              'Workspace register failed:',
-              err instanceof Error ? err.message : String(err),
-            );
           });
+          const body = (await response.json()) as {
+            ok?: boolean;
+            data?: WorkspaceNavigationSnapshot;
+            error?: string;
+          };
+          if (!response.ok || !body.ok || !body.data) {
+            toastStore.error(body.error || 'Workspace folder is unavailable');
+            break;
+          }
+          reconcileWorkspaceSnapshot(body.data);
           sessionStore.activeSessionId = '';
           toastStore.success(
-            `Opened workspace ${projectDisplayName(selectedPath)} with ${projects.length} project folders`,
+            `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders`,
           );
         } catch (error) {
           toastStore.error(String(error));
@@ -1182,40 +1314,9 @@
           await openRecentProject(action.slice('open_recent:'.length));
         } else if (action.startsWith('select_project:')) {
           const path = decodeURIComponent(action.slice('select_project:'.length));
-          projectStore.setProject(path);
-          await resumeOrCreateSession(path);
+          if (await selectAuthoritativeProject(path)) await resumeOrCreateSession(path);
         }
         break;
-    }
-  }
-
-  async function runPendingInHome() {
-    const pending = noProjectPrompt;
-    if (!pending) return;
-    try {
-      const res = await apiFetch(apiUrl('/api/workspace/home'));
-      const data = await res.json();
-      if (!res.ok || !data.ok || typeof data.data !== 'string') {
-        toastStore.error('Could not resolve your home folder — open a project instead');
-        return;
-      }
-      noProjectPrompt = null;
-      projectStore.setProject(data.data);
-      await resumeOrCreateSession(data.data);
-      toastStore.warning('Running in your home folder — no project scoping');
-      handleSend(
-        pending.message,
-        pending.model,
-        pending.reasoningLevel,
-        pending.attachments,
-        pending.fastMode,
-      );
-    } catch (err: unknown) {
-      console.warn(
-        'Failed to resolve home folder:',
-        err instanceof Error ? err.message : String(err),
-      );
-      toastStore.error('Could not resolve your home folder — open a project instead');
     }
   }
 
@@ -1265,8 +1366,10 @@
       return;
     }
     if (!projectStore.currentPath) {
-      // Don't hard-block: warn and let the user pick a project, or knowingly
-      // run a quick task scoped to their home folder.
+      // Fail closed until the user chooses a current folder. Treating HOME as
+      // an ephemeral project conflicted with authoritative workspace refresh:
+      // the next snapshot correctly rejected the broad path and detached the
+      // newly created session.
       noProjectPrompt = { message, model, reasoningLevel, attachments, fastMode };
       return;
     }
@@ -1482,6 +1585,42 @@
             Koryphaios works best when it can inspect a real codebase, explain the current state,
             and then make targeted changes.
           </p>
+
+          {#if projectStore.unavailablePath}
+            <div
+              class="mb-6 rounded-xl border px-4 py-3 text-left"
+              style="border-color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 10%, transparent);"
+              role="status"
+            >
+              <div class="flex items-start gap-3">
+                <AlertTriangle
+                  size={18}
+                  class="mt-0.5 shrink-0"
+                  style="color: var(--color-warning);"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-semibold" style="color: var(--color-text-primary);">
+                    Folder moved or deleted
+                  </div>
+                  <div class="mt-1 truncate text-xs" style="color: var(--color-text-secondary);">
+                    {projectStore.unavailablePath}
+                  </div>
+                  <p class="mt-2 text-xs leading-relaxed" style="color: var(--color-text-muted);">
+                    Koryphaios stopped using the stale path. Open its new location or choose one of
+                    the current workspace folders below.
+                  </p>
+                  <button
+                    type="button"
+                    class="mt-3 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                    style="border-color: var(--color-border); color: var(--color-text-secondary);"
+                    onclick={() => void acknowledgeUnavailableProject()}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          {/if}
 
           <div class="flex flex-col gap-3 mb-8">
             <button
@@ -1815,8 +1954,8 @@
         No project open
       </h3>
       <p class="text-sm mb-5 leading-relaxed" style="color: var(--color-text-secondary);">
-        The agent works inside a folder. Choose a project so it runs in the right place — or, for a
-        quick one-off task, run it scoped to your home folder.
+        The agent works inside a current project folder. Choose one so file access, sessions, and
+        workspace refresh all stay scoped to the same location.
       </p>
       <div class="flex flex-col gap-2">
         <button
@@ -1830,14 +1969,6 @@
           }}
         >
           Choose Project Folder…
-        </button>
-        <button
-          type="button"
-          class="w-full rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-[var(--color-surface-3)]"
-          style="border-color: var(--color-border); color: var(--color-text-primary);"
-          onclick={runPendingInHome}
-        >
-          Run in Home Folder (~)
         </button>
         <button
           type="button"

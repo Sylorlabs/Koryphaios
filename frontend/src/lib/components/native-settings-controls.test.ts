@@ -28,6 +28,15 @@ describe('Koryphaios settings controls', () => {
     }
   });
 
+  it('renders auth-token inputs when provider capabilities advertise them', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/lib/components/SettingsDrawer.svelte'),
+      'utf8',
+    );
+    expect(source).toMatch(/function showTokenInput[\s\S]*?return caps\.supportsAuthToken;/);
+    expect(source).not.toMatch(/function showTokenInput[^}]+return false;/);
+  });
+
   it('keeps product controls on the shared Kory contracts', () => {
     const sourceRoot = join(process.cwd(), 'src');
     const sources = listSvelteFiles(sourceRoot).map((path) => ({

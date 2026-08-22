@@ -10,6 +10,8 @@
   import Eye from 'lucide-svelte/icons/eye';
   import Copy from 'lucide-svelte/icons/copy';
   import Check from 'lucide-svelte/icons/check';
+  import Volume2 from 'lucide-svelte/icons/volume-2';
+  import Square from 'lucide-svelte/icons/square';
   import Terminal from 'lucide-svelte/icons/terminal';
   import Undo from 'lucide-svelte/icons/undo';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
@@ -64,6 +66,7 @@
   import { renderKoryColors } from '$lib/utils/color-renderer';
   import { htmlSandboxPlaceholder, expandHtmlSandboxes } from '$lib/utils/html-sandbox';
   import { computeStreamingSegments } from '$lib/utils/streaming-segments';
+  import { playVoiceResponse, stopVoicePlayback } from '$lib/utils/voice-playback';
 
   hljs.registerLanguage('bash', bash);
   hljs.registerLanguage('cpp', cpp);
@@ -213,6 +216,8 @@
   }>();
 
   let copied = $state(false);
+  let voicePlaying = $state(false);
+  let wasStreaming = $state(false);
   let entryElement = $state<HTMLDivElement>();
   let regenerating = $state(false);
   let selectedVariant = $state(-1);
@@ -412,6 +417,38 @@
       console.error('Failed to copy text: ', err);
     }
   }
+
+  async function toggleVoicePlayback() {
+    if (voicePlaying) {
+      stopVoicePlayback();
+      voicePlaying = false;
+      return;
+    }
+    voicePlaying = true;
+    try {
+      await playVoiceResponse(entry.id, currentText);
+    } catch (error) {
+      console.error('Voice playback failed:', error);
+    } finally {
+      voicePlaying = false;
+    }
+  }
+
+  async function autoReadReply() {
+    const response = await apiFetch(apiUrl('/api/voice/settings'));
+    const result = await response.json();
+    if (response.ok && result.data?.autoReadFinalReplies) await toggleVoicePlayback();
+  }
+
+  $effect(() => {
+    if (isStreaming) {
+      wasStreaming = true;
+      return;
+    }
+    if (!wasStreaming || entry.type !== 'content' || !currentText) return;
+    wasStreaming = false;
+    void autoReadReply();
+  });
 
   // ── Streaming text: render arriving tokens as chunks that fade from
   // translucent to full opacity — text "settles" as it lands. ──
@@ -1300,6 +1337,18 @@
                   <Copy size={10} />
                   Copy Response
                 {/if}
+              </button>
+
+              <button
+                type="button"
+                class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)]"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  void toggleVoicePlayback();
+                }}
+                aria-pressed={voicePlaying}
+              >
+                {#if voicePlaying}<Square size={10} /> Stop{:else}<Volume2 size={10} /> Listen{/if}
               </button>
 
               {#if entry.metadata?.messageId}

@@ -8,6 +8,7 @@
   import Plug from 'lucide-svelte/icons/plug';
   import Plus from 'lucide-svelte/icons/plus';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
+  import Search from 'lucide-svelte/icons/search';
   import Server from 'lucide-svelte/icons/server';
   import Terminal from 'lucide-svelte/icons/terminal';
   import Trash2 from 'lucide-svelte/icons/trash-2';
@@ -17,13 +18,13 @@
     type McpServerInput,
     type McpServerStatus,
     type McpServerTestResult,
+    type McpRegistrySearchResult,
   } from '$lib/stores/mcp-servers.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import KorySelect from './KorySelect.svelte';
   import SettingsPageIntro from './SettingsPageIntro.svelte';
 
   // ─── Form state ──────────────────────────────────────────────────────────
-  let showAddForm = $state(false);
   let editingName = $state<string | null>(null);
   let formName = $state('');
   let formType = $state<'stdio' | 'sse'>('stdio');
@@ -39,6 +40,11 @@
   let testResult = $state<Record<string, McpServerTestResult | null>>({});
   let removeTarget = $state<string | null>(null);
   let envLoading = $state(false);
+
+  // ─── View state: "list" | "browse" | "form" ──────────────────────────────
+  type McpView = 'list' | 'browse' | 'form';
+  let view = $state<McpView>('list');
+  let registrySearchInput = $state('');
 
   const transportOptions = [
     { value: 'stdio', label: 'stdio', description: 'Spawn a local process and communicate over stdin/stdout.' },
@@ -64,12 +70,64 @@
 
   function openAddForm(): void {
     resetForm();
-    showAddForm = true;
+    view = 'form';
   }
 
   function closeForm(): void {
-    showAddForm = false;
+    view = 'list';
     resetForm();
+  }
+
+  function openBrowse(): void {
+    view = 'browse';
+  }
+
+  function closeBrowse(): void {
+    view = 'list';
+    mcpServersStore.clearRegistry();
+    registrySearchInput = '';
+  }
+
+  function handleRegistrySearch(): void {
+    const q = registrySearchInput.trim();
+    mcpServersStore.registryQuery = q;
+    void mcpServersStore.searchRegistry(q);
+  }
+
+  function loadMoreRegistry(): void {
+    if (mcpServersStore.registryNextCursor) {
+      void mcpServersStore.searchRegistry(
+        mcpServersStore.registryQuery,
+        mcpServersStore.registryNextCursor,
+      );
+    }
+  }
+
+  function addFromRegistry(result: McpRegistrySearchResult): void {
+    resetForm();
+    // Use the last path segment as a default server name (more readable than
+    // the full reverse-DNS id like "io.github.user/server").
+    const shortName = result.name.split('/').pop() ?? result.name;
+    formName = shortName;
+    formType = result.transport;
+    if (result.transport === 'stdio') {
+      formCommand = result.command ?? '';
+      formArgs = result.args.join('\n');
+      envRows = result.envVars.map((v) => ({
+        key: v.name,
+        value: v.defaultValue ?? '',
+        masked: false,
+      }));
+    } else {
+      formUrl = result.url ?? '';
+      // Pre-populate header placeholders as comments so the user knows what to set.
+      if (result.headerVars.length > 0) {
+        formHeaders = result.headerVars
+          .map((h) => `# ${h.name}: ${h.description || 'set this value'}`)
+          .join('\n');
+      }
+    }
+    view = 'form';
   }
 
   function addEnvRow(): void {
@@ -172,7 +230,7 @@
     formHeaders = '';
     envRows = [];
     envLoading = true;
-    showAddForm = true;
+    view = 'form';
     const keys = await mcpServersStore.getEnvKeys(server.name);
     envRows = keys.map((key) => ({ key, value: '', masked: true }));
     envLoading = false;
@@ -207,52 +265,60 @@
     title="MCP servers"
     description="Manage pluggable Model Context Protocol tool servers. Connection status, tools, and protocol version are reported by the backend."
   >
-    {#if !showAddForm}
-      <button
-        type="button"
-        onclick={openAddForm}
-        class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-      >
-        <Plus size={13} /> Add server
-      </button>
+    {#if view === 'list'}
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          onclick={openBrowse}
+          class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+        >
+          <Search size={13} /> Browse registry
+        </button>
+        <button
+          type="button"
+          onclick={openAddForm}
+          class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+        >
+          <Plus size={13} /> Add manually
+        </button>
+      </div>
     {/if}
   </SettingsPageIntro>
 
   <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
     <div class="mx-auto max-w-5xl space-y-5">
-      {#if mcpServersStore.error && mcpServersStore.servers.length === 0}
-        <section
-          role="alert"
-          class="flex items-start gap-3 rounded-2xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
-        >
-          <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
-          <div class="min-w-0 flex-1">
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-              MCP servers unavailable
-            </h4>
-            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-              {mcpServersStore.error}
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={mcpServersStore.loading}
-            onclick={() => void mcpServersStore.loadAll()}
-            class="flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+      {#if view === 'list'}
+        {#if mcpServersStore.error && mcpServersStore.servers.length === 0}
+          <section
+            role="alert"
+            class="flex items-start gap-3 rounded-2xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
           >
-            <RefreshCw size={14} /> Retry
-          </button>
-        </section>
-      {:else if mcpServersStore.loading && mcpServersStore.servers.length === 0}
-        <section
-          role="status"
-          class="flex min-h-40 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
-        >
-          <RefreshCw size={16} class="animate-spin" /> Loading MCP servers…
-        </section>
-      {:else}
-        <!-- Server list -->
-        {#if mcpServersStore.servers.length === 0}
+            <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
+            <div class="min-w-0 flex-1">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                MCP servers unavailable
+              </h4>
+              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                {mcpServersStore.error}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={mcpServersStore.loading}
+              onclick={() => void mcpServersStore.loadAll()}
+              class="flex min-h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+            >
+              <RefreshCw size={14} /> Retry
+            </button>
+          </section>
+        {:else if mcpServersStore.loading && mcpServersStore.servers.length === 0}
+          <section
+            role="status"
+            class="flex min-h-40 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
+          >
+            <RefreshCw size={16} class="animate-spin" /> Loading MCP servers…
+          </section>
+        {:else if mcpServersStore.servers.length === 0}
           <section
             class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-10 text-center"
           >
@@ -261,15 +327,24 @@
               No MCP servers configured
             </h4>
             <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-              Add a stdio or SSE server to expose external tools to your agents.
+              Browse the registry or add a server manually to expose external tools to your agents.
             </p>
-            <button
-              type="button"
-              onclick={openAddForm}
-              class="mt-4 flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-            >
-              <Plus size={14} /> Add your first server
-            </button>
+            <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onclick={openBrowse}
+                class="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              >
+                <Search size={14} /> Browse registry
+              </button>
+              <button
+                type="button"
+                onclick={openAddForm}
+                class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              >
+                <Plus size={14} /> Add manually
+              </button>
+            </div>
           </section>
         {:else}
           <div class="space-y-3">
@@ -407,9 +482,199 @@
             {/each}
           </div>
         {/if}
+      {:else if view === 'browse'}
+        <!-- ─── Browse registry view ──────────────────────────────────── -->
+        <section class="space-y-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                Browse MCP registry
+              </h4>
+              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                Search the official MCP registry at registry.modelcontextprotocol.io to discover servers you can add.
+              </p>
+            </div>
+            <button
+              type="button"
+              onclick={closeBrowse}
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              aria-label="Close browse"
+            >
+              <X size={16} />
+            </button>
+          </div>
 
-        <!-- Add / Edit form -->
-        {#if showAddForm}
+          <!-- Search bar -->
+          <form
+            onsubmit={(e) => {
+              e.preventDefault();
+              handleRegistrySearch();
+            }}
+            class="flex items-center gap-2"
+          >
+            <div class="relative min-w-0 flex-1">
+              <Search
+                size={15}
+                class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+              />
+              <input
+                type="text"
+                bind:value={registrySearchInput}
+                placeholder="Search servers (e.g. filesystem, github, slack…)"
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={mcpServersStore.registrySearching}
+              class="flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {#if mcpServersStore.registrySearching}
+                <LoaderCircle size={13} class="animate-spin" /> Searching…
+              {:else}
+                <Search size={13} /> Search
+              {/if}
+            </button>
+          </form>
+
+          <!-- Search results -->
+          {#if mcpServersStore.registryError}
+            <div
+              class="flex items-start gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error-bg)] p-4"
+            >
+              <AlertTriangle size={16} class="mt-0.5 shrink-0 text-[var(--color-error)]" />
+              <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                {mcpServersStore.registryError}
+              </p>
+            </div>
+          {:else if mcpServersStore.registrySearching && mcpServersStore.registryResults.length === 0}
+            <div
+              class="flex min-h-32 items-center justify-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-sm text-[var(--color-text-muted)]"
+            >
+              <LoaderCircle size={16} class="animate-spin" /> Searching the registry…
+            </div>
+          {:else if mcpServersStore.registryResults.length === 0}
+            <div
+              class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-10 text-center"
+            >
+              <Search size={28} class="mx-auto text-[var(--color-text-muted)]" />
+              <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
+                {mcpServersStore.registryQuery
+                  ? 'No servers found'
+                  : 'Search for MCP servers'}
+              </h4>
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                {mcpServersStore.registryQuery
+                  ? `No results for "${mcpServersStore.registryQuery}". Try a different keyword.`
+                  : 'Type a keyword above to search the official MCP registry.'}
+              </p>
+            </div>
+          {:else}
+            <div class="space-y-3">
+              {#each mcpServersStore.registryResults as result (result.id)}
+                <section
+                  class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span
+                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                        >
+                          {#if result.transport === 'sse'}
+                            <Globe size={15} />
+                          {:else}
+                            <Terminal size={15} />
+                          {/if}
+                        </span>
+                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                          {result.title}
+                        </h4>
+                        <span
+                          class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                        >
+                          {result.transport}
+                        </span>
+                        {#if result.version}
+                          <span
+                            class="text-[10px] text-[var(--color-text-muted)]"
+                          >v{result.version}</span>
+                          {/if}
+                      </div>
+                      <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                        {result.description}
+                      </p>
+                      {#if result.transport === 'stdio' && result.command}
+                        <div class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                          {result.command} {result.args.join(' ')}
+                        </div>
+                      {:else if result.transport === 'sse' && result.url}
+                        <div class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                          {result.url}
+                        </div>
+                      {/if}
+                      {#if result.envVars.length > 0}
+                        <div class="mt-2 flex flex-wrap gap-1.5">
+                          {#each result.envVars as envVar}
+                            <span
+                              class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-muted)]'}"
+                              title={envVar.description}
+                            >
+                              {envVar.name}{envVar.isRequired ? ' *' : ''}
+                            </span>
+                          {/each}
+                        </div>
+                      {/if}
+                      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
+                        {#if result.websiteUrl}
+                          <a
+                            href={result.websiteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="transition-colors hover:text-[var(--color-accent)]"
+                          >Website</a>
+                        {/if}
+                        {#if result.repositoryUrl}
+                          <a
+                            href={result.repositoryUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="transition-colors hover:text-[var(--color-accent)]"
+                          >Repository</a>
+                        {/if}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onclick={() => addFromRegistry(result)}
+                      class="flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                    >
+                      <Plus size={13} /> Add
+                    </button>
+                  </div>
+                </section>
+              {/each}
+              {#if mcpServersStore.registryNextCursor}
+                <div class="flex justify-center pt-2">
+                  <button
+                    type="button"
+                    disabled={mcpServersStore.registrySearching}
+                    onclick={loadMoreRegistry}
+                    class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+                  >
+                    {#if mcpServersStore.registrySearching}
+                      <LoaderCircle size={13} class="animate-spin" /> Loading…
+                    {:else}
+                      Load more
+                    {/if}
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </section>
+      {:else if view === 'form'}
+        <!-- ─── Add / Edit form view ──────────────────────────────────── -->
           <section
             class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
           >
@@ -604,7 +869,6 @@
               </button>
             </div>
           </section>
-        {/if}
       {/if}
     </div>
   </div>
