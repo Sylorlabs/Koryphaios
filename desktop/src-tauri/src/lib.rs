@@ -696,11 +696,16 @@ fn resolve_dev_backend_dir() -> Option<std::path::PathBuf> {
 /// Used only when the app is running in dev mode without a bundled backend
 /// and the launcher's backend has disappeared. The resulting child is stored
 /// in BACKEND_PROCESS so kill_backend()/window-destroy cleans it up.
+fn dev_backend_binding(host: &str, port: u16) -> (String, String) {
+    (host.to_string(), port.to_string())
+}
+
 fn spawn_dev_backend(
     app_handle: &tauri::AppHandle,
     backend_dir: &std::path::Path,
+    host: &str,
+    port: u16,
 ) -> Result<Arc<std::sync::Mutex<std::process::Child>>, String> {
-    let config = AppConfig::get();
     let mut cmd = std::process::Command::new("bun");
     cmd.args(["run", "src/server.ts"]);
     cmd.current_dir(backend_dir);
@@ -708,8 +713,9 @@ fn spawn_dev_backend(
     // The dev environment (KORYPHAIOS_* vars) was inherited from the launcher
     // that originally spawned `tauri dev`. Pin the host/port explicitly so the
     // child binds where the UI expects it.
-    cmd.env("KORYPHAIOS_HOST", &config.server.host);
-    cmd.env("KORYPHAIOS_PORT", config.server.port.to_string());
+    let (binding_host, binding_port) = dev_backend_binding(host, port);
+    cmd.env("KORYPHAIOS_HOST", binding_host);
+    cmd.env("KORYPHAIOS_PORT", binding_port);
     if let Ok(v) = std::env::var("KORYPHAIOS_FRONTEND_HOST") {
         cmd.env("KORYPHAIOS_FRONTEND_HOST", v);
     }
@@ -773,7 +779,7 @@ async fn spawn_and_wait_dev_backend(
     host: &str,
     port: u16,
 ) {
-    match spawn_dev_backend(app_handle, backend_dir) {
+    match spawn_dev_backend(app_handle, backend_dir, host, port) {
         Ok(proc) => {
             let pid = proc.lock().ok().map(|c| c.id());
             if let Ok(mut guard) = BACKEND_PROCESS.lock() {
@@ -1287,31 +1293,6 @@ fn read_folder_contents(folder_path: String) -> Result<FolderContents, String> {
     Ok(FolderContents { folder_name, files })
 }
 
-// A workspace is an organizational root. Its immediate child directories are
-// offered as projects, but none becomes the working directory until selected.
-#[tauri::command]
-fn list_workspace_projects(folder_path: String) -> Result<Vec<String>, String> {
-    let root = std::path::Path::new(&folder_path);
-    if !root.is_dir() {
-        return Err("Workspace folder does not exist".to_string());
-    }
-    let mut projects = std::fs::read_dir(root)
-        .map_err(|e| format!("Failed to read workspace: {}", e))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| !name.starts_with('.'))
-                .unwrap_or(false)
-        })
-        .map(|path| path.to_string_lossy().to_string())
-        .collect::<Vec<_>>();
-    projects.sort();
-    Ok(projects)
-}
-
 /// Check whether a filesystem path exists (file or directory). Used by the
 /// frontend to prune recent-project entries whose folder has been moved or
 /// deleted outside Koryphaios.
@@ -1402,13 +1383,17 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
     .map_err(|e| AppError::Menu(e.to_string()))?;
 
     // Edit menu
-    let cut = MenuItem::with_id(app, "cut", "Cut", true, Some("CmdOrCtrl+X"))
+    let undo = PredefinedMenuItem::undo(app, Some("Undo"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
-    let copy = MenuItem::with_id(app, "copy", "Copy", true, Some("CmdOrCtrl+C"))
+    let redo = PredefinedMenuItem::redo(app, Some("Redo"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
-    let paste = MenuItem::with_id(app, "paste", "Paste", true, Some("CmdOrCtrl+V"))
+    let cut = PredefinedMenuItem::cut(app, Some("Cut"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
-    let select_all = MenuItem::with_id(app, "select_all", "Select All", true, Some("CmdOrCtrl+A"))
+    let copy = PredefinedMenuItem::copy(app, Some("Copy"))
+        .map_err(|e| AppError::Menu(e.to_string()))?;
+    let paste = PredefinedMenuItem::paste(app, Some("Paste"))
+        .map_err(|e| AppError::Menu(e.to_string()))?;
+    let select_all = PredefinedMenuItem::select_all(app, Some("Select All"))
         .map_err(|e| AppError::Menu(e.to_string()))?;
 
     let edit_menu = Submenu::with_items(
@@ -1416,6 +1401,9 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
         "Edit",
         true,
         &[
+            &undo,
+            &redo,
+            &PredefinedMenuItem::separator(app).map_err(|e| AppError::Menu(e.to_string()))?,
             &cut,
             &copy,
             &paste,
@@ -1910,13 +1898,8 @@ pub fn run() {
 
             // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Linux/Windows maximize to the usable desktop area. macOS's
-                // `maximize` only performs AppKit "zoom", which can leave a
-                // large border around the workspace; enter a real fullscreen
-                // space there so startup fills the display consistently.
-                #[cfg(target_os = "macos")]
-                let _ = window.set_fullscreen(true);
-                #[cfg(not(target_os = "macos"))]
+                // Start in the platform's maximized/zoomed state while keeping
+                // normal window resizing available. Fullscreen is user-controlled.
                 let _ = window.maximize();
 
                 // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
@@ -1985,7 +1968,6 @@ pub fn run() {
             select_files_dialog,
             create_project_folder,
             read_folder_contents,
-            list_workspace_projects,
             path_exists,
             indexer::search_codebase,
             check_for_updates,
@@ -1998,8 +1980,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_backend_resource, merge_packaged_cors_origins, open_private_backend_logs,
-        validate_log_file_name,
+        copy_backend_resource, dev_backend_binding, merge_packaged_cors_origins,
+        open_private_backend_logs, validate_log_file_name,
     };
     use flate2::write::GzEncoder;
     use flate2::Compression;
@@ -2025,6 +2007,21 @@ mod tests {
         let error = merge_packaged_cors_origins(Some("*,http://tauri.localhost"))
             .expect_err("wildcard configuration must fail closed");
         assert!(error.contains("wildcard CORS_ORIGINS"));
+    }
+
+    #[test]
+    fn dev_supervisor_replacement_uses_the_supervised_launcher_binding() {
+        // The app config may have a different default port (for example 3002),
+        // but a replacement for a launcher-owned backend must bind the exact
+        // host/port that the supervisor is polling (normally 3001).
+        assert_eq!(
+            dev_backend_binding("127.0.0.1", 3001),
+            ("127.0.0.1".into(), "3001".into())
+        );
+        assert_eq!(
+            dev_backend_binding("127.0.0.1", 3017),
+            ("127.0.0.1".into(), "3017".into())
+        );
     }
 
     struct TestDirectory(PathBuf);
