@@ -4,6 +4,8 @@ This private workspace package exposes Koryphaios error detection and browser-co
 
 Both servers use `@modelcontextprotocol/server` v2 and `serveStdio(() => buildServer())`. The current wire revision is `2026-07-28`, with `2025-11-25` accepted as the legacy negotiation fallback. Production code does not construct `StdioServerTransport` or call `server.connect()`; the in-memory transport used by protocol tests is test-only.
 
+Both servers use the high-level `McpServer` class with `registerTool()` / `registerResource()` / `registerPrompt()` for tool/resource/prompt registration. The error-detection server uses Zod schemas (`zod/v4`) for automatic input validation; the bridge server uses `fromJsonSchema()` to wrap dynamic JSON Schemas from the backend catalog. The SDK handles `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get` dispatch automatically — no manual `setRequestHandler` calls.
+
 The server reports only capabilities backed by an implementation. In particular, it does not publish demo resources, claim active debugger sessions, or return synthetic performance and variable data.
 
 ## Implemented surface

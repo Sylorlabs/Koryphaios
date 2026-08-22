@@ -2,18 +2,9 @@
  * Core MCP Server implementation
  */
 
-import {
-  Server,
-  ProtocolError,
-  ProtocolErrorCode,
-  type ListToolsResult,
-  type CallToolResult,
-  type ListResourcesResult,
-  type ReadResourceResult,
-  type ListPromptsResult,
-  type GetPromptResult,
-} from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server/stdio';
+import * as z from 'zod/v4';
 
 import { EventEmitter } from './event-emitter.js';
 import { PlaywrightManager } from './playwright-manager.js';
@@ -69,8 +60,96 @@ export class KoryphaiosMCPServer extends EventEmitter {
     };
   }
 
-  buildServer(): Server {
-    const server = new Server(
+  /**
+   * Zod input schemas for the core tools registered in registerCoreComponents().
+   * These provide automatic argument validation via McpServer.registerTool() —
+   * the SDK validates every call against the schema before the handler runs.
+   */
+  private static readonly TOOL_SCHEMAS: Record<string, z.ZodObject<z.ZodRawShape>> = {
+    'detect-errors': z.object({
+      source: z.enum(['console', 'runtime', 'build', 'test', 'all']).optional(),
+      language: z.string().optional(),
+      files: z.array(z.string()).optional(),
+      projectRoot: z.string().optional(),
+      includeWarnings: z.boolean().optional(),
+      realTime: z.boolean().optional(),
+    }),
+    'analyze-error': z.object({
+      errorId: z.string(),
+      includeContext: z.boolean().optional(),
+      includeSuggestions: z.boolean().optional(),
+      includeHistory: z.boolean().optional(),
+    }),
+    navigate: z.object({
+      url: z.string(),
+      sessionId: z.string().optional(),
+    }),
+    screenshot: z.object({
+      sessionId: z.string().optional(),
+    }),
+    click: z.object({
+      selector: z.string(),
+      sessionId: z.string().optional(),
+    }),
+    fill: z.object({
+      selector: z.string(),
+      value: z.string(),
+      sessionId: z.string().optional(),
+    }),
+    evaluate: z.object({
+      script: z.string(),
+      sessionId: z.string().optional(),
+    }),
+    get_logs: z.object({
+      sessionId: z.string().optional(),
+    }),
+    clear_logs: z.object({
+      sessionId: z.string().optional(),
+    }),
+  };
+
+  /**
+   * Zod args schemas for the core prompts registered by PromptRegistry.
+   * Used with McpServer.registerPrompt() for automatic argument validation.
+   */
+  private static readonly PROMPT_SCHEMAS: Record<string, z.ZodObject<z.ZodRawShape>> = {
+    'explain-error': z.object({
+      errorMessage: z.string(),
+      stackTrace: z.string().optional(),
+      codeContext: z.string().optional(),
+      language: z.string().optional(),
+    }),
+    'suggest-fix': z.object({
+      errorMessage: z.string(),
+      codeSnippet: z.string(),
+      language: z.string().optional(),
+      framework: z.string().optional(),
+    }),
+    'analyze-performance': z.object({
+      profileData: z.string(),
+      codeContext: z.string().optional(),
+      language: z.string().optional(),
+    }),
+    'debug-guidance': z.object({
+      problemDescription: z.string(),
+      language: z.string().optional(),
+      framework: z.string().optional(),
+      environment: z.string().optional(),
+    }),
+    'code-review': z.object({
+      codeSnippet: z.string(),
+      language: z.string().optional(),
+      focusAreas: z.string().optional(),
+    }),
+    'error-prevention': z.object({
+      errorHistory: z.string(),
+      codebase: z.string().optional(),
+      language: z.string().optional(),
+    }),
+  };
+
+  buildServer(): McpServer {
+    const server = new McpServer(
       {
         name: this.config.server.name,
         version: this.config.server.version,
@@ -80,76 +159,81 @@ export class KoryphaiosMCPServer extends EventEmitter {
       }
     );
 
-    this.setupHandlers(server);
+    this.registerTools(server);
+    this.registerResources(server);
+    this.registerPrompts(server);
 
-    server.onerror = error => {
+    server.server.onerror = error => {
       this.emit('server:error', error instanceof Error ? error : new Error(String(error)));
     };
 
     return server;
   }
 
-  private setupHandlers(server: Server): void {
-    // Tool handlers
-    server.setRequestHandler('tools/list', async (): Promise<ListToolsResult> => ({
-      tools: this.toolRegistry.listTools() as ListToolsResult['tools'],
-    }));
+  /**
+   * Register all tools from the ToolRegistry with the McpServer using Zod
+   * schemas for automatic input validation. Falls back to a permissive schema
+   * for tools without a static Zod schema definition (e.g. plugin-registered).
+   */
+  private registerTools(server: McpServer): void {
+    for (const tool of this.toolRegistry.listTools()) {
+      const inputSchema = KoryphaiosMCPServer.TOOL_SCHEMAS[tool.name] ?? z.object({});
+      server.registerTool(
+        tool.name,
+        { description: tool.description, inputSchema },
+        // The ToolRegistry returns MCPContent[] which is structurally compatible
+        // with the SDK's CallToolResult content blocks; cast to satisfy the
+        // SDK's narrower type definitions.
+        async (args: Record<string, unknown>) => {
+          const result = await this.toolRegistry.callTool(tool.name, args);
+          return {
+            content: result.content,
+            isError: result.isError,
+          } as any;
+        },
+      );
+    }
+  }
 
-    server.setRequestHandler('tools/call', async request => {
-      const { name, arguments: args } = request.params;
+  /**
+   * Register all resources from the ResourceManager with the McpServer.
+   */
+  private registerResources(server: McpServer): void {
+    for (const resource of this.resourceManager.listResources()) {
+      server.registerResource(
+        resource.name,
+        resource.uri,
+        {
+          description: resource.description,
+          mimeType: resource.mimeType,
+        },
+        // The ResourceManager returns MCPContent which has a slightly different
+        // shape than the SDK's ReadResourceResult contents; cast to bridge the gap.
+        async (uri: URL) => {
+          const content = await this.resourceManager.readResource(uri.toString());
+          return { contents: [content] } as any;
+        },
+      );
+    }
+  }
 
-      try {
-        const result = await this.toolRegistry.callTool(name, args || {});
-        return {
-          content: result.content,
-          isError: result.isError,
-        } as CallToolResult;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new ProtocolError(
-          ProtocolErrorCode.InternalError,
-          `Tool execution failed: ${message}`
-        );
-      }
-    });
-
-    // Resource handlers
-    server.setRequestHandler('resources/list', async (): Promise<ListResourcesResult> => ({
-      resources: this.resourceManager.listResources() as ListResourcesResult['resources'],
-    }));
-
-    server.setRequestHandler('resources/read', async request => {
-      const { uri } = request.params;
-
-      try {
-        const content = await this.resourceManager.readResource(uri);
-        return {
-          contents: [content],
-        } as unknown as ReadResourceResult;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, `Resource not found: ${message}`);
-      }
-    });
-
-    // Prompt handlers
-    server.setRequestHandler('prompts/list', async (): Promise<ListPromptsResult> => ({
-      prompts: this.promptRegistry.listPrompts() as ListPromptsResult['prompts'],
-    }));
-
-    server.setRequestHandler('prompts/get', async request => {
-      const { name, arguments: args } = request.params;
-
-      try {
-        const prompt = await this.promptRegistry.executePrompt(name, args);
-        return {
-          messages: prompt.messages,
-        } as GetPromptResult;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        throw new ProtocolError(ProtocolErrorCode.InvalidRequest, `Prompt not found: ${message}`);
-      }
-    });
+  /**
+   * Register all prompts from the PromptRegistry with the McpServer using Zod
+   * schemas for automatic argument validation.
+   */
+  private registerPrompts(server: McpServer): void {
+    for (const prompt of this.promptRegistry.listPrompts()) {
+      const argsSchema = KoryphaiosMCPServer.PROMPT_SCHEMAS[prompt.name] ?? z.object({});
+      server.registerPrompt(
+        prompt.name,
+        { description: prompt.description, argsSchema },
+        // PromptResult allows role: 'system' which the SDK's GetPromptResult
+        // doesn't; cast to satisfy the SDK's narrower type.
+        async (args: Record<string, unknown>) => {
+          return await this.promptRegistry.executePrompt(prompt.name, args) as any;
+        },
+      );
+    }
   }
 
   async start(): Promise<void> {
@@ -221,6 +305,9 @@ export class KoryphaiosMCPServer extends EventEmitter {
 
       // serveStdio owns the stdio transport and serves the 2026-07-28 protocol
       // revision by default, with 2025-era fallback for legacy clients.
+      // buildServer() returns a McpServer with tools/resources/prompts
+      // registered via the high-level registerTool/registerResource/registerPrompt
+      // API with Zod schemas for automatic input validation.
       this.stdioHandle = serveStdio(() => this.buildServer());
 
       const transportInfo = {

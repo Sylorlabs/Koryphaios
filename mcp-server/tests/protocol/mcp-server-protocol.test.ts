@@ -187,7 +187,7 @@ describe('MCP 2026-07-28 protocol (createMcpHandler + StreamableHTTPClientTransp
 
   it('throws a ProtocolError for an unknown tool', async () => {
     await expect(client.callTool({ name: 'nonexistent-tool', arguments: {} })).rejects.toThrow(
-      /Tool execution failed|No handler registered/
+      /Tool nonexistent-tool not found/
     );
   });
 });

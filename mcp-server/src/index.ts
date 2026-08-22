@@ -8,11 +8,105 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { Server } from '@modelcontextprotocol/server';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
+
 import { KoryphaiosMCPServer } from './server/mcp-server.js';
 import { ConfigManager } from './utils/config-manager.js';
 import { Logger } from './utils/logger.js';
 
+/**
+ * Detects whether Koryphaios is active (orchestrated/invoked within Koryphaios context)
+ * or if the user is running a CLI tool natively from their terminal.
+ */
+export function isKoryphaiosActive(): boolean {
+  // Explicit activation flags
+  if (
+    process.env['KORYPHAIOS_ACTIVE'] === '1' ||
+    process.env['KORYPHAIOS_ACTIVE'] === 'true' ||
+    process.env['KORYPHAIOS'] === '1' ||
+    process.env['KORYPHAIOS'] === 'true' ||
+    process.env['KORYPHAIOS_MCP_ENABLED'] === '1' ||
+    process.env['KORYPHAIOS_MCP_ENABLED'] === 'true'
+  ) {
+    return true;
+  }
+
+  // Koryphaios CLI bridge / grant environment variables
+  if (
+    Boolean(process.env['KORY_BACKEND_URL']) ||
+    Boolean(process.env['KORY_BRIDGE_AUTH_FILE']) ||
+    Boolean(process.env['KORYPHAIOS_SESSION_ID']) ||
+    Boolean(process.env['KORY_SESSION_ID'])
+  ) {
+    return true;
+  }
+
+  // Explicit CLI argument flags
+  if (
+    process.argv.includes('--koryphaios') ||
+    process.argv.includes('--kory-active') ||
+    process.argv.includes('--kory')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Serves a lightweight, zero-overhead passive MCP responder on stdio.
+ * When the user runs CLI tools (Devin, Claude, OpenCode, Cursor) natively without Koryphaios,
+ * this responds immediately to protocol discovery without starting heavy background watchers,
+ * file analyzers, or Playwright, preventing timeouts and zombie node processes.
+ */
+export async function runPassiveServer(): Promise<void> {
+  const server = new Server(
+    {
+      name: 'koryphaios',
+      version: '0.2.0',
+    },
+    {
+      capabilities: {
+        tools: {},
+        prompts: {},
+        resources: {},
+      },
+    }
+  );
+
+  // Return empty capabilities instantly with zero delay
+  server.setRequestHandler('tools/list', async () => ({ tools: [] }));
+  server.setRequestHandler('prompts/list', async () => ({ prompts: [] }));
+  server.setRequestHandler('resources/list', async () => ({ resources: [] }));
+
+  // Serve over stdio
+  const stdioHandle = serveStdio(() => server);
+
+  // Ensure clean exit when parent process disconnects
+  process.on('SIGINT', async () => {
+    await stdioHandle.close().catch(() => {});
+    process.exit(0);
+  });
+  process.on('SIGTERM', async () => {
+    await stdioHandle.close().catch(() => {});
+    process.exit(0);
+  });
+  process.stdin.on('end', () => {
+    process.exit(0);
+  });
+  process.stdin.on('close', () => {
+    process.exit(0);
+  });
+}
+
 export async function main(): Promise<void> {
+  // If native CLI usage (Koryphaios not active), run passive responder
+  if (!isKoryphaiosActive()) {
+    await runPassiveServer();
+    return;
+  }
+
   try {
     // Initialize configuration
     const configManager = new ConfigManager();
@@ -72,7 +166,7 @@ export async function main(): Promise<void> {
     // Start the server
     await server.start();
   } catch (error) {
-    console.error('Failed to start server:', error);
+    process.stderr.write(`Failed to start Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   }
 }
@@ -83,7 +177,7 @@ export async function main(): Promise<void> {
 const entrypoint = process.argv[1] ? resolve(process.argv[1]) : '';
 if (entrypoint === fileURLToPath(import.meta.url)) {
   main().catch(error => {
-    console.error('Fatal error:', error);
+    process.stderr.write(`Fatal error in Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   });
 }
