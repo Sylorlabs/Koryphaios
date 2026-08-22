@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
-const FRONTEND_ORIGIN = 'http://127.0.0.1:5174';
+import {
+  E2E_BACKEND_URL as BACKEND_URL,
+  E2E_FRONTEND_ORIGIN as FRONTEND_ORIGIN,
+} from './helpers/urls';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': FRONTEND_ORIGIN,

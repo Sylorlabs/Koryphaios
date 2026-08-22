@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
+import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 
 /**
  * Verifies the feedback dialog opens, accepts input, and attempts to open

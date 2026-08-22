@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { ApiClient } from './helpers/api';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
+import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 
 /**
  * Verifies that the frontend establishes a real WebSocket connection to the
@@ -28,7 +27,9 @@ test('frontend establishes a WebSocket connection to the backend', async ({ page
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
 
   // Wait for a WebSocket connection to be established
-  await expect.poll(() => wsConnected, { timeout: 15_000, message: 'WebSocket should connect' }).toBe(true);
+  await expect
+    .poll(() => wsConnected, { timeout: 15_000, message: 'WebSocket should connect' })
+    .toBe(true);
 });
 
 /**

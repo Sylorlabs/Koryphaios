@@ -8,6 +8,7 @@
  */
 
 import { expect, type APIRequestContext } from '@playwright/test';
+import { E2E_BACKEND_URL } from './urls';
 
 export interface AuthSession {
   bearerToken: string;
@@ -24,13 +25,15 @@ export interface AuthSession {
  */
 export async function createAuthSession(
   request: APIRequestContext,
-  baseUrl = 'http://127.0.0.1:3011',
+  baseUrl = E2E_BACKEND_URL,
 ): Promise<AuthSession> {
   // 1. Create a local session
   const sessionRes = await request.post(`${baseUrl}/api/auth/session`, {
     headers: { 'Content-Type': 'application/json' },
   });
-  expect(sessionRes.ok(), `POST /api/auth/session should succeed: ${sessionRes.status()}`).toBe(true);
+  expect(sessionRes.ok(), `POST /api/auth/session should succeed: ${sessionRes.status()}`).toBe(
+    true,
+  );
   const sessionBody = await sessionRes.json();
   const bearerToken = sessionBody?.data?.bearerToken;
   expect(bearerToken, 'Session response should contain a bearer token').toBeTruthy();

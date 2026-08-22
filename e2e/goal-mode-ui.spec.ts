@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { ApiClient } from './helpers/api';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
+import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 
 /**
  * Verifies Goal Mode slash commands reveal the Critic-aware control surface.

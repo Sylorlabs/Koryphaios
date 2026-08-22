@@ -9,8 +9,7 @@
 import { test as base, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage, type AuthSession } from './auth';
 import { ApiClient } from './api';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
+import { E2E_BACKEND_URL as BACKEND_URL } from './urls';
 
 interface E2EFixtures {
   auth: AuthSession;

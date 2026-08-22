@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { ApiClient } from './helpers/api';
-
-const BACKEND_URL = 'http://127.0.0.1:3011';
+import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 
 /**
  * Verifies that sending a message through the real backend produces no
@@ -58,7 +57,10 @@ test('sending a message through the real backend produces no errors', async ({ p
   const sessionId = await api.createSession('E2E message test');
   expect(sessionId).toBeTruthy();
 
-  const sendRes = await api.sendMessage(sessionId, 'Hello, this is a test message from Playwright e2e.');
+  const sendRes = await api.sendMessage(
+    sessionId,
+    'Hello, this is a test message from Playwright e2e.',
+  );
   expect(sendRes.ok(), `POST /api/messages should succeed: ${sendRes.status()}`).toBe(true);
 
   // ─── 5. Verify the message was persisted ────────────────────────────────
@@ -68,7 +70,9 @@ test('sending a message through the real backend produces no errors', async ({ p
   // The message should appear in the session's message history
   const userMessages = (messages.data as any[]).filter((m) => m.role === 'user');
   expect(userMessages.length).toBeGreaterThan(0);
-  expect(userMessages.some((m) => m.content?.includes('test message from Playwright e2e'))).toBe(true);
+  expect(userMessages.some((m) => m.content?.includes('test message from Playwright e2e'))).toBe(
+    true,
+  );
 
   // ─── 6. Verify backend health after the message ─────────────────────────
   const health = await api.health();
@@ -76,8 +80,16 @@ test('sending a message through the real backend produces no errors', async ({ p
 
   // ─── 7. Assert zero tolerance for errors ────────────────────────────────
   // Filter out known-benign patterns (favicon, source maps, Tauri internals)
-  const benignPatterns = [/favicon/i, /\.map$/i, /__TAURI/i, /websocket.*close/i, /\/api\/auth\/me.*401/i];
-  const realConsoleErrors = consoleErrors.filter((text) => !benignPatterns.some((re) => re.test(text)));
+  const benignPatterns = [
+    /favicon/i,
+    /\.map$/i,
+    /__TAURI/i,
+    /websocket.*close/i,
+    /\/api\/auth\/me.*401/i,
+  ];
+  const realConsoleErrors = consoleErrors.filter(
+    (text) => !benignPatterns.some((re) => re.test(text)),
+  );
 
   expect(realConsoleErrors, `Console errors: ${realConsoleErrors.join('; ')}`).toEqual([]);
   expect(networkFailures, `Network failures: ${networkFailures.join('; ')}`).toEqual([]);
