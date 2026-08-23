@@ -1,20 +1,29 @@
 // Cline CLI provider — runs the official `cline` CLI harness.
 //
-// CLI-ONLY: Cline has its OWN provider/auth store (~/.cline/data/secrets.json,
-// set once via `cline auth --provider … --apikey …`). Koryphaios never holds a
-// Cline key — it shells out to the logged-in binary. Headless
-// `cline -p <prompt> --act --yolo --json` emits newline-delimited JSON events
-// (say/ask/tool/completion) which we translate to ProviderEvents.
+// CLI-ONLY: Cline owns its provider authentication and model configuration.
+// Koryphaios never stores a Cline key. The child reads Cline's real provider
+// settings while databases, sessions, teams, hooks, plugins, rules, skills,
+// and MCP configuration resolve inside a private Koryphaios-managed home.
+//
+// Cline has shipped two JSON stream generations in the wild:
+//   1. legacy top-level say/ask records
+//   2. current { type: "agent_event", event: ... } envelopes
+// Both are accepted here. An exit code of zero with no recognized frames is a
+// protocol error, never a successful empty response.
 
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { whichBinary } from './cli-detection';
 import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  sandboxCapabilities,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -43,41 +52,93 @@ import { buildProviderCliEnv } from './cli-environment';
 
 const CLINE_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
+const CLINE_HELP_CACHE_TTL_MS = 5 * 60_000;
 
 const HARNESS_SYSTEM_NOTE =
-  'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
-  'other agents yourself; if work should be parallelized or delegated, say so in your response ' +
-  'and Koryphaios will dispatch its own worker agents.';
+  'You are running inside the Koryphaios orchestrator. Koryphaios owns tool ' +
+  'authorization and orchestration. Prefer the role-scoped tools from the kory MCP server. ' +
+  'Never spawn Cline teams or subagents; if work should be delegated, say so and ' +
+  'Koryphaios will dispatch its own workers.';
+
+interface ClineCliContract {
+  inspectedAt: number;
+  version?: string;
+  help: string;
+  supportsJson: boolean;
+  supportsPlan: boolean;
+  supportsAutoApprove: boolean;
+  supportsYolo: boolean;
+  supportsCwd: boolean;
+  supportsConfig: boolean;
+  supportsDataDir: boolean;
+  supportsHooksDir: boolean;
+  supportsThinking: boolean;
+  supportsReasoningEffort: boolean;
+  supportsModel: boolean;
+}
+
+interface ClineLegacyEvent {
+  type?: string;
+  say?: string;
+  ask?: string;
+  text?: string;
+  message?: string;
+}
+
+interface ClineAgentEvent {
+  type?: string;
+  contentType?: string;
+  text?: string;
+  reasoning?: string;
+  redacted?: boolean;
+  toolName?: string;
+  toolCallId?: string;
+  input?: unknown;
+  output?: unknown;
+  error?: string;
+  recoverable?: boolean;
+  message?: string;
+  displayRole?: string;
+  reason?: string;
+  usage?: unknown;
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+}
+
+interface ClineWireEvent extends ClineLegacyEvent {
+  event?: ClineAgentEvent;
+}
+
+interface MappedClineEvent {
+  recognized: boolean;
+  completed: boolean;
+  events: ProviderEvent[];
+}
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
   const sys = systemPrompt?.trim();
-  // Use the ClineCliBridge's harness note for consistency (Phase 1).
-  const clineBridge = getCliBridge('cline');
-  const bridgeConfig = clineBridge?.buildAgentConfig({
-    provider: 'cline',
-    role: 'manager',
-    sandbox: undefined,
-    workingDirectory: process.cwd(),
-    systemPrompt: systemPrompt ?? '',
-    tools: [],
-  });
-  const harnessNote = bridgeConfig?.systemInstructions?.[1] ?? HARNESS_SYSTEM_NOTE;
-  lines.push(sys ? `${sys}\n\n${harnessNote}` : harnessNote, '');
-  for (const m of messages) {
+  lines.push(sys ? `${sys}\n\n${HARNESS_SYSTEM_NOTE}` : HARNESS_SYSTEM_NOTE, '');
+  for (const message of messages) {
     const content =
-      typeof m.content === 'string'
-        ? m.content
-        : m.content
-            .map((b) =>
-              b.type === 'text' ? b.text : b.type === 'image' ? '[image attachment]' : '',
+      typeof message.content === 'string'
+        ? message.content
+        : message.content
+            .map((block) =>
+              block.type === 'text'
+                ? block.text
+                : block.type === 'image'
+                  ? '[image attachment]'
+                  : '',
             )
             .filter(Boolean)
             .join('\n');
     if (!content.trim()) continue;
-    if (m.role === 'user') lines.push(`User: ${content}`);
-    else if (m.role === 'assistant') lines.push(`Assistant: ${content}`);
-    else if (m.role === 'tool') lines.push(`Tool result: ${content.slice(0, 8_000)}`);
+    if (message.role === 'user') lines.push(`User: ${content}`);
+    else if (message.role === 'assistant') lines.push(`Assistant: ${content}`);
+    else if (message.role === 'tool') lines.push(`Tool result: ${content.slice(0, 8_000)}`);
     lines.push('');
   }
   return lines.join('\n').trim();
@@ -98,11 +159,8 @@ function readJsonFile<T = unknown>(path: string): T | null {
 function looksLikeClineModelId(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed || trimmed.length < 2 || trimmed.length > 200) return false;
-  if (/\s/.test(trimmed)) return false;
-  if (trimmed === 'default') return false;
-  if (!/^[^\n\r]+$/.test(trimmed)) return false;
-  // Common Cline models are short identifiers, not arbitrary long secrets.
-  return trimmed.length >= 2 && /^[A-Za-z0-9._/:+-]+$/.test(trimmed);
+  if (/\s/.test(trimmed) || trimmed === 'default') return false;
+  return /^[A-Za-z0-9._/:+-]+$/.test(trimmed);
 }
 
 function isClineModelKey(key: string): boolean {
@@ -111,55 +169,56 @@ function isClineModelKey(key: string): boolean {
     normalized === 'model' ||
     normalized === 'modelid' ||
     normalized === 'model_id' ||
+    normalized === 'clinemodel' ||
     normalized === 'cline_model' ||
     normalized === 'actmodel' ||
-    normalized.includes('modelid') ||
-    normalized.includes('model_id') ||
-    normalized.includes('clinemodel') ||
-    normalized.includes('cline-model') ||
-    normalized.includes('model')
+    normalized === 'planmodel' ||
+    normalized.endsWith('modelid') ||
+    normalized.endsWith('model_id')
   );
 }
 
 function collectConfiguredClineModels(
   source: unknown,
-  path: string[] = [],
   models: Set<string> = new Set<string>(),
 ): Set<string> {
   if (!source || typeof source !== 'object') return models;
-
   if (Array.isArray(source)) {
-    for (const item of source) {
-      collectConfiguredClineModels(item, path, models);
-    }
+    for (const item of source) collectConfiguredClineModels(item, models);
     return models;
   }
 
-  const record = source as Record<string, unknown>;
-  const includesClinePath = path.some((segment) => /cline/i.test(segment));
-
-  for (const [key, value] of Object.entries(record)) {
-    const normalized = key.toLowerCase();
-    const nextPath = [...path, key];
-    if (typeof value === 'string') {
-      if (isClineModelKey(normalized) || (includesClinePath && normalized.includes('id'))) {
-        const modelId = value.trim();
-        if (looksLikeClineModelId(modelId)) {
-          models.add(modelId);
-        }
-      }
+  for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+    if (typeof value === 'string' && isClineModelKey(key) && looksLikeClineModelId(value)) {
+      models.add(value.trim());
       continue;
     }
-    collectConfiguredClineModels(value, nextPath, models);
+    collectConfiguredClineModels(value, models);
   }
   return models;
+}
+
+function modelDefinition(modelId: string, displayName = modelId): ModelDef {
+  return {
+    id: `cline-${modelId}`,
+    name: displayName,
+    provider: 'cline',
+    apiModelId: modelId,
+    contextWindow: 0,
+    maxOutputTokens: 0,
+    supportsStreaming: true,
+    supportsAttachments: false,
+    reasoningLevels: ['none', 'low', 'medium', 'high', 'xhigh'],
+  } as ModelDef;
 }
 
 function readConfiguredClineModels(): ModelDef[] {
   const clineData = join(homedir(), '.cline', 'data');
   const sources = [
     join(clineData, 'settings', 'providers.json'),
+    join(clineData, 'settings', 'global-settings.json'),
     join(clineData, 'globalState.json'),
+    join(clineData, 'secrets.json'),
   ];
 
   const modelIds = new Set<string>();
@@ -167,164 +226,138 @@ function readConfiguredClineModels(): ModelDef[] {
     if (!existsSync(sourcePath)) continue;
     const payload = readJsonFile(sourcePath);
     if (!payload || typeof payload !== 'object') continue;
-    for (const modelId of collectConfiguredClineModels(payload)) {
-      modelIds.add(modelId);
-    }
+    collectConfiguredClineModels(payload, modelIds);
   }
 
-  return [...modelIds].map(
-    (modelId) =>
-      ({
-        id: `cline-${modelId}`,
-        name: modelId,
-        provider: 'cline',
-        apiModelId: modelId,
-        contextWindow: 0,
-        maxOutputTokens: 0,
-        supportsStreaming: true,
-        supportsAttachments: false,
-      }) as ModelDef,
-  );
+  const configured = [...modelIds].map((modelId) => modelDefinition(modelId));
+  // Cline can resolve its own saved/default model even when it does not expose
+  // a stable machine-readable catalog. This is a harness route, not a claim
+  // that a model literally named "default" exists upstream.
+  return configured.length ? configured : [modelDefinition('default', 'Cline configured model')];
 }
 
-interface ClineEvent {
-  type?: string; // 'say' | 'ask' | 'task_started' | 'error' | 'completion' | …
-  say?: string; // 'text' | 'reasoning' | 'tool' | 'command' | 'api_req_started' | 'completion_result'
-  ask?: string;
-  text?: string;
+function outputText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function boundedOutput(value: unknown): string {
+  return outputText(value).slice(0, 8_000);
+}
+
+function numberFrom(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function usageEvent(value: unknown): ProviderEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const tokensIn = numberFrom(record, [
+    'inputTokens',
+    'input_tokens',
+    'promptTokens',
+    'prompt_tokens',
+  ]);
+  const tokensOut = numberFrom(record, [
+    'outputTokens',
+    'output_tokens',
+    'completionTokens',
+    'completion_tokens',
+  ]);
+  if (tokensIn === undefined && tokensOut === undefined) return null;
+  return { type: 'usage_update', tokensIn: tokensIn ?? 0, tokensOut: tokensOut ?? 0 };
+}
+
+function normalizeThinkingLevel(value: string | undefined): string | null {
+  if (!value || value === 'auto') return null;
+  const normalized = value.toLowerCase();
+  if (normalized === 'minimal') return 'low';
+  if (['none', 'low', 'medium', 'high', 'xhigh'].includes(normalized)) return normalized;
+  return null;
+}
+
+export function shouldUseClinePlanMode(
+  request: StreamRequest,
+  researchOnly: boolean,
+  kernelIsolationAvailable: boolean,
+): boolean {
+  if (researchOnly || request.harnessRole === 'critic' || request.permissionMode === 'plan') {
+    return true;
+  }
+  // A mutating Cline turn must either be confined by a real host-kernel jail or
+  // explicitly authorized as YOLO. A soft jail is not sufficient for Act mode.
+  return (
+    request.permissionMode !== 'yolo' &&
+    (!request.sandbox?.filesystemIsolation || !kernelIsolationAvailable)
+  );
 }
 
 export class ClineProvider implements Provider {
   readonly name = 'cline' as const;
   private cachedModels: ModelDef[] | null = null;
   private modelsFetchedAt = 0;
-  private modelsInFlight = false;
+  private cliContract: ClineCliContract | null = null;
 
   constructor(readonly config: ProviderConfig) {}
 
-  private static MODEL_LINE_PATTERNS = [
-    /^\s*([a-z0-9._\/=:+-]+)\s+-\s+(.+?)\s*(?:\((?:current|active|default)\))?\s*$/i,
-    /^\s*([a-z0-9._\/=:+-]+)\s*$/i,
-    /^\s*\*?\s*([a-z0-9._\/=:+-]+)\s*$/i,
-  ];
-
-  private parseModelOutput(output: string): ModelDef[] {
-    const models: ModelDef[] = [];
-    const lines = output.replace(/\r\n/g, '\n').split('\n');
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-
-      let match: RegExpMatchArray | null = null;
-      let modelId = '';
-      let modelName = '';
-
-      for (const pattern of ClineProvider.MODEL_LINE_PATTERNS) {
-        const m = pattern.exec(trimmed);
-        if (!m) continue;
-
-        match = m;
-        modelId = m[1]?.trim() ?? '';
-        modelName = (m[2] || m[1] || '').trim();
-        break;
-      }
-
-      if (!match || !modelId) continue;
-
-      const normalized = modelName.replace(/\s+\(current\)\s*$/i, '').trim();
-      models.push({
-        id: `cline-${modelId}`,
-        name: normalized || modelId,
-        provider: 'cline',
-        apiModelId: modelId,
-        contextWindow: 0,
-        maxOutputTokens: 0,
-        supportsStreaming: true,
-        supportsAttachments: false,
-      } as ModelDef);
+  private inspectCli(bin: string): ClineCliContract {
+    if (this.cliContract && Date.now() - this.cliContract.inspectedAt < CLINE_HELP_CACHE_TTL_MS) {
+      return this.cliContract;
     }
 
-    const deduped = new Map<string, ModelDef>();
-    for (const model of models) {
-      deduped.set(model.id, model);
-    }
-    return [...deduped.values()];
+    const env = buildProviderCliEnv('cline');
+    const versionResult = spawnSync(bin, ['--version'], {
+      encoding: 'utf8',
+      timeout: 8_000,
+      env,
+      windowsHide: true,
+    });
+    const helpResult = spawnSync(bin, ['--help'], {
+      encoding: 'utf8',
+      timeout: 8_000,
+      env,
+      windowsHide: true,
+    });
+    const help = `${helpResult.stdout ?? ''}\n${helpResult.stderr ?? ''}`;
+    const has = (flag: string) => help.includes(flag);
+    this.cliContract = {
+      inspectedAt: Date.now(),
+      version: `${versionResult.stdout ?? ''}`.trim() || undefined,
+      help,
+      supportsJson: has('--json'),
+      supportsPlan: has('--plan'),
+      supportsAutoApprove: has('--auto-approve'),
+      supportsYolo: has('--yolo'),
+      supportsCwd: has('--cwd'),
+      supportsConfig: has('--config'),
+      supportsDataDir: has('--data-dir'),
+      supportsHooksDir: has('--hooks-dir'),
+      supportsThinking: has('--thinking'),
+      supportsReasoningEffort: has('--reasoning-effort'),
+      supportsModel: has('--model'),
+    };
+    return this.cliContract;
   }
 
   refreshModels(forceRefresh = false): void {
     if (
       !forceRefresh &&
-      this.modelsFetchedAt > 0 &&
-      !this.modelsInFlight &&
-      this.cachedModels?.length
+      this.cachedModels &&
+      Date.now() - this.modelsFetchedAt < MODELS_CACHE_TTL_MS
     ) {
       return;
     }
-    if (this.modelsInFlight) return;
-    this.modelsInFlight = true;
-
-    const finalize = (models: ModelDef[]): void => {
-      this.cachedModels = models;
-      this.modelsFetchedAt = Date.now();
-      this.modelsInFlight = false;
-      if (models.length) {
-        providerLog.debug(
-          { provider: 'cline', count: models.length },
-          'Cline model list refreshed',
-        );
-      }
-    };
-
-    const fallbackFromConfig = (): void => {
-      const configured = readConfiguredClineModels();
-      finalize(configured);
-    };
-
-    const candidates: string[][] = [['--list-models'], ['models'], ['list-models'], ['-l']];
-    const runCandidate = (index: number): void => {
-      if (index >= candidates.length) {
-        fallbackFromConfig();
-        return;
-      }
-
-      const args = candidates[index] ?? ['--list-models'];
-      let out = '';
-
-      const child = spawn('cline', args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: buildProviderCliEnv('cline', {
-          CLINE_HOME: getKoryphaiosClineHome(),
-          HOME: getKoryphaiosClineHome(),
-          USERPROFILE: getKoryphaiosClineHome(),
-        }),
-      });
-
-      child.stdout.on('data', (c: Buffer) => (out += c.toString()));
-      child.once('error', () => {
-        runCandidate(index + 1);
-      });
-      child.once('exit', () => {
-        const models = this.parseModelOutput(out);
-        if (models.length > 0) {
-          finalize(models);
-          return;
-        }
-        runCandidate(index + 1);
-      });
-      setTimeout(() => {
-        try {
-          child.kill('SIGTERM');
-        } catch (err: unknown) {
-          providerLog.debug(
-            { err: err instanceof Error ? err.message : String(err) },
-            'Cline model probe child already gone on timeout',
-          );
-        }
-      }, 12_000).unref?.();
-    };
-
-    runCandidate(0);
+    this.cachedModels = readConfiguredClineModels();
+    this.modelsFetchedAt = Date.now();
   }
 
   isAvailable(): boolean {
@@ -335,7 +368,7 @@ export class ClineProvider implements Provider {
     if (!this.cachedModels || Date.now() - this.modelsFetchedAt > MODELS_CACHE_TTL_MS) {
       this.refreshModels();
     }
-    return this.cachedModels ?? [];
+    return this.cachedModels ?? [modelDefinition('default', 'Cline configured model')];
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -348,8 +381,44 @@ export class ClineProvider implements Provider {
     if (!detectClineCLILogin()) {
       yield {
         type: 'error',
-        error:
-          'Cline CLI is not signed in — run "cline auth --provider <p> --apikey <k>" (Cline manages its own key).',
+        error: 'Cline CLI is not configured — run "cline auth" in a terminal, then reconnect.',
+      };
+      return;
+    }
+
+    const contract = this.inspectCli(bin);
+    if (!contract.supportsJson) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose the required --json protocol. Update Cline, then reconnect.`,
+      };
+      return;
+    }
+    if (!contract.supportsConfig) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose --config, so Koryphaios cannot safely isolate the harness from the user's full Cline configuration. Update Cline, then reconnect.`,
+      };
+      return;
+    }
+
+    const kernelIsolationAvailable = sandboxCapabilities().osIsolation;
+    const planMode = shouldUseClinePlanMode(
+      request,
+      researchOnly,
+      kernelIsolationAvailable,
+    );
+    if (planMode && !contract.supportsPlan) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} cannot enforce the required Plan mode. Update Cline or choose a different provider.`,
+      };
+      return;
+    }
+    if (!contract.supportsAutoApprove && (planMode || !contract.supportsYolo)) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose the headless approval controls required by Koryphaios. Update Cline, then reconnect.`,
       };
       return;
     }
@@ -360,10 +429,6 @@ export class ClineProvider implements Provider {
       return;
     }
 
-    // ── Wire kory MCP server + rules into the isolated cline home ──────────
-    // Cline reads MCP servers from cline_mcp_settings.json and .clinerules as
-    // always-on rules. Writing these before each turn ensures the CLI
-    // discovers the kory__ tool catalog and Kory's session rules on startup.
     const clineBridge = getCliBridge('cline');
     const bridgeGrantLease =
       !researchOnly && request.sessionId
@@ -379,80 +444,112 @@ export class ClineProvider implements Provider {
       tools: request.tools ?? [],
       bridgeGrantLease,
     };
+
     const clineHome = researchOnly
       ? join(getKoryphaiosClineHome(), 'research-only')
       : getKoryphaiosClineHome();
+    const clineUserConfigDir = join(homedir(), '.cline');
+    const clineSettingsDir = join(clineUserConfigDir, 'data', 'settings');
+    const clineDataDir = join(clineHome, 'data');
+    const clineDbDir = join(clineDataDir, 'db');
+    const clineSessionDir = join(clineDataDir, 'sessions');
+    const clineTeamDir = join(clineDataDir, 'teams');
+    const clineLogDir = join(clineDataDir, 'logs');
+    const clineHooksDir = join(clineHome, 'hooks');
+    const mcpConfigPath = join(clineDataDir, 'settings', 'cline_mcp_settings.json');
     const bridgeGrantDirectory =
       !researchOnly && bridgeCtx.sessionId
         ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
-    ensureManagedCliDirectory(clineHome);
-    if (!researchOnly)
+
+    for (const directory of [
+      clineHome,
+      clineDataDir,
+      clineDbDir,
+      clineSessionDir,
+      clineTeamDir,
+      clineLogDir,
+      clineHooksDir,
+    ]) {
+      ensureManagedCliDirectory(directory);
+    }
+
+    if (!researchOnly) {
       try {
-        // MCP: write cline_mcp_settings.json with the kory server.
         const mcpConfigs = clineBridge?.buildMcpConfig(bridgeCtx);
-        if (mcpConfigs && mcpConfigs.length > 0) {
-          const mcpConfigPath = join(clineHome, 'cline_mcp_settings.json');
+        if (mcpConfigs?.length) {
           if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
           const existing = existsSync(mcpConfigPath)
-            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+            ? (JSON.parse(readFileSync(mcpConfigPath, 'utf-8')) as Record<string, unknown>)
             : {};
-          existing.mcpServers = existing.mcpServers ?? {};
-          for (const srv of mcpConfigs) {
-            existing.mcpServers[srv.name] = {
-              command: srv.command,
-              args: srv.args,
-              env: srv.env,
+          const mcpServers =
+            existing.mcpServers && typeof existing.mcpServers === 'object'
+              ? (existing.mcpServers as Record<string, unknown>)
+              : {};
+          for (const server of mcpConfigs) {
+            mcpServers[server.name] = {
+              command: server.command,
+              args: server.args,
+              env: server.env,
+              disabled: false,
             };
           }
-          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
-        }
-        // Rules: write .clinerules with the Kory session rules.
-        const ruleFiles = clineBridge?.buildRules(bridgeCtx);
-        if (ruleFiles) {
-          for (const rule of ruleFiles) {
-            writeManagedCliFile(rule.path, rule.content);
-          }
+          writeManagedCliFile(mcpConfigPath, JSON.stringify({ ...existing, mcpServers }, null, 2));
         }
       } catch (wiringErr) {
-        providerLog.warn(
-          safeProviderDiagnostic('cline', 'configuration', wiringErr),
-          'Failed to wire kory MCP/rules for Cline',
-        );
+        bridgeGrantLease?.cleanup();
+        const diagnostic = safeProviderDiagnostic('cline', 'configuration', wiringErr);
+        providerLog.error(diagnostic, 'Failed to wire Kory MCP for Cline');
+        yield {
+          type: 'error',
+          error: safeProviderFailureMessage('cline', diagnostic),
+        };
+        return;
       }
+    }
 
     const researchRoot = researchOnly
       ? mkdtempSync(join(tmpdir(), 'kory-web-research-cline-'))
       : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
-    const args = [
-      '--plan',
-      '--auto-approve',
-      'true',
-      '--json',
-      '--cwd',
-      cwd,
-      '--config',
-      clineHome,
-      '--data-dir',
-      join(clineHome, 'data'),
-      '--hooks-dir',
-      join(clineHome, 'hooks'),
-    ];
-    if (request.reasoningLevel && request.reasoningLevel !== 'auto') {
-      const lvl = request.reasoningLevel.toLowerCase();
-      const modelDef = this.listModels().find(
-        (model) => model.id === request.model || model.apiModelId === request.model,
-      );
-      if (modelDef?.reasoningLevels?.includes(lvl)) {
-        args.push('--reasoning-effort', lvl);
+    const args: string[] = [];
+    if (planMode) args.push('--plan');
+    if (contract.supportsAutoApprove) args.push('--auto-approve', 'true');
+    else args.push('--yolo');
+    args.push('--json');
+    if (contract.supportsCwd) args.push('--cwd', cwd);
+    args.push('--config', clineHome);
+    if (contract.supportsHooksDir) args.push('--hooks-dir', clineHooksDir);
+
+    const thinkingLevel = normalizeThinkingLevel(request.reasoningLevel);
+    if (thinkingLevel) {
+      if (contract.supportsThinking) args.push('--thinking', thinkingLevel);
+      else if (contract.supportsReasoningEffort) {
+        args.push('--reasoning-effort', thinkingLevel);
       }
     }
     const cliModel = request.model?.replace(/^cline-/, '');
-    if (cliModel && cliModel !== 'default') args.push('--model', cliModel);
+    if (contract.supportsModel && cliModel && cliModel !== 'default') {
+      args.push('--model', cliModel);
+    }
 
     const baseEnv = buildProviderCliEnv('cline', {
       CLINE_HOME: clineHome,
+      CLINE_PROVIDER_SETTINGS_PATH: join(clineSettingsDir, 'providers.json'),
+      CLINE_GLOBAL_SETTINGS_PATH: join(clineSettingsDir, 'global-settings.json'),
+      CLINE_MCP_SETTINGS_PATH: researchOnly ? undefined : mcpConfigPath,
+      CLINE_DB_DATA_DIR: clineDbDir,
+      CLINE_SESSION_DATA_DIR: clineSessionDir,
+      CLINE_TEAM_DATA_DIR: clineTeamDir,
+      CLINE_HOOKS_DIR: clineHooksDir,
+      CLINE_HOOKS_LOG_PATH: join(clineLogDir, 'hooks.jsonl'),
+      CLINE_SESSION_BACKEND_MODE: 'local',
+      // A modern Cline --data-dir sets CLINE_PROVIDER_SETTINGS_PATH to the
+      // isolated directory. Delete ambient sandbox/data overrides so the
+      // explicit CLI-owned provider settings path above remains authoritative.
+      CLINE_DATA_DIR: undefined,
+      CLINE_SANDBOX: undefined,
+      CLINE_SANDBOX_DATA_DIR: undefined,
       HOME: clineHome,
       USERPROFILE: clineHome,
     });
@@ -460,13 +557,15 @@ export class ClineProvider implements Provider {
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
-          configDirs: [clineHome, ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : [])],
+          configDirs: [clineHome],
+          readonlyConfigDirs: [
+            clineSettingsDir,
+            ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
+          ],
           policy: request.sandbox,
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    // Point the CLI at the isolated home so it discovers the kory MCP server
-    // and .clinerules we just wrote.
     const clineEnv = { ...(jail?.env ?? baseEnv) };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
@@ -503,12 +602,16 @@ export class ClineProvider implements Provider {
     timeout.unref?.();
 
     let stderr = '';
-    child.stderr.on('data', (c: Buffer) => (stderr = appendPrivateDiagnostic(stderr, c)));
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr = appendPrivateDiagnostic(stderr, chunk);
+    });
 
     const decoder = new TextDecoder();
     let buffer = '';
     let sawContent = false;
-    let lastText = '';
+    let sawRecognizedFrame = false;
+    let sawComplete = false;
+    let lastLegacyText = '';
 
     try {
       for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
@@ -521,9 +624,9 @@ export class ClineProvider implements Provider {
         for (const raw of bounded.frames) {
           const line = raw.trim();
           if (!line) continue;
-          let ev: ClineEvent;
+          let event: ClineWireEvent;
           try {
-            ev = JSON.parse(line) as ClineEvent;
+            event = JSON.parse(line) as ClineWireEvent;
           } catch {
             providerLog.debug(
               safeProviderDiagnostic('cline', 'stdout', line),
@@ -531,13 +634,17 @@ export class ClineProvider implements Provider {
             );
             continue;
           }
-          for (const out of this.mapEvent(
-            ev,
-            () => lastText,
-            (t) => (lastText = t),
-          )) {
-            if (out.type === 'content_delta' || out.type === 'thinking_delta') sawContent = true;
-            yield out;
+          const mapped = this.mapEvent(event, lastLegacyText);
+          if (mapped.recognized) sawRecognizedFrame = true;
+          if (mapped.completed) sawComplete = true;
+          for (const output of mapped.events) {
+            if (output.type === 'content_delta' && output.content) {
+              sawContent = true;
+              lastLegacyText += event.type === 'say' ? output.content : '';
+            } else if (output.type === 'thinking_delta') {
+              sawContent = true;
+            }
+            yield output;
           }
         }
       }
@@ -548,10 +655,7 @@ export class ClineProvider implements Provider {
         onAbort();
         const diagnostic = safeProviderDiagnostic('cline', 'stream', err);
         providerLog.error(diagnostic, 'Cline harness stream failed');
-        yield {
-          type: 'error',
-          error: safeProviderFailureMessage('cline', diagnostic),
-        };
+        yield { type: 'error', error: safeProviderFailureMessage('cline', diagnostic) };
       }
       clearTimeout(timeout);
       request.signal?.removeEventListener('abort', onAbort);
@@ -566,7 +670,7 @@ export class ClineProvider implements Provider {
     request.signal?.removeEventListener('abort', onAbort);
     if (request.signal?.aborted) return;
 
-    if (exitCode !== 0 && !sawContent) {
+    if (exitCode !== 0) {
       const diagnostic = safeProviderDiagnostic('cline', 'stderr', stderr, { exitCode });
       providerLog.warn(diagnostic, 'Cline CLI exited unsuccessfully');
       yield {
@@ -577,49 +681,175 @@ export class ClineProvider implements Provider {
       };
       return;
     }
-    yield { type: 'complete', finishReason: 'end_turn' };
-  }
-
-  private *mapEvent(
-    ev: ClineEvent,
-    getLast: () => string,
-    setLast: (t: string) => void,
-  ): Generator<ProviderEvent> {
-    // Cline emits cumulative `say:text` snapshots; diff against the last one so
-    // the UI streams deltas, not repeated full text.
-    if (ev.type === 'say' && ev.say === 'text' && typeof ev.text === 'string') {
-      const full = ev.text;
-      const prev = getLast();
-      const delta = full.startsWith(prev) ? full.slice(prev.length) : full;
-      setLast(full);
-      if (delta) yield { type: 'content_delta', content: delta };
-      return;
-    }
-    if (ev.type === 'say' && ev.say === 'reasoning' && ev.text) {
-      yield { type: 'thinking_delta', thinking: ev.text };
-      return;
-    }
-    if (ev.type === 'say' && (ev.say === 'tool' || ev.say === 'command') && ev.text) {
+    if (!sawRecognizedFrame) {
       yield {
-        type: 'tool_executed',
-        toolName: ev.say === 'command' ? 'bash' : 'tool',
-        toolInput: '{}',
-        toolOutput: ev.text.slice(0, 8_000),
+        type: 'error',
+        error: `Cline CLI${contract.version ? ` ${contract.version}` : ''} exited without any recognized JSON protocol frames. This Cline version is not compatible with the installed Koryphaios adapter.`,
       };
       return;
     }
-    if (ev.type === 'say' && ev.say === 'completion_result' && ev.text) {
-      const prev = getLast();
-      const delta = ev.text.startsWith(prev) ? ev.text.slice(prev.length) : ev.text;
-      setLast(ev.text);
-      if (delta) yield { type: 'content_delta', content: delta };
-      return;
+    if (!sawContent) {
+      providerLog.warn(
+        { provider: 'cline', version: contract.version },
+        'Cline completed without user-facing content',
+      );
     }
-    if (ev.type === 'error' && ev.text) {
-      const diagnostic = safeProviderDiagnostic('cline', 'stdout', ev.text);
-      providerLog.warn(diagnostic, 'Cline CLI reported a request failure');
-      yield { type: 'error', error: safeProviderFailureMessage('cline', diagnostic) };
-      return;
+    if (!sawComplete) yield { type: 'complete', finishReason: 'end_turn' };
+  }
+
+  private mapEvent(event: ClineWireEvent, lastLegacyText: string): MappedClineEvent {
+    if (event.type === 'agent_event' && event.event) {
+      return this.mapAgentEvent(event.event);
     }
+    if (event.type === 'team_event') {
+      // Koryphaios owns orchestration; upstream team telemetry is intentionally
+      // consumed but not surfaced as a second competing team system.
+      return { recognized: true, completed: false, events: [] };
+    }
+    if (event.type === 'error' && (event.message || event.text)) {
+      const text = event.message ?? event.text ?? 'Cline reported an error';
+      const diagnostic = safeProviderDiagnostic('cline', 'stdout', text);
+      return {
+        recognized: true,
+        completed: false,
+        events: [{ type: 'error', error: safeProviderFailureMessage('cline', diagnostic) }],
+      };
+    }
+
+    // Legacy protocol: top-level cumulative say/ask records.
+    if (event.type === 'say' && event.say === 'text' && typeof event.text === 'string') {
+      const delta = event.text.startsWith(lastLegacyText)
+        ? event.text.slice(lastLegacyText.length)
+        : event.text;
+      return {
+        recognized: true,
+        completed: false,
+        events: delta ? [{ type: 'content_delta', content: delta }] : [],
+      };
+    }
+    if (event.type === 'say' && event.say === 'reasoning' && event.text) {
+      return {
+        recognized: true,
+        completed: false,
+        events: [{ type: 'thinking_delta', thinking: event.text }],
+      };
+    }
+    if (event.type === 'say' && (event.say === 'tool' || event.say === 'command') && event.text) {
+      return {
+        recognized: true,
+        completed: false,
+        events: [
+          {
+            type: 'tool_executed',
+            toolName: event.say === 'command' ? 'bash' : 'tool',
+            toolInput: '{}',
+            toolOutput: event.text.slice(0, 8_000),
+          },
+        ],
+      };
+    }
+    if (event.type === 'say' && event.say === 'completion_result') {
+      const text = event.text ?? '';
+      const delta = text.startsWith(lastLegacyText) ? text.slice(lastLegacyText.length) : text;
+      return {
+        recognized: true,
+        completed: true,
+        events: [
+          ...(delta ? [{ type: 'content_delta' as const, content: delta }] : []),
+          { type: 'complete' as const, finishReason: 'end_turn' as const },
+        ],
+      };
+    }
+    if (event.type === 'completion' || event.type === 'done') {
+      return {
+        recognized: true,
+        completed: true,
+        events: [{ type: 'complete', finishReason: 'end_turn' }],
+      };
+    }
+
+    return { recognized: false, completed: false, events: [] };
+  }
+
+  private mapAgentEvent(event: ClineAgentEvent): MappedClineEvent {
+    if (event.type === 'content_start') {
+      if (event.contentType === 'text' && event.text) {
+        return {
+          recognized: true,
+          completed: false,
+          events: [{ type: 'content_delta', content: event.text }],
+        };
+      }
+      if (event.contentType === 'reasoning') {
+        const thinking = event.reasoning || (event.redacted ? '[redacted]' : '');
+        return {
+          recognized: true,
+          completed: false,
+          events: thinking ? [{ type: 'thinking_delta', thinking }] : [],
+        };
+      }
+      if (event.contentType === 'tool') {
+        return { recognized: true, completed: false, events: [] };
+      }
+      return { recognized: true, completed: false, events: [] };
+    }
+
+    if (event.type === 'content_end') {
+      if (event.contentType !== 'tool') {
+        return { recognized: true, completed: false, events: [] };
+      }
+      return {
+        recognized: true,
+        completed: false,
+        events: [
+          {
+            type: 'tool_executed',
+            toolCallId: event.toolCallId,
+            toolName: event.toolName ?? 'tool',
+            toolInput: outputText(event.input) || '{}',
+            toolOutput: boundedOutput(event.error ?? event.output),
+            isError: Boolean(event.error),
+          },
+        ],
+      };
+    }
+
+    if (event.type === 'usage') {
+      const usage = usageEvent(event.usage ?? event);
+      return {
+        recognized: true,
+        completed: false,
+        events: usage ? [usage] : [],
+      };
+    }
+
+    if (event.type === 'done') {
+      const usage = usageEvent(event.usage);
+      return {
+        recognized: true,
+        completed: true,
+        events: [...(usage ? [usage] : []), { type: 'complete', finishReason: 'end_turn' }],
+      };
+    }
+
+    if (event.type === 'error') {
+      const text = event.error ?? event.message ?? 'Cline reported an error';
+      const diagnostic = safeProviderDiagnostic('cline', 'stdout', text);
+      return {
+        recognized: true,
+        completed: false,
+        events: [{ type: 'error', error: safeProviderFailureMessage('cline', diagnostic) }],
+      };
+    }
+
+    if (
+      event.type === 'iteration_start' ||
+      event.type === 'iteration_end' ||
+      event.type === 'notice'
+    ) {
+      return { recognized: true, completed: false, events: [] };
+    }
+
+    return { recognized: false, completed: false, events: [] };
   }
 }

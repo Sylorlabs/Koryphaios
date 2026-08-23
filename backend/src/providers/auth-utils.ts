@@ -207,8 +207,9 @@ export function detectClaudeCodeLogin(): boolean {
 
 // ─── Agent-CLI login detection ──────────────────────────────────────────────
 // Koryphaios detects agent CLIs plus local login signals (Claude Code, Codex,
-// Antigravity, Grok Build, Cursor) so their adapters can be configured without
-// copying CLI-owned secrets. These helpers do not verify the remote account.
+// Antigravity, Grok Build, Cursor, Cline) so their adapters can be configured
+// without copying CLI-owned secrets. These helpers report local configuration,
+// not account entitlement or a successful remote request.
 
 function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? '';
@@ -235,6 +236,16 @@ const CLINE_AUTH_KEY_HINTS = [
   'session',
 ];
 
+const CLINE_PROVIDER_KEY_HINTS = [
+  'provider',
+  'providerid',
+  'provider_id',
+  'apiprovider',
+  'actmodeapiprovider',
+  'planmodeapiprovider',
+  'selectedprovider',
+];
+
 function hasClineAuthKeyHint(key: string): boolean {
   const normalized = key.toLowerCase();
   return CLINE_AUTH_KEY_HINTS.some((hint) => normalized.includes(hint));
@@ -243,11 +254,7 @@ function hasClineAuthKeyHint(key: string): boolean {
 function looksLikeClineAuthValue(value: string): boolean {
   const token = value.trim();
   if (!token || token === 'cline-cli-session') return false;
-  if (token.length < 16) return false;
-  if (token.length > 3_000) return false;
-  if (/\s/.test(token)) return false;
-  // API keys are usually encoded tokens. For unknown formats, we only
-  // accept sufficiently long opaque values or JWT-like structures.
+  if (token.length < 16 || token.length > 3_000 || /\s/.test(token)) return false;
   if (/^[A-Za-z0-9._~+/\-=%$@]+$/u.test(token)) return true;
   return token.split('.').length >= 2;
 }
@@ -271,6 +278,36 @@ function hasClineCLILoginSignal(node: unknown, key: string): boolean {
     if (hasClineCLILoginSignal(entryValue, entryKey)) return true;
   }
   return false;
+}
+
+function hasConfiguredClineProvider(node: unknown, key = ''): boolean {
+  if (typeof node === 'string') {
+    const normalizedKey = key.toLowerCase().replace(/[-_]/g, '');
+    return (
+      CLINE_PROVIDER_KEY_HINTS.includes(normalizedKey) &&
+      node.trim().length > 0 &&
+      node.trim().toLowerCase() !== 'none'
+    );
+  }
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((item) => hasConfiguredClineProvider(item, key));
+  return Object.entries(node as Record<string, unknown>).some(([entryKey, value]) =>
+    hasConfiguredClineProvider(value, entryKey),
+  );
+}
+
+function readClineConfigurationSignal(path: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+    return hasClineCLILoginSignal(data, 'configuration') || hasConfiguredClineProvider(data);
+  } catch (err: unknown) {
+    serverLog.debug(
+      { path, err: err instanceof Error ? err.message : String(err) },
+      'auth-utils: Cline configuration parse failed',
+    );
+    return false;
+  }
 }
 
 /**
@@ -312,25 +349,25 @@ export function detectGrokCLILogin(): boolean {
 }
 
 /**
- * Detects whether the Cursor CLI (cursor-agent) is logged in: a CURSOR_API_KEY in the
- * environment or stored auth in ~/.cursor/cli-config.json (the `authInfo` block).
+ * Detects whether the current Cline CLI has provider/auth configuration. Modern
+ * Cline versions may keep secrets in the OS credential store and only leave the
+ * selected provider in providers.json, so secrets.json is only a legacy signal.
+ * The CLI remains the authority when Koryphaios performs a real turn.
  */
 export function detectClineCLILogin(): boolean {
+  if (process.env.CLINE_API_KEY?.trim()) return true;
   const home = homeDir();
   if (!home) return false;
-  const secrets = join(home, '.cline', 'data', 'secrets.json');
-  if (!existsSync(secrets)) return false;
-  try {
-    const data = JSON.parse(readFileSync(secrets, 'utf-8')) as Record<string, unknown>;
-    return hasClineCLILoginSignal(data, 'secrets');
-  } catch (err: unknown) {
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'auth-utils: Cline secrets.json parse failed',
-    );
-    return false;
-  }
+  const data = join(home, '.cline', 'data');
+  const candidates = [
+    join(data, 'settings', 'providers.json'),
+    join(data, 'settings', 'global-settings.json'),
+    join(data, 'globalState.json'),
+    join(data, 'secrets.json'),
+  ];
+  return candidates.some(readClineConfigurationSignal);
 }
+
 export function isClineCLIAuthMarker(value: string | null | undefined): boolean {
   return value === 'cline-cli-session';
 }
@@ -592,5 +629,3 @@ export function detectKimiCodeCLILogin(): boolean {
   const home = homeDir();
   return !!home && existsSync(join(home, '.kimi', 'credentials', 'kimi-code.json'));
 }
-
-

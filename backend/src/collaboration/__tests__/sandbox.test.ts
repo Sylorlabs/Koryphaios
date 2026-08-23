@@ -5,7 +5,9 @@ import {
   buildSeatbeltProfile,
   buildSoftJail,
 } from '../sandbox-runner';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from '@koryphaios/shared';
 
 describe('sandbox policy', () => {
@@ -110,8 +112,42 @@ describe('sandbox runner (native OS wrap)', () => {
     }
   });
 
+  test('mounts account configuration read-only while runtime state remains writable', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-sandbox-mounts-'));
+    const writable = join(root, 'runtime');
+    const readonly = join(root, 'account');
+    const project = join(root, 'project');
+    for (const path of [writable, readonly, project]) {
+      mkdirSync(path, { recursive: true });
+    }
+
+    try {
+      const r = wrapCommand('cline', ['--json'], {
+        cwd: project,
+        configDirs: [writable],
+        readonlyConfigDirs: [readonly],
+        policy: { ...SANDBOX_PRESETS.balanced },
+      });
+      if (r.isolated && r.mechanism === 'bubblewrap') {
+        const joined = r.args.join(' ');
+        expect(joined).toContain(`--bind ${writable} ${writable}`);
+        expect(joined).toContain(`--ro-bind ${readonly} ${readonly}`);
+        expect(joined).not.toContain(`--bind ${readonly} ${readonly}`);
+      } else if (r.isolated && r.mechanism === 'seatbelt') {
+        const profile = r.args[1] as string;
+        expect(profile).toContain(writable);
+        expect(profile).not.toContain(readonly);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('network block cuts network when isolated', () => {
-    const r = wrapCommand('claude', [], { cwd: '/tmp/p', policy: { ...SANDBOX_PRESETS.hardened } });
+    const r = wrapCommand('claude', [], {
+      cwd: '/tmp/p',
+      policy: { ...SANDBOX_PRESETS.hardened },
+    });
     if (caps.mechanism === 'bubblewrap') {
       expect(r.args).toContain('--unshare-net');
     } else if (caps.mechanism === 'seatbelt') {
@@ -177,12 +213,14 @@ describe('macOS Seatbelt profile', () => {
     const balanced = buildSeatbeltProfile({
       cwd: '/Users/me/proj',
       configDirs: ['/Users/me/.claude'],
+      readonlyConfigDirs: ['/Users/me/.cline-account'],
       policy: { ...SANDBOX_PRESETS.balanced },
     });
     expect(balanced).toContain('(version 1)');
     expect(balanced).toContain('(deny file-write*)');
     expect(balanced).toContain('/Users/me/proj'); // project is writable
-    expect(balanced).toContain('/Users/me/.claude'); // CLI config writable
+    expect(balanced).toContain('/Users/me/.claude'); // CLI runtime config writable
+    expect(balanced).not.toContain('/Users/me/.cline-account'); // account config not writable
     expect(balanced).not.toContain('(deny network*)'); // balanced allows net
 
     const hardened = buildSeatbeltProfile({
@@ -197,9 +235,11 @@ describe('macOS Seatbelt profile', () => {
     const readonly = buildSeatbeltProfile({
       cwd: '/Users/me/proj',
       configDirs: ['/Users/me/.claude'],
+      readonlyConfigDirs: ['/Users/me/.cline-account'],
       policy: { ...SANDBOX_PRESETS.readonly },
     });
     expect(readonly).not.toContain('/Users/me/proj');
     expect(readonly).toContain('/Users/me/.claude');
+    expect(readonly).not.toContain('/Users/me/.cline-account');
   });
 });

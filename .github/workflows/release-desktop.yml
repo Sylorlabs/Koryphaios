@@ -1,21 +1,12 @@
 name: Release Desktop Apps
 
-# Assembles desktop installers from pre-built Tauri shell binaries + new
-# backend/frontend resources. This runs on EVERY release tag.
-#
-# Architecture:
-#   1. Build frontend once (Linux, platform-independent)
-#   2. Cross-compile Bun backend for all 4 targets (Linux, no native runners)
-#   3. Download pre-built shell binaries from the build-shell workflow
-#   4. Assemble bundles:
-#      - Linux: tauri build (native, fast — shell is cached)
-#      - Windows: NSIS installer via makensis on Linux (no Windows runner!)
-#      - macOS: .app + DMG + codesign on macOS (no Rust compilation!)
-#   5. Sign, upload, publish release + updater manifest
-#
-# The macOS job is the ONLY one that needs a macOS runner, and it does NO
-# Rust compilation — just file assembly + codesign + hdiutil. ~2 minutes
-# instead of 30+ minutes.
+# Release invariant:
+#   - the workflow runs only on an immutable v* tag
+#   - every updater artifact is signed
+#   - cached native shells come from one explicit successful build-shell run
+#   - shell-relevant source has not changed since that pinned build
+#   - assets and latest.json are assembled into a draft release
+#   - Packaged App Smoke Test promotes the draft only after native launch checks
 
 on:
   push:
@@ -23,35 +14,165 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   BUN_VERSION: '1.3.14'
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
-  # ─── Build frontend (once, platform-independent) ───────────────────────────
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      shell_run_id: ${{ steps.release.outputs.shell_run_id }}
+      shell_sha: ${{ steps.release.outputs.shell_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate release inputs, versions, and shell provenance
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SHELL_BUILD_RUN_ID: ${{ vars.SHELL_BUILD_RUN_ID }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/tags/v*) ;;
+            *) echo "::error::Release workflow must run on a v* tag, got $GITHUB_REF"; exit 1 ;;
+          esac
+
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Release tag $TAG is not a supported semantic version"
+            exit 1
+          fi
+
+          check_json_version() {
+            local file=$1
+            local selector=$2
+            local actual
+            actual=$(jq -r "$selector" "$file")
+            if [ "$actual" != "$VERSION" ]; then
+              echo "::error::$file reports $actual; expected $VERSION from $TAG"
+              exit 1
+            fi
+          }
+
+          check_json_version desktop/src-tauri/tauri.conf.json '.version'
+          check_json_version package.json '.version'
+          check_json_version desktop/package.json '.version'
+          check_json_version backend/package.json '.version'
+          check_json_version frontend/package.json '.version'
+          check_json_version shared/package.json '.version'
+          check_json_version mcp-server/package.json '.version'
+          check_json_version frontend/static/app.config.json '.app.version'
+          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -1)
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::desktop/src-tauri/Cargo.toml reports $CARGO_VERSION; expected $VERSION"
+            exit 1
+          fi
+
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is required for a stable release"
+            exit 1
+          fi
+          if ! printf '%s' "$SHELL_BUILD_RUN_ID" | grep -Eq '^[0-9]+$'; then
+            echo "::error::SHELL_BUILD_RUN_ID must identify a successful build-shell workflow run"
+            exit 1
+          fi
+
+          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SHELL_BUILD_RUN_ID")
+          CONCLUSION=$(echo "$RUN" | jq -r .conclusion)
+          WORKFLOW_PATH=$(echo "$RUN" | jq -r .path)
+          SHELL_SHA=$(echo "$RUN" | jq -r .head_sha)
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::Shell workflow run $SHELL_BUILD_RUN_ID concluded $CONCLUSION"
+            exit 1
+          fi
+          if [ "$WORKFLOW_PATH" != ".github/workflows/build-shell.yml" ]; then
+            echo "::error::Run $SHELL_BUILD_RUN_ID belongs to $WORKFLOW_PATH, not build-shell.yml"
+            exit 1
+          fi
+          if ! git cat-file -e "$SHELL_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$SHELL_SHA"
+          fi
+
+          SHELL_PATHS=(
+            desktop/src-tauri/Cargo.toml
+            desktop/src-tauri/Cargo.lock
+            desktop/src-tauri/src
+            desktop/src-tauri/build.rs
+            desktop/src-tauri/tauri.conf.json
+            desktop/src-tauri/icons
+            .github/workflows/build-shell.yml
+          )
+          if ! git diff --quiet "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"; then
+            echo "::error::Shell-relevant source changed after pinned build run $SHELL_BUILD_RUN_ID ($SHELL_SHA)"
+            git diff --name-only "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "shell_run_id=$SHELL_BUILD_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "shell_sha=$SHELL_SHA" >> "$GITHUB_OUTPUT"
+          echo "Release preflight passed for $TAG using shell run $SHELL_BUILD_RUN_ID at $SHELL_SHA"
+
+  prepare-release:
+    runs-on: ubuntu-latest
+    needs: [preflight]
+    timeout-minutes: 5
+    steps:
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG is already public; published releases are immutable"
+              exit 1
+            fi
+            echo "Reusing existing draft release $TAG"
+          else
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --verify-tag \
+              --generate-notes \
+              --title "Koryphaios $TAG"
+          fi
+
   build-frontend:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
+    needs: [preflight]
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
+      - run: bun install --frozen-lockfile
       - name: Build frontend
         working-directory: ./frontend
         run: bun run build
         env:
           BUILD_MODE: static
           NODE_ENV: production
-
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-build
@@ -59,7 +180,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ─── Cross-compile backend for all targets (Linux only) ────────────────────
   build-backends:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -81,33 +201,25 @@ jobs:
             suffix: ''
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
+      - run: bun install --frozen-lockfile
       - name: Compile backend for ${{ matrix.target }}
         env:
           RELAY_URL: ${{ secrets.RELAY_URL }}
         run: |
+          set -euo pipefail
           OUTFILE="$GITHUB_WORKSPACE/koryphaios-backend-${{ matrix.target }}${{ matrix.suffix }}"
           DEFINE=()
           [ -n "$RELAY_URL" ] && DEFINE+=(--define "process.env.RELAY_URL=\"$RELAY_URL\"")
           bun build --compile --target=${{ matrix.bun-target }} "${DEFINE[@]}" \
             backend/src/server.ts --outfile="$OUTFILE"
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            # Keep linuxdeploy from rewriting the Bun executable. The desktop
-            # shell decompresses this resource into its private runtime cache
-            # immediately before launch.
             gzip -9 -c "$OUTFILE" > "$OUTFILE.gz"
             rm "$OUTFILE"
           fi
-          ls -la "$OUTFILE"*
-
+          test -s "$OUTFILE" || test -s "$OUTFILE.gz"
       - uses: actions/upload-artifact@v7
         with:
           name: backend-${{ matrix.target }}
@@ -115,151 +227,116 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # ─── Download pre-built shell binaries ─────────────────────────────────────
   download-shells:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
-    outputs:
-      shell-available: ${{ steps.check.outputs.available }}
+    timeout-minutes: 10
+    needs: [preflight]
     steps:
-      - name: Download shell artifacts from latest build-shell run
+      - name: Download Windows shell from pinned build run
         uses: actions/download-artifact@v4
         with:
           name: shell-windows-x64
           path: shells/windows
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ vars.SHELL_BUILD_RUN_ID || '' }}
-        continue-on-error: true
-        id: dl-windows
-
-      - name: Download macOS x86_64 shell
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
+      - name: Download macOS x86_64 shell from pinned build run
         uses: actions/download-artifact@v4
         with:
           name: shell-macos-x86_64
           path: shells/macos-x86_64
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        id: dl-macos-x64
-
-      - name: Download macOS aarch64 shell
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
+      - name: Download macOS aarch64 shell from pinned build run
         uses: actions/download-artifact@v4
         with:
           name: shell-macos-aarch64
           path: shells/macos-aarch64
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        id: dl-macos-arm64
-
-      - name: Download Linux shell
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
+      - name: Download Linux shell provenance artifact
         uses: actions/download-artifact@v4
         with:
           name: shell-linux-x64
           path: shells/linux
           github-token: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-        id: dl-linux
-
-      - name: Check shell availability
-        id: check
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
+      - name: Verify exact shell payloads
         run: |
-          AVAILABLE="true"
-          for dir in shells/windows shells/macos-x86_64 shells/macos-aarch64 shells/linux; do
-            if [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
-              echo "WARNING: No shell binary found in $dir"
-              AVAILABLE="false"
-            fi
-          done
-          echo "available=$AVAILABLE" >> $GITHUB_OUTPUT
-          echo "Shell availability: $AVAILABLE"
-
-      - name: Upload all shells as combined artifact
-        uses: actions/upload-artifact@v7
+          set -euo pipefail
+          test -s shells/windows/Koryphaios-shell-windows-x64.exe
+          test -s shells/macos-x86_64/Koryphaios-shell-macos-x86_64
+          test -s shells/macos-aarch64/Koryphaios-shell-macos-aarch64
+          test -s shells/linux/Koryphaios-shell-linux-x64
+          sha256sum shells/windows/* shells/macos-x86_64/* shells/macos-aarch64/* shells/linux/*
+      - uses: actions/upload-artifact@v7
         with:
           name: shell-binaries
           path: shells/
+          if-no-files-found: error
           retention-days: 1
 
-  # ─── Assemble Windows installer (Linux, no Windows runner!) ────────────────
   assemble-windows:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 10
-    needs: [build-frontend, build-backends, download-shells]
-    if: needs.download-shells.outputs.shell-available == 'true'
+    timeout-minutes: 12
+    needs: [preflight, build-frontend, build-backends, download-shells]
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
+      - run: bun install --frozen-lockfile
       - name: Install NSIS
-        run: sudo apt-get install -y nsis
-
-      - name: Download frontend build
-        uses: actions/download-artifact@v4
+        run: sudo apt-get update && sudo apt-get install -y nsis
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-build
           path: frontend/build/client
-
-      - name: Download Windows backend
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: backend-x86_64-pc-windows-msvc
           path: backends
-
-      - name: Download shell binaries
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: shell-binaries
           path: shells
-
       - name: Assemble Windows NSIS installer
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/assemble-windows-installer.sh \
             --shell-bin shells/windows/Koryphaios-shell-windows-x64.exe \
             --frontend frontend/build/client \
             --backend backends/koryphaios-backend-x86_64-pc-windows-msvc.exe \
             --config config \
             --icons desktop/src-tauri/icons/icon.ico \
-            --version "$VERSION" \
+            --version "${{ needs.preflight.outputs.version }}" \
             --output-dir artifacts
-
-      - name: Verify installer
-        run: |
-          INSTALLER=$(find artifacts -name "*-x64-setup.exe" -print -quit)
-          test -n "$INSTALLER"
-          test "$(stat -c%s "$INSTALLER")" -gt 1000000
-          echo "Installer size: $(stat -c%s "$INSTALLER") bytes"
-
-      - name: Sign installer for updater
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      - name: Verify and sign Windows updater installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # Tauri's signer creates .sig files that the updater verifies
-          # before installing. Without these, the updater rejects the update.
+          set -euo pipefail
           INSTALLER=$(find artifacts -name "*-x64-setup.exe" -print -quit)
+          test -n "$INSTALLER"
+          test "$(stat -c%s "$INSTALLER")" -gt 1000000
           npx @tauri-apps/cli signer sign \
             --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
             --private-key-password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
             "$INSTALLER"
-          echo "Signed: $INSTALLER"
-
+          test -s "$INSTALLER.sig"
       - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
           path: artifacts/
           if-no-files-found: error
 
-  # ─── Assemble macOS bundles (macOS runner, NO Rust compilation) ────────────
   assemble-macos:
     runs-on: blacksmith-6vcpu-macos-latest
-    timeout-minutes: 15
-    needs: [build-frontend, build-backends, download-shells]
-    if: needs.download-shells.outputs.shell-available == 'true'
+    timeout-minutes: 18
+    needs: [preflight, build-frontend, build-backends, download-shells]
     strategy:
       matrix:
         include:
@@ -269,137 +346,101 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Download frontend build
-        uses: actions/download-artifact@v4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-build
           path: frontend/build/client
-
-      - name: Download macOS backend
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: backend-${{ matrix.target }}
           path: backends
-
-      - name: Download shell binaries
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: shell-binaries
           path: shells
-
-      - name: Assemble macOS .app and DMG
+      - name: Assemble macOS app and DMG
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           ./scripts/assemble-macos-bundle.sh \
             --shell-bin "shells/macos-${{ matrix.arch }}/Koryphaios-shell-macos-${{ matrix.arch }}" \
             --frontend frontend/build/client \
             --backend "backends/koryphaios-backend-${{ matrix.target }}" \
             --config config \
             --icons desktop/src-tauri/icons/icon.icns \
-            --version "$VERSION" \
+            --version "${{ needs.preflight.outputs.version }}" \
             --arch "${{ matrix.arch }}" \
             --output-dir artifacts
-
-      - name: Sign .app.tar.gz for updater
-        if: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+      - name: Verify and sign macOS updater archive
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # The Tauri updater downloads the .app.tar.gz and verifies its
-          # signature before extracting. Sign the tarball, not the DMG.
+          set -euo pipefail
           TARGZ=$(find artifacts -name "*.app.tar.gz" -print -quit)
+          DMG=$(find artifacts -name "*.dmg" -print -quit)
+          test -s "$TARGZ"
+          test -s "$DMG"
           npx @tauri-apps/cli signer sign \
             --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
             --private-key-password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
             "$TARGZ"
-          echo "Signed: $TARGZ"
-
+          test -s "$TARGZ.sig"
       - uses: actions/upload-artifact@v7
         with:
           name: macos-installer-${{ matrix.arch }}
           path: artifacts/
           if-no-files-found: error
 
-  # ─── Assemble Linux packages (native, fast) ────────────────────────────────
   assemble-linux:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
-    needs: [build-frontend, build-backends, download-shells]
-    if: needs.download-shells.outputs.shell-available == 'true'
+    needs: [preflight, build-frontend, build-backends, download-shells]
     steps:
       - uses: actions/checkout@v6
-
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            rpm \
-            desktop-file-utils \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf rpm \
+            desktop-file-utils libgtk-3-dev libayatana-appindicator3-dev
+      - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri -> target
           key: shell-linux-x64
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download frontend build
-        uses: actions/download-artifact@v4
+      - run: bun install --frozen-lockfile
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-build
           path: frontend/build/client
-
-      - name: Download Linux backend
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           name: backend-x86_64-unknown-linux-gnu
           path: desktop/src-tauri/embedded-backend
-
-      - name: Build Tauri app (Linux native — shell is cached)
+      - name: Build signed Linux bundles
         working-directory: ./desktop
         run: bun run tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Verify Linux artifacts
+      - name: Verify Linux packages and updater signature
         run: |
+          set -euo pipefail
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
-          DEB_COUNT=$(find "$BUNDLE_DIR/deb" -name "*.deb" 2>/dev/null | wc -l)
-          RPM_COUNT=$(find "$BUNDLE_DIR/rpm" -name "*.rpm" 2>/dev/null | wc -l)
-          APPIMAGE_COUNT=$(find "$BUNDLE_DIR/appimage" -name "*.AppImage" 2>/dev/null | wc -l)
-          echo "Artifacts: deb=$DEB_COUNT rpm=$RPM_COUNT appimage=$APPIMAGE_COUNT"
-          if [ "$DEB_COUNT" -eq 0 ] || [ "$RPM_COUNT" -eq 0 ] || [ "$APPIMAGE_COUNT" -eq 0 ]; then
-            echo "ERROR: Linux release requires DEB, RPM, and AppImage artifacts"
-            exit 1
-          fi
-
+          test "$(find "$BUNDLE_DIR/deb" -name '*.deb' | wc -l)" -gt 0
+          test "$(find "$BUNDLE_DIR/rpm" -name '*.rpm' | wc -l)" -gt 0
+          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' | wc -l)" -gt 0
+          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage.sig' | wc -l)" -gt 0
       - uses: actions/upload-artifact@v7
         with:
           name: linux-installer
@@ -407,102 +448,88 @@ jobs:
             desktop/src-tauri/target/release/bundle/deb/*.deb
             desktop/src-tauri/target/release/bundle/rpm/*.rpm
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
 
-  # ─── Assemble macOS universal DMG (from per-arch DMGs) ─────────────────────
   assemble-macos-universal:
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 10
-    needs: [assemble-macos]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [preflight, assemble-macos]
     steps:
       - uses: actions/checkout@v6
-
-      - name: Download both arch DMGs
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           pattern: macos-installer-*
           path: dmg-sources
           merge-multiple: false
-
       - name: Create universal DMG
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          # Find the .app bundles from each arch
+          set -euo pipefail
+          VERSION="${{ needs.preflight.outputs.version }}"
           X86_APP=$(find dmg-sources/macos-installer-x86_64 -name "Koryphaios.app" -type d | head -1)
           ARM_APP=$(find dmg-sources/macos-installer-aarch64 -name "Koryphaios.app" -type d | head -1)
-          test -d "$X86_APP" || { echo "No x86_64 .app found"; exit 1; }
-          test -d "$ARM_APP" || { echo "No aarch64 .app found"; exit 1; }
+          test -d "$X86_APP"
+          test -d "$ARM_APP"
 
-          # Create universal binary by merging the two shell executables
           UNIVERSAL_APP="artifacts/Koryphaios.app"
           mkdir -p "$(dirname "$UNIVERSAL_APP")"
           cp -R "$ARM_APP" "$UNIVERSAL_APP"
-
-          # lipo the two shell binaries together
           lipo -create \
             "$X86_APP/Contents/MacOS/Koryphaios" \
             "$ARM_APP/Contents/MacOS/Koryphaios" \
             -output "$UNIVERSAL_APP/Contents/MacOS/Koryphaios"
-
-          # Also lipo the backend binaries
           lipo -create \
             "$X86_APP/Contents/Resources/backend/koryphaios-backend-x86_64-apple-darwin" \
             "$ARM_APP/Contents/Resources/backend/koryphaios-backend-aarch64-apple-darwin" \
             -output "$UNIVERSAL_APP/Contents/Resources/backend/koryphaios-backend-universal"
-
-          # Remove the per-arch backends, keep only universal
           rm -f "$UNIVERSAL_APP/Contents/Resources/backend/koryphaios-backend-x86_64-apple-darwin"
           rm -f "$UNIVERSAL_APP/Contents/Resources/backend/koryphaios-backend-aarch64-apple-darwin"
 
-          # Re-sign the universal bundle
           SIGN_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
           codesign --force --deep --strict --sign "$SIGN_IDENTITY" "$UNIVERSAL_APP"
           codesign --verify --deep --strict --verbose=2 "$UNIVERSAL_APP"
 
-          # Create universal DMG
           DMG_STAGING=$(mktemp -d)
+          trap 'rm -rf "$DMG_STAGING"' EXIT
           ln -s /Applications "$DMG_STAGING/Applications"
           cp -R "$UNIVERSAL_APP" "$DMG_STAGING/"
-
           hdiutil create \
             -volname "Koryphaios" \
             -srcfolder "$DMG_STAGING" \
             -ov -format UDZO \
             "artifacts/Koryphaios-${VERSION}-universal.dmg"
-
-          rm -rf "$DMG_STAGING"
-          echo "Universal DMG created"
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-
+          test -s "artifacts/Koryphaios-${VERSION}-universal.dmg"
       - uses: actions/upload-artifact@v7
         with:
           name: macos-universal-installer
           path: artifacts/
           if-no-files-found: error
 
-  # ─── Publish release ───────────────────────────────────────────────────────
-  publish-release:
+  publish-release-assets:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [assemble-windows, assemble-macos, assemble-linux, assemble-macos-universal]
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    needs:
+      [
+        preflight,
+        prepare-release,
+        assemble-windows,
+        assemble-macos,
+        assemble-linux,
+        assemble-macos-universal,
+      ]
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all installer artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
-
-      - name: Publish verified installers to the release
+      - name: Validate and upload draft assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
+          set -euo pipefail
           mapfile -d '' ASSETS < <(find release-artifacts -type f \( \
             -name '*.dmg' -o -name '*.dmg.sig' -o \
             -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' -o \
@@ -513,98 +540,126 @@ jobs:
             -name '*.AppImage' -o -name '*.AppImage.sig' \
           \) -print0)
           test "${#ASSETS[@]}" -gt 0
-          printf 'Publishing %s verified release assets\n' "${#ASSETS[@]}"
-          gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo Sylorlabs/Koryphaios
+          test "$(find release-artifacts -name '*-setup.exe' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*-setup.exe.sig' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*aarch64*.app.tar.gz.sig' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*x86_64*.app.tar.gz.sig' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.AppImage.sig' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.deb' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.rpm' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.dmg' | wc -l)" -ge 3
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
-  # ─── Generate updater manifest (latest.json) ───────────────────────────────
   publish-updater-manifest:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [publish-release]
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
+    timeout-minutes: 10
+    needs: [preflight, publish-release-assets]
     steps:
-      - uses: actions/checkout@v6
-
-      - name: Generate latest.json from release .sig files
+      - name: Generate and upload latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          REPO="Sylorlabs/Koryphaios"
+          set -euo pipefail
+          REPO="$GITHUB_REPOSITORY"
           VERSION="${TAG#v}"
           mkdir -p sigs
-          gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir sigs || true
+          gh release download "$TAG" --repo "$REPO" --pattern "*.sig" --dir sigs
 
           PLATFORMS='{}'
           for sig_file in sigs/*.sig; do
-            [ -f "$sig_file" ] || continue
             sig_content=$(cat "$sig_file")
             base_name=$(basename "$sig_file" .sig)
             url="https://github.com/$REPO/releases/download/$TAG/$base_name"
             platform=""
             case "$base_name" in
-              # macOS: the updater needs .app.tar.gz (NOT .dmg)
-              *aarch64*.app.tar.gz)   platform="darwin-aarch64" ;;
+              *aarch64*.app.tar.gz) platform="darwin-aarch64" ;;
               *x86_64*.app.tar.gz|*x64*.app.tar.gz) platform="darwin-x86_64" ;;
-              # Linux: the updater needs the AppImage
               *amd64*.AppImage|*x86_64*.AppImage) platform="linux-x86_64" ;;
-              # Windows: the updater runs the NSIS installer
               *x64-setup*.exe|*-setup*.exe) platform="windows-x86_64" ;;
-              # Skip DMG sigs — the updater doesn't use DMGs
-              *.dmg) echo "Skipping DMG sig (updater uses .app.tar.gz): $base_name"; continue ;;
-              # Skip MSI if NSIS is available
+              *.dmg) continue ;;
               *.msi)
-                if ls sigs/*-setup.exe.sig 1>/dev/null 2>&1; then
-                  echo "Skipping MSI sig (NSIS available): $base_name"; continue
-                fi
-                platform="windows-x86_64" ;;
-              *) echo "::warning::Unknown platform for $base_name, skipping"; continue ;;
+                if ls sigs/*-setup.exe.sig >/dev/null 2>&1; then continue; fi
+                platform="windows-x86_64"
+                ;;
+              *) continue ;;
             esac
-            [ -z "$platform" ] && continue
-            echo "Mapping: $base_name -> $platform"
             PLATFORMS=$(echo "$PLATFORMS" | jq \
               --arg p "$platform" --arg s "$sig_content" --arg u "$url" \
               '.[$p] = {signature: $s, url: $u}')
           done
 
-          # Verify all required platforms are present
           for required in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
             if [ "$(echo "$PLATFORMS" | jq --arg p "$required" 'has($p)')" != "true" ]; then
-              echo "::error::Missing required platform $required in latest.json"
+              echo "::error::Missing required updater platform $required"
               exit 1
             fi
           done
 
-          RELEASE_INFO=$(gh release view "$TAG" --repo "$REPO" --json body,createdAt)
-          NOTES=$(echo "$RELEASE_INFO" | jq -r '.body // "Release $VERSION"')
-          PUB_DATE=$(echo "$RELEASE_INFO" | jq -r '.createdAt')
-
+          RELEASE_INFO=$(gh release view "$TAG" --repo "$REPO" --json body,createdAt,isDraft)
+          [ "$(echo "$RELEASE_INFO" | jq -r .isDraft)" = "true" ]
+          NOTES=$(echo "$RELEASE_INFO" | jq -r '.body // "Release"')
+          PUB_DATE=$(echo "$RELEASE_INFO" | jq -r .createdAt)
           jq -n \
-            --arg version "$VERSION" --arg notes "$NOTES" \
-            --arg pub_date "$PUB_DATE" --argjson platforms "$PLATFORMS" \
+            --arg version "$VERSION" \
+            --arg notes "$NOTES" \
+            --arg pub_date "$PUB_DATE" \
+            --argjson platforms "$PLATFORMS" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
+          jq -e \
+            '.version and (.platforms | keys | length == 4) and ([.platforms[].signature | length > 0] | all)' \
+            latest.json >/dev/null
+          gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 
-          cat latest.json
-          gh release upload "$TAG" latest.json --clobber --repo Sylorlabs/Koryphaios
-
-  # ─── Summary ───────────────────────────────────────────────────────────────
-  release-summary:
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    needs: [assemble-windows, assemble-macos, assemble-linux, assemble-macos-universal, publish-release, publish-updater-manifest]
-    if: always()
+  draft-ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [preflight, publish-updater-manifest]
     steps:
-      - name: Release Summary
+      - name: Verify complete draft for packaged smoke testing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          echo "Release Status Summary:"
-          echo "========================"
-          echo "Frontend:       ${{ needs.build-frontend.result }}"
-          echo "Backends:       ${{ needs.build-backends.result }}"
-          echo "Shell download: ${{ needs.download-shells.result }}"
-          echo "Windows:        ${{ needs.assemble-windows.result }}"
-          echo "macOS x86_64:   ${{ needs.assemble-macos.result }}"
-          echo "Linux:          ${{ needs.assemble-linux.result }}"
-          echo "macOS universal: ${{ needs.assemble-macos-universal.result }}"
-          echo "Publish:        ${{ needs.publish-release.result }}"
-          echo "Updater manifest: ${{ needs.publish-updater-manifest.result }}"
+          set -euo pipefail
+          RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)
+          [ "$(echo "$RELEASE" | jq -r .isDraft)" = "true" ]
+          echo "$RELEASE" | jq -e '[.assets[].name] | index("latest.json") != null' >/dev/null
+          echo "Draft $TAG is complete. Packaged App Smoke Test will promote it after native checks."
+
+  release-summary:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - preflight
+      - prepare-release
+      - build-frontend
+      - build-backends
+      - download-shells
+      - assemble-windows
+      - assemble-macos
+      - assemble-linux
+      - assemble-macos-universal
+      - publish-release-assets
+      - publish-updater-manifest
+      - draft-ready
+    steps:
+      - name: Release summary
+        run: |
+          cat <<'SUMMARY'
+          Release Status Summary
+          ======================
+          Preflight:        ${{ needs.preflight.result }}
+          Draft release:    ${{ needs.prepare-release.result }}
+          Frontend:         ${{ needs.build-frontend.result }}
+          Backends:         ${{ needs.build-backends.result }}
+          Shell provenance: ${{ needs.download-shells.result }}
+          Windows:          ${{ needs.assemble-windows.result }}
+          macOS:            ${{ needs.assemble-macos.result }}
+          Linux:            ${{ needs.assemble-linux.result }}
+          macOS universal:  ${{ needs.assemble-macos-universal.result }}
+          Asset upload:     ${{ needs.publish-release-assets.result }}
+          Updater manifest: ${{ needs.publish-updater-manifest.result }}
+          Draft ready:      ${{ needs.draft-ready.result }}
+          SUMMARY

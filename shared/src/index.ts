@@ -104,8 +104,23 @@ export { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from './types
 
 // Re-export from existing providers.ts for backward compatibility
 export { IMPLEMENTED_PROVIDERS, PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS } from './providers';
-
 export type { ProviderAuthMode } from './providers';
+
+// Provider release support is intentionally separate from a machine-local
+// connection state. A provider can verify on one machine while remaining
+// Preview or Compatible for the release as a whole.
+export {
+  PROVIDER_SUPPORT,
+  providerSupport,
+  isProviderCertified,
+  isProviderRunnableByTier,
+} from './provider-support';
+export type {
+  ProviderSupportTier,
+  ProviderCapabilityKind,
+  ProviderEvidenceKind,
+  ProviderSupportRecord,
+} from './provider-support';
 
 // ============== Permission System ==============
 export type { PermissionRequest, PermissionResponse } from './permissions/PermissionTypes';

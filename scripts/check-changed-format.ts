@@ -60,6 +60,23 @@ function zeroSeparated(output: string): string[] {
   return output.split('\0').filter(Boolean);
 }
 
+function printFormattingPatch(files: string[]): void {
+  if (!process.env.CI || files.length === 0) return;
+  const write = spawnSync('bunx', ['prettier', '--write', '--ignore-unknown', ...files], {
+    cwd: PROJECT_ROOT,
+    stdio: 'inherit',
+    shell: SPAWN_SHELL,
+  });
+  if (write.status !== 0) return;
+
+  const patch = git(['diff', '--', ...files]);
+  if (patch.trim()) {
+    console.error('\n--- Prettier patch (apply this diff) ---\n');
+    console.error(patch);
+    console.error('--- End Prettier patch ---\n');
+  }
+}
+
 function main() {
   const baseArg = process.argv[2] ?? process.env['KORYPHAIOS_FORMAT_BASE'] ?? '';
   let base = baseArg;
@@ -90,6 +107,7 @@ function main() {
       shell: SPAWN_SHELL,
     });
     if (result.status !== 0) {
+      printFormattingPatch(files);
       process.exit(result.status ?? 1);
     }
   }
