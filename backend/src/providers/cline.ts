@@ -2,8 +2,8 @@
 //
 // CLI-ONLY: Cline owns its provider authentication and model configuration.
 // Koryphaios never stores a Cline key. The child reads Cline's real provider
-// settings while databases, sessions, teams, hooks, and MCP configuration are
-// redirected to a private Koryphaios-managed runtime directory.
+// settings while databases, sessions, teams, hooks, plugins, rules, skills,
+// and MCP configuration resolve inside a private Koryphaios-managed home.
 //
 // Cline has shipped two JSON stream generations in the wild:
 //   1. legacy top-level say/ask records
@@ -295,8 +295,10 @@ export function shouldUseClinePlanMode(
   }
   // A mutating Cline turn must either be confined by a real host-kernel jail or
   // explicitly authorized as YOLO. A soft jail is not sufficient for Act mode.
-  return request.permissionMode !== 'yolo' &&
-    (!request.sandbox?.filesystemIsolation || !kernelIsolationAvailable);
+  return (
+    request.permissionMode !== 'yolo' &&
+    (!request.sandbox?.filesystemIsolation || !kernelIsolationAvailable)
+  );
 }
 
 export class ClineProvider implements Provider {
@@ -395,7 +397,7 @@ export class ClineProvider implements Provider {
     if (!contract.supportsConfig) {
       yield {
         type: 'error',
-        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose --config, so Koryphaios cannot use the CLI-owned account without exposing the user's full home directory. Update Cline, then reconnect.`,
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose --config, so Koryphaios cannot safely isolate the harness from the user's full Cline configuration. Update Cline, then reconnect.`,
       };
       return;
     }
@@ -446,8 +448,8 @@ export class ClineProvider implements Provider {
     const clineHome = researchOnly
       ? join(getKoryphaiosClineHome(), 'research-only')
       : getKoryphaiosClineHome();
-    const clineConfigDir = join(homedir(), '.cline');
-    const clineSettingsDir = join(clineConfigDir, 'data', 'settings');
+    const clineUserConfigDir = join(homedir(), '.cline');
+    const clineSettingsDir = join(clineUserConfigDir, 'data', 'settings');
     const clineDataDir = join(clineHome, 'data');
     const clineDbDir = join(clineDataDir, 'db');
     const clineSessionDir = join(clineDataDir, 'sessions');
@@ -516,7 +518,7 @@ export class ClineProvider implements Provider {
     else args.push('--yolo');
     args.push('--json');
     if (contract.supportsCwd) args.push('--cwd', cwd);
-    args.push('--config', clineConfigDir);
+    args.push('--config', clineHome);
     if (contract.supportsHooksDir) args.push('--hooks-dir', clineHooksDir);
 
     const thinkingLevel = normalizeThinkingLevel(request.reasoningLevel);
@@ -532,7 +534,7 @@ export class ClineProvider implements Provider {
     }
 
     const baseEnv = buildProviderCliEnv('cline', {
-      CLINE_HOME: clineConfigDir,
+      CLINE_HOME: clineHome,
       CLINE_PROVIDER_SETTINGS_PATH: join(clineSettingsDir, 'providers.json'),
       CLINE_GLOBAL_SETTINGS_PATH: join(clineSettingsDir, 'global-settings.json'),
       CLINE_MCP_SETTINGS_PATH: researchOnly ? undefined : mcpConfigPath,
@@ -557,7 +559,7 @@ export class ClineProvider implements Provider {
           cwd,
           configDirs: [clineHome],
           readonlyConfigDirs: [
-            clineConfigDir,
+            clineSettingsDir,
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
           ],
           policy: request.sandbox,
