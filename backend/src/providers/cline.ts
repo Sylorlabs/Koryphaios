@@ -226,9 +226,7 @@ function readConfiguredClineModels(): ModelDef[] {
   // Cline can resolve its own saved/default model even when it does not expose
   // a stable machine-readable catalog. This is a harness route, not a claim
   // that a model literally named "default" exists upstream.
-  return configured.length
-    ? configured
-    : [modelDefinition('default', 'Cline configured model')];
+  return configured.length ? configured : [modelDefinition('default', 'Cline configured model')];
 }
 
 function outputText(value: unknown): string {
@@ -298,10 +296,7 @@ export class ClineProvider implements Provider {
   constructor(readonly config: ProviderConfig) {}
 
   private inspectCli(bin: string): ClineCliContract {
-    if (
-      this.cliContract &&
-      Date.now() - this.cliContract.inspectedAt < CLINE_HELP_CACHE_TTL_MS
-    ) {
+    if (this.cliContract && Date.now() - this.cliContract.inspectedAt < CLINE_HELP_CACHE_TTL_MS) {
       return this.cliContract;
     }
 
@@ -372,8 +367,7 @@ export class ClineProvider implements Provider {
     if (!detectClineCLILogin()) {
       yield {
         type: 'error',
-        error:
-          'Cline CLI is not configured — run "cline auth" in a terminal, then reconnect.',
+        error: 'Cline CLI is not configured — run "cline auth" in a terminal, then reconnect.',
       };
       return;
     }
@@ -445,10 +439,7 @@ export class ClineProvider implements Provider {
               disabled: false,
             };
           }
-          writeManagedCliFile(
-            mcpConfigPath,
-            JSON.stringify({ ...existing, mcpServers }, null, 2),
-          );
+          writeManagedCliFile(mcpConfigPath, JSON.stringify({ ...existing, mcpServers }, null, 2));
         }
       } catch (wiringErr) {
         bridgeGrantLease?.cleanup();
@@ -679,11 +670,7 @@ export class ClineProvider implements Provider {
         events: [{ type: 'thinking_delta', thinking: event.text }],
       };
     }
-    if (
-      event.type === 'say' &&
-      (event.say === 'tool' || event.say === 'command') &&
-      event.text
-    ) {
+    if (event.type === 'say' && (event.say === 'tool' || event.say === 'command') && event.text) {
       return {
         recognized: true,
         completed: false,
@@ -768,10 +755,7 @@ export class ClineProvider implements Provider {
       return {
         recognized: true,
         completed: true,
-        events: [
-          ...(usage ? [usage] : []),
-          { type: 'complete', finishReason: 'end_turn' },
-        ],
+        events: [...(usage ? [usage] : []), { type: 'complete', finishReason: 'end_turn' }],
       };
     }
 
