@@ -1,8 +1,4 @@
-export type CredentialIssuer =
-  | 'openrouter'
-  | 'openai'
-  | 'anthropic'
-  | 'unknown';
+export type CredentialIssuer = 'openrouter' | 'openai' | 'anthropic' | 'unknown';
 
 export interface ProviderCredentialExpectation {
   provider: string;
@@ -37,10 +33,7 @@ export function assertCredentialOwnership(
 ): CredentialMismatch | null {
   const detected = detectCredentialIssuer(secret);
 
-  if (
-    detected !== 'unknown' &&
-    !expectation.acceptedIssuers.includes(detected)
-  ) {
+  if (detected !== 'unknown' && !expectation.acceptedIssuers.includes(detected)) {
     return {
       detected,
       expected: expectation.acceptedIssuers,

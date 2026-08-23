@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  assertCredentialOwnership,
-  detectCredentialIssuer,
-} from '../provider-credential-guard';
+import { assertCredentialOwnership, detectCredentialIssuer } from '../provider-credential-guard';
 
 describe('provider credential ownership', () => {
   it('detects OpenRouter keys', () => {
