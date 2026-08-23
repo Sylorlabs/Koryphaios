@@ -7,7 +7,7 @@ name: Packaged App Smoke Test
 
 on:
   workflow_run:
-    workflows: ["Release Desktop Apps"]
+    workflows: ['Release Desktop Apps']
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -163,9 +163,9 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            dmg-pattern: "*x86_64*.dmg"
+            dmg-pattern: '*x86_64*.dmg'
           - arch: aarch64
-            dmg-pattern: "*aarch64*.dmg"
+            dmg-pattern: '*aarch64*.dmg'
     steps:
       - name: Download macOS DMG from release
         env:
