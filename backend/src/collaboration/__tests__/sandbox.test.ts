@@ -5,7 +5,7 @@ import {
   buildSeatbeltProfile,
   buildSoftJail,
 } from '../sandbox-runner';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from '@koryphaios/shared';
@@ -117,9 +117,8 @@ describe('sandbox runner (native OS wrap)', () => {
     const writable = join(root, 'runtime');
     const readonly = join(root, 'account');
     const project = join(root, 'project');
-    // mkdtemp created root; each directory only needs to exist for bwrap flags.
     for (const path of [writable, readonly, project]) {
-      require('node:fs').mkdirSync(path, { recursive: true });
+      mkdirSync(path, { recursive: true });
     }
 
     try {
