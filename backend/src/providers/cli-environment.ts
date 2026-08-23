@@ -93,10 +93,21 @@ const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {
     'CLINE_API_KEY',
     'CLINE_BASE_URL',
     'CLINE_HOME',
-    // Current Cline CLI isolation/configuration contracts.
-    'CLINE_DATA_DIR',
+    // Current Cline CLI configuration contracts. Provider/global settings can
+    // remain CLI-owned while session/database/team state is redirected into a
+    // private Koryphaios runtime directory.
+    'CLINE_PROVIDER_SETTINGS_PATH',
+    'CLINE_GLOBAL_SETTINGS_PATH',
     'CLINE_MCP_SETTINGS_PATH',
+    'CLINE_DB_DATA_DIR',
+    'CLINE_SESSION_DATA_DIR',
+    'CLINE_TEAM_DATA_DIR',
     'CLINE_HOOKS_DIR',
+    'CLINE_HOOKS_LOG_PATH',
+    // Retained for compatibility probes and older Cline builds. The current
+    // adapter deliberately does not set CLINE_DATA_DIR because modern Cline
+    // uses it to relocate provider settings as well as runtime state.
+    'CLINE_DATA_DIR',
     'CLINE_SANDBOX',
     'CLINE_SANDBOX_DATA_DIR',
     'CLINE_SESSION_BACKEND_MODE',
