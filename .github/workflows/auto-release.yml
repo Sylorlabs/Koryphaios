@@ -1,19 +1,23 @@
-name: Auto Release
+name: Prepare Release
 
-# Trigger a release by including "/update" in a commit message pushed to main/master.
-# This workflow bumps the patch version (sourced from tauri.conf.json — the version
-# the Tauri updater compares against), commits the bump, and pushes a v* tag.
-# It then dispatches release-desktop.yml on that tag, which assembles, signs, and
-# publishes the release with latest.json (the Tauri updater manifest).
+# A release is intentional: version files are prepared in source control first,
+# then `/update` (or a manual dispatch) tags those exact bytes. This workflow
+# never silently increments a version and never commits generated version bumps.
 #
-# NOTE: Pushes made with GITHUB_TOKEN do not trigger other workflow runs, so we
-# explicitly dispatch release-desktop.yml via workflow_dispatch after tagging.
+# GITHUB_TOKEN tag pushes do not start a second workflow automatically, so the
+# desktop release workflow is dispatched explicitly on the new tag.
 
 on:
   push:
     branches:
       - master
       - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact prepared version (for example 0.2.0). Must match the manifests.'
+        required: false
+        type: string
 
 jobs:
   check-and-tag:
@@ -28,78 +32,95 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check for /update in commit message
+      - name: Decide whether to release
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
-          echo "Commit message: $COMMIT_MSG"
-
-          if echo "$COMMIT_MSG" | grep -q "/update"; then
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "/update trigger detected — will create release"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "Manual release preparation requested"
+          elif printf '%s' "$COMMIT_MSG" | grep -q '/update'; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "/update trigger detected"
           else
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "No /update trigger found — skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "No release trigger found"
           fi
 
-      - name: Bump version and push tag
+      - name: Validate version alignment
         if: steps.check.outputs.should_release == 'true'
+        env:
+          REQUESTED_VERSION: ${{ inputs.version || '' }}
         run: |
-          # tauri.conf.json is the source of truth for the version the updater
-          # compares against. Bump its patch version and sync to ALL version files.
-          CURRENT=$(jq -r .version desktop/src-tauri/tauri.conf.json)
-          echo "Current version: $CURRENT"
+          set -euo pipefail
+          VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
+          VERSION=${VERSION#v}
+          REQUESTED=${REQUESTED_VERSION#v}
 
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
-          echo "New version: $NEW_VERSION"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Invalid Tauri version: $VERSION"
+            exit 1
+          fi
+          if [ -n "$REQUESTED" ] && [ "$REQUESTED" != "$VERSION" ]; then
+            echo "::error::Requested version $REQUESTED does not match prepared version $VERSION"
+            exit 1
+          fi
 
-          # tauri.conf.json
-          jq ".version = \"$NEW_VERSION\"" desktop/src-tauri/tauri.conf.json > tauri.conf.json.tmp
-          mv tauri.conf.json.tmp desktop/src-tauri/tauri.conf.json
-
-          # Cargo.toml (only the package version line)
-          sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" desktop/src-tauri/Cargo.toml
-
-          # Root package.json
-          jq ".version = \"$NEW_VERSION\"" package.json > package.json.tmp
-          mv package.json.tmp package.json
-
-          # Workspace package.json files — all must stay aligned.
-          for pkg in desktop/package.json backend/package.json frontend/package.json shared/package.json mcp-server/package.json; do
-            if [ -f "$pkg" ]; then
-              jq ".version = \"$NEW_VERSION\"" "$pkg" > "${pkg}.tmp"
-              mv "${pkg}.tmp" "$pkg"
+          FAIL=0
+          for pkg in package.json desktop/package.json backend/package.json frontend/package.json shared/package.json mcp-server/package.json; do
+            [ -f "$pkg" ] || continue
+            ACTUAL=$(jq -r .version "$pkg")
+            if [ "$ACTUAL" != "$VERSION" ]; then
+              echo "::error file=$pkg::Expected version $VERSION, found $ACTUAL"
+              FAIL=1
             fi
           done
 
-          # Frontend static app config
-          if [ -f frontend/static/app.config.json ]; then
-            jq ".app.version = \"$NEW_VERSION\"" frontend/static/app.config.json > app.config.json.tmp
-            mv app.config.json.tmp frontend/static/app.config.json
+          CARGO_VERSION=$(awk '
+            /^\[package\]/{in_package=1; next}
+            /^\[/{if(in_package) exit}
+            in_package && /^version = /{gsub(/version = |\"/, ""); print; exit}
+          ' desktop/src-tauri/Cargo.toml)
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error file=desktop/src-tauri/Cargo.toml::Expected version $VERSION, found $CARGO_VERSION"
+            FAIL=1
           fi
 
-          # Commit and tag
+          if [ -f frontend/static/app.config.json ]; then
+            APP_VERSION=$(jq -r .app.version frontend/static/app.config.json)
+            if [ "$APP_VERSION" != "$VERSION" ]; then
+              echo "::error file=frontend/static/app.config.json::Expected version $VERSION, found $APP_VERSION"
+              FAIL=1
+            fi
+          fi
+
+          [ "$FAIL" -eq 0 ] || exit 1
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG already exists. Version releases are immutable."
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Prepared release: $TAG"
+
+      - name: Tag exact prepared commit
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add package.json desktop/package.json backend/package.json frontend/package.json shared/package.json mcp-server/package.json desktop/src-tauri/Cargo.toml desktop/src-tauri/tauri.conf.json frontend/static/app.config.json
-          git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
-          git tag "v$NEW_VERSION"
-          git push origin "v$NEW_VERSION"
-          git push
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
 
-          # Save the new version for the dispatch step
-          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-
-      - name: Dispatch build-desktop.yml on the new tag
+      - name: Dispatch desktop release on tag
         if: steps.check.outputs.should_release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # GITHUB_TOKEN pushes don't trigger other workflows, so dispatch explicitly.
-          # release-desktop.yml has workflow_dispatch in its triggers and will
-          # assemble, sign, upload to the release, and generate latest.json.
-          echo "Dispatching release-desktop.yml on tag v${NEW_VERSION}..."
-          gh workflow run release-desktop.yml --ref "v${NEW_VERSION}"
-          echo "Release workflow dispatched. Monitor at:"
-          echo "https://github.com/Sylorlabs/Koryphaios/actions/workflows/release-desktop.yml"
+          set -euo pipefail
+          echo "Dispatching release-desktop.yml on $TAG"
+          gh workflow run release-desktop.yml --ref "$TAG"
+          echo "Release workflow dispatched for $TAG"
