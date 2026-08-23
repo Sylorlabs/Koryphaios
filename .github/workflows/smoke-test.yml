@@ -1,9 +1,9 @@
 name: Packaged App Smoke Test
 
-# Download the exact published installers, install them, launch the native app,
-# and verify that the bundled backend becomes healthy. This is packaged-runtime
-# evidence, not a substitute for the browser UI journey and visual-regression
-# suites. Screenshots and logs are retained for release review.
+# Download the exact draft installers, install them, launch the native app, and
+# verify that the bundled backend becomes healthy. A release-workflow-triggered
+# run promotes the draft only after Windows, macOS, and Linux all pass.
+# Manual runs are diagnostic by default and promote only when explicitly asked.
 
 on:
   workflow_run:
@@ -15,6 +15,11 @@ on:
         description: 'Release tag to smoke test (for example v0.2.0)'
         required: true
         type: string
+      promote:
+        description: 'Publish the draft after every packaged smoke job passes'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -27,43 +32,82 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
-      should-run: ${{ steps.resolve.outputs.should_run }}
+      should_run: ${{ steps.resolve.outputs.should_run }}
+      promote: ${{ steps.resolve.outputs.promote }}
     steps:
       - id: resolve
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MANUAL_TAG: ${{ inputs.tag || '' }}
+          MANUAL_PROMOTE: ${{ inputs.promote || false }}
           SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
           SOURCE_REF: ${{ github.event.workflow_run.head_branch || '' }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || '' }}
         run: |
           set -euo pipefail
+          TAG=''
+          PROMOTE=false
+
           if [ -n "$MANUAL_TAG" ]; then
             TAG="$MANUAL_TAG"
+            PROMOTE="$MANUAL_PROMOTE"
           elif [ "$SOURCE_CONCLUSION" = "success" ]; then
             TAG="$SOURCE_REF"
+            PROMOTE=true
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "promote=false" >> "$GITHUB_OUTPUT"
             echo "Source release workflow did not succeed; smoke test will not run"
             exit 0
           fi
 
+          # workflow_run normally reports the release tag as head_branch. Keep a
+          # deterministic API fallback for platforms that report only a SHA.
           case "$TAG" in
-            v*)
-              echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-              ;;
+            v*) ;;
             *)
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-              echo "Resolved source ref '$TAG' is not a release tag"
+              TAG=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --paginate \
+                --jq '.[] | [.ref, .object.type, .object.sha] | @tsv' | \
+                while IFS=$'\t' read -r REF TYPE SHA; do
+                  RESOLVED_SHA="$SHA"
+                  if [ "$TYPE" = "tag" ]; then
+                    RESOLVED_SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$SHA" --jq .object.sha)
+                  fi
+                  if [ "$RESOLVED_SHA" = "$SOURCE_SHA" ]; then
+                    printf '%s\n' "${REF#refs/tags/}"
+                    break
+                  fi
+                done)
               ;;
           esac
 
+          case "$TAG" in
+            v*) ;;
+            *)
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+              echo "promote=false" >> "$GITHUB_OUTPUT"
+              echo "Resolved source '$TAG' is not a release tag"
+              exit 0
+              ;;
+          esac
+
+          IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          if [ "$IS_DRAFT" != "true" ] && [ "$PROMOTE" = "true" ]; then
+            echo "::error::Automated smoke expected draft $TAG, but it is already public"
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
+          echo "promote=$PROMOTE" >> "$GITHUB_OUTPUT"
+
   smoke-windows:
     needs: resolve-tag
-    if: needs.resolve-tag.outputs.should-run == 'true'
+    if: needs.resolve-tag.outputs.should_run == 'true'
     runs-on: blacksmith-2vcpu-windows-2025
     timeout-minutes: 12
     steps:
-      - name: Download Windows installer from release
+      - name: Download Windows installer from draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-tag.outputs.tag }}
@@ -155,27 +199,19 @@ jobs:
 
   smoke-macos:
     needs: resolve-tag
-    if: needs.resolve-tag.outputs.should-run == 'true'
+    if: needs.resolve-tag.outputs.should_run == 'true'
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            dmg-pattern: '*x86_64*.dmg'
-          - arch: aarch64
-            dmg-pattern: '*aarch64*.dmg'
     steps:
-      - name: Download macOS DMG from release
+      - name: Download universal macOS DMG from draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           set -euo pipefail
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "${{ matrix.dmg-pattern }}" --dir . --clobber
-          DMG=$(find . -maxdepth 1 -name '*.dmg' -print -quit)
+            --pattern '*universal*.dmg' --dir . --clobber
+          DMG=$(find . -maxdepth 1 -name '*universal*.dmg' -print -quit)
           test -s "$DMG"
           echo "DMG_PATH=$DMG" >> "$GITHUB_ENV"
 
@@ -183,14 +219,13 @@ jobs:
         run: |
           set -euo pipefail
           MOUNT_POINT=$(hdiutil attach "$DMG_PATH" -nobrowse -quiet | tail -1 | cut -f3)
-          echo "MOUNT_POINT=$MOUNT_POINT" >> "$GITHUB_ENV"
           APP=$(find "$MOUNT_POINT" -maxdepth 1 -name "Koryphaios.app" -type d -print -quit)
           test -d "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           rm -rf /Applications/Koryphaios.app
           cp -R "$APP" /Applications/
-          # Do not strip quarantine attributes here. CI downloads normally lack
-          # browser quarantine, but this test must never bypass a present one.
+          # Never strip quarantine attributes. CI downloads usually lack browser
+          # quarantine, but a present trust boundary must not be bypassed.
           hdiutil detach "$MOUNT_POINT" -quiet
 
       - name: Launch app and verify bundled backend
@@ -225,14 +260,14 @@ jobs:
         if: always()
         run: |
           mkdir -p smoke-evidence
-          screencapture -x "smoke-evidence/macos-${{ matrix.arch }}-packaged-app.png" || true
+          screencapture -x smoke-evidence/macos-universal-packaged-app.png || true
           LOG_DIR="$HOME/Library/Application Support/com.sylorlabs.koryphaios/logs"
           [ ! -d "$LOG_DIR" ] || cp -R "$LOG_DIR" smoke-evidence/logs
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: smoke-evidence-macos-${{ matrix.arch }}
+          name: smoke-evidence-macos-universal
           path: smoke-evidence/
           if-no-files-found: warn
           retention-days: 14
@@ -243,18 +278,121 @@ jobs:
           pkill -f "Koryphaios.app/Contents/MacOS/Koryphaios" 2>/dev/null || true
           pkill -f "koryphaios-backend" 2>/dev/null || true
 
+  smoke-linux:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.should_run == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - name: Install packaged-runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl xvfb libfuse2 libwebkit2gtk-4.1-0 libgtk-3-0 \
+            libayatana-appindicator3-1
+
+      - name: Download Linux AppImage from draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.AppImage' --dir . --clobber
+          APPIMAGE=$(find . -maxdepth 1 -name '*.AppImage' -print -quit)
+          test -s "$APPIMAGE"
+          chmod +x "$APPIMAGE"
+          echo "APPIMAGE=$APPIMAGE" >> "$GITHUB_ENV"
+
+      - name: Launch AppImage and verify bundled backend
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-evidence
+          DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios"
+          ACTIVE_PORT="$DATA_DIR/.koryphaios/.active-port.json"
+          PORT=3001
+          APPIMAGE_EXTRACT_AND_RUN=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+            xvfb-run -a "$APPIMAGE" >smoke-evidence/appimage.log 2>&1 &
+          APP_PID=$!
+          echo "APP_PID=$APP_PID" >> "$GITHUB_ENV"
+
+          HEALTHY=false
+          for ELAPSED in $(seq 2 2 100); do
+            sleep 2
+            kill -0 "$APP_PID" 2>/dev/null || { cat smoke-evidence/appimage.log; exit 1; }
+            if [ -f "$ACTIVE_PORT" ]; then
+              PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            fi
+            RESPONSE=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/health" || true)
+            if [ -n "$RESPONSE" ] && [ "$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' 2>/dev/null || echo False)" = "True" ]; then
+              echo "Bundled backend healthy on port $PORT"
+              HEALTHY=true
+              break
+            fi
+          done
+          [ "$HEALTHY" = "true" ]
+
+      - name: Capture packaged-app logs
+        if: always()
+        run: |
+          mkdir -p smoke-evidence
+          LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/logs"
+          [ ! -d "$LOG_DIR" ] || cp -R "$LOG_DIR" smoke-evidence/logs
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-evidence-linux-appimage
+          path: smoke-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: |
+          [ -z "${APP_PID:-}" ] || kill "$APP_PID" 2>/dev/null || true
+          pkill -f "koryphaios-backend" 2>/dev/null || true
+
   smoke-summary:
-    needs: [resolve-tag, smoke-windows, smoke-macos]
+    needs: [resolve-tag, smoke-windows, smoke-macos, smoke-linux]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate packaged smoke results
         run: |
+          if [ "${{ needs.resolve-tag.outputs.should_run }}" != "true" ]; then
+            echo "Packaged smoke test was intentionally skipped"
+            exit 0
+          fi
           echo "Packaged smoke results for ${{ needs.resolve-tag.outputs.tag }}"
           echo "Windows: ${{ needs.smoke-windows.result }}"
           echo "macOS:   ${{ needs.smoke-macos.result }}"
+          echo "Linux:   ${{ needs.smoke-linux.result }}"
           if [ "${{ needs.smoke-windows.result }}" != "success" ] || \
-             [ "${{ needs.smoke-macos.result }}" != "success" ]; then
-            echo "::error::At least one packaged desktop smoke test failed"
+             [ "${{ needs.smoke-macos.result }}" != "success" ] || \
+             [ "${{ needs.smoke-linux.result }}" != "success" ]; then
+            echo "::error::At least one packaged desktop smoke test failed; release remains draft"
             exit 1
           fi
+
+  promote-release:
+    needs: [resolve-tag, smoke-summary]
+    if: >-
+      needs.resolve-tag.outputs.should_run == 'true' &&
+      needs.resolve-tag.outputs.promote == 'true' &&
+      needs.smoke-summary.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Promote verified draft to stable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          IS_DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+          [ "$IS_DRAFT" = "true" ]
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -qx false
+          echo "Published $TAG after Windows, macOS, and Linux packaged smoke tests passed"
