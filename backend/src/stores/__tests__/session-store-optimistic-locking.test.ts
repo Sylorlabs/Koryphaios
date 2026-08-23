@@ -37,7 +37,15 @@ afterAll(async () => {
   // Do NOT close getDb() — reopenDatabase() already created a fresh live
   // connection that subsequent tests need.
   await reopenDatabase();
-  rmSync(tempDir, { recursive: true, force: true });
+  // Windows may still hold a file lock on the SQLite database immediately
+  // after reopening; force:true suppresses ENOENT but not EPERM, so wrap
+  // in a try-catch. The temp dir is in os.tmpdir() and will be cleaned up
+  // by the OS.
+  try {
+    rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup; temp dir is in os.tmpdir().
+  }
 });
 
 // ---------------------------------------------------------------------------

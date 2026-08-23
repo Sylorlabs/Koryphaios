@@ -107,6 +107,9 @@ describe('MCP env secret store', () => {
     upsertMcpEnvSecrets(root, 'test', { KEY: 'val' });
     const secretsPath = join(root, '.koryphaios', 'mcp-env.json');
     expect(existsSync(secretsPath)).toBe(true);
+    // Unix enforces 0600; Windows has no equivalent permission bit (files are
+    // always 0o666 regardless of chmod), so skip the mode check on win32.
+    if (process.platform === 'win32') return;
     const stat = statSync(secretsPath);
     // Mode 0o600 = 0o100600 (regular file + 0600). Lower 9 bits should be 0o600.
     expect(stat.mode & 0o777).toBe(0o600);
