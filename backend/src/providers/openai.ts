@@ -31,7 +31,7 @@ export class OpenAIProvider implements Provider {
   constructor(
     readonly config: ProviderConfig,
     readonly name: ProviderName = 'openai',
-    private readonly baseUrl?: string,
+    protected readonly baseUrl?: string,
   ) {}
 
   protected get client(): OpenAI {
