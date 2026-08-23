@@ -2,22 +2,12 @@
 
 import { browser } from '$app/environment';
 import { loadFont } from '$lib/fonts';
-import {
-  THEME_PRESETS,
-  type ConcreteThemePreset,
-} from '$lib/theme-palette';
+import { THEME_PRESETS, type ConcreteThemePreset } from '$lib/theme-palette';
 
 export { THEME_PRESETS } from '$lib/theme-palette';
 export type ThemePreset = ConcreteThemePreset | 'system';
 export type AccentColor =
-  | 'gold'
-  | 'indigo'
-  | 'cyan'
-  | 'emerald'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'custom';
+  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
 
 export interface CustomAccent {
   main: string;
