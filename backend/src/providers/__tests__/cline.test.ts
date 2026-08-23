@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ProviderConfig } from '@koryphaios/shared';
+import { SANDBOX_PRESETS, type ProviderConfig } from '@koryphaios/shared';
 import { detectClineCLILogin } from '../auth-utils';
-import { ClineProvider } from '../cline';
-import type { ProviderEvent } from '../types';
+import { ClineProvider, shouldUseClinePlanMode } from '../cline';
+import type { ProviderEvent, StreamRequest } from '../types';
 
 type MapResult = {
   recognized: boolean;
@@ -19,6 +19,15 @@ type ClineParser = {
 
 function makeProvider(): ClineProvider {
   return new ClineProvider({ name: 'cline', disabled: false } as ProviderConfig);
+}
+
+function makeRequest(overrides: Partial<StreamRequest> = {}): StreamRequest {
+  return {
+    model: 'cline-default',
+    messages: [{ role: 'user', content: 'test' }],
+    systemPrompt: '',
+    ...overrides,
+  };
 }
 
 function parse(
@@ -78,6 +87,36 @@ describe('Cline CLI configuration detection', () => {
     writeFileSync(join(settings, 'providers.json'), '{}');
 
     expect(detectClineCLILogin()).toBe(false);
+  });
+});
+
+describe('Cline CLI execution policy', () => {
+  it('uses Plan for research, critics, and explicit Plan turns', () => {
+    expect(shouldUseClinePlanMode(makeRequest(), true, true)).toBe(true);
+    expect(
+      shouldUseClinePlanMode(makeRequest({ harnessRole: 'critic' }), false, true),
+    ).toBe(true);
+    expect(
+      shouldUseClinePlanMode(makeRequest({ permissionMode: 'plan' }), false, true),
+    ).toBe(true);
+  });
+
+  it('allows non-YOLO Act only with filesystem isolation and a real kernel jail', () => {
+    const guarded = makeRequest({
+      permissionMode: 'guarded',
+      sandbox: SANDBOX_PRESETS.balanced,
+    });
+    expect(shouldUseClinePlanMode(guarded, false, true)).toBe(false);
+    expect(shouldUseClinePlanMode(guarded, false, false)).toBe(true);
+    expect(
+      shouldUseClinePlanMode(makeRequest({ permissionMode: 'guarded' }), false, true),
+    ).toBe(true);
+  });
+
+  it('keeps explicit YOLO as the only unsandboxed Act escape hatch', () => {
+    expect(
+      shouldUseClinePlanMode(makeRequest({ permissionMode: 'yolo' }), false, false),
+    ).toBe(false);
   });
 });
 
