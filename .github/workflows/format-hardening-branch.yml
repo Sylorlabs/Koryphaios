@@ -1,0 +1,63 @@
+name: Format Hardening Branch
+
+on:
+  push:
+    branches:
+      - release/provider-ui-hardening
+    paths:
+      - '.github/workflows/format-hardening-branch.yml'
+      - '.github/workflows/release-desktop.yml'
+      - 'backend/src/providers/cline.ts'
+      - 'frontend/src/lib/stores/theme.svelte.ts'
+      - 'frontend/src/lib/theme-palette.test.ts'
+      - 'shared/src/provider-support.ts'
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-remove-self:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: release/provider-ui-hardening
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.14'
+
+      - run: bun install --frozen-lockfile
+
+      - name: Apply repository formatter
+        run: |
+          bunx prettier --write \
+            .github/workflows/release-desktop.yml \
+            backend/src/providers/cline.ts \
+            frontend/src/lib/stores/theme.svelte.ts \
+            frontend/src/lib/theme-palette.test.ts \
+            shared/src/provider-support.ts
+
+      - name: Remove one-shot formatter workflow
+        run: rm .github/workflows/format-hardening-branch.yml
+
+      - name: Commit normalized files
+        run: |
+          git config user.name 'GitHub Actions'
+          git config user.email 'actions@github.com'
+          git add \
+            .github/workflows/release-desktop.yml \
+            backend/src/providers/cline.ts \
+            frontend/src/lib/stores/theme.svelte.ts \
+            frontend/src/lib/theme-palette.test.ts \
+            shared/src/provider-support.ts \
+            .github/workflows/format-hardening-branch.yml
+          if git diff --cached --quiet; then
+            echo 'No formatting changes required'
+            exit 0
+          fi
+          git commit -m 'style: normalize hardening tranche'
+          git push origin HEAD:release/provider-ui-hardening
