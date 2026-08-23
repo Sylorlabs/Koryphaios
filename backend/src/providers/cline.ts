@@ -19,7 +19,11 @@ import { detectClineCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  sandboxCapabilities,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -281,13 +285,18 @@ function normalizeThinkingLevel(value: string | undefined): string | null {
   return null;
 }
 
-function shouldUsePlanMode(request: StreamRequest, researchOnly: boolean): boolean {
+export function shouldUseClinePlanMode(
+  request: StreamRequest,
+  researchOnly: boolean,
+  kernelIsolationAvailable: boolean,
+): boolean {
   if (researchOnly || request.harnessRole === 'critic' || request.permissionMode === 'plan') {
     return true;
   }
-  // A mutating Cline turn must either be confined by the host or explicitly
-  // authorized as YOLO. Otherwise fail safe into Cline Plan mode.
-  return !request.sandbox && request.permissionMode !== 'yolo';
+  // A mutating Cline turn must either be confined by a real host-kernel jail or
+  // explicitly authorized as YOLO. A soft jail is not sufficient for Act mode.
+  return request.permissionMode !== 'yolo' &&
+    (!request.sandbox?.filesystemIsolation || !kernelIsolationAvailable);
 }
 
 export class ClineProvider implements Provider {
@@ -391,7 +400,12 @@ export class ClineProvider implements Provider {
       return;
     }
 
-    const planMode = shouldUsePlanMode(request, researchOnly);
+    const kernelIsolationAvailable = sandboxCapabilities().osIsolation;
+    const planMode = shouldUseClinePlanMode(
+      request,
+      researchOnly,
+      kernelIsolationAvailable,
+    );
     if (planMode && !contract.supportsPlan) {
       yield {
         type: 'error',
@@ -537,12 +551,12 @@ export class ClineProvider implements Provider {
       HOME: clineHome,
       USERPROFILE: clineHome,
     });
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [clineHome, clineConfigDir]) : null;
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [clineHome]) : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
-          configDirs: [
-            clineHome,
+          configDirs: [clineHome],
+          readonlyConfigDirs: [
             clineConfigDir,
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
           ],
