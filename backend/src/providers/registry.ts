@@ -11,6 +11,7 @@ import {
   buildAuthHeaders,
   getVerifyUrl,
   maskApiKey,
+  withOpenRouterAttribution,
   GEMINI_V1BETA_BASE,
   GEMINI_V1_BASE,
   PROVIDER_BASE_URLS,
@@ -1362,7 +1363,16 @@ class ProviderRegistry {
           );
         }
         case 'openrouter':
-          return this.verifyBearerGet('https://openrouter.ai/api/v1/models', apiKey);
+          return this.verifyModelCatalog(
+            'https://openrouter.ai/api/v1/models',
+            {
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                ...withOpenRouterAttribution(),
+              },
+            },
+            'openai',
+          );
         case 'github-models': {
           const token = apiKey || authToken;
           if (!token) return { success: false, error: 'Missing GitHub token' };

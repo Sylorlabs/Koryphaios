@@ -69,6 +69,33 @@ export interface AuthHeadersResult {
 }
 
 /**
+ * OpenRouter app-attribution headers.
+ *
+ * OpenRouter requires `HTTP-Referer` to identify the calling application and
+ * `X-OpenRouter-Title` for its display name. Without these, OpenRouter does
+ * not recognize the caller as a registered agentic harness and may refuse to
+ * route to certain models (especially agentic/premium models). The
+ * `X-OpenRouter-Categories` header declares the harness type so OpenRouter
+ * can gate model access correctly.
+ *
+ * User-configured headers always take precedence over these defaults.
+ *
+ * @see https://openrouter.ai/docs/app-attribution
+ */
+export const OPENROUTER_ATTRIBUTION_HEADERS: Record<string, string> = {
+  'HTTP-Referer': 'https://koryphaios.ai',
+  'X-OpenRouter-Title': 'Koryphaios',
+  'X-OpenRouter-Categories': 'cli-agent,cloud-agent',
+};
+
+/** Merge OpenRouter attribution headers under user-provided overrides. */
+export function withOpenRouterAttribution(
+  userHeaders?: Record<string, string> | null,
+): Record<string, string> {
+  return { ...OPENROUTER_ATTRIBUTION_HEADERS, ...(userHeaders ?? {}) };
+}
+
+/**
  * Build auth headers (and optional URL suffix) for a provider.
  * Use for verification and minimal-cost requests only; actual SDKs may add their own.
  */
@@ -103,6 +130,9 @@ export function buildAuthHeaders(
     case 'moonshot':
     case 'mistral':
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (provider === 'openrouter') {
+        Object.assign(headers, withOpenRouterAttribution());
+      }
       return { headers };
 
     case 'google':

@@ -23,6 +23,7 @@ import {
   modelFromRemoteId,
 } from './model-list-cache';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import { withOpenRouterAttribution } from './api-endpoints';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -335,9 +336,8 @@ export class OpenAIProvider implements Provider {
         }
 
         // Reasoning content (O-series models)
-        const reasoningContent = (
-          delta as { reasoning_content?: string } | undefined
-        )?.reasoning_content;
+        const reasoningContent = (delta as { reasoning_content?: string } | undefined)
+          ?.reasoning_content;
         if (reasoningContent) {
           yield { type: 'thinking_delta', thinking: reasoningContent };
         }
@@ -558,6 +558,26 @@ export class GroqProvider extends OpenAIProvider {
 export class OpenRouterProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'openrouter', 'https://openrouter.ai/api/v1');
+  }
+
+  /**
+   * OpenRouter requires app-attribution headers (`HTTP-Referer`,
+   * `X-OpenRouter-Title`, `X-OpenRouter-Categories`) to identify the calling
+   * harness as agentic. Without them, OpenRouter may refuse to route to
+   * certain models. Merge the attribution defaults under any user-configured
+   * headers so explicit overrides always win.
+   */
+  protected override get client(): OpenAI {
+    if (!this._client) {
+      const apiKey = this.config.apiKey || this.config.authToken;
+      this._client = new OpenAI({
+        apiKey: apiKey || 'placeholder',
+        baseURL: this.baseUrl ?? this.config.baseUrl,
+        defaultHeaders: withOpenRouterAttribution(this.config.headers),
+        fetch: createUsageInterceptingFetch(globalThis.fetch),
+      });
+    }
+    return this._client;
   }
 }
 
