@@ -1,10 +1,9 @@
 // Cline CLI provider — runs the official `cline` CLI harness.
 //
 // CLI-ONLY: Cline owns its provider authentication and model configuration.
-// Koryphaios never copies a Cline key into its own credential store. Instead it
-// gives the child read access to Cline's real configuration directory, keeps
-// task/session data in a private Koryphaios-managed directory, and injects the
-// Kory MCP bridge through an explicit settings path.
+// Koryphaios never stores a Cline key. The child reads Cline's real provider
+// settings while databases, sessions, teams, hooks, and MCP configuration are
+// redirected to a private Koryphaios-managed runtime directory.
 //
 // Cline has shipped two JSON stream generations in the wild:
 //   1. legacy top-level say/ask records
@@ -98,6 +97,10 @@ interface ClineAgentEvent {
   displayRole?: string;
   reason?: string;
   usage?: unknown;
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
 }
 
 interface ClineWireEvent extends ClineLegacyEvent {
@@ -380,6 +383,29 @@ export class ClineProvider implements Provider {
       };
       return;
     }
+    if (!contract.supportsConfig) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose --config, so Koryphaios cannot use the CLI-owned account without exposing the user's full home directory. Update Cline, then reconnect.`,
+      };
+      return;
+    }
+
+    const planMode = shouldUsePlanMode(request, researchOnly);
+    if (planMode && !contract.supportsPlan) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} cannot enforce the required Plan mode. Update Cline or choose a different provider.`,
+      };
+      return;
+    }
+    if (!contract.supportsAutoApprove && (planMode || !contract.supportsYolo)) {
+      yield {
+        type: 'error',
+        error: `Installed Cline CLI${contract.version ? ` ${contract.version}` : ''} does not expose the headless approval controls required by Koryphaios. Update Cline, then reconnect.`,
+      };
+      return;
+    }
 
     const prompt = buildPrompt(request.systemPrompt, request.messages);
     if (!prompt.trim()) {
@@ -407,7 +433,12 @@ export class ClineProvider implements Provider {
       ? join(getKoryphaiosClineHome(), 'research-only')
       : getKoryphaiosClineHome();
     const clineConfigDir = join(homedir(), '.cline');
+    const clineSettingsDir = join(clineConfigDir, 'data', 'settings');
     const clineDataDir = join(clineHome, 'data');
+    const clineDbDir = join(clineDataDir, 'db');
+    const clineSessionDir = join(clineDataDir, 'sessions');
+    const clineTeamDir = join(clineDataDir, 'teams');
+    const clineLogDir = join(clineDataDir, 'logs');
     const clineHooksDir = join(clineHome, 'hooks');
     const mcpConfigPath = join(clineDataDir, 'settings', 'cline_mcp_settings.json');
     const bridgeGrantDirectory =
@@ -415,9 +446,17 @@ export class ClineProvider implements Provider {
         ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
 
-    ensureManagedCliDirectory(clineHome);
-    ensureManagedCliDirectory(clineDataDir);
-    ensureManagedCliDirectory(clineHooksDir);
+    for (const directory of [
+      clineHome,
+      clineDataDir,
+      clineDbDir,
+      clineSessionDir,
+      clineTeamDir,
+      clineLogDir,
+      clineHooksDir,
+    ]) {
+      ensureManagedCliDirectory(directory);
+    }
 
     if (!researchOnly) {
       try {
@@ -458,14 +497,12 @@ export class ClineProvider implements Provider {
       : null;
     const cwd = researchRoot ?? (request.workingDirectory?.trim() || process.cwd());
     const args: string[] = [];
-    const planMode = shouldUsePlanMode(request, researchOnly);
-    if (planMode && contract.supportsPlan) args.push('--plan');
+    if (planMode) args.push('--plan');
     if (contract.supportsAutoApprove) args.push('--auto-approve', 'true');
-    else if (contract.supportsYolo && !planMode) args.push('--yolo');
+    else args.push('--yolo');
     args.push('--json');
     if (contract.supportsCwd) args.push('--cwd', cwd);
-    if (contract.supportsConfig) args.push('--config', clineConfigDir);
-    if (contract.supportsDataDir) args.push('--data-dir', clineDataDir);
+    args.push('--config', clineConfigDir);
     if (contract.supportsHooksDir) args.push('--hooks-dir', clineHooksDir);
 
     const thinkingLevel = normalizeThinkingLevel(request.reasoningLevel);
@@ -482,10 +519,21 @@ export class ClineProvider implements Provider {
 
     const baseEnv = buildProviderCliEnv('cline', {
       CLINE_HOME: clineConfigDir,
-      CLINE_DATA_DIR: clineDataDir,
+      CLINE_PROVIDER_SETTINGS_PATH: join(clineSettingsDir, 'providers.json'),
+      CLINE_GLOBAL_SETTINGS_PATH: join(clineSettingsDir, 'global-settings.json'),
       CLINE_MCP_SETTINGS_PATH: researchOnly ? undefined : mcpConfigPath,
+      CLINE_DB_DATA_DIR: clineDbDir,
+      CLINE_SESSION_DATA_DIR: clineSessionDir,
+      CLINE_TEAM_DATA_DIR: clineTeamDir,
       CLINE_HOOKS_DIR: clineHooksDir,
-      CLINE_SANDBOX_DATA_DIR: clineDataDir,
+      CLINE_HOOKS_LOG_PATH: join(clineLogDir, 'hooks.jsonl'),
+      CLINE_SESSION_BACKEND_MODE: 'local',
+      // A modern Cline --data-dir sets CLINE_PROVIDER_SETTINGS_PATH to the
+      // isolated directory. Delete ambient sandbox/data overrides so the
+      // explicit CLI-owned provider settings path above remains authoritative.
+      CLINE_DATA_DIR: undefined,
+      CLINE_SANDBOX: undefined,
+      CLINE_SANDBOX_DATA_DIR: undefined,
       HOME: clineHome,
       USERPROFILE: clineHome,
     });
@@ -747,6 +795,15 @@ export class ClineProvider implements Provider {
             isError: Boolean(event.error),
           },
         ],
+      };
+    }
+
+    if (event.type === 'usage') {
+      const usage = usageEvent(event.usage ?? event);
+      return {
+        recognized: true,
+        completed: false,
+        events: usage ? [usage] : [],
       };
     }
 
