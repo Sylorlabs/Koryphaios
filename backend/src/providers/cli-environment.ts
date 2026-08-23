@@ -9,13 +9,7 @@
  */
 
 export type NativeCliProvider =
-  | 'claude'
-  | 'codex'
-  | 'cline'
-  | 'cursor'
-  | 'devin'
-  | 'antigravity'
-  | 'grok';
+  'claude' | 'codex' | 'cline' | 'cursor' | 'devin' | 'antigravity' | 'grok';
 
 const PROCESS_ENV_KEYS = [
   // Executable discovery and Windows process startup.
