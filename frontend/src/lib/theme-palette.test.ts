@@ -11,9 +11,7 @@ function parseHex(value: string): Rgb {
 
 function parseColor(value: string, background: Rgb): Rgb {
   if (value.startsWith('#')) return parseHex(value);
-  const match = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(
-    value.trim(),
-  );
+  const match = /^rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)$/i.exec(value.trim());
   if (!match) throw new Error(`Unsupported theme color: ${value}`);
   const foreground: Rgb = [Number(match[1]), Number(match[2]), Number(match[3])];
   const alpha = Number(match[4]);
@@ -24,17 +22,11 @@ function parseColor(value: string, background: Rgb): Rgb {
 
 function linearChannel(channel: number): number {
   const normalized = channel / 255;
-  return normalized <= 0.04045
-    ? normalized / 12.92
-    : ((normalized + 0.055) / 1.055) ** 2.4;
+  return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
 }
 
 function luminance([red, green, blue]: Rgb): number {
-  return (
-    0.2126 * linearChannel(red) +
-    0.7152 * linearChannel(green) +
-    0.0722 * linearChannel(blue)
-  );
+  return 0.2126 * linearChannel(red) + 0.7152 * linearChannel(green) + 0.0722 * linearChannel(blue);
 }
 
 function contrastRatio(foreground: Rgb, background: Rgb): number {
