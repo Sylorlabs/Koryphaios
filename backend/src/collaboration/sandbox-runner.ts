@@ -44,12 +44,18 @@ function detect(): { mechanism: SandboxMechanism; path: string | null } {
     if (bw) {
       // Verify user namespaces actually work (some kernels disable them).
       try {
-        execFileSync(bw, ['--ro-bind', '/usr', '/usr', 'true'], { timeout: 4000, stdio: 'ignore' });
+        execFileSync(bw, ['--ro-bind', '/usr', '/usr', 'true'], {
+          timeout: 4000,
+          stdio: 'ignore',
+        });
         cached = { mechanism: 'bubblewrap', path: bw };
         return cached;
       } catch (err: unknown) {
         // User namespaces unavailable on this kernel; fall back to no isolation.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'bubblewrap user namespaces unavailable; falling back');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'bubblewrap user namespaces unavailable; falling back',
+        );
       }
     }
   } else if (process.platform === 'darwin') {
@@ -84,9 +90,10 @@ export function sandboxCapabilities(): SandboxCapabilities {
 
 export interface WrapOptions {
   cwd: string;
-  /** The CLI's own config/auth dir(s) — exposed read-write inside the jail so
-   *  the CLI can run. The host's real HOME is never fully bound. */
+  /** CLI-owned mutable runtime/config directories exposed read-write. */
   configDirs?: string[];
+  /** Account/provider configuration that the CLI may inspect but never mutate. */
+  readonlyConfigDirs?: string[];
   policy: SandboxPolicy;
 }
 
@@ -112,8 +119,9 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     '/tmp',
   ];
   for (const p of SYSTEM_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
-  if (opts.policy.allowNetwork)
+  if (opts.policy.allowNetwork) {
     for (const p of NET_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
+  }
   flags.push(
     opts.policy.allowEdits ? '--bind' : '--ro-bind',
     opts.cwd,
@@ -121,7 +129,12 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
     '--chdir',
     opts.cwd,
   );
-  for (const dir of opts.configDirs ?? []) if (existsSync(dir)) flags.push('--bind', dir, dir);
+  for (const dir of opts.configDirs ?? []) {
+    if (existsSync(dir)) flags.push('--bind', dir, dir);
+  }
+  for (const dir of opts.readonlyConfigDirs ?? []) {
+    if (existsSync(dir)) flags.push('--ro-bind', dir, dir);
+  }
   flags.push('--tmpfs', '/root', '--setenv', 'HOME', opts.cwd);
   return [...flags, '--', bin, ...args];
 }
@@ -164,7 +177,8 @@ export function buildSeatbeltProfile(opts: WrapOptions): string {
     .join(' ');
 
   // allow-default keeps the CLI runnable; specific denies do the confining.
-  // (Later matching rules win in SBPL, so denies after allow-default apply.)
+  // Read-only config paths need no allow rule because reads are allowed by
+  // default; the global file-write deny keeps them immutable.
   return [
     '(version 1)',
     '(allow default)',
@@ -241,9 +255,13 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
     mkdirSync(tmp, { recursive: true });
   } catch (err: unknown) {
     // Best-effort temp dir; the CLI can use the system temp if this fails.
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Soft-jail temp dir creation failed; best-effort');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Soft-jail temp dir creation failed; best-effort',
+    );
   }
-  // Expose ONLY the CLI's own config inside the fake home.
+  // Expose ONLY the CLI's own writable config inside the fake home. Read-only
+  // account paths are referenced explicitly and are never symlinked here.
   for (const dir of configDirs) {
     if (!existsSync(dir)) continue;
     try {
@@ -251,7 +269,10 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
     } catch (err: unknown) {
       // Symlink may need privilege on Windows — the CLI usually reads its
       // config via an absolute env var anyway, so this is best-effort.
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'Soft-jail config symlink failed; best-effort');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), dir },
+        'Soft-jail config symlink failed; best-effort',
+      );
     }
   }
 
@@ -277,7 +298,10 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
         rmSync(home, { recursive: true, force: true });
       } catch (err: unknown) {
         // Cleanup is best-effort; the OS temp reaper will remove it eventually.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Soft-jail home cleanup failed; best-effort');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Soft-jail home cleanup failed; best-effort',
+        );
       }
     },
   };
