@@ -163,7 +163,7 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
 
 const FALLBACK_SUPPORT: ProviderSupportRecord = Object.freeze({
   tier: 'compatible',
-  capabilities: ['chat'],
+  capabilities: ['chat'] as ProviderCapabilityKind[],
   evidence: 'openai-compatible-contract',
   note: 'This provider uses the shared OpenAI-compatible contract. The provider itself has not completed Koryphaios live release certification.',
 });
