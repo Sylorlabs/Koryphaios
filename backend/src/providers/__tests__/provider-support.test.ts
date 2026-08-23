@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  PROVIDER_SUPPORT,
   isProviderCertified,
   isProviderRunnableByTier,
   providerSupport,
@@ -45,7 +44,14 @@ describe('provider release support truth', () => {
     }
   });
 
-  it('gives every configured provider an explicit or conservative fallback record', () => {
+  it('defaults an unclassified future provider to Preview, never Compatible', () => {
+    expect(providerSupport('future-provider-with-no-release-record')).toMatchObject({
+      tier: 'preview',
+      evidence: 'openai-compatible-contract',
+    });
+  });
+
+  it('gives every configured provider a conservative support record', () => {
     for (const definition of PROVIDER_CONFIGS) {
       const support = providerSupport(definition.name);
       expect(['certified', 'compatible', 'preview', 'unavailable']).toContain(support.tier);
