@@ -156,7 +156,10 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   mixedbread: unavailable(['embedding'], 'Mixedbread belongs in the dedicated embeddings route.'),
   mem0: unavailable(['memory'], 'Mem0 belongs in a dedicated memory adapter.'),
   letta: unavailable(['memory'], 'Letta belongs in a dedicated memory/agent adapter.'),
-  blackforestlabs: unavailable(['image'], 'Black Forest Labs belongs in the dedicated image route.'),
+  blackforestlabs: unavailable(
+    ['image'],
+    'Black Forest Labs belongs in the dedicated image route.',
+  ),
   klingai: unavailable(['image'], 'Kling belongs in a dedicated image/video route.'),
   prodia: unavailable(['image'], 'Prodia belongs in the dedicated image route.'),
 };
