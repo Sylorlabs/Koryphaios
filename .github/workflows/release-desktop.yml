@@ -1,11 +1,12 @@
 name: Release Desktop Apps
 
 # Release invariant:
-#   - the workflow must run on an immutable v* tag
-#   - every updater artifact must be signed
-#   - cached native shells must come from one explicit successful build-shell run
-#   - assets are assembled into a draft release
-#   - the draft becomes public only after every platform and latest.json verify
+#   - the workflow runs only on an immutable v* tag
+#   - every updater artifact is signed
+#   - cached native shells come from one explicit successful build-shell run
+#   - shell-relevant source has not changed since that pinned build
+#   - assets and latest.json are assembled into a draft release
+#   - Packaged App Smoke Test promotes the draft only after native launch checks
 
 on:
   push:
@@ -27,17 +28,18 @@ permissions:
 jobs:
   preflight:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
-      shell-run-id: ${{ steps.release.outputs.shell_run_id }}
+      shell_run_id: ${{ steps.release.outputs.shell_run_id }}
+      shell_sha: ${{ steps.release.outputs.shell_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Validate release inputs and immutable version
+      - name: Validate release inputs, versions, and shell provenance
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,23 +54,49 @@ jobs:
 
           TAG=${GITHUB_REF#refs/tags/}
           VERSION=${TAG#v}
-          CONFIG_VERSION=$(jq -r .version desktop/src-tauri/tauri.conf.json)
-          if [ "$CONFIG_VERSION" != "$VERSION" ]; then
-            echo "::error::Tag $TAG does not match Tauri version $CONFIG_VERSION"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Release tag $TAG is not a supported semantic version"
             exit 1
           fi
+
+          check_json_version() {
+            local file=$1
+            local selector=$2
+            local actual
+            actual=$(jq -r "$selector" "$file")
+            if [ "$actual" != "$VERSION" ]; then
+              echo "::error::$file reports $actual; expected $VERSION from $TAG"
+              exit 1
+            fi
+          }
+
+          check_json_version desktop/src-tauri/tauri.conf.json '.version'
+          check_json_version package.json '.version'
+          check_json_version desktop/package.json '.version'
+          check_json_version backend/package.json '.version'
+          check_json_version frontend/package.json '.version'
+          check_json_version shared/package.json '.version'
+          check_json_version mcp-server/package.json '.version'
+          check_json_version frontend/static/app.config.json '.app.version'
+          CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -1)
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "::error::desktop/src-tauri/Cargo.toml reports $CARGO_VERSION; expected $VERSION"
+            exit 1
+          fi
+
           if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY is required for a stable release"
             exit 1
           fi
           if ! printf '%s' "$SHELL_BUILD_RUN_ID" | grep -Eq '^[0-9]+$'; then
-            echo "::error::SHELL_BUILD_RUN_ID must identify the successful build-shell workflow run"
+            echo "::error::SHELL_BUILD_RUN_ID must identify a successful build-shell workflow run"
             exit 1
           fi
 
           RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SHELL_BUILD_RUN_ID")
           CONCLUSION=$(echo "$RUN" | jq -r .conclusion)
           WORKFLOW_PATH=$(echo "$RUN" | jq -r .path)
+          SHELL_SHA=$(echo "$RUN" | jq -r .head_sha)
           if [ "$CONCLUSION" != "success" ]; then
             echo "::error::Shell workflow run $SHELL_BUILD_RUN_ID concluded $CONCLUSION"
             exit 1
@@ -77,11 +105,30 @@ jobs:
             echo "::error::Run $SHELL_BUILD_RUN_ID belongs to $WORKFLOW_PATH, not build-shell.yml"
             exit 1
           fi
+          if ! git cat-file -e "$SHELL_SHA^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$SHELL_SHA"
+          fi
+
+          SHELL_PATHS=(
+            desktop/src-tauri/Cargo.toml
+            desktop/src-tauri/Cargo.lock
+            desktop/src-tauri/src
+            desktop/src-tauri/build.rs
+            desktop/src-tauri/tauri.conf.json
+            desktop/src-tauri/icons
+            .github/workflows/build-shell.yml
+          )
+          if ! git diff --quiet "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"; then
+            echo "::error::Shell-relevant source changed after pinned build run $SHELL_BUILD_RUN_ID ($SHELL_SHA)"
+            git diff --name-only "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"
+            exit 1
+          fi
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "shell_run_id=$SHELL_BUILD_RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "Release preflight passed for $TAG using shell run $SHELL_BUILD_RUN_ID"
+          echo "shell_sha=$SHELL_SHA" >> "$GITHUB_OUTPUT"
+          echo "Release preflight passed for $TAG using shell run $SHELL_BUILD_RUN_ID at $SHELL_SHA"
 
   prepare-release:
     runs-on: ubuntu-latest
@@ -192,7 +239,7 @@ jobs:
           path: shells/windows
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ needs.preflight.outputs.shell-run-id }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
       - name: Download macOS x86_64 shell from pinned build run
         uses: actions/download-artifact@v4
         with:
@@ -200,7 +247,7 @@ jobs:
           path: shells/macos-x86_64
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ needs.preflight.outputs.shell-run-id }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
       - name: Download macOS aarch64 shell from pinned build run
         uses: actions/download-artifact@v4
         with:
@@ -208,7 +255,7 @@ jobs:
           path: shells/macos-aarch64
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ needs.preflight.outputs.shell-run-id }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
       - name: Download Linux shell provenance artifact
         uses: actions/download-artifact@v4
         with:
@@ -216,7 +263,7 @@ jobs:
           path: shells/linux
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          run-id: ${{ needs.preflight.outputs.shell-run-id }}
+          run-id: ${{ needs.preflight.outputs.shell_run_id }}
       - name: Verify exact shell payloads
         run: |
           set -euo pipefail
@@ -234,13 +281,14 @@ jobs:
 
   assemble-windows:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 12
     needs: [preflight, build-frontend, build-backends, download-shells]
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
       - name: Install NSIS
         run: sudo apt-get update && sudo apt-get install -y nsis
       - uses: actions/download-artifact@v4
@@ -287,7 +335,7 @@ jobs:
 
   assemble-macos:
     runs-on: blacksmith-6vcpu-macos-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     needs: [preflight, build-frontend, build-backends, download-shells]
     strategy:
       matrix:
@@ -301,6 +349,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
           name: frontend-build
@@ -397,9 +446,7 @@ jobs:
           name: linux-installer
           path: |
             desktop/src-tauri/target/release/bundle/deb/*.deb
-            desktop/src-tauri/target/release/bundle/deb/*.deb.sig
             desktop/src-tauri/target/release/bundle/rpm/*.rpm
-            desktop/src-tauri/target/release/bundle/rpm/*.rpm.sig
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
@@ -493,10 +540,14 @@ jobs:
             -name '*.AppImage' -o -name '*.AppImage.sig' \
           \) -print0)
           test "${#ASSETS[@]}" -gt 0
+          test "$(find release-artifacts -name '*-setup.exe' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*-setup.exe.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*aarch64*.app.tar.gz.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*x86_64*.app.tar.gz.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*.AppImage.sig' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.deb' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.rpm' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.dmg' | wc -l)" -ge 3
           gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
   publish-updater-manifest:
@@ -561,20 +612,21 @@ jobs:
             latest.json >/dev/null
           gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 
-  publish-stable-release:
+  draft-ready:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [preflight, publish-updater-manifest]
     steps:
-      - name: Publish verified draft atomically
+      - name: Verify complete draft for packaged smoke testing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.preflight.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -qx false
-          echo "Published $TAG after all artifact and updater checks passed"
+          RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)
+          [ "$(echo "$RELEASE" | jq -r .isDraft)" = "true" ]
+          echo "$RELEASE" | jq -e '[.assets[].name] | index("latest.json") != null' >/dev/null
+          echo "Draft $TAG is complete. Packaged App Smoke Test will promote it after native checks."
 
   release-summary:
     runs-on: ubuntu-latest
@@ -591,7 +643,7 @@ jobs:
       - assemble-macos-universal
       - publish-release-assets
       - publish-updater-manifest
-      - publish-stable-release
+      - draft-ready
     steps:
       - name: Release summary
         run: |
@@ -609,5 +661,5 @@ jobs:
           macOS universal:  ${{ needs.assemble-macos-universal.result }}
           Asset upload:     ${{ needs.publish-release-assets.result }}
           Updater manifest: ${{ needs.publish-updater-manifest.result }}
-          Stable publish:   ${{ needs.publish-stable-release.result }}
+          Draft ready:      ${{ needs.draft-ready.result }}
           SUMMARY
