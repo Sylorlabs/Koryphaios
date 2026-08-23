@@ -5,23 +5,24 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/format-hardening-branch.yml'
-      - '.github/workflows/release-desktop.yml'
       - 'backend/src/providers/cline.ts'
-      - 'frontend/src/lib/stores/theme.svelte.ts'
-      - 'frontend/src/lib/theme-palette.test.ts'
-      - 'shared/src/provider-support.ts'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export-formatted-files:
+  format-cline:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'release/provider-ui-hardening'
+      github.event.pull_request.head.ref == 'release/provider-ui-hardening' &&
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -30,31 +31,16 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - name: Apply repository formatter
-        run: |
-          bunx prettier --write \
-            .github/workflows/release-desktop.yml \
-            backend/src/providers/cline.ts \
-            frontend/src/lib/stores/theme.svelte.ts \
-            frontend/src/lib/theme-palette.test.ts \
-            shared/src/provider-support.ts
+        run: bunx prettier --write backend/src/providers/cline.ts
 
-      - name: Stage formatted export
+      - name: Commit Cline formatting
         run: |
-          mkdir -p \
-            formatted/.github/workflows \
-            formatted/backend/src/providers \
-            formatted/frontend/src/lib/stores \
-            formatted/frontend/src/lib \
-            formatted/shared/src
-          cp .github/workflows/release-desktop.yml formatted/.github/workflows/
-          cp backend/src/providers/cline.ts formatted/backend/src/providers/
-          cp frontend/src/lib/stores/theme.svelte.ts formatted/frontend/src/lib/stores/
-          cp frontend/src/lib/theme-palette.test.ts formatted/frontend/src/lib/
-          cp shared/src/provider-support.ts formatted/shared/src/
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: hardening-formatted-files
-          path: formatted/
-          if-no-files-found: error
-          retention-days: 1
+          git config user.name 'GitHub Actions'
+          git config user.email 'actions@github.com'
+          git add backend/src/providers/cline.ts
+          if git diff --cached --quiet; then
+            echo 'No Cline formatting changes required'
+            exit 0
+          fi
+          git commit -m 'style(cline): normalize adapter'
+          git push origin HEAD:release/provider-ui-hardening
