@@ -12,21 +12,16 @@ on:
       - 'shared/src/provider-support.ts'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  format-and-remove-self:
+  export-formatted-files:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref == 'release/provider-ui-hardening' &&
-      github.actor != 'github-actions[bot]'
+      github.event.pull_request.head.ref == 'release/provider-ui-hardening'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -43,23 +38,23 @@ jobs:
             frontend/src/lib/theme-palette.test.ts \
             shared/src/provider-support.ts
 
-      - name: Remove one-shot formatter workflow
-        run: rm .github/workflows/format-hardening-branch.yml
-
-      - name: Commit normalized files
+      - name: Stage formatted export
         run: |
-          git config user.name 'GitHub Actions'
-          git config user.email 'actions@github.com'
-          git add \
-            .github/workflows/release-desktop.yml \
-            backend/src/providers/cline.ts \
-            frontend/src/lib/stores/theme.svelte.ts \
-            frontend/src/lib/theme-palette.test.ts \
-            shared/src/provider-support.ts \
-            .github/workflows/format-hardening-branch.yml
-          if git diff --cached --quiet; then
-            echo 'No formatting changes required'
-            exit 0
-          fi
-          git commit -m 'style: normalize hardening tranche'
-          git push origin HEAD:release/provider-ui-hardening
+          mkdir -p \
+            formatted/.github/workflows \
+            formatted/backend/src/providers \
+            formatted/frontend/src/lib/stores \
+            formatted/frontend/src/lib \
+            formatted/shared/src
+          cp .github/workflows/release-desktop.yml formatted/.github/workflows/
+          cp backend/src/providers/cline.ts formatted/backend/src/providers/
+          cp frontend/src/lib/stores/theme.svelte.ts formatted/frontend/src/lib/stores/
+          cp frontend/src/lib/theme-palette.test.ts formatted/frontend/src/lib/
+          cp shared/src/provider-support.ts formatted/shared/src/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hardening-formatted-files
+          path: formatted/
+          if-no-files-found: error
+          retention-days: 1
