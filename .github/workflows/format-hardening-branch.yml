@@ -1,9 +1,8 @@
 name: Format Hardening Branch
 
 on:
-  push:
-    branches:
-      - release/provider-ui-hardening
+  pull_request:
+    types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/format-hardening-branch.yml'
       - '.github/workflows/release-desktop.yml'
@@ -17,12 +16,15 @@ permissions:
 
 jobs:
   format-and-remove-self:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'release/provider-ui-hardening' &&
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    if: github.actor != 'github-actions[bot]'
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: release/provider-ui-hardening
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
