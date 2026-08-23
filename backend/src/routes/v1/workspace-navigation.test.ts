@@ -1,5 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,12 +28,24 @@ const { workspaceRoutes } = await import('./workspace');
 const app = new Elysia().onError(errorHandler).use(workspaceRoutes);
 const workspaceRoot = join(isolatedRoot, 'workspace');
 let authorization = '';
+let canonicalWorkspaceRoot = workspaceRoot;
 
 beforeAll(async () => {
   await initDb();
   mkdirSync(join(workspaceRoot, 'alpha'), { recursive: true });
+  canonicalWorkspaceRoot = canonical(workspaceRoot);
   authorization = buildLocalBearerToken(localAuth.createSession(['*']));
 });
+
+/** Resolve symlinks so comparisons match the canonical paths the store persists
+ *  (macOS resolves /var → /private/var via realpathSync inside the store). */
+function canonical(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
 
 afterAll(() => {
   localAuth.dispose();
@@ -85,15 +105,15 @@ describe('workspace navigation routes', () => {
         body: JSON.stringify({ path: join(workspaceRoot, 'gamma') }),
       }),
     );
-    expect((await body(selected)).data.selectedProject).toBe(join(workspaceRoot, 'gamma'));
+    expect((await body(selected)).data.selectedProject).toBe(join(canonicalWorkspaceRoot, 'gamma'));
 
     rmSync(join(workspaceRoot, 'gamma'), { recursive: true });
     const missing = await body(await app.handle(request('/api/workspace/state')));
     expect(missing.data.selectedProject).toBeNull();
-    expect(missing.data.unavailableProject).toBe(join(workspaceRoot, 'gamma'));
+    expect(missing.data.unavailableProject).toBe(join(canonicalWorkspaceRoot, 'gamma'));
 
     const stillMissing = await body(await app.handle(request('/api/workspace/state')));
-    expect(stillMissing.data.unavailableProject).toBe(join(workspaceRoot, 'gamma'));
+    expect(stillMissing.data.unavailableProject).toBe(join(canonicalWorkspaceRoot, 'gamma'));
 
     const acknowledged = await body(
       await app.handle(request('/api/workspace/acknowledge-unavailable', { method: 'POST' })),

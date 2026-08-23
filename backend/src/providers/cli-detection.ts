@@ -128,6 +128,7 @@ export function probeCliVersion(binary: string, provider: ProviderName): boolean
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: CLI_PROBE_TIMEOUT_MS,
       encoding: 'utf8',
+      shell: process.platform === 'win32',
     });
     return result.status === 0 && (result.stdout?.trim().length ?? 0) > 0;
   } catch (err: unknown) {

@@ -205,8 +205,12 @@ describe('provider verification truth', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kory-cli-detection-truth-'));
     const originalPath = process.env.PATH;
     const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    writeFileSync(join(dir, 'claude'), '#!/bin/sh\necho "1.0.0-test"\nexit 0\n');
-    chmodSync(join(dir, 'claude'), 0o755);
+    if (process.platform === 'win32') {
+      writeFileSync(join(dir, 'claude.cmd'), '@echo off\necho 1.0.0-test\nexit /b 0\n');
+    } else {
+      writeFileSync(join(dir, 'claude'), '#!/bin/sh\necho "1.0.0-test"\nexit 0\n');
+      chmodSync(join(dir, 'claude'), 0o755);
+    }
     process.env.PATH = `${dir}${delimiter}${originalPath ?? ''}`;
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'synthetic-local-login-material';
     clearTokenCache();

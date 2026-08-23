@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorkspaceNavigationStore } from './workspace-navigation-store';
 
 const roots: string[] = [];
+
+/** Resolve symlinks so comparisons match the canonical paths the store persists
+ *  (macOS resolves /var → /private/var via realpathSync inside the store). */
+function canonicalRoot(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
 
 function createStore(): { database: Database; store: WorkspaceNavigationStore } {
   const database = new Database(':memory:');
@@ -28,9 +38,10 @@ afterEach(() => {
 
 describe('WorkspaceNavigationStore', () => {
   test('rebuilds workspace children from the current filesystem on every snapshot', () => {
-    const root = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
-    roots.push(root);
-    mkdirSync(join(root, 'alpha'), { recursive: true });
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'alpha'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
     const { database, store } = createStore();
 
     expect(store.openWorkspace(root).projects.map((project) => project.name)).toEqual(['alpha']);
@@ -43,9 +54,10 @@ describe('WorkspaceNavigationStore', () => {
   });
 
   test('clears a workspace that disappears between application refreshes', () => {
-    const root = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
-    roots.push(root);
-    mkdirSync(join(root, 'project'), { recursive: true });
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'project'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
     const { database, store } = createStore();
     store.openWorkspace(root);
 
@@ -58,12 +70,13 @@ describe('WorkspaceNavigationStore', () => {
   });
 
   test('clears a deleted selection without redirecting it to another project', () => {
-    const root = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'selected'), { recursive: true });
+    mkdirSync(join(rawRoot, '.koryphaios'), { recursive: true });
+    writeFileSync(join(rawRoot, '.koryphaios', 'workspace.json'), '{}');
+    const root = canonicalRoot(rawRoot);
     const selected = join(root, 'selected');
-    roots.push(root);
-    mkdirSync(selected, { recursive: true });
-    mkdirSync(join(root, '.koryphaios'), { recursive: true });
-    writeFileSync(join(root, '.koryphaios', 'workspace.json'), '{}');
     const { database, store } = createStore();
 
     store.openWorkspace(root);
@@ -80,10 +93,11 @@ describe('WorkspaceNavigationStore', () => {
   });
 
   test('persists only root and selection while a new store sees fresh children', () => {
-    const root = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'project'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
     const project = join(root, 'project');
-    roots.push(root);
-    mkdirSync(project, { recursive: true });
     const { database, store } = createStore();
     store.openWorkspace(root);
     store.selectProject(project);
