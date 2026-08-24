@@ -131,7 +131,10 @@
   // Cortecs does not publish an icon through the bundled LobeHub set. Use the
   // avatar from its verified Hugging Face organization instead of a fabricated
   // fallback mark.
-  const officialProviderIcons: Record<string, string> = {
+  // Entries may be a plain URL string (color icon, not theme-adaptive) or
+  // { url, themeAdaptive } for monochrome icons that must be inverted in
+  // dark mode.
+  const officialProviderIcons: Record<string, string | { url: string; themeAdaptive: true }> = {
     // Served by Google on the live AI Studio application; this is the current
     // AI Studio ribbon, not the Gemini product mark.
     aistudio:
@@ -156,7 +159,7 @@
     abacus: 'https://abacus.ai/favicon.ico',
     requesty: 'https://www.requesty.ai/favicon.ico',
     synthetic: 'https://synthetic.new/favicon.ico',
-    moark: 'https://moark.ai/favicon.ico',
+    moark: { url: 'https://moark.ai/favicon.ico', themeAdaptive: true },
     prodia: 'https://framerusercontent.com/images/mSECxGqYySTb64MVE0crc5q6z8k.png',
     deepgram: 'https://cdn.simpleicons.org/deepgram',
     vultr: 'https://cdn.simpleicons.org/vultr',
@@ -195,7 +198,13 @@
     };
 
     const officialIcon = officialProviderIcons[normalized];
-    if (officialIcon) pushCandidate(officialIcon, false, true);
+    if (officialIcon) {
+      if (typeof officialIcon === 'string') {
+        pushCandidate(officialIcon, false, true);
+      } else {
+        pushCandidate(officialIcon.url, officialIcon.themeAdaptive, true);
+      }
+    }
 
     const pushColorCandidates = () => {
       for (const slug of slugs) {
