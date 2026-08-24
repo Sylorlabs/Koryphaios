@@ -44,7 +44,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          SHELL_BUILD_RUN_ID: ${{ vars.SHELL_BUILD_RUN_ID }}
         run: |
           set -euo pipefail
           case "$GITHUB_REF" in
@@ -78,6 +77,7 @@ jobs:
           check_json_version shared/package.json '.version'
           check_json_version mcp-server/package.json '.version'
           check_json_version frontend/static/app.config.json '.app.version'
+          check_json_version config/app.config.json '.app.version'
           CARGO_VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/src-tauri/Cargo.toml | head -1)
           if [ "$CARGO_VERSION" != "$VERSION" ]; then
             echo "::error::desktop/src-tauri/Cargo.toml reports $CARGO_VERSION; expected $VERSION"
@@ -88,27 +88,6 @@ jobs:
             echo "::error::TAURI_SIGNING_PRIVATE_KEY is required for a stable release"
             exit 1
           fi
-          if ! printf '%s' "$SHELL_BUILD_RUN_ID" | grep -Eq '^[0-9]+$'; then
-            echo "::error::SHELL_BUILD_RUN_ID must identify a successful build-shell workflow run"
-            exit 1
-          fi
-
-          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SHELL_BUILD_RUN_ID")
-          CONCLUSION=$(echo "$RUN" | jq -r .conclusion)
-          WORKFLOW_PATH=$(echo "$RUN" | jq -r .path)
-          SHELL_SHA=$(echo "$RUN" | jq -r .head_sha)
-          if [ "$CONCLUSION" != "success" ]; then
-            echo "::error::Shell workflow run $SHELL_BUILD_RUN_ID concluded $CONCLUSION"
-            exit 1
-          fi
-          if [ "$WORKFLOW_PATH" != ".github/workflows/build-shell.yml" ]; then
-            echo "::error::Run $SHELL_BUILD_RUN_ID belongs to $WORKFLOW_PATH, not build-shell.yml"
-            exit 1
-          fi
-          if ! git cat-file -e "$SHELL_SHA^{commit}" 2>/dev/null; then
-            git fetch --no-tags origin "$SHELL_SHA"
-          fi
-
           SHELL_PATHS=(
             desktop/src-tauri/Cargo.toml
             desktop/src-tauri/Cargo.lock
@@ -118,9 +97,21 @@ jobs:
             desktop/src-tauri/icons
             .github/workflows/build-shell.yml
           )
-          if ! git diff --quiet "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"; then
-            echo "::error::Shell-relevant source changed after pinned build run $SHELL_BUILD_RUN_ID ($SHELL_SHA)"
-            git diff --name-only "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"
+          RUNS=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/build-shell.yml/runs" \
+            -f status=success -f per_page=50)
+          SHELL_BUILD_RUN_ID=''
+          SHELL_SHA=''
+          while IFS=$'\t' read -r RUN_ID RUN_SHA; do
+            if git merge-base --is-ancestor "$RUN_SHA" "$GITHUB_SHA" && \
+              git diff --quiet "$RUN_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"; then
+              SHELL_BUILD_RUN_ID=$RUN_ID
+              SHELL_SHA=$RUN_SHA
+              break
+            fi
+          done < <(echo "$RUNS" | jq -r '.workflow_runs[] | [.id, .head_sha] | @tsv')
+          if [ -z "$SHELL_BUILD_RUN_ID" ]; then
+            echo "::error::No compatible successful build-shell.yml run exists for $GITHUB_SHA"
             exit 1
           fi
 
@@ -433,12 +424,21 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      - name: Verify Linux packages and updater signature
+      - name: Sign and verify Linux updater packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
-          test "$(find "$BUNDLE_DIR/deb" -name '*.deb' | wc -l)" -gt 0
-          test "$(find "$BUNDLE_DIR/rpm" -name '*.rpm' | wc -l)" -gt 0
+          for package in "$BUNDLE_DIR"/deb/*.deb "$BUNDLE_DIR"/rpm/*.rpm; do
+            test -s "$package"
+            npx @tauri-apps/cli signer sign \
+              --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
+              --private-key-password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+              "$package"
+            test -s "$package.sig"
+          done
           test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' | wc -l)" -gt 0
           test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage.sig' | wc -l)" -gt 0
       - uses: actions/upload-artifact@v7
@@ -446,7 +446,9 @@ jobs:
           name: linux-installer
           path: |
             desktop/src-tauri/target/release/bundle/deb/*.deb
+            desktop/src-tauri/target/release/bundle/deb/*.deb.sig
             desktop/src-tauri/target/release/bundle/rpm/*.rpm
+            desktop/src-tauri/target/release/bundle/rpm/*.rpm.sig
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage
             desktop/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
@@ -546,7 +548,9 @@ jobs:
           test "$(find release-artifacts -name '*x86_64*.app.tar.gz.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*.AppImage.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*.deb' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.deb.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*.rpm' | wc -l)" -gt 0
+          test "$(find release-artifacts -name '*.rpm.sig' | wc -l)" -gt 0
           test "$(find release-artifacts -name '*.dmg' | wc -l)" -ge 3
           gh release upload "$TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
 
@@ -575,7 +579,9 @@ jobs:
             case "$base_name" in
               *aarch64*.app.tar.gz) platform="darwin-aarch64" ;;
               *x86_64*.app.tar.gz|*x64*.app.tar.gz) platform="darwin-x86_64" ;;
-              *amd64*.AppImage|*x86_64*.AppImage) platform="linux-x86_64" ;;
+              *amd64*.AppImage|*x86_64*.AppImage) platform="linux-x86_64-appimage" ;;
+              *amd64*.deb|*x86_64*.deb) platform="linux-x86_64-deb" ;;
+              *amd64*.rpm|*x86_64*.rpm) platform="linux-x86_64-rpm" ;;
               *x64-setup*.exe|*-setup*.exe) platform="windows-x86_64" ;;
               *.dmg) continue ;;
               *.msi)
@@ -589,7 +595,8 @@ jobs:
               '.[$p] = {signature: $s, url: $u}')
           done
 
-          for required in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64; do
+          for required in darwin-aarch64 darwin-x86_64 windows-x86_64 \
+            linux-x86_64-appimage linux-x86_64-deb linux-x86_64-rpm; do
             if [ "$(echo "$PLATFORMS" | jq --arg p "$required" 'has($p)')" != "true" ]; then
               echo "::error::Missing required updater platform $required"
               exit 1
@@ -608,7 +615,7 @@ jobs:
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
           jq -e \
-            '.version and (.platforms | keys | length == 4) and ([.platforms[].signature | length > 0] | all)' \
+            '.version and (.platforms | keys | length == 6) and ([.platforms[].signature | length > 0] | all)' \
             latest.json >/dev/null
           gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 

@@ -15,10 +15,10 @@ use tauri_plugin_dialog::DialogExt;
 // tauri_plugin_updater::Update is not Clone, so we hold it behind a Mutex.
 static CACHED_UPDATE: Mutex<Option<tauri_plugin_updater::Update>> = Mutex::new(None);
 
-// Download timeout: 137 MB at even 1 Mbps = ~1100s; 120s is generous for
-// healthy connections and prevents the "stalled download hangs forever" bug
+// Download timeout: 137 MB at 1 Mbps takes roughly 18 minutes; allow 30
+// minutes while still preventing a stalled download from hanging forever
 // (tauri-plugin-updater hardcodes Update.timeout = None on check()).
-const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 120;
+const UPDATE_DOWNLOAD_TIMEOUT_SECS: u64 = 30 * 60;
 
 // Tauri's production WebView origin is application-owned rather than the
 // dev server's loopback HTTP origin. Different WebView implementations use
@@ -961,8 +961,15 @@ struct UpdateCheckResult {
 
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
+    if cfg!(debug_assertions) {
+        return Err("updates are disabled in development builds".to_string());
+    }
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = app
+        .updater_builder()
+        .on_before_exit(kill_backend)
+        .build()
+        .map_err(|e| e.to_string())?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
     if let Some(update) = update {
         // Cache the Update so install_update can use it without re-fetching
@@ -995,6 +1002,9 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, S
 
 #[tauri::command]
 async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    if cfg!(debug_assertions) {
+        return Err("updates are disabled in development builds".to_string());
+    }
     use tauri_plugin_updater::UpdaterExt;
 
     // Try the cached Update from check_for_updates first; only re-fetch if the
@@ -1004,7 +1014,11 @@ async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
     let mut update = match update_opt {
         Some(u) => u,
         None => {
-            let updater = app.updater().map_err(|e| e.to_string())?;
+            let updater = app
+                .updater_builder()
+                .on_before_exit(kill_backend)
+                .build()
+                .map_err(|e| e.to_string())?;
             updater
                 .check()
                 .await
@@ -1910,6 +1924,34 @@ pub fn run() {
 
                 // Set up file drop handler
                 setup_file_drop_handler(&window);
+
+                // On Linux/WebKitGTK, getUserMedia (microphone) is denied by
+                // default unless the app handles the webview's permission-request
+                // signal. Tauri 2.10 does not yet expose the wry permission
+                // handler API, so connect directly to the WebKitGTK signal and
+                // allow media permission requests. This unblocks the composer
+                // microphone / voice input feature on Linux.
+                #[cfg(target_os = "linux")]
+                {
+                    let webview_window = window.clone();
+                    let _ = webview_window.with_webview(|webview| {
+                        use webkit2gtk::{PermissionRequestExt, WebViewExt};
+                        let webkit_webview = webview.inner();
+                        webkit_webview.connect_permission_request(
+                            |_wv, request: &webkit2gtk::PermissionRequest| {
+                                // Allow all permission requests (microphone, camera,
+                                // notifications, clipboard, etc.). The frontend
+                                // already gates sensitive features behind explicit
+                                // user toggles (e.g. Voice settings), so granting at
+                                // the platform level only lifts the WebKitGTK
+                                // default denial.
+                                request.allow();
+                                // Returning true means we handled the request.
+                                true
+                            },
+                        );
+                    });
+                }
 
                 // Persisting geometry on macOS queries `is_maximized()` from a
                 // resize callback. On current macOS releases that query can

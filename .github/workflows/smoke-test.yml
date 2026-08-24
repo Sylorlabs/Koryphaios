@@ -396,3 +396,222 @@ jobs:
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft | grep -qx false
           echo "Published $TAG after Windows, macOS, and Linux packaged smoke tests passed"
+
+  upgrade-windows:
+    needs: [resolve-tag, promote-release]
+    runs-on: blacksmith-2vcpu-windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Install v0.1.0 and inject the upgrade driver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release download v0.1.0 --repo "$env:GITHUB_REPOSITORY" `
+            --pattern "Koryphaios_0.1.0_x64-setup.exe" --dir . --clobber
+          $installer = (Get-Item "Koryphaios_0.1.0_x64-setup.exe").FullName
+          $installDir = "$env:LOCALAPPDATA\Koryphaios"
+          Start-Process -FilePath $installer -ArgumentList "/S","/D=$installDir" -Wait
+          $index = Join-Path $installDir "frontend\index.html"
+          if (-not (Test-Path $index)) { throw "Packaged frontend index not found" }
+          $driver = 'setTimeout(async()=>{try{const r=await window.__TAURI_INTERNALS__.invoke("check_for_updates");if(r.available)await window.__TAURI_INTERNALS__.invoke("install_update")}catch(e){document.title="UPDATE_TEST_FAILED:"+e}},5000)'
+          Set-Content (Join-Path $installDir "frontend\upgrade-driver.js") $driver -NoNewline
+          (Get-Content $index -Raw).Replace('</head>', '<script src="/upgrade-driver.js"></script></head>') | Set-Content $index -NoNewline
+          "APP_EXE=$installDir\Koryphaios.exe" >> $env:GITHUB_ENV
+
+      - name: Discover, install, relaunch, and verify the candidate
+        env:
+          EXPECTED_VERSION: ${{ needs.resolve-tag.outputs.tag }}
+        shell: pwsh
+        run: |
+          $expected = $env:EXPECTED_VERSION.TrimStart('v')
+          $dataDir = "$env:LOCALAPPDATA\com.sylorlabs.koryphaios"
+          $activePortFile = Join-Path $dataDir ".koryphaios\.active-port.json"
+          Start-Process -FilePath $env:APP_EXE | Out-Null
+          for ($elapsed = 0; $elapsed -lt 1500; $elapsed += 5) {
+            Start-Sleep -Seconds 5
+            if (-not (Test-Path $activePortFile)) { continue }
+            try {
+              $port = (Get-Content $activePortFile -Raw | ConvertFrom-Json).port
+              $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 3
+              if ($health.data.version -eq $expected) {
+                Write-Host "Verified packaged upgrade to $expected"
+                exit 0
+              }
+            } catch {}
+          }
+          throw "v0.1.0 did not upgrade and relaunch as $expected"
+
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          Get-Process -Name "Koryphaios" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "koryphaios-backend-*" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+  upgrade-macos:
+    needs: [resolve-tag, promote-release]
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install v0.1.0 and inject the upgrade driver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "$(uname -m)" = "arm64" ]; then OLD_DMG='Koryphaios_0.1.0_aarch64.dmg'; else OLD_DMG='Koryphaios_0.1.0_x64.dmg'; fi
+          gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" --pattern "$OLD_DMG" --dir . --clobber
+          MOUNT_POINT=$(hdiutil attach "$OLD_DMG" -nobrowse -quiet | tail -1 | cut -f3)
+          rm -rf /Applications/Koryphaios.app
+          cp -R "$MOUNT_POINT/Koryphaios.app" /Applications/
+          hdiutil detach "$MOUNT_POINT" -quiet
+          INDEX=/Applications/Koryphaios.app/Contents/Resources/frontend/index.html
+          test -f "$INDEX"
+          python3 - "$INDEX" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          driver = 'setTimeout(async()=>{try{const r=await window.__TAURI_INTERNALS__.invoke("check_for_updates");if(r.available)await window.__TAURI_INTERNALS__.invoke("install_update")}catch(e){document.title="UPDATE_TEST_FAILED:"+e}},5000)'
+          path.with_name('upgrade-driver.js').write_text(driver)
+          path.write_text(path.read_text().replace('</head>', '<script src="/upgrade-driver.js"></script></head>'))
+          PY
+          codesign --force --deep --sign - /Applications/Koryphaios.app
+
+      - name: Discover, install, relaunch, and verify the candidate
+        env:
+          EXPECTED_VERSION: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION=${EXPECTED_VERSION#v}
+          ACTIVE_PORT="$HOME/Library/Application Support/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
+          open /Applications/Koryphaios.app
+          for ELAPSED in $(seq 5 5 1500); do
+            sleep 5
+            [ -f "$ACTIVE_PORT" ] || continue
+            PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            VERSION=$(curl -fsS --max-time 3 "http://127.0.0.1:$PORT/api/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["version"])' 2>/dev/null || true)
+            if [ "$VERSION" = "$EXPECTED_VERSION" ]; then
+              echo "Verified packaged upgrade to $EXPECTED_VERSION"
+              exit 0
+            fi
+          done
+          echo "v0.1.0 did not upgrade and relaunch as $EXPECTED_VERSION"
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f "Koryphaios.app/Contents/MacOS/Koryphaios" 2>/dev/null || true
+          pkill -f "koryphaios-backend" 2>/dev/null || true
+
+  upgrade-linux-appimage:
+    needs: [resolve-tag, promote-release]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 40
+    steps:
+      - name: Repack v0.1.0 AppImage with the upgrade driver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl xvfb squashfs-tools libfuse2 libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1
+          gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'Koryphaios_0.1.0_amd64.AppImage' --dir . --clobber
+          chmod +x Koryphaios_0.1.0_amd64.AppImage
+          ./Koryphaios_0.1.0_amd64.AppImage --appimage-extract >/dev/null
+          python3 <<'PY'
+          import pathlib
+          path = pathlib.Path('squashfs-root/usr/lib/Koryphaios/frontend/index.html')
+          driver = 'setTimeout(async()=>{try{const r=await window.__TAURI_INTERNALS__.invoke("check_for_updates");if(r.available)await window.__TAURI_INTERNALS__.invoke("install_update")}catch(e){document.title="UPDATE_TEST_FAILED:"+e}},5000)'
+          path.with_name('upgrade-driver.js').write_text(driver)
+          path.write_text(path.read_text().replace('</head>', '<script src="/upgrade-driver.js"></script></head>'))
+          PY
+          OFFSET=$(./Koryphaios_0.1.0_amd64.AppImage --appimage-offset)
+          head -c "$OFFSET" Koryphaios_0.1.0_amd64.AppImage > appimage-runtime
+          mksquashfs squashfs-root appimage-payload.squashfs \
+            -comp zstd -b 1M -noappend -all-root >/dev/null
+          cat appimage-runtime appimage-payload.squashfs > Koryphaios-upgrade-test.AppImage
+          chmod +x Koryphaios-upgrade-test.AppImage
+
+      - name: Discover, install, relaunch, and verify the candidate
+        env:
+          EXPECTED_VERSION: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION=${EXPECTED_VERSION#v}
+          ACTIVE_PORT="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
+          WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a ./Koryphaios-upgrade-test.AppImage >upgrade.log 2>&1 &
+          for ELAPSED in $(seq 5 5 1800); do
+            sleep 5
+            [ -f "$ACTIVE_PORT" ] || continue
+            PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            VERSION=$(curl -fsS --max-time 3 "http://127.0.0.1:$PORT/api/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["version"])' 2>/dev/null || true)
+            if [ "$VERSION" = "$EXPECTED_VERSION" ]; then
+              echo "Verified packaged AppImage upgrade to $EXPECTED_VERSION"
+              exit 0
+            fi
+          done
+          cat upgrade.log
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f Koryphaios 2>/dev/null || true
+          pkill -f koryphaios-backend 2>/dev/null || true
+
+  upgrade-linux-deb:
+    needs: [resolve-tag, promote-release]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - name: Install dependencies and v0.1.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl xvfb libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1
+          gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'Koryphaios_0.1.0_amd64.deb' --dir . --clobber
+          sudo dpkg -i Koryphaios_0.1.0_amd64.deb
+          PACKAGE_NAME=$(dpkg-deb -f Koryphaios_0.1.0_amd64.deb Package)
+          INDEX=$(dpkg -L "$PACKAGE_NAME" | awk '/\/frontend\/index.html$/ { print; exit }')
+          APP_EXE=$(dpkg -L "$PACKAGE_NAME" | awk '/\/(Koryphaios|koryphaios)$/ { print; exit }')
+          test -f "$INDEX"
+          test -x "$APP_EXE"
+          sudo python3 - "$INDEX" <<'PY'
+          import pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          driver = 'setTimeout(async()=>{try{const r=await window.__TAURI_INTERNALS__.invoke("check_for_updates");if(r.available)await window.__TAURI_INTERNALS__.invoke("install_update")}catch(e){document.title="UPDATE_TEST_FAILED:"+e}},5000)'
+          path.with_name('upgrade-driver.js').write_text(driver)
+          path.write_text(path.read_text().replace('</head>', '<script src="/upgrade-driver.js"></script></head>'))
+          PY
+          echo "APP_EXE=$APP_EXE" >> "$GITHUB_ENV"
+
+      - name: Discover, install, relaunch, and verify the candidate
+        env:
+          EXPECTED_VERSION: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION=${EXPECTED_VERSION#v}
+          ACTIVE_PORT="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
+          WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a "$APP_EXE" >upgrade.log 2>&1 &
+          for ELAPSED in $(seq 5 5 1500); do
+            sleep 5
+            [ -f "$ACTIVE_PORT" ] || continue
+            PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            VERSION=$(curl -fsS --max-time 3 "http://127.0.0.1:$PORT/api/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["version"])' 2>/dev/null || true)
+            if [ "$VERSION" = "$EXPECTED_VERSION" ]; then
+              echo "Verified packaged DEB upgrade to $EXPECTED_VERSION"
+              exit 0
+            fi
+          done
+          cat upgrade.log
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f Koryphaios 2>/dev/null || true
+          pkill -f koryphaios-backend 2>/dev/null || true

@@ -51,7 +51,7 @@ jobs:
           toolchain: stable
 
       - name: Set up MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-toolkit@v1
+        uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 

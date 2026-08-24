@@ -193,7 +193,7 @@ impl Default for AppConfig {
         Self {
             app: AppInfo {
                 name: "Koryphaios".to_string(),
-                version: "0.1.0".to_string(),
+                version: env!("CARGO_PKG_VERSION").to_string(),
                 identifier: "com.sylorlabs.koryphaios".to_string(),
             },
             server: ServerConfig {

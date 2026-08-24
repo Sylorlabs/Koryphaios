@@ -4,8 +4,18 @@
   import ExternalLink from 'lucide-svelte/icons/external-link';
   import Loader2 from 'lucide-svelte/icons/loader-2';
   import AlertCircle from 'lucide-svelte/icons/alert-circle';
+  import { tick } from 'svelte';
 
   let installing = $state(false);
+  let dialogElement = $state<HTMLElement>();
+  let previouslyFocused: HTMLElement | null = null;
+
+  $effect(() => {
+    if (!updater.dialogOpen) return;
+    previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => dialogElement?.focus());
+    return () => previouslyFocused?.focus();
+  });
 
   async function handleInstall() {
     if (installing) return;
@@ -38,7 +48,29 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') handleDismiss();
+    if (!updater.dialogOpen) return;
+    if (e.key === 'Escape') {
+      handleDismiss();
+      return;
+    }
+    if (e.key !== 'Tab' || !dialogElement) return;
+    const focusable = Array.from(
+      dialogElement.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'),
+    );
+    if (focusable.length === 0) {
+      e.preventDefault();
+      dialogElement.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogElement)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   // Render the cleaned notes as sections: `### Heading` → heading,
@@ -87,6 +119,7 @@
       aria-modal="true"
       aria-labelledby="update-dialog-title"
       tabindex="-1"
+      bind:this={dialogElement}
     >
       <div class="update-header">
         <Download size={22} class="text-[var(--color-accent)] shrink-0" />

@@ -88,13 +88,14 @@ jobs:
             FAIL=1
           fi
 
-          if [ -f frontend/static/app.config.json ]; then
-            APP_VERSION=$(jq -r .app.version frontend/static/app.config.json)
+          for app_config in frontend/static/app.config.json config/app.config.json; do
+            [ -f "$app_config" ] || continue
+            APP_VERSION=$(jq -r .app.version "$app_config")
             if [ "$APP_VERSION" != "$VERSION" ]; then
-              echo "::error file=frontend/static/app.config.json::Expected version $VERSION, found $APP_VERSION"
+              echo "::error file=$app_config::Expected version $VERSION, found $APP_VERSION"
               FAIL=1
             fi
-          fi
+          done
 
           [ "$FAIL" -eq 0 ] || exit 1
           TAG="v$VERSION"
@@ -105,6 +106,49 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "Prepared release: $TAG"
+
+      - name: Require a successful shell build for this commit
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHELL_PATHS=(
+            desktop/src-tauri/Cargo.toml
+            desktop/src-tauri/Cargo.lock
+            desktop/src-tauri/src
+            desktop/src-tauri/build.rs
+            desktop/src-tauri/tauri.conf.json
+            desktop/src-tauri/icons
+            .github/workflows/build-shell.yml
+          )
+          for attempt in $(seq 1 50); do
+            RUNS=$(gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/build-shell.yml/runs" \
+              -f status=success -f per_page=50)
+            while IFS=$'\t' read -r RUN_ID SHELL_SHA; do
+              if git merge-base --is-ancestor "$SHELL_SHA" "$GITHUB_SHA" && \
+                git diff --quiet "$SHELL_SHA" "$GITHUB_SHA" -- "${SHELL_PATHS[@]}"; then
+                echo "SHELL_BUILD_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+                echo "Pinned compatible shell build $RUN_ID at $SHELL_SHA"
+                exit 0
+              fi
+            done < <(echo "$RUNS" | jq -r '.workflow_runs[] | [.id, .head_sha] | @tsv')
+
+            CURRENT=$(gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/build-shell.yml/runs" \
+              -f head_sha="$GITHUB_SHA" -f per_page=20)
+            ACTIVE=$(echo "$CURRENT" | jq -r '[.workflow_runs[] | select(.status != "completed")] | length')
+            FAILED=$(echo "$CURRENT" | jq -r '[.workflow_runs[] | select(.status == "completed" and .conclusion != "success")] | length')
+            if [ "$ACTIVE" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
+              echo "::error::The shell build for $GITHUB_SHA failed; refusing to create $TAG"
+              exit 1
+            fi
+            echo "Waiting for a compatible build-shell.yml run ($attempt/50)"
+            sleep 60
+          done
+          echo "::error::No compatible successful shell build is available; refusing to create $TAG"
+          exit 1
 
       - name: Tag exact prepared commit
         if: steps.check.outputs.should_release == 'true'

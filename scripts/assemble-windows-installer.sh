@@ -69,7 +69,7 @@ cp -R "$CONFIG_DIR/." "$APP_STAGING/config/"
 cp "$ICON_FILE" "$APP_STAGING/icon.ico"
 
 # ─── Generate NSIS installer script ─────────────────────────────────────────
-NSI_SCRIPT="$STAGING/installer.nsi"
+NSI_SCRIPT="$APP_STAGING/installer.nsi"
 cat > "$NSI_SCRIPT" <<NSIS
 !define APP_NAME "${APP_NAME}"
 !define APP_EXE "${APP_NAME}.exe"
@@ -80,6 +80,11 @@ cat > "$NSI_SCRIPT" <<NSIS
 
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
+
+Var PassiveMode
+Var UpdateMode
+Var LaunchArgs
 
 Name "\${APP_NAME}"
 OutFile "\${APP_NAME}-\${APP_VERSION}-x64-setup.exe"
@@ -108,9 +113,12 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2024 \${APP_PUBLISHER}"
 !define MUI_UNFINISHPAGE_NOAUTOCLOSE
 
 ; ─── Pages ──────────────────────────────────────────────────────────────────
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipUpdaterPage
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipUpdaterPage
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipUpdaterPage
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -118,6 +126,40 @@ VIAddVersionKey "LegalCopyright" "Copyright (c) 2024 \${APP_PUBLISHER}"
 
 ; ─── Languages ──────────────────────────────────────────────────────────────
 !insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+  StrCpy \$PassiveMode 0
+  StrCpy \$UpdateMode 0
+  StrCpy \$LaunchArgs ""
+  \${GetParameters} \$0
+  \${GetOptions} \$0 "/P" \$1
+  \${IfNot} \${Errors}
+    StrCpy \$PassiveMode 1
+  \${EndIf}
+  \${GetOptions} \$0 "/UPDATE" \$1
+  \${IfNot} \${Errors}
+    StrCpy \$UpdateMode 1
+  \${EndIf}
+  \${GetOptions} \$0 "/ARGS" \$LaunchArgs
+FunctionEnd
+
+Function SkipUpdaterPage
+  \${If} \$PassiveMode = 1
+  \${OrIf} \$UpdateMode = 1
+    Abort
+  \${EndIf}
+FunctionEnd
+
+Function .onInstSuccess
+  \${If} \$PassiveMode = 1
+  \${OrIf} \${Silent}
+    \${GetParameters} \$0
+    \${GetOptions} \$0 "/R" \$1
+    \${IfNot} \${Errors}
+      Exec '"\$INSTDIR\\\${APP_EXE}" \$LaunchArgs'
+    \${EndIf}
+  \${EndIf}
+FunctionEnd
 
 ; ─── Install sections ───────────────────────────────────────────────────────
 Section "Install"
@@ -193,11 +235,13 @@ NSIS
 mkdir -p "$OUTPUT_DIR"
 
 echo "Building NSIS installer with makensis..."
+pushd "$APP_STAGING" >/dev/null
 makensis -V2 "$NSI_SCRIPT"
+popd >/dev/null
 
 # makensis outputs to the current directory or OutFile path
-# The OutFile is relative, so it lands in $STAGING
-INSTALLER="${STAGING}/${APP_NAME}-${VERSION}-x64-setup.exe"
+# The OutFile is relative, so it lands in $APP_STAGING
+INSTALLER="${APP_STAGING}/${APP_NAME}-${VERSION}-x64-setup.exe"
 if [[ -f "$INSTALLER" ]]; then
   mv "$INSTALLER" "$OUTPUT_DIR/"
   echo "Installer created: ${OUTPUT_DIR}/${APP_NAME}-${VERSION}-x64-setup.exe"

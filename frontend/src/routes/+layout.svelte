@@ -9,7 +9,6 @@
 	import { initUrls } from '$lib/utils/api-url';
 	import { startBackendHealthSentinel, waitForBackendHealthy } from '$lib/stores/backend-health.svelte';
 	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
-	import UpdateBanner from '$lib/components/UpdateBanner.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
 	import WindowResizeHandles from '$lib/components/WindowResizeHandles.svelte';
 
@@ -195,9 +194,6 @@
 	<!-- Backend unavailable / version-skew overlay. Mounted only when the
 	     backend is sustained-unhealthy or rejects this frontend build. -->
 	<BackendDownOverlay />
-
-	<!-- Update Banner - shows at top when update is available -->
-	<UpdateBanner />
 
 	<!-- Update Dialog - modal for detailed update info -->
 	<UpdateDialog />

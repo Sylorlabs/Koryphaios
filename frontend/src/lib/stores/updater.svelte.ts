@@ -38,13 +38,14 @@ function createUpdaterStore() {
   // Private
   let checkInterval: ReturnType<typeof setInterval> | null = null;
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const updaterEnabled = isTauri && !import.meta.env.DEV;
   let updateDownloaded = false;
   // Running total of bytes downloaded, so we can compute a percentage from
   // the incremental chunk_length events the Rust side emits.
   let downloadedBytes = 0;
 
   async function setupEventListeners() {
-    if (!isTauri) return;
+    if (!updaterEnabled) return;
 
     try {
       // Listen for download progress events emitted by install_update's
@@ -74,7 +75,7 @@ function createUpdaterStore() {
    * @param silent - If true, don't show error toasts for failed checks
    */
   async function checkForUpdates(silent = false): Promise<UpdateInfo | null> {
-    if (!isTauri) {
+    if (!updaterEnabled) {
       return null;
     }
 
@@ -134,7 +135,7 @@ function createUpdaterStore() {
    * caller can reset its UI state.
    */
   async function installUpdateAndRestart(): Promise<boolean> {
-    if (!isTauri || !updateAvailable) {
+    if (!updaterEnabled || !updateAvailable) {
       return false;
     }
 
@@ -258,7 +259,7 @@ function createUpdaterStore() {
   }
 
   // Initialize
-  if (isTauri) {
+  if (updaterEnabled) {
     // Check immediately on startup
     checkForUpdates(true);
 
