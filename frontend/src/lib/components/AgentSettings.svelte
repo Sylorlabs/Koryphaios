@@ -9,7 +9,6 @@
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
-  import SettingsPageIntro from './SettingsPageIntro.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import Bot from 'lucide-svelte/icons/bot';
@@ -46,8 +45,15 @@
 
   let { onClose, focusPermissions = false }: Props = $props();
 
+  type AgentTab = 'settings' | 'preferences' | 'skills';
   type ControlSection = 'permissions' | 'quality' | 'workflow' | 'context' | 'research' | 'routing';
   let selectedControlSection = $state<ControlSection>('permissions');
+
+  const AGENT_TABS: readonly { id: AgentTab; label: string; icon: typeof Bot }[] = [
+    { id: 'settings', label: 'Behavior', icon: Bot },
+    { id: 'preferences', label: 'Preferences', icon: FileText },
+    { id: 'skills', label: 'Skills', icon: Boxes },
+  ];
 
   const CONTROL_SECTIONS = [
     {
@@ -94,6 +100,7 @@
   let showSkillComparison = $state(false);
   let showBundledComparison = $state(false);
   let showSkillCreator = $state(false);
+  let skillCreatorMode = $state<'template' | 'freeform'>('template');
   let newSkillSource = $state<'personal' | 'project'>('personal');
   let newSkillName = $state('');
   let newSkillDescription = $state('');
@@ -171,7 +178,9 @@
   }
 
   function addBroader(value: string) {
-    newSkillBroader = [...new Set([...newSkillBroader, value])];
+    const relation = normalizeSkillName(value);
+    if (!relation) return;
+    newSkillBroader = [...new Set([...newSkillBroader, relation])];
     newSkillDepth = expectedSkillDepth(newSkillBroader);
   }
 
@@ -181,10 +190,12 @@
   }
 
   function addTargetMedium(value: string) {
+    const medium = value.trim().toLowerCase();
+    if (!medium) return;
     newSkillTargetMedia =
-      value === 'any'
+      medium === 'any'
         ? ['any']
-        : [...new Set([...newSkillTargetMedia.filter((medium) => medium !== 'any'), value])];
+        : [...new Set([...newSkillTargetMedia.filter((item) => item !== 'any'), medium])];
   }
 
   async function createSkill() {
@@ -227,6 +238,24 @@
     newSkillTargetMedia = ['any'];
     newSkillDepth = 0;
     newSkillContextBudget = 4000;
+    skillCreatorMode = 'template';
+  }
+
+  async function createFreeformSkill() {
+    const created = await agentSettingsStore.createFreeformSkillDraft({
+      source: newSkillSource,
+      name: normalizeSkillName(newSkillName),
+      description: newSkillDescription.trim(),
+      instructions: newSkillInstructions.trim(),
+    });
+    if (!created) return;
+    selectedSkillKey = `${created.source}:${created.name}:${created.state}`;
+    skillDraftDirty = false;
+    showSkillCreator = false;
+    newSkillName = '';
+    newSkillDescription = '';
+    newSkillInstructions = '';
+    skillCreatorMode = 'template';
   }
 
   async function runSkillPreview() {
@@ -563,6 +592,26 @@
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
+  <nav
+    class="flex h-11 shrink-0 items-end gap-5 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5"
+    aria-label="Agent behavior sections"
+  >
+    {#each AGENT_TABS as tab (tab.id)}
+      <button
+        type="button"
+        aria-current={agentSettingsStore.activeTab === tab.id ? 'page' : undefined}
+        onclick={() => agentSettingsStore.setActiveTab(tab.id)}
+        class="relative flex h-full items-center gap-2 border-b-2 px-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60 {agentSettingsStore.activeTab ===
+        tab.id
+          ? 'border-[var(--color-accent)] text-[var(--color-text-primary)]'
+          : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
+      >
+        <tab.icon size={14} />
+        {tab.label}
+      </button>
+    {/each}
+  </nav>
+
   <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">
     {#if agentSettingsStore.isLoading}
@@ -596,38 +645,6 @@
       </div>
     {:else if agentSettingsStore.activeTab === 'settings'}
       <div class="flex h-full min-h-0 flex-col overflow-hidden">
-        <SettingsPageIntro
-          title="Agent settings"
-          description="Choose one area at a time. Changes are saved to this workspace as soon as you make them."
-        >
-          <span
-            class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]"
-          >
-            {agentSettingsStore.settings.agentExecutionMode} execution
-          </span>
-          <span
-            class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]"
-          >
-            critic {agentSettingsStore.settings.criticGateEnabled ? 'on' : 'off'}
-          </span>
-          <span
-            class="rounded-full bg-[var(--color-surface-3)] px-2.5 py-1 text-[10px] text-[var(--color-text-muted)]"
-            >Current project</span
-          >
-          <span class="text-[10px] text-[var(--color-text-muted)]" aria-live="polite"
-            >{agentSettingsStore.settingsSaving ? 'Saving…' : 'Saved'}</span
-          >
-          <button
-            type="button"
-            class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-            onclick={() => agentSettingsStore.setActiveTab('preferences')}>Preferences</button
-          >
-          <button
-            type="button"
-            class="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-            onclick={() => agentSettingsStore.setActiveTab('skills')}>Skills</button
-          >
-        </SettingsPageIntro>
         {#if agentSettingsStore.settingsError}
           <div
             class="mx-4 mt-3 flex items-start justify-between gap-3 rounded-xl border border-[var(--color-error)]/35 bg-[var(--color-error)]/10 px-4 py-3 sm:mx-6"
@@ -649,32 +666,7 @@
           </div>
         {/if}
         <div class="h-full min-h-0 overflow-y-auto p-4 sm:p-6">
-          <div class="mx-auto max-w-7xl space-y-5">
-            <section
-              class="grid gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 sm:grid-cols-3"
-            >
-              <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
-                <div class="text-sm font-semibold capitalize text-[var(--color-text-primary)]">
-                  {agentSettingsStore.settings.permissionMode === 'plan'
-                    ? 'guarded'
-                    : (agentSettingsStore.settings.permissionMode ?? 'guarded')}
-                </div>
-                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Permission mode</div>
-              </div>
-              <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
-                <div class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  {agentSettingsStore.settings.criticGateEnabled ? 'Enabled' : 'Disabled'}
-                </div>
-                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">Critic review</div>
-              </div>
-              <div class="rounded-xl bg-[var(--color-surface-2)] px-3 py-2.5">
-                <div class="text-sm font-semibold text-[var(--color-success)]">Available</div>
-                <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                  Workspace settings
-                </div>
-              </div>
-            </section>
-
+          <div class="mx-auto max-w-7xl">
             <div class="grid min-w-0 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
               <aside class="min-w-0" aria-label="Agent settings categories">
                 <div
@@ -1701,12 +1693,6 @@
                 <Plus size={14} strokeWidth={2.5} />
                 New skill
               </button>
-              <button
-                type="button"
-                onclick={() => agentSettingsStore.setActiveTab('settings')}
-                class="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
-                >Back to controls</button
-              >
             </div>
           </div>
           {#if showSkillCreator}
@@ -1719,16 +1705,27 @@
                     Create a skill draft
                   </h4>
                   <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                    Start with concrete triggers, non-triggers, a real workflow, and evidence. The
-                    draft stays inactive until its trigger tests pass and you activate it.
+                    {skillCreatorMode === 'template'
+                      ? 'Start with concrete triggers, non-triggers, a real workflow, and evidence. The draft stays inactive until its trigger tests pass and you activate it.'
+                      : 'Write the skill in your own words without completing the routing template. You can edit its generated metadata before activation.'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onclick={() => (showSkillCreator = false)}
-                  class="rounded-md px-2 py-1 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
-                  >Close</button
-                >
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <button
+                    type="button"
+                    onclick={() =>
+                      (skillCreatorMode =
+                        skillCreatorMode === 'template' ? 'freeform' : 'template')}
+                    class="rounded-md border border-[var(--color-border)] px-2.5 py-1 text-[10px] font-medium text-[var(--color-text-secondary)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                    >{skillCreatorMode === 'template' ? 'Skip template' : 'Use template'}</button
+                  >
+                  <button
+                    type="button"
+                    onclick={() => (showSkillCreator = false)}
+                    class="rounded-md px-2 py-1 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                    >Close</button
+                  >
+                </div>
               </div>
               <div class="grid gap-3 lg:grid-cols-2">
                 <label class="text-[10px] font-medium text-[var(--color-text-secondary)]">
@@ -1811,9 +1808,12 @@
                       >
                       <KorySelect
                         compact
+                        allowCustom
                         value=""
                         label="Add broader concept"
                         placeholder="Add a broader discipline…"
+                        customLabel="Custom skill ID"
+                        customPlaceholder="Type a skill ID…"
                         options={skillRelationOptions(newSkillBroader)}
                         onchange={addBroader}
                       />
@@ -1835,12 +1835,18 @@
                       >
                       <KorySelect
                         compact
+                        allowCustom
                         value=""
                         label="Add cross-cutting facet"
                         placeholder="Add a professional facet…"
+                        customLabel="Custom skill ID"
+                        customPlaceholder="Type a skill ID…"
                         options={skillRelationOptions(newSkillFacets)}
-                        onchange={(value) =>
-                          (newSkillFacets = [...new Set([...newSkillFacets, value])])}
+                        onchange={(value) => {
+                          const relation = normalizeSkillName(value);
+                          if (relation)
+                            newSkillFacets = [...new Set([...newSkillFacets, relation])];
+                        }}
                       />
                       <div class="flex flex-wrap gap-1">
                         {#each newSkillFacets as relation (relation)}
@@ -1861,12 +1867,18 @@
                       >
                       <KorySelect
                         compact
+                        allowCustom
                         value=""
                         label="Add required skill"
                         placeholder="Add a required skill…"
+                        customLabel="Custom skill ID"
+                        customPlaceholder="Type a skill ID…"
                         options={skillRelationOptions(newSkillRequires)}
-                        onchange={(value) =>
-                          (newSkillRequires = [...new Set([...newSkillRequires, value])])}
+                        onchange={(value) => {
+                          const relation = normalizeSkillName(value);
+                          if (relation)
+                            newSkillRequires = [...new Set([...newSkillRequires, relation])];
+                        }}
                       />
                       <div class="flex flex-wrap gap-1">
                         {#each newSkillRequires as relation (relation)}
@@ -1889,12 +1901,18 @@
                       >
                       <KorySelect
                         compact
+                        allowCustom
                         value=""
                         label="Add conflicting skill"
                         placeholder="Add an incompatible skill…"
+                        customLabel="Custom skill ID"
+                        customPlaceholder="Type a skill ID…"
                         options={skillRelationOptions(newSkillConflicts)}
-                        onchange={(value) =>
-                          (newSkillConflicts = [...new Set([...newSkillConflicts, value])])}
+                        onchange={(value) => {
+                          const relation = normalizeSkillName(value);
+                          if (relation)
+                            newSkillConflicts = [...new Set([...newSkillConflicts, relation])];
+                        }}
                       />
                       <div class="flex flex-wrap gap-1">
                         {#each newSkillConflicts as relation (relation)}
@@ -1919,9 +1937,12 @@
                   >
                   <KorySelect
                     compact
+                    allowCustom
                     value=""
                     label="Add target medium"
                     placeholder="Add a target medium…"
+                    customLabel="Custom medium"
+                    customPlaceholder="Type your own medium…"
                     options={[
                       { value: 'any', label: 'Any medium' },
                       { value: 'web', label: 'Web' },
@@ -2528,12 +2549,6 @@
               {/if}
             </div>
             <div class="flex items-center gap-2 ml-4">
-              <button
-                type="button"
-                onclick={() => agentSettingsStore.setActiveTab('settings')}
-                class="px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                >Back to controls</button
-              >
               {#if !prefs?.exists}
                 <button
                   onclick={() => agentSettingsStore.initializePreferences()}

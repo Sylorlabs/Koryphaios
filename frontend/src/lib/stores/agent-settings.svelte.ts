@@ -583,6 +583,31 @@ function createAgentSettingsStore() {
     }
   }
 
+  async function createFreeformSkillDraft(input: {
+    source: 'personal' | 'project';
+    name: string;
+    description: string;
+    instructions: string;
+  }): Promise<SkillRevision | null> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills/freeform'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      await loadSkills();
+      toastStore.success('Freeform skill draft created');
+      return data.data as SkillRevision;
+    } catch (err: unknown) {
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) ?? 'Failed to create skill draft',
+      );
+      return null;
+    }
+  }
+
   async function saveSkillDraft(skill: SkillRevision, content: string): Promise<boolean> {
     try {
       const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/draft`), {
@@ -896,6 +921,7 @@ function createAgentSettingsStore() {
     loadSkillQualifications,
     loadSkillEvaluationCard,
     createSkillDraft,
+    createFreeformSkillDraft,
     saveSkillDraft,
     testAndActivateSkill,
     compareSkillDraft,

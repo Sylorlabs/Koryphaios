@@ -24,6 +24,7 @@ import {
   compareSkillRevisions,
   compareBundledSkill,
   countBundledUpdates,
+  createFreeformSkillDraft,
   createSkillDraft,
   listSkills,
   resolveSkills,
@@ -342,22 +343,38 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         conflicts: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 })),
         excludes: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 120 }), { maxItems: 16 })),
         targetMedia: t.Optional(
-          t.Array(
-            t.Union([
-              t.Literal('any'),
-              t.Literal('web'),
-              t.Literal('native'),
-              t.Literal('mobile'),
-              t.Literal('terminal'),
-              t.Literal('game'),
-              t.Literal('spatial'),
-              t.Literal('embedded'),
-            ]),
-            { minItems: 1, maxItems: 8 },
-          ),
+          t.Array(t.String({ minLength: 1, maxLength: 64 }), { minItems: 1, maxItems: 8 }),
         ),
         depth: t.Optional(t.Integer({ minimum: 0, maximum: 32 })),
         contextBudget: t.Optional(t.Integer({ minimum: 100, maximum: 20_000 })),
+        actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
+      }),
+    },
+  )
+  .post(
+    '/skills/freeform',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      enforceSkillLearningPolicy(
+        loadAgentSettings(root).skillLearningMode,
+        body.actor ?? 'human',
+        'save-draft',
+      );
+      try {
+        return { ok: true, data: createFreeformSkillDraft(root, body) };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof SkillDraftConflictError) throw new ConflictError(message);
+        throw new ValidationError(message);
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Union([t.Literal('personal'), t.Literal('project')]),
+        name: t.String({ minLength: 1, maxLength: 64 }),
+        description: t.String({ minLength: 12, maxLength: 1024 }),
+        instructions: t.String({ minLength: 1, maxLength: 50_000 }),
         actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
       }),
     },

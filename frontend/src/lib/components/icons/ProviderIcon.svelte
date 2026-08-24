@@ -160,7 +160,7 @@
     requesty: 'https://www.requesty.ai/favicon.ico',
     synthetic: 'https://synthetic.new/favicon.ico',
     moark: { url: 'https://moark.ai/favicon.ico', themeAdaptive: true },
-    prodia: 'https://framerusercontent.com/images/mSECxGqYySTb64MVE0crc5q6z8k.png',
+    prodia: { url: 'https://framerusercontent.com/images/mSECxGqYySTb64MVE0crc5q6z8k.png', themeAdaptive: true },
     deepgram: 'https://cdn.simpleicons.org/deepgram',
     vultr: 'https://cdn.simpleicons.org/vultr',
     wandb: 'https://cdn.simpleicons.org/weightsandbiases',

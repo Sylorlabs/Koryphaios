@@ -22,6 +22,9 @@
     placeholder?: string;
     compact?: boolean;
     disabled?: boolean;
+    allowCustom?: boolean;
+    customLabel?: string;
+    customPlaceholder?: string;
   }
   let {
     value,
@@ -32,9 +35,14 @@
     placeholder = 'Select…',
     compact = false,
     disabled = false,
+    allowCustom = false,
+    customLabel = 'Custom',
+    customPlaceholder = 'Type your own response…',
   }: Props = $props();
   let open = $state(false);
   let activeIndex = $state(0);
+  let customMode = $state(false);
+  let customValue = $state('');
   let root = $state<HTMLDivElement>();
   const listboxId = `kory-select-${++nextKorySelectId}`;
   const selected = $derived(options.find((option) => option.value === value));
@@ -58,7 +66,20 @@
   function choose(option: KorySelectOption) {
     if (option.disabled) return;
     open = false;
+    customMode = false;
     void onchange(option.value);
+  }
+  function showCustomInput() {
+    customMode = true;
+    customValue = '';
+  }
+  function submitCustom() {
+    const next = customValue.trim();
+    if (!next) return;
+    open = false;
+    customMode = false;
+    customValue = '';
+    void onchange(next);
   }
   function handleKeydown(event: KeyboardEvent) {
     if (disabled || options.length === 0) return;
@@ -177,6 +198,43 @@
           >
         </button>
       {/each}
+      {#if allowCustom}
+        <div class="mt-1 border-t border-[var(--color-border)] pt-1">
+          {#if customMode}
+            <div class="flex gap-1.5 p-1">
+              <input
+                bind:value={customValue}
+                aria-label={customPlaceholder}
+                placeholder={customPlaceholder}
+                onkeydown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitCustom();
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    customMode = false;
+                  }
+                }}
+                class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2.5 py-2 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+              />
+              <button
+                type="button"
+                disabled={!customValue.trim()}
+                onclick={submitCustom}
+                class="rounded-lg bg-[var(--color-accent)] px-2.5 py-2 text-xs font-medium text-white disabled:opacity-40"
+                >Add</button
+              >
+            </div>
+          {:else}
+            <button
+              type="button"
+              onclick={showCustomInput}
+              class="w-full rounded-lg px-3 py-2.5 text-left text-xs font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-surface-3)]"
+              >{customLabel}…</button
+            >
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>

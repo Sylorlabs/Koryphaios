@@ -90,11 +90,16 @@ export function sandboxCapabilities(): SandboxCapabilities {
 
 export interface WrapOptions {
   cwd: string;
+  homeDir?: string;
   /** CLI-owned mutable runtime/config directories exposed read-write. */
   configDirs?: string[];
   /** Account/provider configuration that the CLI may inspect but never mutate. */
   readonlyConfigDirs?: string[];
   policy: SandboxPolicy;
+}
+
+export function sandboxHome(opts: Pick<WrapOptions, 'cwd' | 'homeDir'>): string {
+  return opts.homeDir ?? opts.cwd;
 }
 
 // ─── Linux: bubblewrap ───────────────────────────────────────────────────────
@@ -135,7 +140,7 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
   for (const dir of opts.readonlyConfigDirs ?? []) {
     if (existsSync(dir)) flags.push('--ro-bind', dir, dir);
   }
-  flags.push('--tmpfs', '/root', '--setenv', 'HOME', opts.cwd);
+  flags.push('--tmpfs', '/root', '--setenv', 'HOME', sandboxHome(opts));
   return [...flags, '--', bin, ...args];
 }
 

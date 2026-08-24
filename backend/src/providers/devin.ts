@@ -50,6 +50,36 @@ import { buildProviderCliEnv } from './cli-environment';
 const DEVIN_STREAM_TIMEOUT_MS = 300_000;
 const EXPORT_POLL_MS = 250;
 
+export function sanitizeDevinOutput(value: string): string {
+  return value
+    .replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])/g, '')
+    .replace(/[^\x09\x0a\x0d\x20-\x7e\u00a0-\uffff]/g, '')
+    .replace(
+      /^(?:Welcome to Devin CLI!|Logged in as .+\.|✓ Organization: .+|You're all set\. Run devin to get started\.)\r?\n?/gm,
+      '',
+    );
+}
+
+export function buildDevinProcessEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  jailEnv: NodeJS.ProcessEnv | undefined,
+  devinHome: string | null,
+): NodeJS.ProcessEnv {
+  return {
+    ...(jailEnv ?? baseEnv),
+    ...(devinHome
+      ? {
+          DEVIN_CONFIG_DIR: devinHome,
+          XDG_CONFIG_HOME: devinHome,
+          HOME: devinHome,
+          USERPROFILE: devinHome,
+        }
+      : {}),
+    NO_COLOR: '1',
+    TERM: 'dumb',
+  };
+}
+
 const HARNESS_SYSTEM_NOTE =
   'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
   'other agents yourself; if work should be parallelized or delegated, say so in your response ' +
@@ -178,7 +208,8 @@ export class DevinProvider implements Provider {
     // become the prompt body (no system note stuffed in).
     let agentConfigPath: string | null = null;
     let agentConfigArtifact: PrivateCliArtifact | null = null;
-    let devinHome: string | null = null;
+    // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
+    const devinHome = researchOnly ? null : getKoryphaiosDevinHome(request.sessionId);
     const bridgeGrantLease =
       !researchOnly && request.sessionId
         ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
@@ -219,14 +250,11 @@ export class DevinProvider implements Provider {
           'json',
         );
         agentConfigPath = agentConfigArtifact.path;
-        // Set up the per-session isolated devin home (rules/skills/hooks/MCP).
-        devinHome = getKoryphaiosDevinHome(request.sessionId);
-
         // ── Wire MCP server (kory__ tools) ───────────────────────────────
         // Write the kory MCP server to .devin/config.json so the CLI discovers
         // it on startup and gets access to all kory__ tools.
         const mcpConfigs = researchOnly ? null : bridge.buildMcpConfig(bridgeCtx);
-        if (mcpConfigs && mcpConfigs.length > 0) {
+        if (mcpConfigs && mcpConfigs.length > 0 && devinHome) {
           try {
             bridge.writeMcpConfig(mcpConfigs, devinHome);
           } catch (mcpErr) {
@@ -236,7 +264,7 @@ export class DevinProvider implements Provider {
 
         // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
         const hookConfigs = researchOnly ? null : bridge.buildHooks(bridgeCtx);
-        if (hookConfigs && hookConfigs.length > 0) {
+        if (hookConfigs && hookConfigs.length > 0 && devinHome) {
           try {
             const hooksJson = bridge.serializeHooks(hookConfigs);
             const hooksPath = join(devinHome, '.devin', 'hooks.v1.json');
@@ -308,7 +336,8 @@ export class DevinProvider implements Provider {
             : 'accept-edits'
         : 'auto',
       ...(!researchOnly && caps.supportsSandbox ? ['--sandbox'] : []),
-      ...(researchOnly ? ['--respect-workspace-trust', 'false'] : []),
+      '--respect-workspace-trust',
+      'false',
       '--export',
       exportPath,
     ];
@@ -332,6 +361,7 @@ export class DevinProvider implements Provider {
       request.sandbox && !researchOnly
         ? wrapCommand(bin, args, {
             cwd,
+            homeDir: devinHome ?? undefined,
             configDirs: [
               ...(devinHome ? [devinHome] : []),
               ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
@@ -339,23 +369,20 @@ export class DevinProvider implements Provider {
               exportArtifact.directory,
               ...(agentConfigArtifact ? [agentConfigArtifact.directory] : []),
             ],
+            readonlyConfigDirs: [join(homedir(), '.local', 'share', 'devin', 'credentials.toml')],
             policy: request.sandbox,
           })
         : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    const env: NodeJS.ProcessEnv = { ...baseEnv };
     // Point the CLI at the isolated per-session home so our rules/skills/hooks
     // and session transcripts stay separate from the user's interactive runs.
-    if (devinHome && !researchOnly) {
-      env.DEVIN_CONFIG_DIR = devinHome;
-      env.XDG_CONFIG_HOME = devinHome;
-    }
+    const env = buildDevinProcessEnv(baseEnv, jail?.env, devinHome);
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {
           cwd,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: jail?.env ?? env,
+          env,
         }),
       [promptArtifact, agentConfigArtifact],
       () => bridgeGrantLease?.cleanup(),
@@ -389,8 +416,8 @@ export class DevinProvider implements Provider {
     // Live text from stdout.
     const stdoutQueue: string[] = [];
     child.stdout.on('data', (c: Buffer) => {
-      const t = c.toString();
-      stdoutQueue.push(t);
+      const t = sanitizeDevinOutput(c.toString());
+      if (t) stdoutQueue.push(t);
     });
 
     const exitPromise = new Promise<number>((resolve) => {

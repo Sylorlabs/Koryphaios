@@ -1623,6 +1623,13 @@ export interface CreateSkillDraftInput {
   contextBudget?: number;
 }
 
+export interface CreateFreeformSkillDraftInput {
+  source: SkillSource;
+  name: string;
+  description: string;
+  instructions: string;
+}
+
 export class SkillDraftConflictError extends Error {
   constructor(name: string, source: SkillSource) {
     super(`Skill ${name} already exists in ${source} scope; edit its draft instead`);
@@ -1630,16 +1637,33 @@ export class SkillDraftConflictError extends Error {
   }
 }
 
-const SUPPORTED_TARGET_MEDIA = new Set([
-  'any',
-  'web',
-  'native',
-  'mobile',
-  'terminal',
-  'game',
-  'spatial',
-  'embedded',
-]);
+export function createFreeformSkillDraft(
+  projectRoot: string,
+  input: CreateFreeformSkillDraftInput,
+): SkillRevision {
+  const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+  if (!namePattern.test(input.name)) throw new Error('Invalid skill name');
+  const description = input.description.trim();
+  if (description.length < 12 || description.length > 1024 || /[\r\n]/.test(description)) {
+    throw new Error('Skill description must be one line containing 12 to 1024 characters');
+  }
+  const instructions = input.instructions.trim();
+  if (!instructions) throw new Error('Skill instructions are required');
+  seedDefaultSkills();
+  const root =
+    input.source === 'personal'
+      ? personalRoot()
+      : join(resolve(projectRoot), '.koryphaios', 'skills');
+  const directory = join(root, input.name);
+  if (existsSync(join(directory, 'SKILL.md')) || existsSync(join(directory, 'DRAFT.md'))) {
+    throw new SkillDraftConflictError(input.name, input.source);
+  }
+  const initial = `---\nname: ${input.name}\ndescription: ${JSON.stringify(description)}\nmetadata:\n  koryphaios:\n    version: 0.1.0\n    baseVersion: 0.1.0\n    baseHash: __BASE_HASH__\n    parent: \n    broader: []\n    facets: []\n    depth: 0\n    requires: []\n    conflicts: []\n    activation: []\n    excludes: []\n    domains: []\n    targetMedia: ["any"]\n    shouldTrigger: []\n    shouldNotTrigger: []\n    evidence: []\n    contextBudget: 4000\n    sourceScope: local-only\n---\n# ${input.name}\n\n${instructions}\n`;
+  const content = initial.replace('__BASE_HASH__', contentFingerprint(initial));
+  const draftPath = join(directory, 'DRAFT.md');
+  publishNewSkillDraft(draftPath, content, input.name, input.source);
+  return readRevision(draftPath, input.source, 'draft')!;
+}
 
 /** Create a portable, review-only skill from the native structured editor. */
 export function createSkillDraft(projectRoot: string, input: CreateSkillDraftInput): SkillRevision {
@@ -1706,9 +1730,8 @@ export function createSkillDraft(projectRoot: string, input: CreateSkillDraftInp
   if (targetMedia.includes('any') && targetMedia.length > 1) {
     throw new Error('Target medium "any" cannot be combined with specific media');
   }
-  for (const medium of targetMedia) {
-    if (!SUPPORTED_TARGET_MEDIA.has(medium))
-      throw new Error(`Unsupported target medium: ${medium}`);
+  if (targetMedia.some((medium) => medium.length > 64 || /[\r\n]/.test(medium))) {
+    throw new Error('Target media must be single-line values of at most 64 characters');
   }
   if (!Number.isInteger(depth) || depth < 0 || depth > 32) {
     throw new Error('Skill depth must be an integer from 0 to 32');
