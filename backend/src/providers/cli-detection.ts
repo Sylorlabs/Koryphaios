@@ -32,6 +32,7 @@ import {
   createClineCLIAuthMarker,
   detectKimiCodeCLILogin,
   detectFreebuffCLILogin,
+  createFreebuffCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
 import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-auth';
@@ -136,6 +137,40 @@ export function probeCliVersion(binary: string, provider: ProviderName): boolean
   }
 }
 
+export function probeCliConnection(binary: string, provider: ProviderName): boolean {
+  const args =
+    provider === 'claude'
+      ? ['auth', 'status', '--json']
+      : provider === 'codex'
+        ? ['login', 'status']
+        : provider === 'devin'
+          ? ['auth', 'status']
+          : provider === 'grok' || provider === 'antigravity'
+            ? ['models']
+            : cliVersionArgs(provider);
+  try {
+    const result = spawnSync(binary, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: CLI_PROBE_TIMEOUT_MS,
+      encoding: 'utf8',
+      shell: process.platform === 'win32',
+    });
+    if (result.status !== 0) return false;
+    const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+    if (!output || /not authenticated|not logged in|logged out/i.test(output)) return false;
+    if (provider === 'claude') {
+      try {
+        return JSON.parse(result.stdout || '{}').loggedIn === true;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The single gate for auto-enabling a CLI-backed provider: the CLI binary must be
  * installed and a local credential signal present. A bare env var is intentionally not enough
@@ -147,7 +182,7 @@ export function canAutoEnable(provider: ProviderName): boolean {
   switch (provider) {
     case 'claude': {
       const bin = whichBinary('claude');
-      return !!bin && detectClaudeCodeLogin() && probeCliVersion(bin, provider);
+      return !!bin && detectClaudeCodeLogin() && probeCliConnection(bin, provider);
     }
     case 'codex': {
       const bin = whichBinary('codex');
@@ -155,29 +190,29 @@ export function canAutoEnable(provider: ProviderName): boolean {
         !!bin &&
         (detectCodexCLILogin() ||
           discoverCliAccounts().some((account) => account.provider === 'codex')) &&
-        probeCliVersion(bin, provider)
+        probeCliConnection(bin, provider)
       );
     }
     case 'antigravity': {
       const bin = whichBinary('agy');
-      return !!bin && detectAntigravityCLILogin() && probeCliVersion(bin, provider);
+      return !!bin && detectAntigravityCLILogin() && probeCliConnection(bin, provider);
     }
     case 'grok': {
       // Grok Build subscription CLI — installed + logged in (subscription or xAI key).
       const bin = whichBinary('grok');
-      return !!bin && detectGrokCLILogin() && probeCliVersion(bin, provider);
+      return !!bin && detectGrokCLILogin() && probeCliConnection(bin, provider);
     }
     case 'cursor': {
       const bin = whichBinary('cursor-agent');
-      return !!bin && detectCursorCLILogin() && probeCliVersion(bin, provider);
+      return !!bin && detectCursorCLILogin() && probeCliConnection(bin, provider);
     }
     case 'devin': {
       const bin = whichBinary('devin');
-      return !!bin && detectDevinCLILogin() && probeCliVersion(bin, provider);
+      return !!bin && detectDevinCLILogin() && probeCliConnection(bin, provider);
     }
     case 'cline': {
       const bin = whichBinary('cline');
-      return !!bin && detectClineCLILogin() && probeCliVersion(bin, provider);
+      return !!bin && detectClineCLILogin() && probeCliConnection(bin, provider);
     }
     case 'kimicode':
       // The kimi CLI owns its own OAuth session. Koryphaios reads the stored
@@ -191,9 +226,10 @@ export function canAutoEnable(provider: ProviderName): boolean {
           discoverCliAccounts().some((account) => account.provider === 'kimicode'))
       );
     case 'freebuff':
-      // Detection remains informational, but the undocumented SDK/backend
-      // adapter is fail-closed and must never be auto-enabled.
-      return false;
+      // Freebuff uses @codebuff/sdk (no CLI subprocess). The SDK reads
+      // credentials from ~/.config/manicode/credentials.json directly, so
+      // the binary is NOT required — a login from `freebuff login` is enough.
+      return detectFreebuffCLILogin();
     default:
       return false;
   }
@@ -237,6 +273,10 @@ export function cliAutoEnableCreds(
           : createKimiCodeAuthMarker(),
       };
     }
+    case 'freebuff':
+      // The CLI's credentials file owns the real token; the marker just
+      // signals "use the SDK harness".
+      return { authToken: createFreebuffCLIAuthMarker() };
     default:
       return null;
   }
@@ -371,17 +411,16 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://kimi.com/docs/cli',
   });
 
-  // ── Freebuff detection is informational only. The prior undocumented
-  // Codebuff SDK/backend adapter is unavailable and never auto-enabled. ──
+  // ── Freebuff: SDK-based provider. The @codebuff/sdk reads credentials
+  // from ~/.config/manicode/credentials.json directly (no CLI subprocess). ──
   const freebuffLogin = detectFreebuffCLILogin();
   const freebuff = mk('freebuff', 'Freebuff CLI', ['freebuff'], 'freebuff', {
     loggedIn: freebuffLogin,
     authSource: freebuffLogin ? '~/.config/manicode/credentials.json' : null,
-    autoEnabled: false,
+    autoEnabled: canAutoEnable('freebuff'),
     workingNote:
-      'Freebuff login material detected. Execution is unavailable because this build has no supportable authenticated Freebuff provider contract.',
-    loggedOutNote:
-      'Freebuff integration is unavailable in this build; installation or login detection does not enable execution.',
+      'Codebuff login material detected. Koryphaios drives the @codebuff/sdk directly against the Codebuff backend; tool execution is owned by Koryphaios (via the SDK overrideTools hook). No Freebuff token is collected or stored by Koryphaios.',
+    loggedOutNote: 'No Freebuff login material detected — run "freebuff login", then reconnect.',
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 

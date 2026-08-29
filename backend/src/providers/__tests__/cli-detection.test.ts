@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
-import { detectAgentClis, whichBinary, canAutoEnable } from '../cli-detection';
+import { detectAgentClis, whichBinary, canAutoEnable, probeCliConnection } from '../cli-detection';
 import {
   detectAntigravityCLILogin,
   detectCursorCLILogin,
@@ -180,6 +180,23 @@ describe('login detectors (deterministic via temp HOME)', () => {
 });
 
 describe('canAutoEnable gate', () => {
+  it('rejects a stale login file when the CLI reports that it is logged out', () => {
+    const bin = join(tmpHome, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const claude = join(bin, 'claude');
+    writeFileSync(
+      claude,
+      '#!/bin/sh\nprintf \'{"loggedIn":false,"authMethod":"none"}\\n\'\nexit 1\n',
+    );
+    chmodSync(claude, 0o755);
+    mkdirSync(join(tmpHome, '.claude'), { recursive: true });
+    writeFileSync(join(tmpHome, '.claude', '.credentials.json'), JSON.stringify({ oauth: true }));
+    process.env.PATH = `${bin}${delimiter}${saved.PATH ?? ''}`;
+
+    expect(probeCliConnection(claude, 'claude')).toBe(false);
+    expect(canAutoEnable('claude')).toBe(false);
+  });
+
   it('honors the KORY_DISABLE_CLI_AUTODETECT opt-out', () => {
     process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
     for (const p of ['claude', 'codex', 'google', 'xai'] as const) {

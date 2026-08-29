@@ -167,7 +167,7 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/codebuff.svg',
     deployment: 'local',
     description:
-      'Unavailable in this build. Local Freebuff files may be detected for recovery information, but Koryphaios does not use the undocumented Codebuff SDK/backend path.',
+      'Codebuff-backed. Koryphaios calls the official @codebuff/sdk against the Codebuff backend, using the credentials your local `freebuff login` already wrote to ~/.config/manicode/credentials.json. Koryphaios owns tool execution through its permission system (via the SDK\u2019s overrideTools hook). It never asks for or stores a Freebuff token directly.',
   },
   kilocode: {
     label: 'Kilo Code',

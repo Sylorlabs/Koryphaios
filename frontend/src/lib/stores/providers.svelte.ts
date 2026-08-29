@@ -93,6 +93,17 @@ export type DeviceAuthInfo = {
   intervalMs: number;
 };
 
+export type AwsCredentialScan = {
+  detected: boolean;
+  sources: Array<{
+    kind: 'env' | 'shared_credentials_file' | 'config_file';
+    profile?: string;
+    region?: string;
+    sso?: boolean;
+  }>;
+  description: string;
+};
+
 export type BrowserAuthStartResult =
   | { kind: 'connected'; name: string; openModelSelector: boolean; status?: ProviderInfo }
   | { kind: 'started' }
@@ -121,8 +132,17 @@ export const browserAuthProviders = new Set([
 
 // Cline is deliberately not a browser/device-code flow. Its own local CLI owns
 // authentication, so reconnecting means probing that CLI and activating its
-// non-secret session marker.
-export const localCliConnectProviders = new Set(['codex', 'cursor', 'devin', 'cline']);
+// non-secret session marker. Freebuff is the same class of provider: it reads
+// its login straight from the machine's CLI (freebuff login ->
+// ~/.config/manicode/credentials.json) and must never prompt for a token, so it
+// is treated as a local-CLI-connect provider rather than a generic token entry.
+export const localCliConnectProviders = new Set([
+  'codex',
+  'cursor',
+  'devin',
+  'cline',
+  'freebuff',
+]);
 
 // Provider display labels are sourced from the backend status response
 // (which returns `label` per provider). This fallback is only used before
@@ -225,6 +245,7 @@ function dismissCliAccountNotice(fingerprint: string): void {
 
 function createProvidersStore() {
   let statusList = $state<ProviderInfo[]>([]);
+  let providerStatusLoadRevision = 0;
   let availableProviderTypes = $state<Array<{ name: string; authMode: string }>>([]);
   let detectedClis = $state<DetectedCli[]>([]);
   let cliAccountSelectionRequired = $state<string[]>([]);
@@ -234,6 +255,8 @@ function createProvidersStore() {
   let tokenInputs = $state<Record<string, string>>({});
   let urlInputs = $state<Record<string, string>>({});
   let deploymentInputs = $state<Record<string, string>>({});
+  let awsRegionInputs = $state<Record<string, string>>({});
+  let awsSessionTokenInputs = $state<Record<string, string>>({});
   let accountLabelInputs = $state<Record<string, string>>({});
   let accountKeyInputs = $state<Record<string, string>>({});
   let accountTokenInputs = $state<Record<string, string>>({});
@@ -267,6 +290,9 @@ function createProvidersStore() {
   let copilotAuthMessage = $state<string>('');
   let copilotPollTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Per-provider AWS credential scan result (Bedrock), keyed by provider name. */
+  let awsCredentialScans = $state<Record<string, AwsCredentialScan | undefined>>({});
+
   let kimicodeDeviceAuth = $state<DeviceAuthInfo | null>(null);
   let kimicodeAuthStatus = $state<'idle' | 'pending' | 'connected' | 'error'>('idle');
   let kimicodeAuthMessage = $state<string>('');
@@ -285,7 +311,11 @@ function createProvidersStore() {
       name === 'kimicode' ||
       name === 'claude' ||
       name === 'grok' ||
-      name === 'antigravity'
+      name === 'antigravity' ||
+      name === 'cline' ||
+      name === 'cursor' ||
+      name === 'devin' ||
+      name === 'freebuff'
     ) {
       return 'auth_only';
     }
@@ -309,7 +339,9 @@ function createProvidersStore() {
 
   function getLocalCliConnectLabel(name: string): string {
     const label =
-      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline' }[name] ?? name;
+      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline', freebuff: 'Freebuff' }[
+        name
+      ] ?? name;
     return `Check ${label} CLI login`;
   }
 
@@ -413,6 +445,7 @@ function createProvidersStore() {
     options: { forceRefreshModels?: boolean } = {},
   ): Promise<boolean> {
     if (!browser) return false;
+    const revision = ++providerStatusLoadRevision;
 
     const loadOnce = async (refreshModels: '0' | '1'): Promise<boolean> => {
       const res = await apiFetch(
@@ -425,6 +458,7 @@ function createProvidersStore() {
       const json = await parseJsonResponse<{ ok?: boolean; data?: ProviderInfo[] }>(res);
       const list = json?.data;
       if (json?.ok !== true || !Array.isArray(list)) return false;
+      if (revision !== providerStatusLoadRevision) return false;
       statusList = list;
       if (!cliAccountNoticeShown) {
         cliAccountNoticeShown = true;
@@ -524,6 +558,34 @@ function createProvidersStore() {
       );
       detectedClis = [];
     }
+  }
+
+  /**
+   * Scan the machine for a usable AWS credential source (Bedrock). The backend
+   * only reports WHERE credentials live — it never returns the secret material —
+   * so the result is safe to surface in the UI banner.
+   */
+  async function loadAwsCredentialScan(name = 'bedrock'): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/providers/${name}/credentials/scan`));
+      const data = await parseJsonResponse<{ ok?: boolean; data?: AwsCredentialScan }>(res);
+      if (data?.ok && data.data) awsCredentialScans[name] = data.data;
+      else awsCredentialScans[name] = undefined;
+    } catch (err: unknown) {
+      console.warn(
+        'Failed to scan AWS credentials:',
+        err instanceof Error ? err.message : String(err),
+      );
+      awsCredentialScans[name] = undefined;
+    }
+  }
+
+  /** Pre-fill Bedrock region/keys from the system scan's detected region. */
+  async function refreshAwsScanAndStatus(name = 'bedrock'): Promise<void> {
+    await loadAwsCredentialScan(name);
+    const scan = awsCredentialScans[name];
+    const detected = scan?.sources.find((s) => s.region)?.region;
+    if (detected && !awsRegionInputs[name]) awsRegionInputs[name] = detected;
   }
 
   async function refreshProviderStatus(
@@ -1001,6 +1063,9 @@ function createProvidersStore() {
       if (authToken) body.authToken = authToken;
       if (baseUrl) body.baseUrl = baseUrl;
       if (deployment) body.deployment = deployment;
+      if (awsRegionInputs[name]?.trim()) body.awsRegion = awsRegionInputs[name].trim();
+      if (awsSessionTokenInputs[name]?.trim())
+        body.awsSessionToken = awsSessionTokenInputs[name].trim();
       verifying = name;
       const res = await apiFetch(apiUrl(`/api/providers/${name}`), {
         method: 'PUT',
@@ -1014,6 +1079,7 @@ function createProvidersStore() {
         tokenInputs[name] = '';
         urlInputs[name] = '';
         deploymentInputs[name] = '';
+        awsSessionTokenInputs[name] = '';
         const status = await refreshProviderStatus(name, { warmModelList: true });
         if (status?.connectionState === 'verified') {
           toastStore.success(
@@ -1548,6 +1614,21 @@ function createProvidersStore() {
     set deploymentInputs(v: Record<string, string>) {
       deploymentInputs = v;
     },
+    get awsRegionInputs() {
+      return awsRegionInputs;
+    },
+    set awsRegionInputs(v: Record<string, string>) {
+      awsRegionInputs = v;
+    },
+    get awsSessionTokenInputs() {
+      return awsSessionTokenInputs;
+    },
+    set awsSessionTokenInputs(v: Record<string, string>) {
+      awsSessionTokenInputs = v;
+    },
+    get awsCredentialScans() {
+      return awsCredentialScans;
+    },
     get accountLabelInputs() {
       return accountLabelInputs;
     },
@@ -1667,6 +1748,8 @@ function createProvidersStore() {
     loadProvidersFromApi,
     loadAvailableProviders,
     loadDetectedClis,
+    loadAwsCredentialScan,
+    refreshAwsScanAndStatus,
     refreshProviderStatus,
     syncProviderUi,
     loadProviderAccounts,
