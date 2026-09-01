@@ -23,19 +23,23 @@ import {
   applyDefaultUpdate,
   compareSkillRevisions,
   compareBundledSkill,
+  convertSkillRevision,
   countBundledUpdates,
   createFreeformSkillDraft,
   createSkillDraft,
   listSkills,
   resolveSkills,
   saveSkillDraft,
+  saveSkillDocumentDraft,
   testSkill,
   validateSkillContent,
+  validateSkillDocument,
   enforceSkillLearningPolicy,
   getBundledSkillContent,
   saveAgentMergedSkillDraft,
-  personalRoot,
   SkillDraftConflictError,
+  SkillRevisionConflictError,
+  type SkillDocumentSpec,
   type SkillSource,
 } from '../../kory/skills';
 import { createTaskContract } from '../../kory/prompts';
@@ -141,7 +145,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { sessions, kory } = getContext();
-      if (!(await sessions.get(body.sessionId))) {
+      if (!(await sessions.getActive(body.sessionId))) {
         throw new SessionNotFoundError(body.sessionId);
       }
       // This is the deterministic control-plane path for an explicit human
@@ -347,6 +351,21 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         ),
         depth: t.Optional(t.Integer({ minimum: 0, maximum: 32 })),
         contextBudget: t.Optional(t.Integer({ minimum: 100, maximum: 20_000 })),
+        document: t.Optional(
+          t.Object({
+            kind: t.Union([
+              t.Literal('markdown'),
+              t.Literal('text'),
+              t.Literal('html'),
+              t.Literal('custom'),
+            ]),
+            extension: t.String({ minLength: 1, maxLength: 18 }),
+            renderer: t.Union([t.Literal('markdown'), t.Literal('plain'), t.Literal('html')]),
+            mediaType: t.String({ minLength: 3, maxLength: 100 }),
+          }),
+        ),
+        sourceContent: t.Optional(t.String({ minLength: 1, maxLength: 50_000 })),
+        coreInstructions: t.Optional(t.String({ minLength: 1, maxLength: 50_000 })),
         actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
       }),
     },
@@ -383,9 +402,41 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     '/skills/validate',
     ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-      return { ok: true, data: validateSkillContent(body.content) };
+      if (body.document) {
+        return {
+          ok: true,
+          data: validateSkillDocument({
+            document: body.document,
+            sourceContent: body.sourceContent ?? '',
+            coreInstructions: body.coreInstructions ?? '',
+          }),
+        };
+      }
+      if (body.content !== undefined) {
+        return { ok: true, data: validateSkillContent(body.content) };
+      }
+      throw new ValidationError('Provide legacy content or a native skill document');
     },
-    { body: t.Object({ content: t.String() }) },
+    {
+      body: t.Object({
+        content: t.Optional(t.String({ maxLength: 50_000 })),
+        document: t.Optional(
+          t.Object({
+            kind: t.Union([
+              t.Literal('markdown'),
+              t.Literal('text'),
+              t.Literal('html'),
+              t.Literal('custom'),
+            ]),
+            extension: t.String({ minLength: 1, maxLength: 18 }),
+            renderer: t.Union([t.Literal('markdown'), t.Literal('plain'), t.Literal('html')]),
+            mediaType: t.String({ minLength: 3, maxLength: 100 }),
+          }),
+        ),
+        sourceContent: t.Optional(t.String({ maxLength: 50_000 })),
+        coreInstructions: t.Optional(t.String({ maxLength: 50_000 })),
+      }),
+    },
   )
   .put(
     '/skills/:name/draft',
@@ -397,22 +448,95 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         body.actor ?? 'human',
         'save-draft',
       );
-      return {
-        ok: true,
-        data: saveSkillDraft(
-          root,
-          // body.source is validated by Elysia as 'personal' | 'project', which matches SkillSource.
-          body.source as SkillSource,
-          name,
-          body.content,
-        ),
-      };
+      try {
+        return {
+          ok: true,
+          data: body.document
+            ? saveSkillDocumentDraft(root, body.source as SkillSource, name, {
+                document: body.document,
+                sourceContent: body.sourceContent ?? body.content ?? '',
+                coreInstructions: body.coreInstructions ?? '',
+                expectedHash: body.expectedHash ?? '',
+              })
+            : saveSkillDraft(
+                root,
+                body.source as SkillSource,
+                name,
+                body.content ?? '',
+                body.expectedHash,
+              ),
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof SkillRevisionConflictError) throw new ConflictError(message);
+        throw new ValidationError(message);
+      }
     },
     {
       body: t.Object({
         source: t.Union([t.Literal('personal'), t.Literal('project')]),
-        content: t.String(),
+        content: t.Optional(t.String({ maxLength: 50_000 })),
+        expectedHash: t.String({ minLength: 64, maxLength: 64 }),
+        document: t.Optional(
+          t.Object({
+            kind: t.Union([
+              t.Literal('markdown'),
+              t.Literal('text'),
+              t.Literal('html'),
+              t.Literal('custom'),
+            ]),
+            extension: t.String({ minLength: 1, maxLength: 18 }),
+            renderer: t.Union([t.Literal('markdown'), t.Literal('plain'), t.Literal('html')]),
+            mediaType: t.String({ minLength: 3, maxLength: 100 }),
+          }),
+        ),
+        sourceContent: t.Optional(t.String({ maxLength: 50_000 })),
+        coreInstructions: t.Optional(t.String({ maxLength: 50_000 })),
         actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
+      }),
+    },
+  )
+  .post(
+    '/skills/:name/convert',
+    ({ request, params: { name }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      try {
+        return {
+          ok: true,
+          data: convertSkillRevision(
+            root,
+            body.source as SkillSource,
+            name,
+            body.state,
+            body.document,
+            body.dryRun ?? true,
+            body.expectedHash,
+          ),
+        };
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof SkillRevisionConflictError) throw new ConflictError(message);
+        throw new ValidationError(message);
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Union([t.Literal('personal'), t.Literal('project')]),
+        state: t.Union([t.Literal('active'), t.Literal('draft')]),
+        dryRun: t.Optional(t.Boolean()),
+        expectedHash: t.String({ minLength: 64, maxLength: 64 }),
+        document: t.Object({
+          kind: t.Union([
+            t.Literal('markdown'),
+            t.Literal('text'),
+            t.Literal('html'),
+            t.Literal('custom'),
+          ]),
+          extension: t.String({ minLength: 1, maxLength: 18 }),
+          renderer: t.Union([t.Literal('markdown'), t.Literal('plain'), t.Literal('html')]),
+          mediaType: t.String({ minLength: 3, maxLength: 100 }),
+        }),
       }),
     },
   )
@@ -429,12 +553,18 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       if (!skill) {
         throw new NotFoundError('Skill revision', name);
       }
+      if (body.expectedHash && skill.hash !== body.expectedHash) {
+        throw new ConflictError(
+          `Skill ${name} changed outside this test; reload it before testing this revision`,
+        );
+      }
       return { ok: true, data: testSkill(skill) };
     },
     {
       body: t.Object({
         source: t.Union([t.Literal('personal'), t.Literal('project')]),
         state: t.Optional(t.Union([t.Literal('active'), t.Literal('draft')])),
+        expectedHash: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
       }),
     },
   )
@@ -446,6 +576,11 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       const draft = listSkills(root).find(
         (item) => item.name === name && item.source === body.source && item.state === 'draft',
       );
+      if (body.expectedHash && (!draft || draft.hash !== body.expectedHash)) {
+        throw new ConflictError(
+          `Skill ${name} changed outside this activation; reload it before activating this revision`,
+        );
+      }
       const promotionReady = draft
         ? buildSkillEvaluationCard(root, draft).gate.status === 'ready'
         : false;
@@ -457,13 +592,14 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       );
       return {
         ok: true,
-        data: activateSkill(root, body.source as SkillSource, name),
+        data: activateSkill(root, body.source as SkillSource, name, body.expectedHash),
       };
     },
     {
       body: t.Object({
         source: t.Union([t.Literal('personal'), t.Literal('project')]),
         actor: t.Optional(t.Union([t.Literal('human'), t.Literal('agent')])),
+        expectedHash: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
       }),
     },
   )
@@ -472,6 +608,24 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const projectRoot = getRequestProjectRoot(request);
+      const localAtStart = listSkills(projectRoot).find(
+        (skill) => skill.name === name && skill.source === 'personal' && skill.state === 'active',
+      );
+      if (body.expectedHash && (!localAtStart || localAtStart.hash !== body.expectedHash)) {
+        throw new ConflictError(
+          `Skill ${name} changed outside this update; reload it before applying a bundled revision`,
+        );
+      }
+      if (
+        (body.choice === 'merge' || body.choice === 'merge-with-agent') &&
+        listSkills(projectRoot).some(
+          (skill) => skill.name === name && skill.source === 'personal' && skill.state === 'draft',
+        )
+      ) {
+        throw new ConflictError(
+          `Skill ${name} already has a draft; review or discard it before creating an update draft`,
+        );
+      }
 
       // For merge-with-agent, call the LLM to intelligently merge the user's
       // local edits with the new bundled version.
@@ -481,13 +635,12 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           set.status = 404;
           return { ok: false, error: 'Bundled skill not found' };
         }
-        let local: string;
-        try {
-          local = readFileSync(join(personalRoot(), name, 'SKILL.md'), 'utf8');
-        } catch {
+        const localRevision = localAtStart;
+        if (!localRevision) {
           set.status = 404;
           return { ok: false, error: 'Local skill not found' };
         }
+        const local = localRevision.sourceContent;
 
         const ctx = getContext();
         // Use the user's configured routing to pick the right model — this
@@ -500,11 +653,18 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           return { ok: false, error: 'No model provider available for agent merge' };
         }
 
-        const mergePrompt = buildSkillMergePrompt(name, local, bundled);
+        const mergePrompt = buildSkillMergePrompt(
+          name,
+          local,
+          bundled,
+          localRevision.storageVersion === 2 ? localRevision.document : undefined,
+        );
         const stream = provider.streamResponse({
           model: routing.model,
           systemPrompt:
-            "You are an expert at merging skill instruction files. You preserve the user's customizations while incorporating the bundled improvements. Output ONLY the merged SKILL.md content — no explanation, no markdown fences.",
+            localRevision.storageVersion === 2
+              ? `You merge instruction files while preserving the user's native .${localRevision.document.extension} format. Output only native source: no explanation, fences, or YAML frontmatter.`
+              : "You are an expert at merging skill instruction files. Preserve the user's customizations while incorporating bundled improvements. Output only merged SKILL.md content: no explanation or markdown fences.",
           messages: [{ role: 'user', content: mergePrompt }],
         });
 
@@ -517,23 +677,58 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
 
         // Strip markdown fences if the model wrapped the output
         mergedContent = mergedContent
-          .replace(/^```(?:markdown|yaml|md)?\n?/m, '')
+          .replace(/^```[a-z0-9_+.-]*\s*\r?\n?/i, '')
           .replace(/\n?```\s*$/m, '')
           .trim();
 
-        if (!mergedContent.startsWith('---')) {
+        if (localRevision.storageVersion === 1 && !mergedContent.startsWith('---')) {
           set.status = 500;
           return { ok: false, error: 'Agent merge produced invalid content (missing frontmatter)' };
         }
+        if (!mergedContent) {
+          set.status = 500;
+          return { ok: false, error: 'Agent merge produced empty native content' };
+        }
 
-        const draft = saveAgentMergedSkillDraft(name, mergedContent);
-        return { ok: true, data: draft };
+        const bundledBody =
+          bundled.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/)?.[1] ?? bundled;
+        const mergedCore =
+          localRevision.storageVersion === 2
+            ? `${localRevision.coreInstructions.trim()}\n\n${bundledBody.replace(/^#\s+[^\n]+\n+/, '').trim()}`
+            : undefined;
+        try {
+          const draft = saveAgentMergedSkillDraft(
+            name,
+            mergedContent,
+            mergedCore,
+            localRevision.hash,
+          );
+          return { ok: true, data: draft };
+        } catch (error: unknown) {
+          if (
+            error instanceof SkillRevisionConflictError ||
+            error instanceof SkillDraftConflictError
+          ) {
+            throw new ConflictError(error.message);
+          }
+          throw error;
+        }
       }
 
-      return {
-        ok: true,
-        data: applyDefaultUpdate(projectRoot, name, body.choice),
-      };
+      try {
+        return {
+          ok: true,
+          data: applyDefaultUpdate(projectRoot, name, body.choice, body.expectedHash),
+        };
+      } catch (error: unknown) {
+        if (
+          error instanceof SkillRevisionConflictError ||
+          error instanceof SkillDraftConflictError
+        ) {
+          throw new ConflictError(error.message);
+        }
+        throw error;
+      }
     },
     {
       body: t.Object({
@@ -543,6 +738,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           t.Literal('keep-local'),
           t.Literal('merge-with-agent'),
         ]),
+        expectedHash: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
       }),
     },
   )
@@ -659,17 +855,18 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     async ({ request, params: { agentId }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { sessions, kory } = getContext();
-      const session = await sessions.get(body.sessionId);
+      const session = await sessions.getActive(body.sessionId);
       if (!session) {
         throw new SessionNotFoundError(body.sessionId);
       }
       try {
-        await kory.sendMessageToAgent(body.sessionId, agentId, body.content, {
+        const accepted = await kory.sendMessageToAgent(body.sessionId, agentId, body.content, {
           model: body.model,
           reasoningLevel: body.reasoningLevel,
         });
-        return { ok: true, data: { status: 'processing' } };
+        return { ok: true, data: { status: 'processing', runId: accepted.runId } };
       } catch (err: unknown) {
+        if (err instanceof ConflictError) throw err;
         const message = err instanceof Error ? err.message : String(err);
         // "already working" is an operational conflict, not a bug.
         if (message.includes('already working')) throw new ConflictError(message);
@@ -833,7 +1030,30 @@ function buildSkillMergePrompt(
   skillName: string,
   localContent: string,
   bundledContent: string,
+  targetDocument?: SkillDocumentSpec,
 ): string {
+  if (targetDocument) {
+    return `Merge these two versions of the "${skillName}" skill into native .${targetDocument.extension} source rendered as ${targetDocument.renderer}.
+
+## Rules
+1. Preserve the LOCAL version's native .${targetDocument.extension} format exactly; do not add YAML frontmatter or Markdown fences.
+2. Preserve all user customizations, examples, boundaries, references, and added sections.
+3. Incorporate the BUNDLED Markdown version's substantive improvements, translating structure only where the target format supports it.
+4. When a bundled construct cannot be represented safely, preserve it as literal source for review instead of deleting it.
+5. Keep the result under 500 lines and output only the merged native source.
+
+## LOCAL native source
+---
+${localContent}
+---
+
+## BUNDLED Markdown source
+---
+${bundledContent}
+---
+
+Produce the merged native .${targetDocument.extension} source now.`;
+  }
   return `Merge these two versions of the "${skillName}" skill (SKILL.md).
 
 ## Rules

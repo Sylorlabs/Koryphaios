@@ -8,13 +8,11 @@
 
 import { Elysia, t } from 'elysia';
 import {
-  downloadVoicePack,
-  listVoicePacks,
   listVoiceProviders,
   loadVoiceSettings,
   saveVoiceSettings,
   synthesizeCloud,
-  transcribeCloud,
+  transcribeRecording,
 } from '../../voice/voice-service';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { AuthenticationError } from '../../errors/types';
@@ -29,12 +27,7 @@ export const voiceRoutes = new Elysia({ prefix: '/api/voice' })
     body: t.Any(),
   })
   .get('/providers', async () => ({ ok: true, data: await listVoiceProviders() }))
-  .get('/packs', async () => ({ ok: true, data: await listVoicePacks() }))
-  .post('/packs/:id/download', async ({ params }) => ({
-    ok: true,
-    data: await downloadVoicePack(params.id),
-  }))
-  .post('/transcribe', async ({ body }) => ({ ok: true, data: await transcribeCloud(body) }), {
+  .post('/transcribe', async ({ body }) => ({ ok: true, data: await transcribeRecording(body) }), {
     body: t.Object({
       audioBase64: t.String(),
       mimeType: t.Optional(t.String()),

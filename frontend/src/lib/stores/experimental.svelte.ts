@@ -45,6 +45,7 @@ function createExperimentalStore() {
   let spendCapConfig = $state<SpendCapConfig>({ ...DEFAULT_SPEND_CAP_CONFIG });
   let pausedSessions = $state<PausedSession[]>([]);
   let isLoading = $state(false);
+  let isSaving = $state(false);
   let spendCapError = $state<string | null>(null);
   let requestRevision = 0;
 
@@ -88,9 +89,8 @@ function createExperimentalStore() {
   }
 
   async function saveSpendCapConfig(patch: Partial<SpendCapConfig>): Promise<boolean> {
-    const revision = ++requestRevision;
     const previous = spendCapConfig;
-    isLoading = true;
+    isSaving = true;
     spendCapError = null;
     spendCapConfig = { ...spendCapConfig, ...patch };
     try {
@@ -101,18 +101,16 @@ function createExperimentalStore() {
       });
       const data = await readJson(response, 'Could not save spend limits');
       if (!data.config) throw new Error('The spend-limit service did not confirm the change');
-      if (revision === requestRevision) spendCapConfig = data.config;
+      spendCapConfig = { ...DEFAULT_SPEND_CAP_CONFIG, ...data.config };
       toastStore.success('Spend limit saved');
       return true;
     } catch (error) {
-      if (revision === requestRevision) {
-        spendCapConfig = previous;
-        spendCapError = error instanceof Error ? error.message : 'Could not save spend limits';
-        toastStore.error(spendCapError);
-      }
+      spendCapConfig = previous;
+      spendCapError = error instanceof Error ? error.message : 'Could not save spend limits';
+      toastStore.error(spendCapError);
       return false;
     } finally {
-      if (revision === requestRevision) isLoading = false;
+      isSaving = false;
     }
   }
 
@@ -145,6 +143,9 @@ function createExperimentalStore() {
     },
     get isLoading() {
       return isLoading;
+    },
+    get isSaving() {
+      return isSaving;
     },
     get spendCapError() {
       return spendCapError;

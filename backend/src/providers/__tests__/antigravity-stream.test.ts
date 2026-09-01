@@ -21,6 +21,7 @@ describe('Antigravity stream-json parser', () => {
       tokensIn: 18_867,
       tokensOut: 18,
       tokensCache: 4_000,
+      tokensCacheRead: 4_000,
     }]);
   });
 

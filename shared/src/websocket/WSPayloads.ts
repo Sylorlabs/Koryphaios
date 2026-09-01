@@ -1,7 +1,11 @@
 // WebSocket Message Payloads
 // Domain: Payload structures for all WebSocket event types
 
-import type { ProviderName, ModelDef } from '../providers/ModelDefs';
+import type {
+  ProviderName,
+  ModelDef,
+  CustomProviderIconConfig,
+} from '../providers/ModelDefs';
 import type { AgentRole, AgentStatus, WorkerDomain } from '../types/AgentTypes';
 
 // Re-export these types to avoid circular dependency
@@ -34,6 +38,9 @@ export type StreamUsage = {
   tokensOut: number;
   tokensUsed: number;
   usageKnown: boolean;
+  /** Provider-reported cached input already included in tokensIn. This
+   *  explains billing/prompt reuse without double-counting context. */
+  cachedInputTokens?: number;
   contextWindow?: number;
   contextKnown: boolean;
   /** Where the context limit came from. Live provider/CLI data is preferred;
@@ -175,6 +182,13 @@ export interface SessionIdlePayload {
   updatedAt: number;
 }
 
+/** Durable sequence-one control row emitted after an intentional conversation
+ * rewrite. Its epoch must match the WS message epoch. */
+export interface SessionTimelineRewrittenPayload {
+  eventEpoch: number;
+  reason: 'conversation_rewind';
+}
+
 export interface CompactionProgressPayload {
   compactionId: string;
   sessionId: string;
@@ -197,6 +211,30 @@ export interface ChangeSummaryPayload {
 
 export interface KorySessionChangesPayload {
   changes: ChangeSummary[];
+  /** Stable durable review identity. Absent only for legacy operational rows. */
+  reviewId?: string;
+}
+
+/** Terminal control for a prior session.changes projection. The matching
+ * review is no longer actionable, so reconnecting clients must remove it. */
+export interface KorySessionChangesResolvedPayload {
+  reviewId?: string;
+  status: 'accepted' | 'rejected' | 'terminalized' | 'not_pending';
+  /** Structural reason only; never includes file or prompt contents. */
+  reason?: string;
+}
+
+/** Terminal control for a prior kory.ask_user projection. */
+export interface KoryAskUserResolvedPayload {
+  questionId?: string;
+  status: 'answered' | 'cancelled' | 'superseded' | 'not_pending';
+}
+
+/** Compact durable index used after a fresh renderer boot. The client can
+ * subscribe only to waiting sessions rather than replaying every chat. */
+export interface SessionActionableWaitsPayload {
+  questionSessionIds: string[];
+  reviewSessionIds: string[];
 }
 
 export interface StreamUsagePayload extends StreamUsage {}
@@ -329,6 +367,8 @@ export interface ProviderInfo {
   label?: string;
   /** Static icon path served by the frontend (e.g. /provider-icons/jules.svg) */
   iconPath?: string;
+  /** Authenticated custom-provider icon asset and presentation metadata. */
+  customIcon?: CustomProviderIconConfig;
   /** Where the provider executes work */
   deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */

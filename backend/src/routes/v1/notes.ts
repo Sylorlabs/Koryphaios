@@ -15,7 +15,27 @@
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
-import { broadcastNotesNetworkUpdate } from '../../notes/notes-events';
+import { noteDraftService } from '../../notes/note-draft-service';
+import { commitVaultRestore, previewVaultRestore } from '../../notes/vault-restore-service';
+import { DEFAULT_VAULT_ARCHIVE_LIMITS } from '../../notes/vault-archive';
+import {
+  assertProjectPropertyProjectionCurrent,
+  getNotePropertyProjection,
+  listNotePropertySchemas,
+  repairProjectPropertyProjections,
+} from '../../notes/note-properties-service';
+import {
+  createNoteBase,
+  getNoteBase,
+  listNoteBaseRevisions,
+  listNoteBases,
+  previewNoteBase,
+  queryNoteBase,
+  restoreNoteBase,
+  trashNoteBase,
+  updateNoteBase,
+} from '../../notes/note-bases-service';
+import { broadcastNotesNetworkUpdate, type NotesMutationOrigin } from '../../notes/notes-events';
 import {
   loadNotesAgentPermissions,
   saveNotesAgentPermissions,
@@ -35,10 +55,115 @@ import { getRequestProjectRoot } from '../../runtime/request-project';
 import { traceBlockingOp } from '../../monitoring/event-loop-monitor';
 import {
   AuthenticationError,
+  ConflictError,
   NotFoundError,
   PayloadTooLargeError,
   ValidationError,
 } from '../../errors/types';
+import { removeNoteProperty, setNoteProperty, type NoteProperty } from '@koryphaios/shared';
+
+function mutationOrigin(request: Request): NotesMutationOrigin | undefined {
+  const normalize = (value: string | null): string | undefined => {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length <= 128 && !/[\u0000-\u001f\u007f]/.test(trimmed)
+      ? trimmed
+      : undefined;
+  };
+  const clientId = normalize(request.headers.get('x-kory-client-id'));
+  const mutationId = normalize(request.headers.get('x-kory-mutation-id'));
+  return clientId || mutationId ? { clientId, mutationId } : undefined;
+}
+
+function requirePositiveRevision(value: number | undefined, label = 'expectedRevision'): number {
+  if (!Number.isSafeInteger(value) || (value ?? 0) < 1) {
+    throw new ValidationError(`${label} must be a positive integer`);
+  }
+  return value!;
+}
+
+function publicVaultRestoreResult(value: {
+  format: 'koryphaios-notes-vault';
+  archiveVersion: 1 | 2;
+  projectName: string;
+  archiveSha256: string;
+  notes: number;
+  revisions: number;
+  attachments: number;
+  links: number;
+  bases: number;
+  drafts: number;
+  noOpNotes: number;
+  conflicts: Array<{ kind: string; archiveId?: string; path?: string; message: string }>;
+  canRestore: boolean;
+  mode: 'safe-merge';
+  restoredNotes?: number;
+  restoredRevisions?: number;
+  restoredAttachments?: number;
+  restoredLinks?: number;
+  restoredBases?: number;
+  restoredDrafts?: number;
+}) {
+  const preview = {
+    format: value.format,
+    archiveVersion: value.archiveVersion,
+    projectName: value.projectName,
+    archiveSha256: value.archiveSha256,
+    notes: value.notes,
+    revisions: value.revisions,
+    attachments: value.attachments,
+    links: value.links,
+    bases: value.bases,
+    drafts: value.drafts,
+    noOpNotes: value.noOpNotes,
+    conflicts: value.conflicts,
+    canRestore: value.canRestore,
+    mode: value.mode,
+  };
+  return value.restoredNotes === undefined
+    ? preview
+    : {
+        ...preview,
+        restoredNotes: value.restoredNotes,
+        restoredRevisions: value.restoredRevisions ?? 0,
+        restoredAttachments: value.restoredAttachments ?? 0,
+        restoredLinks: value.restoredLinks ?? 0,
+        restoredBases: value.restoredBases ?? 0,
+        restoredDrafts: value.restoredDrafts ?? 0,
+      };
+}
+
+async function vaultArchiveForm(request: Request): Promise<{
+  file: File;
+  archiveSha256?: string;
+}> {
+  const formData = await request.formData();
+  const file = formData.get('file');
+  if (!(file instanceof File)) throw new ValidationError('Choose a vault archive to restore');
+  if (file.size === 0) throw new ValidationError('The selected vault archive is empty');
+  if (file.size > DEFAULT_VAULT_ARCHIVE_LIMITS.maxArchiveBytes) {
+    throw new PayloadTooLargeError(`${DEFAULT_VAULT_ARCHIVE_LIMITS.maxArchiveBytes} bytes`, {
+      actualBytes: file.size,
+      maxBytes: DEFAULT_VAULT_ARCHIVE_LIMITS.maxArchiveBytes,
+    });
+  }
+  const digest = formData.get('archiveSha256');
+  if (digest !== null && typeof digest !== 'string') {
+    throw new ValidationError('Vault archive digest must be text');
+  }
+  return { file, ...(digest === null ? {} : { archiveSha256: digest }) };
+}
+
+const noteDraftSnapshotSchema = {
+  title: t.String(),
+  content: t.String(),
+  folderPath: t.String(),
+  tags: t.Array(t.String()),
+  pinned: t.Boolean(),
+  includeInContext: t.Boolean(),
+  format: t.Union([t.Literal('markdown'), t.Literal('html')]),
+};
+
+const notePropertyValueSchema = t.Union([t.String(), t.Number(), t.Boolean(), t.Array(t.String())]);
 
 export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .onBeforeHandle(({ request }) => {
@@ -67,7 +192,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     const result = await traceBlockingOp('syncProjectDocuments', () =>
       notesService.syncProjectDocuments(getRequestProjectRoot(request)),
     );
-    broadcastNotesNetworkUpdate('update');
+    broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
     return { ok: true, data: result };
   })
 
@@ -76,7 +201,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     '/',
     async ({ request, body }) => {
       const note = await notesService.createNote(body, getRequestProjectRoot(request));
-      broadcastNotesNetworkUpdate('create', note.id);
+      broadcastNotesNetworkUpdate('create', note.id, undefined, mutationOrigin(request));
       return { ok: true, data: note };
     },
     {
@@ -194,12 +319,17 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
 
   // ── Full-text search ──────────────────────────────────────────────────────
   .get('/search', async ({ request, query }) => {
+    const resultLimit = 50;
     const results = await notesService.searchNotes(
       (query.q as string) ?? '',
-      50,
+      resultLimit + 1,
       getRequestProjectRoot(request),
     );
-    return { ok: true, data: results };
+    return {
+      ok: true,
+      data: results.slice(0, resultLimit),
+      meta: { truncated: results.length > resultLimit, limit: resultLimit },
+    };
   })
 
   // ── Import memory files as notes (must come before /:id to avoid collision) ─
@@ -210,8 +340,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     // The caller receives per-source outcomes. Imports are intentionally
     // independent, so a partial batch is explicit instead of masquerading as
     // an all-or-nothing transaction.
-    // Broadcasting the generic mutation event would make that same client
-    // reload the entire vault, graph, and folder tree a second time.
+    broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
     return { ok: true, data: report };
   })
 
@@ -243,8 +372,297 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       },
       getRequestProjectRoot(request),
     );
-    broadcastNotesNetworkUpdate('create', note.id);
+    broadcastNotesNetworkUpdate('create', note.id, undefined, mutationOrigin(request));
     return { ok: true, data: note };
+  })
+
+  // ── Typed Markdown Properties (fixed prefixes must precede /:id) ────────
+  .get('/properties/status', async ({ request }) => {
+    const projectRoot = getRequestProjectRoot(request);
+    try {
+      assertProjectPropertyProjectionCurrent(projectRoot);
+      return { ok: true, data: { current: true } };
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+      return { ok: true, data: { current: false } };
+    }
+  })
+
+  .post('/properties/reindex', async ({ request }) => ({
+    ok: true,
+    data: await repairProjectPropertyProjections(getRequestProjectRoot(request)),
+  }))
+
+  .get('/properties/schemas', async ({ request }) => ({
+    ok: true,
+    data: await listNotePropertySchemas(getRequestProjectRoot(request)),
+  }))
+
+  .get('/:id/properties', async ({ request, params }) => ({
+    ok: true,
+    data: await getNotePropertyProjection(params.id, getRequestProjectRoot(request)),
+  }))
+
+  .patch(
+    '/:id/properties',
+    async ({ request, params, body }) => {
+      const projectRoot = getRequestProjectRoot(request);
+      const current = await notesService.getNote(params.id, projectRoot);
+      if (!current) throw new NotFoundError('Note', params.id);
+      if (current.format === 'html') {
+        throw new ValidationError('Typed YAML properties are available only for Markdown notes');
+      }
+      let content = current.content;
+      try {
+        for (const patch of body.patches) {
+          if (patch.op === 'remove') {
+            content = removeNoteProperty(content, patch.key);
+          } else {
+            content = setNoteProperty(content, patch as NoteProperty);
+          }
+        }
+      } catch (error) {
+        throw new ValidationError(
+          error instanceof Error ? error.message : 'The property patch is invalid',
+        );
+      }
+      const note = await notesService.updateNote(
+        params.id,
+        {
+          content,
+          expectedRevision: requirePositiveRevision(body.expectedRevision),
+          restoreDeletedSource: body.restoreDeletedSource,
+        },
+        projectRoot,
+      );
+      const properties = await getNotePropertyProjection(params.id, projectRoot);
+      broadcastNotesNetworkUpdate('update', note.id, undefined, mutationOrigin(request));
+      return { ok: true, data: { note, properties } };
+    },
+    {
+      body: t.Object({
+        expectedRevision: t.Number(),
+        restoreDeletedSource: t.Optional(t.Boolean()),
+        patches: t.Array(
+          t.Union([
+            t.Object({ op: t.Literal('remove'), key: t.String() }),
+            t.Object({
+              op: t.Literal('set'),
+              key: t.String(),
+              type: t.Union([
+                t.Literal('text'),
+                t.Literal('number'),
+                t.Literal('checkbox'),
+                t.Literal('date'),
+                t.Literal('datetime'),
+                t.Literal('list'),
+                t.Literal('tags'),
+              ]),
+              value: notePropertyValueSchema,
+            }),
+          ]),
+          { minItems: 1, maxItems: 100 },
+        ),
+      }),
+    },
+  )
+
+  // ── Persistent typed Bases (fixed prefixes must precede /:id) ───────────
+  .get('/bases', async ({ request, query }) => ({
+    ok: true,
+    data: listNoteBases(getRequestProjectRoot(request), {
+      includeTrashed: query.includeTrashed === 'true',
+    }),
+  }))
+
+  .post(
+    '/bases',
+    async ({ request, body }) => ({
+      ok: true,
+      data: createNoteBase(body, getRequestProjectRoot(request)),
+    }),
+    { body: t.Object({ name: t.String(), definition: t.Any() }) },
+  )
+
+  .post(
+    '/bases/query-preview',
+    async ({ request, body }) => ({
+      ok: true,
+      data: await previewNoteBase(
+        body.definition,
+        { limit: body.limit, offset: body.offset },
+        getRequestProjectRoot(request),
+      ),
+    }),
+    {
+      body: t.Object({
+        definition: t.Any(),
+        limit: t.Optional(t.Number()),
+        offset: t.Optional(t.Number()),
+      }),
+    },
+  )
+
+  .get('/bases/:baseId', async ({ request, params }) => {
+    const base = getNoteBase(params.baseId, getRequestProjectRoot(request), {
+      includeTrashed: true,
+    });
+    if (!base) throw new NotFoundError('Note Base', params.baseId);
+    return { ok: true, data: base };
+  })
+
+  .put(
+    '/bases/:baseId',
+    async ({ request, params, body }) => ({
+      ok: true,
+      data: updateNoteBase(params.baseId, body, getRequestProjectRoot(request)),
+    }),
+    {
+      body: t.Object({
+        expectedRevision: t.Number(),
+        name: t.Optional(t.String()),
+        definition: t.Optional(t.Any()),
+      }),
+    },
+  )
+
+  .delete('/bases/:baseId', async ({ request, params, query }) => ({
+    ok: true,
+    data: trashNoteBase(
+      params.baseId,
+      requirePositiveRevision(Number(query.expectedRevision)),
+      getRequestProjectRoot(request),
+    ),
+  }))
+
+  .post(
+    '/bases/:baseId/restore',
+    async ({ request, params, body }) => ({
+      ok: true,
+      data: restoreNoteBase(
+        params.baseId,
+        requirePositiveRevision(body.expectedRevision),
+        getRequestProjectRoot(request),
+      ),
+    }),
+    { body: t.Object({ expectedRevision: t.Number() }) },
+  )
+
+  .get('/bases/:baseId/revisions', async ({ request, params }) => ({
+    ok: true,
+    data: listNoteBaseRevisions(params.baseId, getRequestProjectRoot(request)),
+  }))
+
+  .post(
+    '/bases/:baseId/query',
+    async ({ request, params, body }) => ({
+      ok: true,
+      data: await queryNoteBase(
+        params.baseId,
+        { limit: body.limit, offset: body.offset },
+        getRequestProjectRoot(request),
+      ),
+    }),
+    {
+      body: t.Object({
+        limit: t.Optional(t.Number()),
+        offset: t.Optional(t.Number()),
+      }),
+    },
+  )
+
+  // ── Crash-durable non-authoritative drafts (must precede /:id) ──────────
+  .get('/drafts', async ({ request }) => ({
+    ok: true,
+    data: noteDraftService.listDrafts(getRequestProjectRoot(request)),
+  }))
+
+  .post(
+    '/drafts',
+    async ({ request, body }) => ({
+      ok: true,
+      data: noteDraftService.createDraft(body, getRequestProjectRoot(request)),
+    }),
+    {
+      body: t.Object({
+        noteId: t.String(),
+        baseRevision: t.Number(),
+        baseTitle: t.Optional(t.String()),
+        ...noteDraftSnapshotSchema,
+      }),
+    },
+  )
+
+  .get('/drafts/:draftId', async ({ request, params }) => {
+    const draft = noteDraftService.getDraft(params.draftId, getRequestProjectRoot(request));
+    if (!draft) throw new NotFoundError('Notes draft', params.draftId);
+    return { ok: true, data: draft };
+  })
+
+  .put(
+    '/drafts/:draftId',
+    async ({ request, params, body }) => ({
+      ok: true,
+      data: noteDraftService.updateDraft(params.draftId, body, getRequestProjectRoot(request)),
+    }),
+    {
+      body: t.Object({
+        expectedDraftRevision: t.Number(),
+        ...noteDraftSnapshotSchema,
+      }),
+    },
+  )
+
+  .post(
+    '/drafts/:draftId/discard',
+    async ({ request, params, body }) => {
+      noteDraftService.discardDraft(
+        params.draftId,
+        requirePositiveRevision(body.expectedDraftRevision, 'expectedDraftRevision'),
+        getRequestProjectRoot(request),
+      );
+      return { ok: true };
+    },
+    { body: t.Object({ expectedDraftRevision: t.Number() }) },
+  )
+
+  // ── Recoverable trash (must precede /:id) ────────────────────────────────
+  .get('/trash', async ({ request }) => {
+    return {
+      ok: true,
+      data: await notesService.listTrashedNotes(getRequestProjectRoot(request)),
+    };
+  })
+
+  // ── Whole-vault deterministic archive (must precede /:id) ───────────────
+  .get('/export', async ({ request }) => {
+    const artifact = await notesService.createVaultExport(getRequestProjectRoot(request));
+    return new Response(artifact.body, {
+      headers: {
+        'Content-Type': artifact.contentType,
+        'Content-Length': String(artifact.contentLength),
+        'Content-Disposition': `attachment; filename="${artifact.filename}"`,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  })
+
+  // ── Whole-vault verified restore (must precede /:id) ───────────────────
+  .post('/import-vault/preview', async ({ request }) => {
+    const { file } = await vaultArchiveForm(request);
+    const plan = await previewVaultRestore(file, getRequestProjectRoot(request));
+    return { ok: true, data: publicVaultRestoreResult(plan) };
+  })
+
+  .post('/import-vault/restore', async ({ request }) => {
+    const { file, archiveSha256 } = await vaultArchiveForm(request);
+    if (!archiveSha256) {
+      throw new ValidationError('Preview this exact vault archive before restoring it');
+    }
+    const result = await commitVaultRestore(file, getRequestProjectRoot(request), archiveSha256);
+    broadcastNotesNetworkUpdate('update', undefined, undefined, mutationOrigin(request));
+    return { ok: true, data: publicVaultRestoreResult(result) };
   })
 
   // ── Serve attachment (must come before /:id to avoid path collision) ──────
@@ -301,11 +719,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .put(
     '/:id',
     async ({ request, params, body }) => {
-      if (body.expectedRevision === undefined) {
-        throw new ValidationError('expectedRevision is required for note updates');
-      }
+      requirePositiveRevision(body.expectedRevision);
       const note = await notesService.updateNote(params.id, body, getRequestProjectRoot(request));
-      broadcastNotesNetworkUpdate('update', note.id);
+      broadcastNotesNetworkUpdate('update', note.id, undefined, mutationOrigin(request));
       return { ok: true, data: note };
     },
     {
@@ -330,10 +746,70 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       throw new ValidationError('x-kory-note-revision is required for note deletion');
     }
-    await notesService.deleteNote(params.id, getRequestProjectRoot(request), expectedRevision);
-    broadcastNotesNetworkUpdate('delete', params.id);
-    return { ok: true };
+    const trashed = await notesService.deleteNote(
+      params.id,
+      getRequestProjectRoot(request),
+      expectedRevision,
+    );
+    broadcastNotesNetworkUpdate('delete', params.id, undefined, mutationOrigin(request));
+    return { ok: true, data: trashed };
   })
+
+  // ── Restore a trashed note ───────────────────────────────────────────────
+  .post(
+    '/:id/restore',
+    async ({ request, params, body }) => {
+      const note = await notesService.restoreNote(
+        params.id,
+        getRequestProjectRoot(request),
+        requirePositiveRevision(body.expectedRevision),
+      );
+      broadcastNotesNetworkUpdate('create', note.id, undefined, mutationOrigin(request));
+      return { ok: true, data: note };
+    },
+    {
+      body: t.Object({ expectedRevision: t.Number() }),
+    },
+  )
+
+  // ── Immutable revision history ───────────────────────────────────────────
+  .get('/:id/revisions', async ({ request, params }) => ({
+    ok: true,
+    data: await notesService.listNoteRevisions(params.id, getRequestProjectRoot(request)),
+  }))
+
+  .get('/:id/revisions/:revision', async ({ request, params }) => {
+    const revision = Number(params.revision);
+    if (!Number.isSafeInteger(revision) || revision < 1) {
+      throw new ValidationError('revision must be a positive integer');
+    }
+    const snapshot = await notesService.getNoteRevision(
+      params.id,
+      revision,
+      getRequestProjectRoot(request),
+    );
+    if (!snapshot) throw new NotFoundError('Note revision', `${params.id}@${revision}`);
+    return { ok: true, data: snapshot };
+  })
+
+  .post(
+    '/:id/revisions/:revision/restore',
+    async ({ request, params, body }) => {
+      const revision = Number(params.revision);
+      if (!Number.isSafeInteger(revision) || revision < 1) {
+        throw new ValidationError('revision must be a positive integer');
+      }
+      const note = await notesService.restoreNoteRevision(
+        params.id,
+        revision,
+        requirePositiveRevision(body.expectedRevision),
+        getRequestProjectRoot(request),
+      );
+      broadcastNotesNetworkUpdate('update', note.id, undefined, mutationOrigin(request));
+      return { ok: true, data: note };
+    },
+    { body: t.Object({ expectedRevision: t.Number() }) },
+  )
 
   // ── Get backlinks ─────────────────────────────────────────────────────────
   .get('/:id/backlinks', async ({ request, params }) => {
@@ -369,6 +845,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       buffer,
       getRequestProjectRoot(request),
     );
+    broadcastNotesNetworkUpdate('update', params.id, undefined, mutationOrigin(request));
     return { ok: true, data: attachment };
   })
 
@@ -380,5 +857,6 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       throw new NotFoundError('Attachment', params.attachmentId);
     }
     await notesService.deleteAttachment(params.attachmentId, projectRoot);
+    broadcastNotesNetworkUpdate('update', params.id, undefined, mutationOrigin(request));
     return { ok: true };
   });

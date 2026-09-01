@@ -26,6 +26,7 @@ import {
   personalRoot,
   auditBundledSkillDefinitions,
   BUNDLED_SKILL_DEFINITIONS,
+  createFreeformSkillDraft,
   createSkillDraft,
   deriveAuthoritativeTargetMedium,
   getBundledSkillContent,
@@ -227,6 +228,7 @@ describe('local Koryphaios skills', () => {
       'personal',
       'implementation',
       original.content.replace('minimum sufficient', 'smallest sufficient'),
+      original.hash,
     );
     expect(draft.state).toBe('draft');
     expect(
@@ -261,7 +263,7 @@ describe('local Koryphaios skills', () => {
       requires: ['testing-engineering'],
       conflicts: ['documents-communication'],
       excludes: ['marketing only'],
-      targetMedia: ['native'],
+      targetMedia: ['wearable display'],
       depth: 1,
       contextBudget: 2600,
     });
@@ -272,7 +274,7 @@ describe('local Koryphaios skills', () => {
     expect(draft.metadata.requires).toEqual(['testing-engineering']);
     expect(draft.metadata.conflicts).toEqual(['documents-communication']);
     expect(draft.metadata.excludes).toEqual(['marketing only']);
-    expect(draft.metadata.targetMedia).toEqual(['native']);
+    expect(draft.metadata.targetMedia).toEqual(['wearable display']);
     expect(draft.metadata.depth).toBe(1);
     expect(draft.metadata.contextBudget).toBe(2600);
     expect(draft.validation.valid).toBe(true);
@@ -295,6 +297,23 @@ describe('local Koryphaios skills', () => {
     expect(readFileSync(join(root, '.koryphaios', 'skills', draft.name, 'DRAFT.md'), 'utf8')).toBe(
       draft.content,
     );
+  });
+
+  test('creates a freeform draft without requiring the routing template', () => {
+    const draft = createFreeformSkillDraft(root, {
+      source: 'project',
+      name: 'my-own-workflow',
+      description: 'Follow my custom workflow exactly as written.',
+      instructions: 'Do the first thing, make the user-defined decision, then verify the result.',
+    });
+
+    expect(draft.state).toBe('draft');
+    expect(draft.instructions).toContain('make the user-defined decision');
+    expect(draft.metadata.activation).toEqual([]);
+    expect(draft.metadata.shouldTrigger).toEqual([]);
+    expect(draft.metadata.targetMedia).toEqual(['any']);
+    expect(draft.validation.valid).toBe(true);
+    expect(testSkill(draft).passed).toBe(false);
   });
 
   test('publishes same-scope drafts with a process-safe no-replace CAS and bounded stale cleanup', async () => {
@@ -396,6 +415,7 @@ describe('local Koryphaios skills', () => {
       'personal',
       'implementation',
       implementation.content.replace('name: implementation', 'name: forged-implementation'),
+      implementation.hash,
     );
     expect(() => activateSkill(root, 'personal', 'implementation')).toThrow(
       'Skill frontmatter name must match its directory name',
@@ -627,6 +647,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       'personal',
       'terminal-interface',
       terminal.content.replace('conflicts: []', 'conflicts: ["web-interface"]'),
+      terminal.hash,
     );
     activateSkill(root, 'personal', 'terminal-interface');
     const contract = createTaskContract('Build a web and terminal interface');
@@ -649,6 +670,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
           'broader: ["visual-interface-design", "frontend-engineering"]',
           'broader: ["missing-design-discipline", "frontend-engineering"]',
         ),
+      web.hash,
     );
     expect(() => activateSkill(root, 'personal', 'web-interface')).toThrow(
       'web-interface references missing broader missing-design-discipline',
@@ -1190,6 +1212,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       'personal',
       'planning',
       original.content.replace('dependency-ordered', 'locally edited'),
+      original.hash,
     );
     activateSkill(root, 'personal', 'planning');
     expect(applyDefaultUpdate(root, 'planning', 'keep-local').content).toContain('locally edited');
@@ -1261,6 +1284,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       'personal',
       'planning',
       original.content.replace('dependency-ordered', 'locally edited'),
+      original.hash,
     );
     activateSkill(root, 'personal', 'planning');
     expect(existsSync(join(personalRoot(), 'planning', 'DRAFT.md'))).toBe(false);

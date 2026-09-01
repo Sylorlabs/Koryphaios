@@ -21,6 +21,7 @@ import {
   getAttachment,
   getNote,
   getProjectSyncStatus,
+  PROJECT_DOCUMENT_SCAN_LIMIT,
   listNotes,
   saveAttachment,
   syncProjectDocuments,
@@ -417,16 +418,18 @@ describe('long-form Notes hardening', () => {
     await syncProjectDocuments(scanProject);
 
     unlinkSync(authoritative);
-    for (let index = 0; index < 1_001; index++) {
+    for (let index = 0; index < PROJECT_DOCUMENT_SCAN_LIMIT + 1; index++) {
       writeFileSync(join(scanProject, `document-${String(index).padStart(4, '0')}.md`), '# Doc\n');
     }
     const partial = await syncProjectDocuments(scanProject);
 
     expect(partial.truncated).toBe(true);
-    expect(partial.discovered).toBe(1_000);
+    expect(partial.scanLimitReached).toBe(true);
+    expect(partial.discovered).toBe(PROJECT_DOCUMENT_SCAN_LIMIT);
+    expect(partial.message).toContain('scan limit was reached');
     expect(getProjectSyncStatus(scanProject)).toMatchObject({
       state: 'partial',
-      discovered: 1_000,
+      discovered: PROJECT_DOCUMENT_SCAN_LIMIT,
     });
     expect(await getNote(previous!.id, scanProject)).not.toBeNull();
   });

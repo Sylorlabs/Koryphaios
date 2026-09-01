@@ -126,6 +126,9 @@ export interface AgentSettings {
   /** Automatically compact after a completed turn reaches the safe context threshold. */
   autoCompactEnabled: boolean;
 
+  /** Context-window percentage at which automatic compaction triggers. */
+  autoCompactThreshold: number;
+
   /** Show complete reasoning blocks expanded in the chat feed by default. */
   reasoningExpandedByDefault: boolean;
 
@@ -161,6 +164,11 @@ export interface AgentSettings {
    *  Checked first — before any mode-based logic. Interaction tools
    *  (ask_user, ask_manager) cannot be blocked. */
   toolBlocklist: string[];
+
+  /** Per-tier tool overrides so each permission preset can be customized
+   *  independently. Keys are permissionMode values (ask, edits, guarded, yolo,
+   *  custom). Each entry stores allow/block lists scoped to that tier. */
+  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[] }>;
 
   /** Bash base-command patterns that bypass the sandbox safety prompt.
    *  Populated when the user chooses "Allow and add to allowlist" in the
@@ -236,6 +244,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
   autoCompactEnabled: true,
+  autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,
   skillCollisionChoices: {},
   permissionMode: 'guarded',
@@ -244,6 +253,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   subAgentApproval: 'manager',
   toolAllowlist: [],
   toolBlocklist: [],
+  toolPermissionsByTier: {},
   bashCommandAllowlist: [],
   bashCommandBlocklist: [],
 };
@@ -558,6 +568,7 @@ const SETTINGS_NUMERIC_RANGES: Partial<Record<keyof AgentSettings, { min: number
     approvalThresholdLines: { min: 1, max: 1_000_000 },
     contextKeepRecentTurns: { min: 1, max: 100 },
     contextPruneMinChars: { min: 100, max: 1_000_000 },
+    autoCompactThreshold: { min: 10, max: 99 },
   };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -632,6 +643,19 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
           )
           .slice(0, 200),
       );
+      continue;
+    }
+    if (typedKey === 'toolPermissionsByTier') {
+      if (!isPlainRecord(value)) continue;
+      const tierMap: Record<string, { allow: string[]; block: string[] }> = {};
+      for (const [tier, entry] of Object.entries(value).slice(0, 20)) {
+        if (!/^[a-z][a-z0-9_-]{0,31}$/i.test(tier)) continue;
+        if (!isPlainRecord(entry)) continue;
+        const allow = boundedStringList((entry as Record<string, unknown>).allow);
+        const block = boundedStringList((entry as Record<string, unknown>).block);
+        tierMap[tier] = { allow: allow ?? [], block: block ?? [] };
+      }
+      next.toolPermissionsByTier = tierMap;
       continue;
     }
     const allowed = SETTING_ENUMS[typedKey];

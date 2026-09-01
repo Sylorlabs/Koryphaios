@@ -35,11 +35,34 @@ export interface ProviderEvent {
   toolInput?: string;
   tokensIn?: number;
   tokensOut?: number;
+  /** Input tokens processed across every provider request in one agentic turn.
+   * This may differ from `tokensIn`, which is the final context occupancy used
+   * by Kory's context meter. Billing prefers this field when present. */
+  billingTokensIn?: number;
+  /** Output tokens processed across every provider request in one agentic turn. */
+  billingTokensOut?: number;
+  /** Per-request usage retained for threshold-sensitive provider pricing.
+   * Billing records these samples instead of the aggregate fields when set. */
+  billingUsageSamples?: Array<{
+    tokensIn: number;
+    tokensOut: number;
+    tokensCacheRead?: number;
+    tokensCacheWrite?: number;
+  }>;
+  /** Limits of the provider evidence behind this usage sample. */
+  usagePrecision?: 'provider-reported' | 'input-context-only';
   // Cached prompt tokens NOT already counted in tokensIn (Anthropic-style
   // usage, where input_tokens excludes cache reads/writes). Consumers add
   // tokensIn + tokensCache to get real context occupancy. Providers whose
   // prompt count already includes cached tokens (OpenAI-style) must omit this.
   tokensCache?: number;
+  /** Cached input included inside tokensIn (OpenAI/Codex-style usage).
+   *  Informational only: never add this to context occupancy again. */
+  tokensCacheRead?: number;
+  /** Input tokens written into a provider prompt cache. Depending on the
+   * provider these may be included in tokensIn (OpenAI/Google) or excluded
+   * from it (Anthropic). Informational and billing metadata only. */
+  tokensCacheWrite?: number;
   /** Account selected by Koryphaios for this provider-emitted usage event. */
   accountId?: string;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
@@ -120,6 +143,10 @@ export interface StreamRequest {
   workingDirectory?: string;
   /** Koryphaios session id — used by cloud providers (Jules) for session continuity. */
   sessionId?: string;
+  /** Persisted generation of any provider-owned native transcript for this session. */
+  providerConversationRevision?: number;
+  /** Nonlinear history (regenerate/rewind) must not resume or adopt a stale native transcript. */
+  forceFreshConversation?: boolean;
   /** Host-imposed sandbox for a REMOTE agentic turn: the CLI runs on the host,
    *  so the host confines it (OS jail + tool gating). Absent for local turns
    *  (full access). See SandboxPolicy. */
@@ -133,9 +160,26 @@ export interface StreamRequest {
   /** Versioned prompt/task provenance; providers transport but never invent these values. */
   promptManifestHash?: string;
   taskContractHash?: string;
+  /** Harness-authored cache topology. Providers validate the prefix hash
+   * before using it and silently fall back to implicit caching if stale. */
+  promptCache?: PromptCachePlan;
   /** Narrow provider-native research subprocess. It receives no Kory MCP,
    * workspace, or general agent authority and may only return cited text. */
   capabilityProfile?: 'research-only';
+}
+
+export interface PromptCachePlan {
+  version: 1;
+  /** Exact immutable prefix of systemPrompt, never a second source of truth. */
+  stableSystemPrompt: string;
+  stablePrefixHash: string;
+  /** Opaque, non-identifying routing bucket. Provider adapters may combine it
+   * with model, tool-schema, and reasoning hashes. */
+  cacheKey: string;
+  strategy: 'hierarchical';
+  /** Anthropic default. Other providers translate to their native policy. */
+  ttl: '5m';
+  estimatedStableTokens: number;
 }
 
 // ─── Provider interface ─────────────────────────────────────────────────────

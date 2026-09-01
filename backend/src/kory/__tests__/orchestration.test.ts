@@ -269,6 +269,30 @@ describe('KoryManager Orchestration', () => {
     expect(result).toContain('worker:openai:gpt-4o');
   });
 
+  test('worker delegation and direct replies fail closed for archived sessions', async () => {
+    const runWorker = mock(async () => 'must not run');
+    manager['sessions'] = {
+      get: async () => ({ id: 'session-archived', archivedAt: 1_000 }),
+      getActive: async () => undefined,
+    } as any;
+    manager['workerPipeline']['runWorkerPipeline'] = runWorker;
+
+    await expect(manager.runWorkerPipeline('session-archived', 'Do archived work')).rejects.toThrow(
+      /Recover this archived chat/,
+    );
+    expect(runWorker).not.toHaveBeenCalled();
+    const afterDelegate = manager.tryAcquireSessionMutationBarrier('session-archived');
+    expect(afterDelegate).not.toBeNull();
+    afterDelegate?.release();
+
+    await expect(
+      manager.sendMessageToAgent('session-archived', 'missing-agent', 'Continue'),
+    ).rejects.toThrow(/Recover this archived chat/);
+    const afterReply = manager.tryAcquireSessionMutationBarrier('session-archived');
+    expect(afterReply).not.toBeNull();
+    afterReply?.release();
+  });
+
   test('critic gate never lets a producer verify its own work when no distinct model exists', async () => {
     manager['runHardChecks'] = mock(async () => ({ passed: true, output: 'checks passed' }));
     manager['resolveActiveRouting'] = mock(() => ({ model: 'producer-model', provider: 'openai' }));

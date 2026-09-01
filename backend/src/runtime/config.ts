@@ -459,18 +459,12 @@ export function migrateMcpEnvSecretsOutOfConfig(projectRoot: string): void {
 export function syncProviderConfigsToConfig(
   projectRoot: string,
   providers: Record<string, unknown>,
-): void {
+): boolean {
   const configPath = join(projectRoot, 'koryphaios.json');
-
-  if (!existsSync(configPath)) {
-    return;
-  }
-
   const tempPath = `${configPath}.${process.pid}.tmp`;
 
   try {
-    const content = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(content);
+    const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf-8')) : {};
 
     // Secrets go to the 0600 store; koryphaios.json gets everything else.
     const { clean, secrets } = stripProviderSecrets(providers);
@@ -483,7 +477,7 @@ export function syncProviderConfigsToConfig(
         ...((merged[name] as Record<string, unknown>) ?? {}),
         ...(cfg as Record<string, unknown>),
       };
-      for (const field of ['apiKey', 'authToken'])
+      for (const field of ['apiKey', 'authToken', 'headers'])
         delete (merged[name] as Record<string, unknown>)[field];
     }
     config.providers = merged;
@@ -505,7 +499,9 @@ export function syncProviderConfigsToConfig(
       sessionId: 'global',
       agentId: 'system',
     });
+    return true;
   } catch (err) {
     serverLog.warn({ err }, 'Failed to sync provider configurations to koryphaios.json');
+    return false;
   }
 }

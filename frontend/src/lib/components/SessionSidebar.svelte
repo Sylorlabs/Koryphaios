@@ -10,6 +10,7 @@
   import Plus from 'lucide-svelte/icons/plus';
   import Search from 'lucide-svelte/icons/search';
   import Pencil from 'lucide-svelte/icons/pencil';
+  import Archive from 'lucide-svelte/icons/archive';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import Check from 'lucide-svelte/icons/check';
   import X from 'lucide-svelte/icons/x';
@@ -41,6 +42,8 @@
   let showConfirmDialog = $state<boolean>(false);
   let showDeleteAllDialog = $state<boolean>(false);
   let sessionToDeleteId = $state<string>('');
+  let archivingId = $state<string>('');
+  let preparingDeleteAll = $state(false);
   let creating = $state(false);
   let goalClock = $state(Date.now());
   const nowClock = useNow();
@@ -51,7 +54,7 @@
   let lastLoadedSessionId = $state<string>('');
 
   onMount(() => {
-    void goalStore.refresh();
+    if (!goalStore.loaded) void goalStore.refresh();
     return () => nowClock.unsubscribe();
   });
 
@@ -68,10 +71,25 @@
   }
 
   $effect(() => {
-    // Keep currentSessionId in sync if needed by other parts of the sidebar
     if (sessionStore.activeSessionId && sessionStore.activeSessionId !== currentSessionId) {
       currentSessionId = sessionStore.activeSessionId;
     }
+  });
+
+  $effect(() => {
+    const path = projectStore.currentPath;
+    void path;
+    untrack(() => {
+      if (!path) return;
+      const active = sessionStore.sessions.find((s) => s.id === sessionStore.activeSessionId);
+      if (!active || active.workingDirectory !== path) {
+        const forProject = sessionStore.sessionsForProject(path);
+        if (forProject.length > 0) {
+          const latest = forProject.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+          if (latest.id !== sessionStore.activeSessionId) sessionStore.activeSessionId = latest.id;
+        }
+      }
+    });
   });
 
   async function handleCreateSession(event?: MouseEvent) {
@@ -161,13 +179,42 @@
     showConfirmDialog = false;
   }
 
-  function requestDeleteAll() {
+  async function handleArchive(e: MouseEvent, id: string) {
+    e.stopPropagation();
+    if (isGuidedDemo) {
+      toastStore.info('Sample sessions are protected in the demo.');
+      return;
+    }
+    if (archivingId) return;
+    if (editingId === id) cancelRename();
+    archivingId = id;
+    try {
+      await sessionStore.archiveSession(id);
+    } finally {
+      archivingId = '';
+    }
+  }
+
+  async function requestDeleteAll() {
     if (isGuidedDemo) {
       toastStore.info('Sample sessions are protected in the demo.');
       return;
     }
     if (sessionStore.sessions.length === 0) return;
-    showDeleteAllDialog = true;
+    preparingDeleteAll = true;
+    try {
+      const loaded = await sessionStore.fetchArchivedSessions();
+      if (!loaded) {
+        toastStore.error(
+          sessionStore.archivedError ||
+            'Could not verify archived chats. Nothing was deleted; try again when the backend is available.',
+        );
+        return;
+      }
+      showDeleteAllDialog = true;
+    } finally {
+      preparingDeleteAll = false;
+    }
   }
 
   async function handleConfirmDeleteAll() {
@@ -364,12 +411,14 @@
         class="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[9px] font-semibold transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-35"
         style="color:var(--color-error)"
         onclick={requestDeleteAll}
-        disabled={sessionStore.sessions.length === 0}
+        disabled={sessionStore.sessions.length === 0 || preparingDeleteAll}
         aria-label="Delete all sessions"
         title="Delete all sessions"
       >
-        <Trash2 size={10} />
-        Delete all sessions
+        {#if preparingDeleteAll}<LoaderCircle size={10} class="animate-spin" />{:else}<Trash2
+            size={10}
+          />{/if}
+        {preparingDeleteAll ? 'Checking archives…' : 'Delete all sessions'}
       </button>
     </div>
     {#each sessionStore.groupedSessions as group (group.label)}
@@ -486,14 +535,15 @@
               {/if}
               <div class="pointer-events-none relative z-[1] flex-1 min-w-0">
                 <div class="text-sm font-medium truncate" style="color: var(--color-text-primary);">
-                  {session.title}
+                  {session.workingDirectory ? projectDisplayName(session.workingDirectory) : session.title}
                 </div>
                 <div class="flex items-center gap-2.5 flex-wrap" style="margin-top: 6px;">
                   {#if sessionStore.activeSessionId === session.id && !collaborationStore.activeJoinedSession}
                     <span
                       class="inline-flex items-center rounded-full px-1.5 py-0.5 font-bold uppercase tracking-wider"
                       style="font-size: 9px; color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 14%, transparent);"
-                      >Open</span
+                      title={session.workingDirectory ? projectDisplayName(session.workingDirectory) : 'Open'}
+                      >{session.workingDirectory ? projectDisplayName(session.workingDirectory) : 'Open'}</span
                     >
                   {/if}
                   {#if primaryGoal}
@@ -584,6 +634,21 @@
                     type="button"
                     class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
                     style="color: var(--color-text-muted);"
+                    disabled={archivingId === session.id}
+                    onclick={(e) => handleArchive(e, session.id)}
+                    ondblclick={(e) => e.stopPropagation()}
+                    title="Archive chat"
+                    aria-label="Archive chat"
+                  >
+                    {#if archivingId === session.id}<LoaderCircle
+                        size={12}
+                        class="animate-spin"
+                      />{:else}<Archive size={12} />{/if}
+                  </button>
+                  <button
+                    type="button"
+                    class="p-1.5 rounded-lg hover:bg-[var(--color-surface-4)] transition-colors"
+                    style="color: var(--color-text-muted);"
                     onclick={(e) => confirmDelete(e, session.id)}
                     ondblclick={(e) => e.stopPropagation()}
                     title="Delete (Shift+Click to skip confirmation)"
@@ -631,7 +696,7 @@
 <ConfirmDialog
   open={showDeleteAllDialog}
   title="Delete All Sessions?"
-  message={`This permanently deletes all ${sessionStore.sessions.length} personal sessions and their message history. Any running work will be stopped. Are you sure?`}
+  message={`This permanently deletes ${sessionStore.sessions.length} active ${sessionStore.sessions.length === 1 ? 'chat' : 'chats'} and ${sessionStore.archivedSessions.length} archived ${sessionStore.archivedSessions.length === 1 ? 'chat' : 'chats'}, including their complete history. Any running work will be stopped. This cannot be undone.`}
   confirmLabel="Delete All Sessions"
   cancelLabel="Cancel"
   variant="danger"

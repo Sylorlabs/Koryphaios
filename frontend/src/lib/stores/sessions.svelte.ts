@@ -4,27 +4,136 @@
 import type { Session } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { projectStore } from './project.svelte';
+import { resolveSessionSelection } from './session-selection';
 import { browser } from '$app/environment';
 import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 import { wsStore } from './websocket.svelte';
+import { loadLastSessionId, saveLastSessionId } from './navigation-preferences';
+import {
+  parseMessageDisplayProjection,
+  type DisplayMessage,
+  type MessageDisplayBoundary,
+} from '$lib/utils/message-variants';
 
 const NEW_CHAT_BEHAVIOR_KEY = 'koryphaios-new-chat-behavior';
 
 export type NewChatBehavior = 'always-create';
 
-let sessions = $state<Session[]>([]);
+export type LifecycleSession = Session & {
+  status?: 'active' | 'archived';
+  archivedAt?: number;
+};
+
+let sessions = $state<LifecycleSession[]>([]);
+let archivedSessions = $state<LifecycleSession[]>([]);
 let activeSessionId = $state<string>('');
 let searchQuery = $state<string>('');
 let loading = $state<boolean>(false);
+let archivedLoading = $state<boolean>(false);
+let archivedLoaded = $state<boolean>(false);
+let archivedError = $state<string | null>(null);
 let createSessionPromise: Promise<string | null> | null = null;
 let fetchGeneration = 0;
+let archivedFetchGeneration = 0;
 let hasRestoredInitialSession = false;
 // A websocket update can already be in flight when a session is deleted.
 // Keep a short-lived tombstone until the next authoritative list confirms the
 // row is gone, rather than allowing that stale event to recreate it in the UI.
 const deletedSessionIds = new Set<string>();
+// Archiving, like deletion, removes a row from the active projection. Keep a
+// lifecycle tombstone so an older session.updated event cannot put that row
+// back in the sidebar before the archive/restore revision reaches the client.
+const archivedSessionIds = new Set<string>();
+const latestSessionVersions = new Map<string, number>();
+// Bind boundary metadata to the exact history snapshot that carried it. A
+// session-keyed cache lets concurrent reloads pair an older message array with
+// a newer CAS boundary (or vice versa), which is unsafe for branch activation.
+const messageDisplayBoundaries = new WeakMap<DisplayMessage[], MessageDisplayBoundary>();
+
+function lifecycleVersion(session: LifecycleSession): number | null {
+  return typeof session.version === 'number' ? session.version : null;
+}
+
+function rememberVersion(session: LifecycleSession): void {
+  const version = lifecycleVersion(session);
+  if (version === null) return;
+  const current = latestSessionVersions.get(session.id);
+  if (current === undefined || version >= current) latestSessionVersions.set(session.id, version);
+}
+
+function isStaleLifecycleUpdate(session: LifecycleSession): boolean {
+  const version = lifecycleVersion(session);
+  const current = latestSessionVersions.get(session.id);
+  return version !== null && current !== undefined && version < current;
+}
+
+function archivedTimestamp(session: LifecycleSession): number {
+  return session.archivedAt ?? session.updatedAt;
+}
+
+function sortActive(list: LifecycleSession[]): LifecycleSession[] {
+  return [...list].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function sortArchived(list: LifecycleSession[]): LifecycleSession[] {
+  return [...list].sort((left, right) => archivedTimestamp(right) - archivedTimestamp(left));
+}
+
+function upsertSession(
+  list: LifecycleSession[],
+  session: LifecycleSession,
+  sorter: (items: LifecycleSession[]) => LifecycleSession[],
+): LifecycleSession[] {
+  const next = list.some((item) => item.id === session.id)
+    ? list.map((item) => (item.id === session.id ? session : item))
+    : [session, ...list];
+  return sorter(next);
+}
+
+function replacementSessionId(remaining: LifecycleSession[]): string {
+  if (projectStore.scope === 'project' && projectStore.currentPath) {
+    return (
+      remaining.find((session) => session.workingDirectory === projectStore.currentPath)?.id ?? ''
+    );
+  }
+  return remaining[0]?.id ?? '';
+}
+
+function removeFromActiveProjection(id: string): void {
+  sessions = sessions.filter((session) => session.id !== id);
+  wsStore.unsubscribeFromSession(id);
+  if (activeSessionId === id) {
+    activeSessionId = replacementSessionId(sessions);
+    saveLastSession(activeSessionId);
+  }
+}
+
+function responseDetail(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const record = body as Record<string, unknown>;
+  for (const key of ['detail', 'error', 'message']) {
+    if (typeof record[key] === 'string' && record[key]) return record[key];
+  }
+  return '';
+}
+
+function parseResponseBody(text: string): Record<string, unknown> {
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function invalidateSessionFetches(): void {
+  fetchGeneration += 1;
+  archivedFetchGeneration += 1;
+  archivedLoading = false;
+}
 
 function loadNewChatBehavior(): NewChatBehavior {
   if (!browser) return 'always-create';
@@ -57,13 +166,15 @@ function setNewChatBehavior(behavior: NewChatBehavior): void {
 }
 
 // Active-session navigation is derived from the backend's authoritative
-// updated order. Browser storage must not resurrect a chat whose project was
-// moved or deleted outside Koryphaios.
+// updated order. Browser storage contains only an opaque id and is always
+// validated against that authoritative list before it can be restored.
 function loadLastSession(): string {
-  return '';
+  return loadLastSessionId();
 }
 
-function saveLastSession(_id: string): void {}
+function saveLastSession(id: string): void {
+  saveLastSessionId(id);
+}
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
@@ -91,13 +202,13 @@ async function fetchSessions(): Promise<boolean> {
         if (import.meta.env.DEV)
           console.error('fetchSessions failed', { status: res.status, body: text || '(empty)' });
       }
-      toastStore.error(friendlyHttpError(res.status, 'load sessions'), {
+      toastStore.error(detail || friendlyHttpError(res.status, 'load sessions'), {
         onRetry: () => void fetchSessions(),
       });
       return false;
     }
     if (!text.trim()) return false;
-    let data: { ok?: boolean; data?: Session[] };
+    let data: { ok?: boolean; data?: LifecycleSession[] };
     try {
       data = JSON.parse(text);
     } catch (err: unknown) {
@@ -115,20 +226,31 @@ async function fetchSessions(): Promise<boolean> {
       for (const id of deletedSessionIds) {
         if (!returnedIds.has(id)) deletedSessionIds.delete(id);
       }
-      sessions = data.data.filter((session) => !deletedSessionIds.has(session.id));
-      const lastSessionId = hasRestoredInitialSession ? '' : loadLastSession();
-      hasRestoredInitialSession = true;
-
-      // If we have a stored session and it still exists, use it
-      if (lastSessionId && sessions.find((s) => s.id === lastSessionId)) {
-        activeSessionId = lastSessionId;
-      } else if (activeSessionId && !sessions.find((s) => s.id === activeSessionId)) {
-        // Never jump to an unrelated conversation because a refresh returned a
-        // differently scoped list. Deletion explicitly chooses a replacement.
-        activeSessionId = '';
-      } else if (!activeSessionId && sessions.length > 0) {
-        activeSessionId = sessions[0].id;
+      for (const session of data.data) {
+        rememberVersion(session);
+        // GET /api/sessions is the authoritative active projection. A returned
+        // id therefore confirms that a restore completed, even for a legacy
+        // response that does not yet include an explicit status field.
+        if (session.status !== 'archived') archivedSessionIds.delete(session.id);
+        else archivedSessionIds.add(session.id);
       }
+      sessions = sortActive(
+        data.data.filter(
+          (session) =>
+            session.status !== 'archived' &&
+            !deletedSessionIds.has(session.id) &&
+            !archivedSessionIds.has(session.id),
+        ),
+      );
+      const storedSessionId = hasRestoredInitialSession ? '' : loadLastSession();
+      hasRestoredInitialSession = true;
+      activeSessionId = resolveSessionSelection({
+        storedSessionId,
+        currentActiveId: activeSessionId,
+        sessionIds: sessions.map((s) => s.id),
+      });
+      // Selection invariants live in resolveSessionSelection (session-selection.ts):
+      // stored restore wins, vanished actives clear, empty stays empty.
 
       // Save the resolved active session
       if (activeSessionId) {
@@ -147,6 +269,53 @@ async function fetchSessions(): Promise<boolean> {
   }
 }
 
+/** Load the settings-only archived projection without mixing it into the
+ * active sidebar list. Returns false with an inspectable error for retry UI. */
+async function fetchArchivedSessions(): Promise<boolean> {
+  if (!browser) return false;
+  const myGeneration = ++archivedFetchGeneration;
+  archivedLoading = true;
+  archivedError = null;
+  try {
+    const res = await apiFetch(apiUrl('/api/sessions/archived'));
+    const text = await res.text();
+    const body = parseResponseBody(text);
+    if (!res.ok || body.ok !== true || !Array.isArray(body.data)) {
+      if (myGeneration !== archivedFetchGeneration) return false;
+      archivedError = responseDetail(body) || friendlyHttpError(res.status, 'load archived chats');
+      return false;
+    }
+
+    if (myGeneration !== archivedFetchGeneration) return true;
+    const returned = body.data as LifecycleSession[];
+    for (const session of returned) {
+      rememberVersion(session);
+      archivedSessionIds.add(session.id);
+    }
+    archivedSessions = sortArchived(
+      returned.filter((session) => !deletedSessionIds.has(session.id)),
+    );
+    // A server-side archive is authoritative even if this window did not
+    // initiate it. Remove those rows from the active projection now.
+    const archivedIds = new Set(returned.map((session) => session.id));
+    const activeWasArchived = activeSessionId ? archivedIds.has(activeSessionId) : false;
+    sessions = sessions.filter((session) => !archivedIds.has(session.id));
+    if (activeWasArchived) {
+      wsStore.unsubscribeFromSession(activeSessionId);
+      activeSessionId = replacementSessionId(sessions);
+      saveLastSession(activeSessionId);
+    }
+    archivedLoaded = true;
+    return true;
+  } catch (err: unknown) {
+    if (myGeneration !== archivedFetchGeneration) return false;
+    archivedError = err instanceof Error ? err.message : 'Failed to load archived chats';
+    return false;
+  } finally {
+    if (myGeneration === archivedFetchGeneration) archivedLoading = false;
+  }
+}
+
 /** Resolve the working directory a brand-new chat should be scoped to.
  *  - Inside a workspace: scope='all' → no workingDirectory (workspace-level chat);
  *    scope='project' → use the active project's path. Falls back to workspace-level
@@ -157,7 +326,7 @@ function resolveNewChatWorkingDirectory(): string | undefined {
     if (projectStore.scope === 'project' && projectStore.currentPath) {
       return projectStore.currentPath;
     }
-    return undefined;
+    return projectStore.workspaceRoot ?? undefined;
   }
   return projectStore.currentPath ?? undefined;
 }
@@ -243,7 +412,7 @@ async function createSessionRequest(
   return null;
 }
 
-async function renameSession(id: string, title: string) {
+async function renameSession(id: string, title: string): Promise<boolean> {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
       method: 'PATCH',
@@ -252,14 +421,109 @@ async function renameSession(id: string, title: string) {
       },
       body: JSON.stringify({ title }),
     });
-    const data = await res.json();
-    if (data.ok) {
-      sessions = sessions.map((s) => (s.id === id ? data.data : s));
-      toastStore.success('Session renamed');
+    const text = await res.text();
+    const data = parseResponseBody(text);
+    if (!res.ok || data.ok !== true) {
+      toastStore.error(responseDetail(data) || friendlyHttpError(res.status, 'rename chat'));
+      return false;
     }
+
+    const current =
+      sessions.find((session) => session.id === id) ??
+      archivedSessions.find((session) => session.id === id);
+    const updated =
+      data.data && typeof data.data === 'object'
+        ? (data.data as LifecycleSession)
+        : current
+          ? { ...current, title }
+          : null;
+    if (updated) {
+      rememberVersion(updated);
+      archivedFetchGeneration += 1;
+      archivedLoading = false;
+      sessions = sessions.map((session) => (session.id === id ? updated : session));
+      archivedSessions = archivedSessions.map((session) => (session.id === id ? updated : session));
+    }
+    toastStore.success('Chat renamed');
+    return true;
   } catch (err: unknown) {
     console.warn('Failed to rename session:', err instanceof Error ? err.message : String(err));
-    toastStore.error('Failed to rename session');
+    toastStore.error('Failed to rename chat');
+    return false;
+  }
+}
+
+async function archiveSession(id: string): Promise<boolean> {
+  const current = sessions.find((session) => session.id === id);
+  if (!current) return false;
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}/archive`), { method: 'POST' });
+    const text = await res.text();
+    const body = parseResponseBody(text);
+    if (!res.ok || body.ok !== true) {
+      toastStore.error(responseDetail(body) || friendlyHttpError(res.status, 'archive chat'));
+      return false;
+    }
+
+    const archived =
+      body.data && typeof body.data === 'object'
+        ? (body.data as LifecycleSession)
+        : ({ ...current, status: 'archived', archivedAt: Date.now() } satisfies LifecycleSession);
+    rememberVersion(archived);
+    invalidateSessionFetches();
+    archivedSessionIds.add(id);
+    archivedSessions = upsertSession(archivedSessions, archived, sortArchived);
+    removeFromActiveProjection(id);
+    toastStore.success('Chat archived', {
+      duration: 8000,
+      action: () => void restoreSession(id),
+      actionLabel: 'Undo',
+    });
+    return true;
+  } catch (err: unknown) {
+    console.warn('Failed to archive session:', err instanceof Error ? err.message : String(err));
+    toastStore.error('Failed to archive chat');
+    return false;
+  }
+}
+
+async function restoreSession(id: string): Promise<boolean> {
+  const current = archivedSessions.find((session) => session.id === id);
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}/restore`), { method: 'POST' });
+    const text = await res.text();
+    const body = parseResponseBody(text);
+    if (!res.ok || body.ok !== true) {
+      toastStore.error(responseDetail(body) || friendlyHttpError(res.status, 'restore chat'));
+      return false;
+    }
+
+    const restoredFallback = current
+      ? (({ archivedAt: _archivedAt, ...session }) => ({
+          ...session,
+          status: 'active' as const,
+        }))(current)
+      : null;
+    const restored =
+      body.data && typeof body.data === 'object'
+        ? (body.data as LifecycleSession)
+        : restoredFallback;
+    if (!restored) {
+      toastStore.error('The restored chat was not returned by the backend');
+      return false;
+    }
+    rememberVersion(restored);
+    invalidateSessionFetches();
+    deletedSessionIds.delete(id);
+    archivedSessionIds.delete(id);
+    archivedSessions = archivedSessions.filter((session) => session.id !== id);
+    sessions = upsertSession(sessions, restored, sortActive);
+    toastStore.success('Chat restored to the sidebar');
+    return true;
+  } catch (err: unknown) {
+    console.warn('Failed to restore session:', err instanceof Error ? err.message : String(err));
+    toastStore.error('Failed to restore chat');
+    return false;
   }
 }
 
@@ -284,7 +548,7 @@ async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): 
   }
 }
 
-async function deleteSession(id: string) {
+async function deleteSession(id: string): Promise<boolean> {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
       method: 'DELETE',
@@ -303,21 +567,19 @@ async function deleteSession(id: string) {
         );
       }
       toastStore.error(detail || friendlyHttpError(res.status, 'delete session'));
-      return;
+      return false;
     }
     deletedSessionIds.add(id);
-    sessions = sessions.filter((s) => s.id !== id);
-    // Drop the WS subscription so a reconnect does not replay stale events
-    // for this session and resurrect it in the sidebar.
-    wsStore.unsubscribeFromSession(id);
-    if (activeSessionId === id) {
-      activeSessionId = sessions[0]?.id ?? '';
-      saveLastSession(activeSessionId);
-    }
-    toastStore.success('Session deleted');
+    invalidateSessionFetches();
+    archivedSessionIds.delete(id);
+    archivedSessions = archivedSessions.filter((session) => session.id !== id);
+    removeFromActiveProjection(id);
+    toastStore.success('Chat deleted');
+    return true;
   } catch (err) {
     if (import.meta.env.DEV) console.error('deleteSession exception:', err);
-    toastStore.error('Failed to delete session');
+    toastStore.error('Failed to delete chat');
+    return false;
   }
 }
 
@@ -340,11 +602,15 @@ async function deleteAllSessions(): Promise<boolean> {
       return false;
     }
 
-    for (const session of sessions) {
+    for (const session of [...sessions, ...archivedSessions]) {
       deletedSessionIds.add(session.id);
       wsStore.unsubscribeFromSession(session.id);
     }
     sessions = [];
+    archivedSessions = [];
+    archivedSessionIds.clear();
+    archivedLoaded = true;
+    archivedError = null;
     activeSessionId = '';
     saveLastSession('');
     toastStore.success(
@@ -358,26 +624,9 @@ async function deleteAllSessions(): Promise<boolean> {
   }
 }
 
-async function fetchMessages(
-  sessionId: string,
-  signal?: AbortSignal,
-): Promise<
-  Array<{
-    id: string;
-    role: string;
-    content: string;
-    createdAt: number;
-    model?: string;
-    cost?: number;
-    variantGroupId?: string;
-    variantIndex?: number;
-  }>
-> {
+async function fetchMessages(sessionId: string, signal?: AbortSignal): Promise<DisplayMessage[]> {
   const res = await apiFetch(apiUrl(`/api/messages/${sessionId}`), { signal });
   const text = await res.text();
-  if (!res.ok) {
-    throw new Error(friendlyHttpError(res.status, 'load chat history'));
-  }
   let data: { ok?: boolean; data?: unknown; error?: string };
   try {
     data = text ? JSON.parse(text) : {};
@@ -388,10 +637,17 @@ async function fetchMessages(
     );
     throw new Error('Chat history returned an invalid response.');
   }
-  if (!data.ok || !Array.isArray(data.data)) {
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || friendlyHttpError(res.status, 'load chat history'));
+  }
+  try {
+    const projection = parseMessageDisplayProjection(data.data);
+    messageDisplayBoundaries.set(projection.messages, projection.boundary);
+    return projection.messages;
+  } catch (error) {
+    if (error instanceof Error) throw error;
     throw new Error(data.error || 'Chat history was not returned by the backend.');
   }
-  return data.data;
 }
 
 // ─── Session grouping by date ───────────────────────────────────────────────
@@ -427,26 +683,34 @@ function groupByDate(sessionList: Session[]): SessionGroup[] {
 }
 
 // Handle WebSocket updates to sessions
-function handleSessionUpdate(session: Session) {
+function handleSessionUpdate(session: LifecycleSession) {
   if (deletedSessionIds.has(session.id)) return;
-  const existingIndex = sessions.findIndex((s) => s.id === session.id);
-  if (existingIndex >= 0) {
-    // Update existing session
-    sessions = sessions.map((s) => (s.id === session.id ? session : s));
-  } else {
-    // Add new session to the list (avoid duplicates from race conditions)
-    sessions = [session, ...sessions];
+  if (isStaleLifecycleUpdate(session)) return;
+  rememberVersion(session);
+
+  const belongsToArchive =
+    session.status === 'archived' ||
+    (session.status !== 'active' && archivedSessionIds.has(session.id));
+  if (belongsToArchive) {
+    invalidateSessionFetches();
+    archivedSessionIds.add(session.id);
+    archivedSessions = upsertSession(archivedSessions, session, sortArchived);
+    removeFromActiveProjection(session.id);
+    return;
   }
+
+  const wasArchived = archivedSessionIds.has(session.id);
+  if (wasArchived) invalidateSessionFetches();
+  archivedSessionIds.delete(session.id);
+  archivedSessions = archivedSessions.filter((item) => item.id !== session.id);
+  sessions = upsertSession(sessions, session, sortActive);
 }
 
 function handleSessionDeleted(sessionId: string) {
   deletedSessionIds.add(sessionId);
-  sessions = sessions.filter((s) => s.id !== sessionId);
-  wsStore.unsubscribeFromSession(sessionId);
-  if (activeSessionId === sessionId) {
-    activeSessionId = sessions[0]?.id ?? '';
-    saveLastSession(activeSessionId);
-  }
+  archivedSessionIds.delete(sessionId);
+  archivedSessions = archivedSessions.filter((session) => session.id !== sessionId);
+  removeFromActiveProjection(sessionId);
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
@@ -454,6 +718,18 @@ function handleSessionDeleted(sessionId: string) {
 export const sessionStore = {
   get sessions() {
     return sessions;
+  },
+  get archivedSessions() {
+    return archivedSessions;
+  },
+  get archivedLoading() {
+    return archivedLoading;
+  },
+  get archivedLoaded() {
+    return archivedLoaded;
+  },
+  get archivedError() {
+    return archivedError;
   },
   get activeSessionId() {
     return activeSessionId;
@@ -498,18 +774,31 @@ export const sessionStore = {
   },
 
   /** Demo-mode only: inject canned sessions + active id (no backend). */
-  seedDemoSessions(list: Session[], activeId: string) {
+  seedDemoSessions(list: LifecycleSession[], activeId: string) {
     sessions = list;
+    archivedSessions = [];
     activeSessionId = activeId;
+    archivedError = null;
+    archivedLoaded = false;
+    archivedSessionIds.clear();
+    deletedSessionIds.clear();
+    latestSessionVersions.clear();
+    for (const session of list) rememberVersion(session);
   },
   fetchSessions,
+  fetchArchivedSessions,
   createSession,
   newChat,
   renameSession,
+  archiveSession,
+  restoreSession,
   setInteractionMode,
   deleteSession,
   deleteAllSessions,
   fetchMessages,
+  getMessageDisplayBoundary(messages: DisplayMessage[]): MessageDisplayBoundary | undefined {
+    return messageDisplayBoundaries.get(messages);
+  },
   handleSessionUpdate,
   handleSessionDeleted,
 };

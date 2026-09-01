@@ -233,6 +233,7 @@ type ProviderStatus = {
 
 let providerStatus: ProviderStatus[];
 let lastSetCredentials: { name: string; body: Record<string, unknown> } | null;
+let customProviderConfigs: Record<string, any>;
 
 function authHeader(): Record<string, string> {
   return {
@@ -280,10 +281,14 @@ beforeAll(async () => {
     },
   ];
   lastSetCredentials = null;
+  customProviderConfigs = {};
 
   const providers = {
     getStatus: () => providerStatus,
-    getAvailableProviderTypes: () => [{ name: 'openai', authMode: 'api_key' }],
+    getAvailableProviderTypes: () => [
+      { name: 'openai', authMode: 'api_key' },
+      ...Object.keys(customProviderConfigs).map((name) => ({ name, authMode: 'api_key' })),
+    ],
     async setCredentials(name: string, body: Record<string, unknown>) {
       lastSetCredentials = { name, body };
       providerStatus = providerStatus.map((status) =>
@@ -305,7 +310,27 @@ beforeAll(async () => {
       return { success: true };
     },
     get: () => ({ refreshModels: async () => {} }),
-    getConfigs: () => ({}),
+    getConfigs: () => customProviderConfigs,
+    registerCustomProvider(definition: Record<string, any>) {
+      customProviderConfigs[definition.id] = {
+        name: definition.id,
+        custom: true,
+        disabled: false,
+        selectedModels: definition.models ?? [],
+        ...definition,
+      };
+      return { success: true };
+    },
+    setCustomProviderIcon(name: string, customIcon: Record<string, unknown> | undefined) {
+      const existing = customProviderConfigs[name];
+      if (!existing) return { success: false, error: 'Custom provider not found' };
+      existing.customIcon = customIcon;
+      return { success: true };
+    },
+    removeCustomProvider(name: string) {
+      delete customProviderConfigs[name];
+    },
+    async autoConnectCliProviders() {},
     removeApiKey(name: string) {
       providerStatus = providerStatus.map((status) =>
         status.name === name ? { ...status, authenticated: false, enabled: false } : status,
@@ -345,6 +370,140 @@ describe('provider routes', () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.data).toEqual(providerStatus);
+  });
+
+  test('custom-provider creation rejects an invalid key without persisting it', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('{"error":"Invalid token"}', { status: 401 })) as typeof fetch;
+    try {
+      const { response, body } = await request('/api/providers/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Rejected Gateway',
+          kind: 'openai',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'bad-key',
+        }),
+      });
+
+      expect(response.status).toBe(422);
+      expect(body).toMatchObject({ ok: false, canSaveUnverified: false });
+      expect(body.error).toContain('Nothing was saved');
+      expect(customProviderConfigs['custom:rejected-gateway']).toBeUndefined();
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('custom-provider creation detects catalog access, normalizes, and persists models', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ data: [{ id: 'gateway-chat' }] }), {
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    try {
+      const { response, body } = await request('/api/providers/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Verified Gateway',
+          kind: 'openai',
+          baseUrl: 'https://gateway.example/v1/chat/completions',
+          apiKey: 'valid-key',
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(body.data).toMatchObject({
+        id: 'custom:verified-gateway',
+        catalogDetected: true,
+        normalizedBaseUrl: 'https://gateway.example/v1',
+        models: ['gateway-chat'],
+      });
+      expect(customProviderConfigs['custom:verified-gateway']).toMatchObject({
+        baseUrl: 'https://gateway.example/v1',
+        models: ['gateway-chat'],
+        catalogDetected: true,
+      });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('catalog-less endpoints require explicit models before saving unverified', async () => {
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response('{}', { status: 404 })) as typeof fetch;
+    try {
+      const missingModels = await request('/api/providers/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Manual Gateway',
+          baseUrl: 'https://manual.example/v1',
+          allowUnverified: true,
+        }),
+      });
+      expect(missingModels.response.status).toBe(422);
+      expect(missingModels.body).toMatchObject({
+        ok: false,
+        canSaveUnverified: true,
+        requiresManualModels: true,
+      });
+
+      const saved = await request('/api/providers/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: 'Manual Gateway',
+          baseUrl: 'https://manual.example/v1',
+          models: ['manual-chat'],
+          allowUnverified: true,
+        }),
+      });
+      expect(saved.response.status).toBe(200);
+      expect(saved.body.data).toMatchObject({ catalogDetected: false, models: ['manual-chat'] });
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+
+  test('Gemini-compatible custom providers fail closed without an API key', async () => {
+    const { response, body } = await request('/api/providers/custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label: 'Keyless Gemini',
+        kind: 'gemini',
+        baseUrl: 'https://gemini.example/v1beta',
+        models: ['gemini-custom'],
+        allowUnverified: true,
+      }),
+    });
+
+    expect(response.status).toBe(422);
+    expect(body).toMatchObject({ ok: false, canSaveUnverified: false });
+    expect(body.error).toContain('require an API key');
+    expect(customProviderConfigs['custom:keyless-gemini']).toBeUndefined();
+  });
+
+  test('custom-provider deletion cannot target a built-in provider id', async () => {
+    customProviderConfigs.openai = {
+      name: 'openai',
+      custom: false,
+      disabled: false,
+    };
+    try {
+      const { response, body } = await request('/api/providers/custom/openai', {
+        method: 'DELETE',
+      });
+
+      expect(response.status).toBe(404);
+      expect(body).toEqual({ ok: false, error: 'Custom provider not found' });
+      expect(customProviderConfigs.openai).toBeDefined();
+    } finally {
+      delete customProviderConfigs.openai;
+    }
   });
 
   test('PUT /api/providers/:name accepts model selection fields', async () => {

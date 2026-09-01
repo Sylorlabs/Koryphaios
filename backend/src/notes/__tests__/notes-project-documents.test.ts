@@ -3,17 +3,32 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from '
 // These tests do heavy filesystem operations (mkdtemp, file sync, project
 // scans) that are slow under parallel test load. Give them a generous timeout.
 setDefaultTimeout(60000);
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDb } from '../../db';
 import {
   createNote,
   deleteNote,
+  getAttachment,
   getNote,
+  getNoteRevision,
   importMemoryAsNotes,
   importMemoryAsNotesWithReport,
   listNotes,
+  listNoteRevisions,
+  resolveNoteRef,
+  restoreNote,
+  saveAttachment,
   syncProjectDocuments,
   updateNote,
 } from '../notes-service';
@@ -69,14 +84,142 @@ describe('project documents', () => {
     expect((await getNote(note!.id))?.content).toContain('Revised plan');
   });
 
-  test('deletes the backing Markdown file only for its matching project note', async () => {
+  test('does not rebuild links when only an unchanged file mtime moved', async () => {
+    const unchangedProject = join(fixtureRoot, 'unchanged-mtime-project');
+    mkdirSync(unchangedProject, { recursive: true });
+    const source = join(unchangedProject, 'linked.md');
+    writeFileSync(source, '# Linked\n\nSee [[Target]].\n');
+    writeFileSync(join(unchangedProject, 'target.md'), '# Target\n');
+    await syncProjectDocuments(unchangedProject);
+
+    const future = new Date(Date.now() + 5_000);
+    utimesSync(source, future, future);
+
+    const result = await syncProjectDocuments(unchangedProject);
+
+    expect(result).toMatchObject({ created: 0, updated: 0, relinked: 0 });
+  });
+
+  test('preserves frontmatter tags and resolves duplicate filenames by source path', async () => {
+    const project = join(fixtureRoot, 'frontmatter-and-qualified-links');
+    mkdirSync(join(project, 'one'), { recursive: true });
+    mkdirSync(join(project, 'two'), { recursive: true });
+    writeFileSync(
+      join(project, 'one', 'topic.md'),
+      '---\ntags: [architecture, durable]\n---\n# First topic\n',
+    );
+    writeFileSync(join(project, 'two', 'topic.md'), '# Second topic\n');
+
+    await syncProjectDocuments(project);
+    const projectNotes = await listNotes(undefined, project);
+    const first = projectNotes.find((note) => note.sourcePath === 'one/topic.md');
+    const second = projectNotes.find((note) => note.sourcePath === 'two/topic.md');
+
+    expect(first?.tags).toEqual(['project-file', 'markdown', 'architecture', 'durable']);
+    expect(await resolveNoteRef('topic', project)).toBeNull();
+    expect(await resolveNoteRef('one/topic.md', project)).toBe(first?.id);
+    expect(await resolveNoteRef('/Project/two/topic', project)).toBe(second?.id);
+  });
+
+  test('preserves DB-owned metadata across an unambiguous byte-identical source move', async () => {
+    const project = join(fixtureRoot, 'identity-relocation');
+    mkdirSync(project, { recursive: true });
+    const beforePath = join(project, 'before.md');
+    const linkerPath = join(project, 'linker.md');
+    writeFileSync(beforePath, '---\ntags: [decision]\n---\n# Durable decision\n');
+    writeFileSync(linkerPath, '# Linker\n\nSee [[before]].\n');
+    await syncProjectDocuments(project);
+
+    const before = (await listNotes(undefined, project)).find(
+      (note) => note.sourcePath === 'before.md',
+    );
+    expect(before).toBeTruthy();
+    const personalized = await updateNote(
+      before!.id,
+      { pinned: true, includeInContext: true, expectedRevision: before!.revision },
+      project,
+    );
+    const attachment = await saveAttachment(
+      personalized.id,
+      'evidence.txt',
+      'text/plain',
+      Buffer.from('move-safe evidence'),
+      project,
+    );
+
+    mkdirSync(join(project, 'decisions'), { recursive: true });
+    renameSync(beforePath, join(project, 'decisions', 'after.md'));
+    const result = await syncProjectDocuments(project);
+    const after = (await listNotes(undefined, project)).find(
+      (note) => note.sourcePath === 'decisions/after.md',
+    );
+
+    expect(result).toMatchObject({
+      identityRelocations: 1,
+      ambiguousMoveCandidates: 0,
+      created: 0,
+      removed: 0,
+    });
+    expect(after).toMatchObject({
+      pinned: true,
+      includeInContext: true,
+      tags: ['project-file', 'markdown', 'decision'],
+    });
+    expect(after?.id).not.toBe(before?.id);
+    expect(await getNote(before!.id, project)).toBeNull();
+    expect((await getAttachment(attachment.id, project))?.noteId).toBe(after?.id);
+    expect((await listNoteRevisions(after!.id, project)).map((entry) => entry.revision)).toEqual([
+      3, 2, 1,
+    ]);
+    expect((await getNoteRevision(after!.id, 1, project))?.sourcePath).toBe('before.md');
+    expect(readFileSync(linkerPath, 'utf8')).toContain('[[after]]');
+  });
+
+  test('does not transfer metadata between unrelated files with identical content', async () => {
+    const project = join(fixtureRoot, 'identity-copy-not-move');
+    mkdirSync(project, { recursive: true });
+    const oldPath = join(project, 'old.md');
+    const newPath = join(project, 'new.md');
+    const repeatedContent = '# Template\n\nSame bytes do not prove identity.\n';
+    writeFileSync(oldPath, repeatedContent);
+    await syncProjectDocuments(project);
+    const oldNote = (await listNotes(undefined, project)).find(
+      (note) => note.sourcePath === 'old.md',
+    );
+    expect(oldNote).toBeTruthy();
+    await updateNote(oldNote!.id, { pinned: true, expectedRevision: oldNote!.revision }, project);
+
+    // Create the copy while the old inode still exists, then remove the old
+    // path. The bytes match exactly but this is provably not a rename.
+    writeFileSync(newPath, repeatedContent);
+    rmSync(oldPath);
+    const result = await syncProjectDocuments(project);
+    const newNote = (await listNotes(undefined, project)).find(
+      (note) => note.sourcePath === 'new.md',
+    );
+
+    expect(result).toMatchObject({
+      identityRelocations: 0,
+      ambiguousMoveCandidates: 1,
+      created: 1,
+      removed: 1,
+    });
+    expect(newNote?.pinned).toBe(false);
+    expect(newNote?.id).not.toBe(oldNote?.id);
+  });
+
+  test('moves a project note to recoverable trash without deleting its Markdown source', async () => {
     const note = (await listNotes(undefined, secondProject)).find(
       (entry) => entry.sourcePath === 'plan.md',
     );
     expect(note).toBeTruthy();
-    await deleteNote(note!.id);
-    expect(existsSync(join(secondProject, 'plan.md'))).toBe(false);
+    const trashed = await deleteNote(note!.id, secondProject, note!.revision);
+    expect(existsSync(join(secondProject, 'plan.md'))).toBe(true);
     expect(existsSync(join(firstProject, 'plan.md'))).toBe(true);
+    expect(await getNote(note!.id, secondProject)).toBeNull();
+    expect((await restoreNote(note!.id, secondProject, trashed.revision)).sourcePath).toBe(
+      'plan.md',
+    );
   });
 
   test('imports every project memory document without overwriting same-titled notes', async () => {

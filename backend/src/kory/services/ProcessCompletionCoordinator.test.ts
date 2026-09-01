@@ -185,6 +185,39 @@ describe('ProcessCompletionCoordinator', () => {
     expect(coordinator.pendingCount('session-1')).toBe(0);
   });
 
+  test('reconstructs and deduplicates an exact durable batch after restart', async () => {
+    let busy = true;
+    let resolveWake: (() => void) | undefined;
+    const woke = new Promise<void>((resolve) => {
+      resolveWake = resolve;
+    });
+    const batches: string[][] = [];
+    const coordinator = new ProcessCompletionCoordinator({
+      isSessionBusy: () => busy,
+      hasActiveAgentProcess: () => false,
+      wakeSession: async (_sessionId, events) => {
+        batches.push(events.map((event) => event.id));
+        resolveWake?.();
+      },
+    });
+    const terminalBeforeCallback = {
+      ...completion('persisted-first'),
+      status: 'orphaned' as const,
+      terminalReason: 'backend-restart-missing' as const,
+      recovered: true,
+    };
+    const second = { ...completion('persisted-second'), recovered: true };
+
+    expect(coordinator.enqueueRecoveredBatch([terminalBeforeCallback, second])).toBe(2);
+    expect(coordinator.enqueueRecoveredBatch([terminalBeforeCallback, second])).toBe(0);
+    expect(coordinator.pendingCount('session-1')).toBe(2);
+
+    busy = false;
+    coordinator.notifySessionIdle('session-1');
+    await woke;
+    expect(batches).toEqual([['persisted-first', 'persisted-second']]);
+  });
+
   test('cancellation clears queued work and cannot reawaken until a new turn resumes', async () => {
     let busy = true;
     const batches: string[][] = [];

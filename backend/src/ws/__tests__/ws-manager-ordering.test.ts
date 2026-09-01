@@ -164,6 +164,67 @@ describe('WSManager canonical ordering', () => {
     expect(replay.every((message) => message.replayed === true)).toBe(true);
   });
 
+  test('can suppress stale actionable replay rows while preserving the ordered cursor', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    manager.broadcastToSession('session-1', {
+      type: 'kory.ask_user',
+      timestamp: 10,
+      payload: { questionId: 'answered-question', question: 'Old?', options: [] },
+    });
+    manager.broadcastToSession('session-1', {
+      type: 'session.changes',
+      timestamp: 20,
+      payload: { reviewId: 'resolved-review', changes: [] },
+    });
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 30,
+      payload: { agentId: 'kory-manager', content: 'durable transcript evidence' },
+    });
+
+    const sent: string[] = [];
+    const socket = {
+      data: { id: 'client-filtered' },
+      readyState: 1,
+      send: (value: string) => sent.push(value),
+      close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>;
+    manager.add(socket);
+    manager.subscribeClientToSession(
+      'client-filtered',
+      'session-1',
+      undefined,
+      (event) => event.type !== 'kory.ask_user' && event.type !== 'session.changes',
+    );
+
+    expect(sent.map((value) => JSON.parse(value))).toEqual([
+      expect.objectContaining({
+        type: 'stream.delta',
+        sequence: 3,
+        replayed: true,
+      }),
+    ]);
+
+    // The suppressed rows were still consumed by the replay cursor. A later
+    // reconnect can therefore resume at the true sequence rather than looping
+    // forever over an intentionally non-actionable historical projection.
+    const resumed: string[] = [];
+    const resumeSocket = {
+      data: { id: 'client-resumed' },
+      readyState: 1,
+      send: (value: string) => resumed.push(value),
+      close: () => {},
+    } as unknown as ServerWebSocket<WSClientData>;
+    manager.add(resumeSocket);
+    manager.subscribeClientToSession('client-resumed', 'session-1', { epoch: 1, sequence: 3 });
+    expect(resumed).toEqual([]);
+  });
+
   test('does not replay events for an erased session on reconnect', () => {
     const { sqlite, log } = createLog();
     databases.push(sqlite);
@@ -248,5 +309,64 @@ describe('WSManager canonical ordering', () => {
       payload: { session: { id: 'session-1', title: 'should not appear' } },
     });
     expect(sent.length).toBe(1); // still only the pre-erasure event
+  });
+
+  test('publishes a durable timeline rewrite to every subscriber and replays it after reconnect', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sentA: string[] = [];
+    const sentB: string[] = [];
+    const sentOther: string[] = [];
+    const socket = (id: string, sent: string[]) =>
+      ({
+        data: { id },
+        readyState: 1,
+        send: (value: string) => sent.push(value),
+        close: () => {},
+      }) as unknown as ServerWebSocket<WSClientData>;
+    manager.add(socket('client-a', sentA));
+    manager.add(socket('client-b', sentB));
+    manager.add(socket('client-other', sentOther));
+    manager.subscribeClientToSession('client-a', 'session-1');
+    manager.subscribeClientToSession('client-b', 'session-1');
+    manager.subscribeClientToSession('client-other', 'session-2');
+
+    manager.broadcastToSession('session-1', {
+      type: 'system.error',
+      timestamp: 10,
+      payload: { error: 'discarded failure' },
+    });
+    sentA.length = 0;
+    sentB.length = 0;
+
+    expect(manager.rewriteSessionTimeline('session-1')).toEqual({ epoch: 2, latestSequence: 1 });
+    for (const sent of [sentA, sentB]) {
+      expect(sent.map((value) => JSON.parse(value))).toEqual([
+        expect.objectContaining({
+          type: 'session.timeline_rewritten',
+          sessionId: 'session-1',
+          epoch: 2,
+          sequence: 1,
+          payload: { eventEpoch: 2, reason: 'conversation_rewind' },
+        }),
+      ]);
+    }
+    expect(sentOther).toEqual([]);
+
+    const reconnect: string[] = [];
+    manager.add(socket('client-reconnect', reconnect));
+    manager.subscribeClientToSession('client-reconnect', 'session-1', { epoch: 1, sequence: 1 });
+    expect(reconnect.map((value) => JSON.parse(value))).toEqual([
+      expect.objectContaining({
+        type: 'session.timeline_rewritten',
+        epoch: 2,
+        sequence: 1,
+        replayed: true,
+      }),
+    ]);
   });
 });

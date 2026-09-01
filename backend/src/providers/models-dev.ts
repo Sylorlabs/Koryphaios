@@ -27,6 +27,18 @@ const PROVIDER_KEY: Record<string, string> = {
   xai: 'xai',
   deepseek: 'deepseek',
   groq: 'groq',
+  // CLI providers — these ship with bare model ids from their local CLI
+  // discovery (e.g. `agy models` -> "gemini-3.7-flash-high"). The CLI itself
+  // does not report the context window or output limit; models.dev is the
+  // only authoritative open data source for these Gemini/Claude/GPT slugs.
+  antigravity: 'google',
+  // Codex (CLI) and codex-auth report slugs like "gpt-5.6-terra" / "gpt-5.5"
+  // via the local `model/list` JSON-RPC and the on-disk models_cache.json.
+  // The CLI omits the context window from the live response, so we keep the
+  // on-disk cache reader authoritative for the real number; models.dev acts
+  // as a fallback when the cache is empty (e.g. first-time discovery before
+  // the CLI has refreshed its own cache).
+  codex: 'openai',
   // OpenCode providers — /models returns bare ids only
   opencodezen: 'opencode',
   opencodego: 'opencode-go',
@@ -178,36 +190,66 @@ function levelsFromOptions(
  * refresh has populated it. Does NOT trigger a refresh itself; call
  * warmModelsDevCache() or rely on the provider's refreshModelsInBackground
  * (which calls applyModelsDevMetadata after live discovery) to populate it.
+ *
+ * `providerName` is the Koryphaios provider name. `keys` is the ordered list
+ * of models.dev provider keys to look under (the first one that has the model
+ * wins). Defaults to a single key from PROVIDER_KEY. Antigravity is the main
+ * caller that needs a multi-key list: its CLI exposes `gemini-*` (google),
+ * `claude-*` (anthropic) and `gpt-oss-*` (openai) under one subscription.
  */
-export function applyModelsDevMetadata(providerName: string, models: ModelDef[]): ModelDef[] {
-  const key = PROVIDER_KEY[providerName];
-  if (!key) return models;
-  const entries = cache?.[key]?.models;
-  if (!entries) return models;
-
-  // Build a case-insensitive lookup so provider-reported ids (which may differ
-  // in casing) still match models.dev keys.
-  const entriesByLower = new Map<string, ModelsDevEntry>();
-  for (const [k, v] of Object.entries(entries)) {
-    entriesByLower.set(k.toLowerCase(), v);
+export function applyModelsDevMetadata(
+  providerName: string,
+  models: ModelDef[],
+  keys?: string[],
+): ModelDef[] {
+  const candidateKeys = (keys && keys.length > 0
+    ? keys
+    : PROVIDER_KEY[providerName]
+      ? [PROVIDER_KEY[providerName]]
+      : []) as string[];
+  if (candidateKeys.length === 0) return models;
+  const entriesByLower = new Map<string, { entry: ModelsDevEntry; key: string }>();
+  for (const key of candidateKeys) {
+    const entries = cache?.[key]?.models;
+    if (!entries) continue;
+    for (const [k, v] of Object.entries(entries)) {
+      const lk = k.toLowerCase();
+      if (!entriesByLower.has(lk)) entriesByLower.set(lk, { entry: v, key });
+    }
   }
+  if (entriesByLower.size === 0) return models;
 
   return models.map((m) => {
     const rawId = m.apiModelId ?? m.id;
     // Strip the Koryphaios provider prefix (e.g. "opencodezen.claude-sonnet-4" → "claude-sonnet-4")
     const bare = rawId.replace(new RegExp(`^${providerName}\\.`), '');
-    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids)
+    // Some CLI providers (antigravity, codex) report reasoning-level
+    // suffixes that models.dev does not carry in the bare id (e.g.
+    // "gemini-3.7-flash-high", "claude-opus-4-6-thinking"). Try stripping
+    // known effort/variant suffixes so the family-level entry (e.g.
+    // "gemini-3.7-flash") still gets the verified context.
+    const variantSuffixes = /-(?:low|medium|high|xhigh|ultra|max|none|thinking|pro)$/i;
+    const strippedVariant = variantSuffixes.test(bare)
+      ? bare.replace(variantSuffixes, '')
+      : '';
+    // Try: exact key, case-insensitive key, last segment after "/" (namespaced ids),
+    // then the variant-stripped slug as a last-resort fallback.
     const candidates = [
       bare,
       bare.toLowerCase(),
       bare.includes('/') ? bare.split('/').pop()! : '',
       rawId,
       rawId.toLowerCase(),
+      strippedVariant,
+      strippedVariant.toLowerCase(),
     ].filter(Boolean);
     let e: ModelsDevEntry | undefined;
     for (const c of candidates) {
-      e = entries[c] ?? entriesByLower.get(c.toLowerCase());
-      if (e) break;
+      const hit = entriesByLower.get(c.toLowerCase());
+      if (hit) {
+        e = hit.entry;
+        break;
+      }
     }
     if (!e) return m;
     const levels = levelsFromOptions(e.reasoning_options);
@@ -228,6 +270,7 @@ export interface ModelsDevPricing {
   /** $ per million output tokens */
   outPerM: number;
   cacheReadPerM?: number;
+  cacheWritePerM?: number;
 }
 
 /** Live per-token pricing from models.dev for any known provider/model.
@@ -251,7 +294,12 @@ export function getModelsDevPricing(
         entries[cand] ?? Object.values(entries).find((e) => e.id?.toLowerCase() === low);
       const c = entry?.cost;
       if (c && typeof c.input === 'number' && typeof c.output === 'number') {
-        return { inPerM: c.input, outPerM: c.output, cacheReadPerM: c.cache_read };
+        return {
+          inPerM: c.input,
+          outPerM: c.output,
+          cacheReadPerM: c.cache_read,
+          cacheWritePerM: c.cache_write,
+        };
       }
     }
     return null;

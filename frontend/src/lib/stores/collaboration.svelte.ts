@@ -39,6 +39,95 @@ export interface CollaborationSession {
   policy: CollaborationPolicy;
 }
 
+/**
+ * A joined team iframe needs its relay invite URL to resume. That URL is a
+ * bearer capability, so keep it in tab-scoped sessionStorage only: it survives
+ * a renderer refresh, but is never written as a long-lived local preference.
+ */
+const JOINED_SESSIONS_STORAGE_KEY = 'koryphaios-joined-team-sessions-v1';
+const MAX_JOINED_SESSIONS = 20;
+
+type JoinedSessionStorage = {
+  sessions: JoinedTeamSession[];
+  activeSessionId: string | null;
+};
+
+function sessionStorageOrNull(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function parseJoinedSession(value: unknown): JoinedTeamSession | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
+  const sessionName = typeof input.sessionName === 'string' ? input.sessionName.trim() : '';
+  const inviteUrl = typeof input.inviteUrl === 'string' ? input.inviteUrl.trim() : '';
+  const tierId = typeof input.tierId === 'string' ? input.tierId.trim() : '';
+  const joinedAt = typeof input.joinedAt === 'number' ? input.joinedAt : 0;
+  if (!sessionId || !sessionName || !inviteUrl || !tierId || !Number.isFinite(joinedAt)) return null;
+  try {
+    const protocol = new URL(inviteUrl).protocol;
+    if (protocol !== 'https:' && protocol !== 'http:') return null;
+  } catch {
+    return null;
+  }
+  return {
+    sessionId: sessionId.slice(0, 200),
+    sessionName: sessionName.slice(0, 160),
+    inviteUrl,
+    tierId: tierId.slice(0, 64),
+    joinedAt,
+  };
+}
+
+function loadJoinedSessionsFromStorage(): JoinedSessionStorage {
+  const storage = sessionStorageOrNull();
+  if (!storage) return { sessions: [], activeSessionId: null };
+  try {
+    const parsed = JSON.parse(storage.getItem(JOINED_SESSIONS_STORAGE_KEY) ?? 'null') as unknown;
+    if (!parsed || typeof parsed !== 'object') return { sessions: [], activeSessionId: null };
+    const input = parsed as Record<string, unknown>;
+    const sessions = Array.isArray(input.sessions)
+      ? input.sessions
+          .map(parseJoinedSession)
+          .filter((session): session is JoinedTeamSession => session !== null)
+          .slice(-MAX_JOINED_SESSIONS)
+      : [];
+    const requestedActive =
+      typeof input.activeSessionId === 'string' ? input.activeSessionId : null;
+    return {
+      sessions,
+      activeSessionId: sessions.some((session) => session.sessionId === requestedActive)
+        ? requestedActive
+        : null,
+    };
+  } catch {
+    return { sessions: [], activeSessionId: null };
+  }
+}
+
+function persistJoinedSessions(
+  sessions: JoinedTeamSession[],
+  activeSessionId: string | null,
+): void {
+  const storage = sessionStorageOrNull();
+  if (!storage) return;
+  try {
+    storage.setItem(
+      JOINED_SESSIONS_STORAGE_KEY,
+      JSON.stringify({ sessions: sessions.slice(-MAX_JOINED_SESSIONS), activeSessionId }),
+    );
+  } catch {
+    // The user can keep collaborating in the current renderer when storage is
+    // unavailable; do not make a private relay capability fatal to the UI.
+  }
+}
+
 let activeCollab = $state<CollaborationSession | null>(null);
 let loading = $state(false);
 let pendingPrompts = $state<PendingPrompt[]>([]);
@@ -54,6 +143,9 @@ let activeJoinedSessionId = $state<string | null>(null);
 let settingsRequest = $state(0);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 let policyRevision = 0;
+let restoredHostForSessionId: string | null = null;
+let restoreInFlight: Promise<void> | null = null;
+let restoredJoinedSessions = false;
 
 function startPollingPending(sessionId: string) {
   stopPollingPending();
@@ -113,14 +205,57 @@ export const collaborationStore = {
   },
   openJoinedSession(sessionId: string) {
     activeJoinedSessionId = activateJoinedTeamSession(joinedSessions, sessionId);
+    persistJoinedSessions(joinedSessions, activeJoinedSessionId);
   },
   closeJoinedSession() {
     activeJoinedSessionId = null;
+    persistJoinedSessions(joinedSessions, activeJoinedSessionId);
   },
   leaveJoinedSession(sessionId: string) {
     const next = removeJoinedTeamSession(joinedSessions, activeJoinedSessionId, sessionId);
     joinedSessions = next.sessions;
     activeJoinedSessionId = next.activeSessionId;
+    persistJoinedSessions(joinedSessions, activeJoinedSessionId);
+  },
+
+  /** Restore non-secret host controls and tab-scoped joined iframes. */
+  async restore(baseSessionId: string | null | undefined): Promise<void> {
+    if (!restoredJoinedSessions) {
+      const restored = loadJoinedSessionsFromStorage();
+      joinedSessions = restored.sessions;
+      activeJoinedSessionId = restored.activeSessionId;
+      restoredJoinedSessions = true;
+    }
+    const sessionId = baseSessionId?.trim();
+    if (!sessionId || restoredHostForSessionId === sessionId) return;
+    if (restoreInFlight) return restoreInFlight;
+
+    restoreInFlight = (async () => {
+      try {
+        const res = await apiFetch(
+          apiUrl(`/api/collab/active?baseSessionId=${encodeURIComponent(sessionId)}`),
+        );
+        const data = await parseJsonResponse<{ ok?: boolean; data?: CollaborationSession | null }>(res);
+        if (data.ok && data.data) {
+          activeCollab = data.data;
+          startPollingPending(data.data.id);
+        } else if (activeCollab?.baseSessionId === sessionId) {
+          activeCollab = null;
+          stopPollingPending();
+        }
+        restoredHostForSessionId = sessionId;
+      } catch (err: unknown) {
+        // Keep the existing controls if a transient boot/restart race loses the
+        // first request; the next active-session change may retry.
+        console.debug(
+          'Collaboration host restore failed:',
+          err instanceof Error ? err.message : String(err),
+        );
+      } finally {
+        restoreInFlight = null;
+      }
+    })();
+    return restoreInFlight;
   },
 
   async hostSession(workspacePaths: string[] = []) {
@@ -140,6 +275,7 @@ export const collaborationStore = {
       const data = await parseJsonResponse(res);
       if (data.ok) {
         activeCollab = data.data;
+        restoredHostForSessionId = data.data.baseSessionId;
         toastStore.success('Collaboration session started!');
         startPollingPending(data.data.id);
         return true;
@@ -291,6 +427,7 @@ export const collaborationStore = {
         };
         joinedSessions = upsertJoinedTeamSession(joinedSessions, joined);
         activeJoinedSessionId = joined.sessionId;
+        persistJoinedSessions(joinedSessions, activeJoinedSessionId);
         return data.data;
       } else {
         toastStore.error(data.error || 'Failed to join session');
@@ -310,6 +447,7 @@ export const collaborationStore = {
     try {
       await apiFetch(apiUrl(`/api/collab/${activeCollab.id}/end`), { method: 'POST' });
       activeCollab = null;
+      restoredHostForSessionId = null;
       stopPollingPending();
       toastStore.info('Collaboration ended');
     } catch (err: unknown) {

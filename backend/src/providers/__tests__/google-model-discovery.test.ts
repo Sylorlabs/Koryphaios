@@ -127,4 +127,95 @@ describe('Google AI Studio model discovery', () => {
 
     expect(provider.listModels()[0]?.reasoningLevels).toEqual(['minimal', 'low', 'medium', 'high']);
   });
+
+  it('uses a custom Gemini endpoint and authenticates it without leaking the key into the URL', async () => {
+    __resetModelsDevCacheForTesting();
+    let catalogUrl = '';
+    let apiKeyHeader: string | null = null;
+    globalThis.fetch = (async (input, init) => {
+      if (String(input) === 'https://models.dev/api.json') {
+        return new Response('{}', { status: 200 });
+      }
+      catalogUrl = String(input);
+      apiKeyHeader = new Headers(init?.headers).get('x-goog-api-key');
+      return new Response(
+        JSON.stringify({
+          models: [
+            {
+              name: 'models/custom-gemini',
+              supportedGenerationMethods: ['generateContent'],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+
+    const provider = new GoogleProvider({
+      name: 'custom:gemini-gateway',
+      custom: true,
+      kind: 'gemini',
+      baseUrl: 'https://gemini-gateway.example/v1beta',
+      apiKey: 'private-key',
+      disabled: false,
+    });
+    await provider.refreshModels(true);
+
+    expect(catalogUrl).toBe('https://gemini-gateway.example/v1beta/models');
+    expect(catalogUrl).not.toContain('private-key');
+    expect(apiKeyHeader).toBe('private-key');
+    expect(provider.listModels()[0]).toMatchObject({
+      id: 'custom-gemini',
+      provider: 'custom:gemini-gateway',
+    });
+  });
+
+  it('uses the same x-goog API-key auth for a custom Gemini auth token at runtime', async () => {
+    __resetModelsDevCacheForTesting();
+    let runtimeApiKey: string | null | undefined;
+    globalThis.fetch = (async (input, init) => {
+      const request = input instanceof Request ? input : undefined;
+      const url = request?.url ?? String(input);
+      if (url === 'https://models.dev/api.json') return new Response('{}', { status: 200 });
+      const method = (request?.method ?? init?.method ?? 'GET').toUpperCase();
+      if (method === 'POST' && url.includes(':streamGenerateContent')) {
+        runtimeApiKey = new Headers(request?.headers ?? init?.headers).get('x-goog-api-key');
+        return new Response(
+          'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}\r\n\r\n',
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          models: [
+            {
+              name: 'models/custom-gemini',
+              supportedGenerationMethods: ['generateContent'],
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const provider = new GoogleProvider({
+      name: 'custom:gemini-token-gateway',
+      custom: true,
+      kind: 'gemini',
+      baseUrl: 'https://gemini-gateway.example/v1beta',
+      authToken: 'private-token',
+      disabled: false,
+    });
+    const events = [];
+    for await (const event of provider.streamResponse({
+      model: 'custom-gemini',
+      systemPrompt: 'test',
+      messages: [{ role: 'user', content: 'hello' }],
+    })) {
+      events.push(event);
+    }
+
+    expect(runtimeApiKey).toBe('private-token');
+    expect(events).toContainEqual({ type: 'content_delta', content: 'ok' });
+  });
 });

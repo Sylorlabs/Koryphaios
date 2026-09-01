@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { KoryphaiosConfig, ProviderConfig } from '@koryphaios/shared';
@@ -90,6 +90,83 @@ describe('provider verification truth', () => {
     }
   });
 
+  it('auto-connects an executable configured CLI and respects explicit disconnect', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-cli-auto-connect-'));
+    const bin = join(root, 'bin');
+    const home = join(root, 'home');
+    const settings = join(home, '.cline', 'data', 'settings');
+    const previousPath = process.env.PATH;
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    try {
+      mkdirSync(bin, { recursive: true });
+      mkdirSync(settings, { recursive: true });
+      const cline = join(bin, 'cline');
+      writeFileSync(cline, '#!/bin/sh\necho "3.0.57"\n');
+      chmodSync(cline, 0o755);
+      writeFileSync(
+        join(settings, 'providers.json'),
+        JSON.stringify({ selectedProvider: 'openrouter', model: 'synthetic-model' }),
+      );
+      process.env.PATH = `${bin}${delimiter}${previousPath ?? ''}`;
+      process.env.HOME = home;
+      process.env.USERPROFILE = home;
+      delete process.env.KORY_DISABLE_CLI_AUTODETECT;
+      const otherClisDisabled = {
+        claude: { name: 'claude', disabled: true },
+        codex: { name: 'codex', disabled: true },
+        grok: { name: 'grok', disabled: true },
+        antigravity: { name: 'antigravity', disabled: true },
+        cursor: { name: 'cursor', disabled: true },
+        devin: { name: 'devin', disabled: true },
+      } satisfies KoryphaiosConfig['providers'];
+
+      const registry = new ProviderRegistry(config(otherClisDisabled));
+      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        enabled: true,
+        connectionState: 'detected',
+      });
+
+      await registry.autoConnectCliProviders(true);
+      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        enabled: true,
+        authenticated: true,
+        supportsAuthToken: false,
+        connectionState: 'verified',
+      });
+
+      writeFileSync(cline, '#!/bin/sh\nexit 1\n');
+      expect(await registry.verifyConnection('cline')).toEqual({
+        success: true,
+        state: 'verified',
+      });
+      await registry.autoConnectCliProviders(true);
+      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        enabled: true,
+        authenticated: true,
+        connectionState: 'verified',
+      });
+
+      const disconnected = new ProviderRegistry(
+        config({ ...otherClisDisabled, cline: { name: 'cline', disabled: true } }),
+      );
+      await disconnected.autoConnectCliProviders(true);
+      expect(disconnected.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        enabled: false,
+        authenticated: false,
+        connectionState: 'not_configured',
+      });
+    } finally {
+      process.env.PATH = previousPath;
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('distinguishes local credential detection from a process-local provider probe', async () => {
     const registry = new ProviderRegistry(
       config({ openai: { name: 'openai', apiKey: 'stored-test-key', disabled: false } }),
@@ -115,6 +192,67 @@ describe('provider verification truth', () => {
     expect(registry.getStatus().find((item) => item.name === 'openai')?.verifiedAt).toBeNumber();
   });
 
+  it('verifies an enabled persisted API provider once when no durable verdict exists', async () => {
+    const registry = new ProviderRegistry(
+      config({ openai: { name: 'openai', apiKey: 'stored-test-key', disabled: false } }),
+    );
+
+    await registry.autoConnectCliProviders(true);
+
+    expect(registry.getStatus().find((item) => item.name === 'openai')).toMatchObject({
+      authenticated: true,
+      connectionState: 'verified',
+      verificationScope: 'credential',
+    });
+    expect(registry.getConfigs().openai?.lastVerifiedAt).toBeNumber();
+  });
+
+  it('restores a persisted successful verification after a backend restart', () => {
+    const verifiedAt = Date.now() - 1_000;
+    const registry = new ProviderRegistry(
+      config({
+        openai: {
+          name: 'openai',
+          apiKey: 'stored-test-key',
+          disabled: false,
+          lastVerifiedAt: verifiedAt,
+          lastVerificationScope: 'credential',
+        },
+      }),
+    );
+
+    expect(registry.getStatus().find((item) => item.name === 'openai')).toMatchObject({
+      enabled: true,
+      authenticated: true,
+      credentialDetected: true,
+      connectionState: 'verified',
+      verifiedAt,
+      verificationScope: 'credential',
+    });
+  });
+
+  it('clears a durable connection after a definitive authentication rejection', async () => {
+    const registry = new ProviderRegistry(
+      config({
+        openai: {
+          name: 'openai',
+          apiKey: 'stored-test-key',
+          disabled: false,
+          lastVerifiedAt: Date.now() - 1_000,
+          lastVerificationScope: 'credential',
+        },
+      }),
+    );
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })) as typeof fetch;
+
+    expect((await registry.verifyConnection('openai')).success).toBe(false);
+    expect(registry.getStatus().find((item) => item.name === 'openai')).toMatchObject({
+      connectionState: 'failed',
+    });
+    expect(registry.getConfigs().openai?.lastVerifiedAt).toBeUndefined();
+  });
+
   it('keeps a failed probe explicit instead of converting detection into authentication', async () => {
     const registry = new ProviderRegistry(
       config({ openai: { name: 'openai', apiKey: 'stored-test-key', disabled: false } }),
@@ -134,6 +272,34 @@ describe('provider verification truth', () => {
     expect(
       registry.getStatus().find((item) => item.name === 'openai')?.verificationError,
     ).toContain('401');
+  });
+
+  it('verifies TokenRouter against its current authenticated model catalog', async () => {
+    let requestUrl = '';
+    let requestHeaders = new Headers();
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      requestUrl = String(input);
+      requestHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ object: 'list', data: [{ id: 'test-model' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const registry = new ProviderRegistry(config());
+    expect(
+      await registry.setCredentials('tokenrouter', { apiKey: 'tr_synthetic-test-key' }),
+    ).toEqual({ success: true });
+    expect(requestUrl).toBe('https://api.tokenrouter.io/v1/models');
+    expect(requestHeaders.get('authorization')).toBe('Bearer tr_synthetic-test-key');
+    expect(registry.get('tokenrouter')).toBeDefined();
+    expect(registry.getStatus().find((item) => item.name === 'tokenrouter')).toMatchObject({
+      enabled: true,
+      authenticated: true,
+      adapterAvailable: true,
+      credentialDetected: true,
+      connectionState: 'verified',
+    });
   });
 
   it('rejects HTML, malformed, structurally wrong, and empty model-catalog 2xx responses', async () => {
@@ -206,9 +372,15 @@ describe('provider verification truth', () => {
     const originalPath = process.env.PATH;
     const originalToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
     if (process.platform === 'win32') {
-      writeFileSync(join(dir, 'claude.cmd'), '@echo off\necho 1.0.0-test\nexit /b 0\n');
+      writeFileSync(
+        join(dir, 'claude.cmd'),
+        '@echo off\nif "%1"=="auth" (echo {"loggedIn":true} & exit /b 0)\necho 1.0.0-test\nexit /b 0\n',
+      );
     } else {
-      writeFileSync(join(dir, 'claude'), '#!/bin/sh\necho "1.0.0-test"\nexit 0\n');
+      writeFileSync(
+        join(dir, 'claude'),
+        '#!/bin/sh\nif [ "$1" = "auth" ]; then echo \'{"loggedIn":true}\'; else echo "1.0.0-test"; fi\nexit 0\n',
+      );
       chmodSync(join(dir, 'claude'), 0o755);
     }
     process.env.PATH = `${dir}${delimiter}${originalPath ?? ''}`;

@@ -47,8 +47,16 @@
   let registrySearchInput = $state('');
 
   const transportOptions = [
-    { value: 'stdio', label: 'stdio', description: 'Spawn a local process and communicate over stdin/stdout.' },
-    { value: 'sse', label: 'SSE', description: 'Connect to a remote server over HTTP Server-Sent Events.' },
+    {
+      value: 'stdio',
+      label: 'stdio',
+      description: 'Spawn a local process and communicate over stdin/stdout.',
+    },
+    {
+      value: 'sse',
+      label: 'SSE',
+      description: 'Connect to a remote server over HTTP Server-Sent Events.',
+    },
   ];
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────
@@ -80,6 +88,7 @@
 
   function openBrowse(): void {
     view = 'browse';
+    void mcpServersStore.loadFeatured();
   }
 
   function closeBrowse(): void {
@@ -143,9 +152,7 @@
   }
 
   function updateEnvValue(index: number, value: string): void {
-    envRows = envRows.map((row, i) =>
-      i === index ? { ...row, value, masked: false } : row,
-    );
+    envRows = envRows.map((row, i) => (i === index ? { ...row, value, masked: false } : row));
   }
 
   function parseArgs(text: string): string[] {
@@ -258,6 +265,20 @@
   }
 
   const formValid = $derived(formName.trim().length > 0);
+
+  const featuredGroups = $derived.by(() => {
+    const groups: Array<{ category: string; servers: McpRegistrySearchResult[] }> = [];
+    for (const server of mcpServersStore.featuredServers) {
+      const category = server.category ?? 'Other';
+      let group = groups.find((candidate) => candidate.category === category);
+      if (!group) {
+        group = { category, servers: [] };
+        groups.push(group);
+      }
+      group.servers.push(server);
+    }
+    return groups;
+  });
 </script>
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
@@ -388,7 +409,9 @@
                         {server.transport}
                       </span>
                     </div>
-                    <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                    <div
+                      class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]"
+                    >
                       <span>{server.toolCount} tool{server.toolCount === 1 ? '' : 's'}</span>
                       {#if server.protocolVersion}
                         <span>protocol {server.protocolVersion}</span>
@@ -409,7 +432,9 @@
                             {#if result.connected}
                               <Check size={12} class="text-[var(--color-success)]" />
                               <span class="text-[var(--color-text-primary)]"
-                                >Connected — {result.tools.length} tool{result.tools.length === 1 ? '' : 's'}</span
+                                >Connected — {result.tools.length} tool{result.tools.length === 1
+                                  ? ''
+                                  : 's'}</span
                               >
                             {:else}
                               <X size={12} class="text-[var(--color-error)]" />
@@ -491,7 +516,8 @@
                 Browse MCP registry
               </h4>
               <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                Search the official MCP registry at registry.modelcontextprotocol.io to discover servers you can add.
+                Pick a featured connector below or search the official MCP registry at
+                registry.modelcontextprotocol.io to discover servers you can add.
               </p>
             </div>
             <button
@@ -521,7 +547,7 @@
                 type="text"
                 bind:value={registrySearchInput}
                 placeholder="Search servers (e.g. filesystem, github, slack…)"
-                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
               />
             </div>
             <button
@@ -553,15 +579,103 @@
             >
               <LoaderCircle size={16} class="animate-spin" /> Searching the registry…
             </div>
+          {:else if mcpServersStore.registryResults.length === 0 && featuredGroups.length > 0}
+            <!-- ─── Featured (curated) catalog ─────────────────────────── -->
+            <div class="space-y-6">
+              {#each featuredGroups as group (group.category)}
+                <div>
+                  <h5
+                    class="mb-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]"
+                  >
+                    {group.category}
+                  </h5>
+                  <div class="grid gap-3 lg:grid-cols-2">
+                    {#each group.servers as result (result.id)}
+                      <section
+                        class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+                      >
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                              <span
+                                class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                              >
+                                {#if result.transport === 'sse'}
+                                  <Globe size={15} />
+                                {:else}
+                                  <Terminal size={15} />
+                                {/if}
+                              </span>
+                              <h6 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                                {result.title}
+                              </h6>
+                              <span
+                                class="rounded-full bg-[var(--color-surface-3)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                              >
+                                {result.transport}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onclick={() => addFromRegistry(result)}
+                            class="flex min-h-9 shrink-0 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          >
+                            <Plus size={13} /> Add
+                          </button>
+                        </div>
+                        <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                          {result.description}
+                        </p>
+                        {#if result.transport === 'stdio' && result.command}
+                          <div
+                            class="mt-2 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
+                          >
+                            {result.command}
+                            {result.args.join(' ')}
+                          </div>
+                        {:else if result.url}
+                          <div
+                            class="mt-2 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
+                          >
+                            {result.url}
+                          </div>
+                        {/if}
+                        {#if result.envVars.length > 0 || result.headerVars.length > 0}
+                          <div class="mt-2 flex flex-wrap gap-1.5">
+                            {#each result.envVars as envVar (envVar.name)}
+                              <span
+                                class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired
+                                  ? 'text-[var(--color-warning)]'
+                                  : 'text-[var(--color-text-muted)]'}"
+                                title={envVar.description}
+                              >
+                                {envVar.name}{envVar.isRequired ? ' *' : ''}
+                              </span>
+                            {/each}
+                            {#each result.headerVars as headerVar (headerVar.name)}
+                              <span
+                                class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-warning)]"
+                                title={headerVar.description}
+                              >
+                                {headerVar.name}
+                              </span>
+                            {/each}
+                          </div>
+                        {/if}
+                      </section>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
           {:else if mcpServersStore.registryResults.length === 0}
             <div
               class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-10 text-center"
             >
               <Search size={28} class="mx-auto text-[var(--color-text-muted)]" />
               <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
-                {mcpServersStore.registryQuery
-                  ? 'No servers found'
-                  : 'Search for MCP servers'}
+                {mcpServersStore.registryQuery ? 'No servers found' : 'Search for MCP servers'}
               </h4>
               <p class="mt-1 text-xs text-[var(--color-text-muted)]">
                 {mcpServersStore.registryQuery
@@ -596,20 +710,25 @@
                           {result.transport}
                         </span>
                         {#if result.version}
-                          <span
-                            class="text-[10px] text-[var(--color-text-muted)]"
-                          >v{result.version}</span>
-                          {/if}
+                          <span class="text-[10px] text-[var(--color-text-muted)]"
+                            >v{result.version}</span
+                          >
+                        {/if}
                       </div>
                       <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
                         {result.description}
                       </p>
                       {#if result.transport === 'stdio' && result.command}
-                        <div class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
-                          {result.command} {result.args.join(' ')}
+                        <div
+                          class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
+                        >
+                          {result.command}
+                          {result.args.join(' ')}
                         </div>
                       {:else if result.transport === 'sse' && result.url}
-                        <div class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                        <div
+                          class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
+                        >
                           {result.url}
                         </div>
                       {/if}
@@ -617,7 +736,9 @@
                         <div class="mt-2 flex flex-wrap gap-1.5">
                           {#each result.envVars as envVar}
                             <span
-                              class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-muted)]'}"
+                              class="rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 font-mono text-[10px] {envVar.isRequired
+                                ? 'text-[var(--color-warning)]'
+                                : 'text-[var(--color-text-muted)]'}"
                               title={envVar.description}
                             >
                               {envVar.name}{envVar.isRequired ? ' *' : ''}
@@ -625,22 +746,24 @@
                           {/each}
                         </div>
                       {/if}
-                      <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-muted)]">
+                      <div
+                        class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-[var(--color-text-muted)]"
+                      >
                         {#if result.websiteUrl}
                           <a
                             href={result.websiteUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="transition-colors hover:text-[var(--color-accent)]"
-                          >Website</a>
+                            class="transition-colors hover:text-[var(--color-accent)]">Website</a
+                          >
                         {/if}
                         {#if result.repositoryUrl}
                           <a
                             href={result.repositoryUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="transition-colors hover:text-[var(--color-accent)]"
-                          >Repository</a>
+                            class="transition-colors hover:text-[var(--color-accent)]">Repository</a
+                          >
                         {/if}
                       </div>
                     </div>
@@ -675,200 +798,222 @@
         </section>
       {:else if view === 'form'}
         <!-- ─── Add / Edit form view ──────────────────────────────────── -->
-          <section
-            class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                  {editingName ? `Edit "${editingName}"` : 'Add MCP server'}
-                </h4>
-                <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                  {editingName
-                    ? 'Re-enter configuration fields. Existing env values are masked — type a new value to replace them.'
-                    : 'Configure a stdio or SSE Model Context Protocol server.'}
-                </p>
-              </div>
-              <button
-                type="button"
-                onclick={closeForm}
-                class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                aria-label="Close form"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <!-- Name -->
+        <section
+          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+        >
+          <div class="flex items-start justify-between gap-3">
             <div>
-              <label for="mcp-name" class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                Server name
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                {editingName ? `Edit "${editingName}"` : 'Add MCP server'}
+              </h4>
+              <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                {editingName
+                  ? 'Re-enter configuration fields. Existing env values are masked — type a new value to replace them.'
+                  : 'Configure a stdio or SSE Model Context Protocol server.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onclick={closeForm}
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              aria-label="Close form"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <!-- Name -->
+          <div>
+            <label
+              for="mcp-name"
+              class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+            >
+              Server name
+            </label>
+            <input
+              id="mcp-name"
+              type="text"
+              bind:value={formName}
+              placeholder="e.g. filesystem"
+              disabled={!!editingName}
+              class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)] disabled:opacity-60"
+            />
+          </div>
+
+          <!-- Transport type -->
+          <div>
+            <span class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
+              Transport type
+            </span>
+            <KorySelect
+              value={formType}
+              options={transportOptions}
+              label="Transport type"
+              onchange={(value) => (formType = value as 'stdio' | 'sse')}
+            />
+          </div>
+
+          {#if formType === 'stdio'}
+            <!-- Command -->
+            <div>
+              <label
+                for="mcp-command"
+                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+              >
+                Command
               </label>
               <input
-                id="mcp-name"
+                id="mcp-command"
                 type="text"
-                bind:value={formName}
-                placeholder="e.g. filesystem"
-                disabled={!!editingName}
-                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-60"
+                bind:value={formCommand}
+                placeholder="e.g. npx"
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
               />
             </div>
-
-            <!-- Transport type -->
+            <!-- Args -->
             <div>
-              <span class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                Transport type
-              </span>
-              <KorySelect
-                value={formType}
-                options={transportOptions}
-                label="Transport type"
-                onchange={(value) => (formType = value as 'stdio' | 'sse')}
+              <label
+                for="mcp-args"
+                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+              >
+                Arguments
+              </label>
+              <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">
+                One argument per line.
+              </p>
+              <textarea
+                id="mcp-args"
+                bind:value={formArgs}
+                rows="3"
+                placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 font-mono text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+              ></textarea>
+            </div>
+          {:else}
+            <!-- URL -->
+            <div>
+              <label
+                for="mcp-url"
+                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
+              >
+                Server URL
+              </label>
+              <input
+                id="mcp-url"
+                type="text"
+                bind:value={formUrl}
+                placeholder="https://example.com/sse"
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
               />
             </div>
-
-            {#if formType === 'stdio'}
-              <!-- Command -->
-              <div>
-                <label for="mcp-command" class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  Command
-                </label>
-                <input
-                  id="mcp-command"
-                  type="text"
-                  bind:value={formCommand}
-                  placeholder="e.g. npx"
-                  class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                />
-              </div>
-              <!-- Args -->
-              <div>
-                <label for="mcp-args" class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  Arguments
-                </label>
-                <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">One argument per line.</p>
-                <textarea
-                  id="mcp-args"
-                  bind:value={formArgs}
-                  rows="3"
-                  placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"
-                  class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 font-mono text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                ></textarea>
-              </div>
-            {:else}
-              <!-- URL -->
-              <div>
-                <label for="mcp-url" class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  Server URL
-                </label>
-                <input
-                  id="mcp-url"
-                  type="text"
-                  bind:value={formUrl}
-                  placeholder="https://example.com/sse"
-                  class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                />
-              </div>
-              <!-- Headers -->
-              <div>
-                <label for="mcp-headers" class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]">
-                  Headers
-                </label>
-                <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">One header per line, in <code>Key: Value</code> format.</p>
-                <textarea
-                  id="mcp-headers"
-                  bind:value={formHeaders}
-                  rows="3"
-                  placeholder="Authorization: Bearer ..."
-                  class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 font-mono text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                ></textarea>
-              </div>
-            {/if}
-
-            <!-- Env editor (stdio only) -->
-            {#if formType === 'stdio'}
-              <div>
-                <div class="flex items-center justify-between">
-                  <span class="text-xs font-medium text-[var(--color-text-secondary)]">
-                    Environment variables
-                  </span>
-                  <button
-                    type="button"
-                    onclick={addEnvRow}
-                    class="flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                  >
-                    <Plus size={11} /> Add variable
-                  </button>
-                </div>
-                <p class="mb-2 mt-1 text-[10px] text-[var(--color-text-muted)]">
-                  Values are stored securely and never displayed. Existing keys show a masked placeholder — type a new value to replace.
-                </p>
-                {#if envLoading}
-                  <div class="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
-                    <LoaderCircle size={14} class="animate-spin" /> Loading env keys…
-                  </div>
-                {:else if envRows.length === 0}
-                  <div
-                    class="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-4 text-center text-[10px] text-[var(--color-text-muted)]"
-                  >
-                    No environment variables configured.
-                  </div>
-                {:else}
-                  <div class="space-y-2">
-                    {#each envRows as row, index (index)}
-                      <div class="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={row.key}
-                          placeholder="KEY"
-                          oninput={(e) => updateEnvKey(index, e.currentTarget.value)}
-                          class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                        />
-                        <input
-                          type="text"
-                          value={row.masked ? '' : row.value}
-                          placeholder={row.masked ? '••••••••' : 'value'}
-                          oninput={(e) => updateEnvValue(index, e.currentTarget.value)}
-                          class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                        />
-                        <button
-                          type="button"
-                          onclick={() => removeEnvRow(index)}
-                          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-error)]/50 hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                          aria-label="Remove variable"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-
-            <!-- Form actions -->
-            <div class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-4">
-              <button
-                type="button"
-                onclick={closeForm}
-                class="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+            <!-- Headers -->
+            <div>
+              <label
+                for="mcp-headers"
+                class="mb-1.5 block text-xs font-medium text-[var(--color-text-secondary)]"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!formValid || formSaving}
-                onclick={() => void handleSubmit()}
-                class="flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {#if formSaving}
-                  <LoaderCircle size={14} class="animate-spin" /> Saving…
-                {:else}
-                  <Check size={14} /> {editingName ? 'Save changes' : 'Add server'}
-                {/if}
-              </button>
+                Headers
+              </label>
+              <p class="mb-1.5 text-[10px] text-[var(--color-text-muted)]">
+                One header per line, in <code>Key: Value</code> format.
+              </p>
+              <textarea
+                id="mcp-headers"
+                bind:value={formHeaders}
+                rows="3"
+                placeholder="Authorization: Bearer ..."
+                class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-2.5 font-mono text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+              ></textarea>
             </div>
-          </section>
+          {/if}
+
+          <!-- Env editor (stdio only) -->
+          {#if formType === 'stdio'}
+            <div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-[var(--color-text-secondary)]">
+                  Environment variables
+                </span>
+                <button
+                  type="button"
+                  onclick={addEnvRow}
+                  class="flex min-h-8 items-center gap-1 rounded-lg border border-[var(--color-border)] px-2.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                >
+                  <Plus size={11} /> Add variable
+                </button>
+              </div>
+              <p class="mb-2 mt-1 text-[10px] text-[var(--color-text-muted)]">
+                Values are stored securely and never displayed. Existing keys show a masked
+                placeholder — type a new value to replace.
+              </p>
+              {#if envLoading}
+                <div class="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
+                  <LoaderCircle size={14} class="animate-spin" /> Loading env keys…
+                </div>
+              {:else if envRows.length === 0}
+                <div
+                  class="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-4 text-center text-[10px] text-[var(--color-text-muted)]"
+                >
+                  No environment variables configured.
+                </div>
+              {:else}
+                <div class="space-y-2">
+                  {#each envRows as row, index (index)}
+                    <div class="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={row.key}
+                        placeholder="KEY"
+                        oninput={(e) => updateEnvKey(index, e.currentTarget.value)}
+                        class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+                      />
+                      <input
+                        type="text"
+                        value={row.masked ? '' : row.value}
+                        placeholder={row.masked ? '••••••••' : 'value'}
+                        oninput={(e) => updateEnvValue(index, e.currentTarget.value)}
+                        class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+                      />
+                      <button
+                        type="button"
+                        onclick={() => removeEnvRow(index)}
+                        class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:border-[var(--color-error)]/50 hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                        aria-label="Remove variable"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Form actions -->
+          <div
+            class="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-4"
+          >
+            <button
+              type="button"
+              onclick={closeForm}
+              class="flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!formValid || formSaving}
+              onclick={() => void handleSubmit()}
+              class="flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {#if formSaving}
+                <LoaderCircle size={14} class="animate-spin" /> Saving…
+              {:else}
+                <Check size={14} /> {editingName ? 'Save changes' : 'Add server'}
+              {/if}
+            </button>
+          </div>
+        </section>
       {/if}
     </div>
   </div>

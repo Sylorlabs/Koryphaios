@@ -43,6 +43,27 @@ beforeEach(async () => {
 });
 
 describe('Goal Mode checklist invariants', () => {
+  test('serializes concurrent activity appends without losing either update', async () => {
+    const goal = await store.create({
+      objective: 'Retain concurrent durable activity',
+      scope: 'workspace',
+      planningDepth: 'minimal',
+    });
+    const messages = Array.from({ length: 12 }, (_, index) => `concurrent activity ${index}`);
+
+    await Promise.all(
+      messages.map((message) => store.addActivity(goal.id, 'concurrent_test', message)),
+    );
+
+    const reloaded = await store.get(goal.id);
+    expect(
+      reloaded?.activity
+        .filter((event) => event.type === 'concurrent_test')
+        .map((event) => event.message)
+        .sort(),
+    ).toEqual([...messages].sort());
+  });
+
   test('uses sequential dependencies and exact verified completion', async () => {
     const goal = await store.create({ objective: 'Ship a guarded goal flow', scope: 'workspace' });
     expect(goal.checklist).toHaveLength(3);
@@ -745,22 +766,35 @@ describe('Goal Mode HTTP user flow', () => {
 
   test('one drive request continues, verifies, and finalizes through the guarded API', async () => {
     const emitted: unknown[] = [];
-    const dispatched: unknown[][] = [];
+    const dispatched: Array<Record<string, unknown>> = [];
     const projectRoot = mkdtempSync(join(tmpdir(), 'goal-http-'));
-    const sessions = { get: async () => ({ id: 'chat-1', workingDirectory: projectRoot }) };
+    const activeSession = { id: 'chat-1', workingDirectory: projectRoot };
+    const sessions = {
+      get: async () => activeSession,
+      getActive: async () => activeSession,
+    };
     const kory = {
       isSessionRunning: () => false,
+      hasActiveSessionExecution: () => false,
+      tryAcquireSessionMutationBarrier: () => ({ release: () => undefined }),
       cancelSessionWorkers: async () => {},
       getRecordedSessionChanges: () => [],
-      processTask: async (...args: unknown[]) => {
-        dispatched.push(args);
-        const goalContext = args[7] as { goalId: string; itemId: string };
+      submitSessionTurn: async (input: Record<string, unknown>) => {
+        dispatched.push(input);
+        const goalContext = input.goalContext as { goalId: string; itemId: string };
         await store.addActivity(
           goalContext.goalId,
           'evidence_candidate',
           `${goalContext.itemId}|verified ${goalContext.itemId}`,
           'chat-1',
         );
+        return {
+          sessionId: 'chat-1',
+          runId: `goal-run-${dispatched.length}`,
+          status: 'completed',
+          phase: 'done',
+          reason: 'test completed',
+        };
       },
       verifyGoalItem: async () => ({
         passed: true,
@@ -802,14 +836,16 @@ describe('Goal Mode HTTP user flow', () => {
       model: 'openai:gpt-test',
       instructions: 'focus the release',
     });
-    expect(driven.status).toBe(200);
+    expect({ status: driven.status, body: await driven.clone().text() }).toMatchObject({
+      status: 200,
+    });
     const deadline = Date.now() + 2_000;
     while ((await store.get(goal.id))?.status !== 'completed' && Date.now() < deadline)
       await new Promise((resolve) => setTimeout(resolve, 10));
     expect((await store.get(goal.id))?.status).toBe('completed');
     expect(emitted.length).toBeGreaterThan(3);
     expect(dispatched).toHaveLength(goal.checklist.length);
-    expect(String(dispatched[0]?.[1])).toContain('User direction for this goal');
-    expect((dispatched[0]?.[7] as { goalId?: string })?.goalId).toBe(goal.id);
+    expect(String(dispatched[0]?.userMessage)).toContain('User direction for this goal');
+    expect((dispatched[0]?.goalContext as { goalId?: string })?.goalId).toBe(goal.id);
   });
 });

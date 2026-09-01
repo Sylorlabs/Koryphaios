@@ -173,10 +173,7 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
         isGeneric: true,
       }));
     } catch (error) {
-      providerLog.error(
-        safeProviderDiagnostic(this.name, 'http', error),
-        'Failed to fetch models',
-      );
+      providerLog.error(safeProviderDiagnostic(this.name, 'http', error), 'Failed to fetch models');
       return [];
     }
   }
@@ -266,11 +263,7 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
 
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
-        const diagnostic = safeProviderDiagnostic(
-          this.name,
-          'http',
-          { status: response.status },
-        );
+        const diagnostic = safeProviderDiagnostic(this.name, 'http', { status: response.status });
         providerLog.warn(diagnostic, 'OpenAI-compatible provider request failed');
         yield {
           type: 'error',
@@ -295,10 +288,7 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
 
           let bounded: ReturnType<typeof appendBoundedProviderFrames>;
           try {
-            bounded = appendBoundedProviderFrames(
-              buffer,
-              decoder.decode(value, { stream: true }),
-            );
+            bounded = appendBoundedProviderFrames(buffer, decoder.decode(value, { stream: true }));
           } catch (error) {
             this.abortController?.abort();
             throw error;
@@ -381,7 +371,10 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
     try {
       return JSON.parse(data);
     } catch (err: unknown) {
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'OpenAI-compatible plugin: SSE data JSON parse failed');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'OpenAI-compatible plugin: SSE data JSON parse failed',
+      );
       return null;
     }
   }
@@ -433,7 +426,6 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
   }
 
   private inferCapabilities(modelId: string): ModelCapabilities {
-    // Infer capabilities from model ID patterns
     const id = modelId.toLowerCase();
 
     const contextWindow = id.includes('32k')
@@ -446,14 +438,13 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
             ? 1000000
             : 8192;
 
-    const supportsVision = id.includes('vision') || id.includes('gpt-4o');
     const supportsTools = !id.includes('instruct');
     const supportsReasoning = id.includes('o1') || id.includes('o3') || id.includes('reasoning');
 
     return {
       contextWindow,
       maxOutputTokens: id.includes('mini') ? 8192 : 4096,
-      modalities: supportsVision ? ['text', 'image'] : ['text'],
+      modalities: ['text'],
       tools: {
         supported: supportsTools,
         streaming: true,
@@ -463,12 +454,6 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
         ? {
             supported: true,
             levels: ['low', 'medium', 'high'],
-          }
-        : undefined,
-      vision: supportsVision
-        ? {
-            supported: true,
-            maxImages: 10,
           }
         : undefined,
       structuredOutput: supportsTools,

@@ -1,8 +1,8 @@
-// Freebuff provider — integrates the free, ad-supported Codebuff build into
-// Koryphaios via @codebuff/sdk's CodebuffClient (no subprocess, no TUI, no
-// ads). The SDK path emits PrintModeEvents (text, tool_call, tool_result,
-// reasoning_delta, finish, error) which this provider translates into
-// Koryphaios ProviderEvents.
+// Legacy Freebuff SDK adapter and shared Codebuff SDK tool-translation helpers.
+// The provider registry does NOT instantiate the FreebuffProvider in this file:
+// freebuff-cli.ts is the active Freebuff route because the free tier rejects
+// direct SDK use. codebuff.ts reuses the permission-gated SDK helper functions
+// below with a real Codebuff API key.
 //
 // Backend contract: Koryphaios talks to Codebuff's cloud backend exclusively
 // through `CodebuffClient` from `@codebuff/sdk` (pinned at v0.10.7 in
@@ -312,6 +312,7 @@ function buildAgentDefinition(
       'update_subgoal',
       'add_message',
       // Custom tools (bridged from Kory)
+      'kory_record_work_note',
       'kory_create_note',
       'kory_search_notes',
       'kory_list_notes',
@@ -681,12 +682,13 @@ export class FreebuffProvider implements Provider {
 // Mirrors KoryManager's context construction so overridden tools flow through
 // the exact same permission/approval/recording pipeline as native Kory tools.
 
-async function buildKoryToolContext(
+export async function buildKoryToolContext(
   sessionId: string,
   cwd: string,
   role: 'manager' | 'worker' | 'critic',
   interactionMode: 'act' | 'plan',
   request: StreamRequest,
+  activeProvider = 'freebuff',
 ): Promise<ToolContext> {
   const ctx = getContext();
   const settings = loadAgentSettings(cwd);
@@ -711,7 +713,8 @@ async function buildKoryToolContext(
 
   return {
     sessionId,
-    activeProvider: 'freebuff',
+    agentId: `${activeProvider}:${role}`,
+    activeProvider,
     activeModel: request.model,
     reasoningLevel: request.reasoningLevel,
     goalId,
@@ -730,7 +733,7 @@ async function buildKoryToolContext(
     emitFileEdit: (e) => {
       wsBroker.publish('custom', {
         type: 'stream.file_delta' as WSMessage['type'],
-        payload: { agentId: 'freebuff', ...e },
+        payload: { agentId: activeProvider, ...e },
         timestamp: Date.now(),
         sessionId,
       });
@@ -738,7 +741,7 @@ async function buildKoryToolContext(
     emitFileComplete: (e) => {
       wsBroker.publish('custom', {
         type: 'stream.file_complete' as WSMessage['type'],
-        payload: { agentId: 'freebuff', ...e },
+        payload: { agentId: activeProvider, ...e },
         timestamp: Date.now(),
         sessionId,
       });
@@ -765,7 +768,7 @@ type OverrideMap = NonNullable<
   NonNullable<ConstructorParameters<typeof CodebuffClient>[0]>['overrideTools']
 >;
 
-function buildOverrideTools(toolCtx: ToolContext): OverrideMap {
+export function buildOverrideTools(toolCtx: ToolContext, callPrefix = 'freebuff'): OverrideMap {
   const ctx = getContext();
 
   const dispatch = async (
@@ -773,7 +776,7 @@ function buildOverrideTools(toolCtx: ToolContext): OverrideMap {
     input: Record<string, unknown>,
   ): Promise<string> => {
     const result = await ctx.tools.execute(toolCtx, {
-      id: `freebuff-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `${callPrefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: koryToolName,
       input,
     });
@@ -963,6 +966,43 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
 
   const tools: CustomToolDefinition[] = [];
 
+  // ── Notes: evidence-backed work result ──
+  tools.push(
+    getCustomToolDefinition({
+      toolName: 'kory_record_work_note',
+      inputSchema: z.object({
+        title: z.string().describe('Specific result or decision title'),
+        summary: z.string().describe('Concise outcome grounded in supplied evidence'),
+        status: z.enum(['completed', 'partial', 'blocked', 'decision']),
+        objective: z.string().optional(),
+        decisions: z.array(z.string()).optional(),
+        changedFiles: z.array(z.string()).optional(),
+        commands: z.array(z.string()).optional(),
+        tests: z
+          .array(
+            z.object({
+              name: z.string(),
+              outcome: z.enum(['pass', 'fail', 'not-run']),
+              evidence: z.string().optional(),
+            }),
+          )
+          .optional(),
+        evidence: z.array(z.string()).optional(),
+        risks: z.array(z.string()).optional(),
+        followUps: z.array(z.string()).optional(),
+        relatedNotes: z.array(z.string()).optional(),
+        includeInContext: z.boolean().optional(),
+      }),
+      description:
+        'Record a structured work result with Koryphaios-owned session and available provider, model, agent, and goal provenance.',
+      endsAgentStep: false,
+      execute: async (input) => {
+        const output = await dispatch('record_work_note', input);
+        return [{ type: 'json', value: { message: output } }];
+      },
+    }),
+  );
+
   // ── Notes: create ──
   tools.push(
     getCustomToolDefinition({
@@ -1092,7 +1132,7 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
 
 // ─── SDK event translation ──────────────────────────────────────────────────
 
-function translateSdkEvent(event: PrintModeEvent): ProviderEvent[] | null {
+export function translateSdkEvent(event: PrintModeEvent): ProviderEvent[] | null {
   switch (event.type) {
     case 'text':
       return [{ type: 'content_delta', content: event.text }];
@@ -1203,7 +1243,7 @@ function fileEditFromToolCall(
 
 // ─── Prompt building ────────────────────────────────────────────────────────
 
-function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
+export function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
   const turns = messages.filter((m) => m.role !== 'system');
 
@@ -1335,11 +1375,12 @@ async function fetchFreebuffModels(): Promise<ModelDef[]> {
         enriched.canReason = false;
         enriched.reasoningLevels = undefined;
       }
-      const modalities = raw.architecture?.input_modalities ?? [];
-      if (modalities.includes('image')) {
-        enriched.vision = true;
-        enriched.supportsAttachments = true;
-      }
+      // OpenRouter metadata describes the remote model, not the capability of
+      // Koryphaios's SDK adapter. The Freebuff SDK wrapper currently has no
+      // verified image-content transport, so advertising vision here would
+      // make the composer accept screenshots that the adapter then discards.
+      enriched.vision = false;
+      enriched.supportsAttachments = false;
       if (raw.pricing?.prompt) {
         const promptCost = parseFloat(raw.pricing.prompt);
         if (!isNaN(promptCost) && promptCost > 0) {
@@ -1384,11 +1425,10 @@ async function fetchFreebuffModels(): Promise<ModelDef[]> {
       enriched.canReason = entry.reasoningHardcoded;
       enriched.reasoningLevels = undefined;
       if (raw) {
-        const modalities = raw.architecture?.input_modalities ?? [];
-        if (modalities.includes('image')) {
-          enriched.vision = true;
-          enriched.supportsAttachments = true;
-        }
+        // See the live-catalog branch above: remote modality metadata cannot
+        // override the adapter's currently text-only transport contract.
+        enriched.vision = false;
+        enriched.supportsAttachments = false;
         if (raw.pricing?.prompt) {
           const promptCost = parseFloat(raw.pricing.prompt);
           if (!isNaN(promptCost) && promptCost > 0) {

@@ -16,6 +16,47 @@ export interface Note {
   format?: 'markdown' | 'html';
 }
 
+/** A recoverable note hidden from the active vault. Trashing never removes
+ * attachment bytes or a project-backed source document. */
+export interface TrashedNote extends Note {
+  trashedAt: Date;
+  trashReason: 'user' | 'source_removed';
+}
+
+export type NoteRevisionOperation =
+  | 'create'
+  | 'update'
+  | 'external_sync'
+  | 'trash'
+  | 'source_removed'
+  | 'restore'
+  | 'revision_restore';
+
+/** Immutable metadata for one saved note state. Content is fetched separately
+ * so the history timeline stays cheap even for long-form vaults. */
+export interface NoteRevisionSummary {
+  noteId: string;
+  revision: number;
+  operation: NoteRevisionOperation;
+  title: string;
+  folderPath: string;
+  tags: string[];
+  pinned: boolean;
+  includeInContext: boolean;
+  format: 'markdown' | 'html';
+  sourcePath?: string;
+  trashedAt?: Date;
+  trashReason?: 'user' | 'source_removed';
+  contentBytes: number;
+  noteCreatedAt: Date;
+  noteUpdatedAt: Date;
+  createdAt: Date;
+}
+
+export interface NoteRevision extends NoteRevisionSummary {
+  content: string;
+}
+
 export interface NoteLink {
   fromNoteId: string;
   toNoteId: string;
@@ -84,6 +125,14 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Visible notes rendered before ghost/unresolved nodes were appended. */
+  shown?: number;
+  /** True when the note count exceeded the graph safety cap. */
+  truncated?: boolean;
+  /** Approximate total notes when truncated (for "showing X of Y" indicators). */
+  total?: number;
+  /** True when the link table exceeded the graph link safety cap. */
+  linksTruncated?: boolean;
 }
 
 export interface FolderNode {
@@ -161,8 +210,12 @@ export const NOTE_TOOL_NAMES = [
   'recall_notes',
   'get_note_backlinks',
   'get_note_graph_summary',
+  'get_note_properties',
+  'query_note_base',
   'render_note',
+  'record_work_note',
   'create_note',
+  'set_note_property',
   'update_note',
   'delete_note',
   'link_notes',
@@ -216,10 +269,28 @@ export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
     category: 'read',
   },
   {
+    name: 'get_note_properties',
+    label: 'Read properties',
+    description: 'Read bounded typed YAML properties from a note',
+    category: 'read',
+  },
+  {
+    name: 'query_note_base',
+    label: 'Query saved Base',
+    description: 'Run a bounded saved Base view by ID',
+    category: 'read',
+  },
+  {
     name: 'render_note',
     label: 'Use in chat',
     description: 'Pull a bounded excerpt or render a note in chat',
     category: 'read',
+  },
+  {
+    name: 'record_work_note',
+    label: 'Record work note',
+    description: 'Save a structured result with host-owned run provenance and evidence',
+    category: 'write',
   },
   {
     name: 'create_note',
@@ -228,15 +299,21 @@ export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
     category: 'write',
   },
   {
+    name: 'set_note_property',
+    label: 'Set note property',
+    description: 'Optimistically update one typed YAML property',
+    category: 'write',
+  },
+  {
     name: 'update_note',
     label: 'Update note',
-    description: 'Edit note content, title, or tags',
+    description: 'Optimistically edit note content, title, or tags at a known revision',
     category: 'write',
   },
   {
     name: 'delete_note',
-    label: 'Delete note',
-    description: 'Permanently remove a note',
+    label: 'Move note to trash',
+    description: 'Hide a note from the active vault while keeping it recoverable',
     category: 'write',
   },
   {
@@ -267,8 +344,12 @@ export const DEFAULT_NOTE_TOOL_PERMISSIONS: NoteToolPermissions = {
   recall_notes: 'auto',
   get_note_backlinks: 'auto',
   get_note_graph_summary: 'auto',
+  get_note_properties: 'auto',
+  query_note_base: 'auto',
   render_note: 'auto',
+  record_work_note: 'ask',
   create_note: 'ask',
+  set_note_property: 'ask',
   update_note: 'ask',
   delete_note: 'ask',
   link_notes: 'ask',

@@ -2,7 +2,6 @@
   import Target from 'lucide-svelte/icons/target';
   import Pause from 'lucide-svelte/icons/pause';
   import Play from 'lucide-svelte/icons/play';
-  import Plus from 'lucide-svelte/icons/plus';
   import ArrowUp from 'lucide-svelte/icons/arrow-up';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
   import X from 'lucide-svelte/icons/x';
@@ -13,7 +12,7 @@
   import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import ShieldOff from 'lucide-svelte/icons/shield-off';
   import { goalStore } from '$lib/stores/goals.svelte';
-  import { goalProgress, type Goal, type GoalScope } from '@koryphaios/shared';
+  import { goalProgress, type Goal } from '@koryphaios/shared';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
@@ -25,21 +24,12 @@
     pickGoalForAction,
     type GoalActionRequest,
   } from '$lib/utils/goal-actions';
-  import KorySelect from './KorySelect.svelte';
   import { onMount } from 'svelte';
   import { useNow } from '$lib/utils/now-signal.svelte';
 
-  const scopeOptions = [
-    { value: 'workspace', label: 'Workspace', description: 'Available from every chat' },
-    { value: 'project', label: 'Project', description: 'Restricted to this project' },
-    { value: 'session', label: 'This chat', description: 'Restricted to the active chat' },
-  ];
   const activityMessage = (message: string) =>
     message.includes('|') ? message.slice(message.indexOf('|') + 1) : message;
   let error = $state('');
-  let objective = $state('');
-  let scope = $state<GoalScope>('workspace');
-  let composer = $state<HTMLInputElement>();
   let expanded = $state(true);
   let showOther = $state(false);
   let armedStopId = $state('');
@@ -80,31 +70,6 @@
   const linkedChatNames = (goal: Goal) => goal.linkedSessionIds.map((id) => chatTitle(id));
   function openExecutionChat(goal: Goal) {
     if (goal.execution?.sessionId) sessionStore.activeSessionId = goal.execution.sessionId;
-  }
-
-  async function create() {
-    try {
-      error = '';
-      if (!objective.trim()) {
-        composer?.focus();
-        return;
-      }
-      if (scope === 'project' && !projectStore.currentPath)
-        throw new Error('Open a project before creating a project goal');
-      if (scope === 'session' && !sessionStore.activeSessionId)
-        throw new Error('Open a chat before creating a chat goal');
-      const goal = await goalStore.create({
-        objective: objective.trim(),
-        scope,
-        projectPath: scope === 'project' ? (projectStore.currentPath ?? undefined) : undefined,
-        sessionId: scope === 'session' ? (sessionStore.activeSessionId ?? undefined) : undefined,
-        planningDepth: agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive',
-      });
-      objective = '';
-      if (agentSettingsStore.settings.automaticGoalDriving) await drive(goal.id);
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    }
   }
 
   async function drive(goalId: string) {
@@ -180,11 +145,7 @@
         typeof detail === 'string' ? { action: detail as GoalActionRequest['action'] } : detail;
       expanded = true;
       error = '';
-      if (request.action === 'goal_create') {
-        objective = request.objective ?? objective;
-        setTimeout(() => composer?.focus(), 0);
-        return;
-      }
+      if (request.action === 'goal_create') return; // creation lives in the chat composer
       const goal = target(request);
       if (!goal) {
         error =
@@ -212,7 +173,7 @@
 
 <section
   class="shrink-0 border-t border-[var(--color-border)] p-3 {expanded
-    ? 'flex min-h-[280px] max-h-[52%] flex-col'
+    ? 'flex max-h-[44%] flex-col'
     : ''}"
   aria-label="Active Goals"
 >
@@ -241,45 +202,6 @@
 
   {#if expanded}
     <div class="mt-2 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-      <div
-        class="space-y-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2"
-      >
-        <input
-          bind:this={composer}
-          aria-label="New goal"
-          class="min-w-0 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1.5 text-xs text-[var(--color-text-primary)]"
-          placeholder="What should Koryphaios finish?"
-          bind:value={objective}
-          onkeydown={(event) => {
-            if (event.key === 'Enter') void create();
-          }}
-        />
-        <div class="flex gap-1">
-          <div class="min-w-0 flex-1">
-            <KorySelect
-              compact
-              value={scope}
-              label="Goal scope"
-              options={scopeOptions}
-              onchange={(value) => (scope = value as GoalScope)}
-            />
-          </div>
-          <button
-            type="button"
-            class="rounded-lg border border-[var(--color-border)] px-2 text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
-            onclick={() => void create()}
-            aria-label={agentSettingsStore.settings.automaticGoalDriving
-              ? 'Create and start goal'
-              : 'Create goal'}><Plus size={13} /></button
-          >
-        </div>
-        <p class="text-[10px] text-[var(--color-text-muted)]">
-          {agentSettingsStore.settings.automaticGoalDriving
-            ? 'Starts automatically with the selected composer model and continues until done, paused, stopped, or genuinely blocked.'
-            : 'Automatic start is off. The goal will wait here until you press Start.'}
-        </p>
-      </div>
-
       {#each sections as section (section.id)}
         {#if section.goals.length > 0}
           <div class="space-y-1.5">
@@ -344,7 +266,8 @@
       {#if goalStore.loaded && activeGoals.length === 0}<p
           class="text-xs text-[var(--color-text-muted)]"
         >
-          No active goals. Create one above or ask Kory to create a goal.
+          No active goals. Create one from the composer above the chat, or ask Kory to create a
+          goal.
         </p>{/if}
 
       {#if selected}

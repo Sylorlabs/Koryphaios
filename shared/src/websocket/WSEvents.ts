@@ -27,9 +27,14 @@ export type WSEventType =
   | 'session.updated'
   | 'session.deleted'
   | 'session.changes'
+  | 'session.changes_resolved'
   | 'session.accept_changes'
   | 'session.user_message'
   | 'session.idle'
+  | 'session.actionable_waits'
+  | 'session.actionable_waits.request'
+  | 'session.timeline_rewritten'
+  | 'run.state'
   | 'compaction.started'
   | 'compaction.progress'
   | 'compaction.completed'
@@ -54,10 +59,13 @@ export type WSEventType =
   | 'kory.verification'
   | 'kory.task_breakdown'
   | 'kory.ask_user'
+  | 'kory.ask_user_resolved'
   | 'process.started'
   | 'process.exited'
   // Notes network
   | 'notes.updated'
+  // Workspace navigation (authoritative desktop workspace snapshots)
+  | 'workspace.updated'
   // Goal mode
   | 'goals.updated'
   // Native CLI slash command output (attributed to a CLI provider harness)
@@ -80,11 +88,16 @@ export interface WSMessage<T = unknown> {
 
 export type WSMessagePayload =
   // Session payloads
+  | import('../run/SessionRun').SessionRunStatePayload
   | SessionCreatedPayload
   | SessionUpdatedPayload
   | SessionIdlePayload
+  | SessionTimelineRewrittenPayload
   | ChangeSummaryPayload
   | KorySessionChangesPayload
+  | KorySessionChangesResolvedPayload
+  | SessionActionableWaitsPayload
+  | KoryAskUserResolvedPayload
   | StreamUsagePayload
 
   // Message payloads
@@ -115,6 +128,7 @@ import type {
   SessionCreatedPayload,
   SessionUpdatedPayload,
   SessionIdlePayload,
+  SessionTimelineRewrittenPayload,
   ChangeSummaryPayload,
   StreamUsagePayload,
   MessagePendingPayload,
@@ -130,6 +144,9 @@ import type {
   ErrorPayload,
   NotificationPayload,
   KorySessionChangesPayload,
+  KorySessionChangesResolvedPayload,
+  SessionActionableWaitsPayload,
+  KoryAskUserResolvedPayload,
   RateLimitPayload,
 } from './WSPayloads';
 

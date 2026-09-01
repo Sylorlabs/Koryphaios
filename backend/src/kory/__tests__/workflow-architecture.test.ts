@@ -28,7 +28,7 @@ describe('workflow architecture', () => {
     });
     expect(compiled.systemPrompt).toContain('override-only-marker');
     expect(compiled.systemPrompt).not.toContain('broad-only-marker');
-    expect(compiled.manifest.version).toBe('kory-workflow-v6-verified-context-skills');
+    expect(compiled.manifest.version).toBe('kory-workflow-v7-hierarchical-cache');
   });
 
   test('verification prefers repository CI and core gates', () => {

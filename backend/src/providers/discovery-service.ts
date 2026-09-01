@@ -290,19 +290,11 @@ export class ModelDiscoveryService {
   private inferCapabilitiesFromPatterns(model: DiscoveredModel): DiscoveredModel {
     const id = model.id.toLowerCase();
 
-    // Context window patterns
     let contextWindow = model.contextWindow;
     if (id.includes('128k') || id.includes('128k')) contextWindow = 128000;
     else if (id.includes('32k')) contextWindow = 32768;
     else if (id.includes('200k')) contextWindow = 200000;
     else if (id.includes('1m')) contextWindow = 1000000;
-
-    // Vision support
-    const hasVision =
-      id.includes('vision') ||
-      id.includes('gpt-4o') ||
-      id.includes('claude-3') ||
-      id.includes('gemini');
 
     return {
       ...model,
@@ -310,13 +302,6 @@ export class ModelDiscoveryService {
       capabilities: {
         ...model.capabilities,
         contextWindow,
-        modalities: hasVision ? ['text', 'image'] : model.capabilities.modalities,
-        vision: hasVision
-          ? {
-              supported: true,
-              maxImages: 10,
-            }
-          : model.capabilities.vision,
       },
     };
   }
@@ -336,7 +321,10 @@ export class ModelDiscoveryService {
     const timer = setTimeout(() => {
       this.fetchModels(provider).catch((err: unknown) => {
         // Background refresh — the next scheduled tick will retry.
-        providerLog.debug({ err: err instanceof Error ? err.message : String(err), provider }, 'Background model discovery refresh failed (will retry on next tick)');
+        providerLog.debug(
+          { err: err instanceof Error ? err.message : String(err), provider },
+          'Background model discovery refresh failed (will retry on next tick)',
+        );
       });
     }, this.config.refreshIntervalMs);
 

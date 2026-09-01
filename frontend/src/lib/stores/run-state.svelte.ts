@@ -82,7 +82,12 @@ const timers: RunStateTimers = {
         // Silent too long — the run ended without a terminal event reaching us.
         const current = states.get(sessionId);
         if (!current) return;
-        if (current.phase !== 'thinking' && current.phase !== 'streaming') return;
+        if (
+          current.phase !== 'analyzing' &&
+          current.phase !== 'thinking' &&
+          current.phase !== 'streaming'
+        )
+          return;
         current.phase = 'done';
         current.activeAgents.clear();
         commit();
@@ -104,7 +109,10 @@ const timers: RunStateTimers = {
       setTimeout(() => {
         doneTimers.delete(sessionId);
         const cur = states.get(sessionId);
-        if (cur && (cur.phase === 'done' || cur.phase === 'error')) {
+        // Canonical phases are a server projection, not display state. Legacy
+        // sessions may still use the brief terminal-icon linger, but a timer
+        // must never rewrite an authoritative revision to local `idle`.
+        if (cur && !cur.authoritative && (cur.phase === 'done' || cur.phase === 'error')) {
           cur.phase = 'idle';
           cur.waitingReason = '';
           commit();
@@ -147,12 +155,16 @@ export const deriveButtonState = engine.deriveButtonState;
  *  status vocabulary. */
 export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
   switch (phase) {
+    case 'analyzing':
+      return 'analyzing';
     case 'thinking':
       return 'thinking';
     case 'streaming':
       return 'streaming';
     case 'tool_calling':
       return 'tool_calling';
+    case 'compacting':
+      return 'compacting';
     case 'waiting_terminal':
       return 'waiting';
     case 'waiting_user':
@@ -161,6 +173,8 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
       return 'done';
     case 'error':
       return 'error';
+    case 'cancelled':
+      return 'done';
     default:
       return 'idle';
   }

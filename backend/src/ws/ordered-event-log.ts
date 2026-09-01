@@ -1,5 +1,5 @@
 import type { Database, Statement } from 'bun:sqlite';
-import type { WSMessage, WSEventType } from '@koryphaios/shared';
+import type { SessionTimelineRewrittenPayload, WSMessage, WSEventType } from '@koryphaios/shared';
 import { getDb } from '../db';
 
 export interface SessionEventCursor {
@@ -33,6 +33,7 @@ export class OrderedEventLog {
   private readonly ensureCursor: Statement;
   private readonly allocateSequence: Statement;
   private readonly insertEvent: Statement;
+  private readonly readEventById: Statement;
   private readonly markEventDispatched: Statement;
   private readonly recordCause: Statement;
   private readonly readCause: Statement;
@@ -42,6 +43,11 @@ export class OrderedEventLog {
   private readonly clearCauses: Statement;
   private readonly appendTransaction: (message: WSMessage, eventId: string) => WSMessage;
   private readonly resetEpochTransaction: (sessionId: string) => SessionEventCursor;
+  private readonly rewriteTimelineTransaction: (
+    sessionId: string,
+    timestamp: number,
+    eventId: string,
+  ) => WSMessage<SessionTimelineRewrittenPayload>;
 
   constructor(private readonly sqlite: Database) {
     this.ensureCursor = sqlite.prepare(`
@@ -60,6 +66,12 @@ export class OrderedEventLog {
         event_id, session_id, epoch, sequence, timestamp, type, agent_id,
         parent_sequence, payload, dispatched, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    `);
+    this.readEventById = sqlite.prepare(`
+      SELECT event_id, session_id, epoch, sequence, timestamp, type, agent_id,
+             parent_sequence, payload
+      FROM ordered_session_events
+      WHERE event_id = ?
     `);
     this.markEventDispatched = sqlite.prepare(
       'UPDATE ordered_session_events SET dispatched = 1 WHERE event_id = ?',
@@ -94,6 +106,20 @@ export class OrderedEventLog {
 
     this.appendTransaction = sqlite.transaction((message: WSMessage, eventId: string) => {
       const sessionId = message.sessionId!;
+      const existing = this.readEventById.get(eventId) as OrderedEventRow | null;
+      if (existing) {
+        const payload = JSON.stringify(message.payload);
+        if (
+          existing.session_id !== sessionId ||
+          existing.type !== message.type ||
+          existing.timestamp !== message.timestamp ||
+          existing.agent_id !== (message.agentId ?? null) ||
+          existing.payload !== payload
+        ) {
+          throw new Error(`Refusing to reuse ordered event id ${eventId} for different content`);
+        }
+        return orderedEventFromRow(existing);
+      }
       const now = Date.now();
       this.ensureCursor.run(sessionId, now);
       const allocated = this.allocateSequence.get(now, sessionId) as {
@@ -151,11 +177,59 @@ export class OrderedEventLog {
       this.clearCauses.run(sessionId);
       return { epoch: row.epoch, latestSequence: 0 };
     });
+    this.rewriteTimelineTransaction = sqlite.transaction(
+      (sessionId: string, timestamp: number, eventId: string) => {
+        const now = Date.now();
+        this.ensureCursor.run(sessionId, now);
+        const epochRow = this.advanceCursorEpoch.get(now, sessionId) as { epoch: number } | null;
+        if (!epochRow) throw new Error(`Failed to advance event epoch for ${sessionId}`);
+        this.clearCauses.run(sessionId);
+
+        // Allocate sequence one inside the same transaction as the epoch
+        // advance. A backend crash can therefore never leave a rewritten epoch
+        // without the durable control row that tells reconnecting clients to
+        // discard the prior operational branch.
+        const allocated = this.allocateSequence.get(now, sessionId) as {
+          epoch: number;
+          next_sequence: number;
+        } | null;
+        if (!allocated || allocated.epoch !== epochRow.epoch) {
+          throw new Error(`Failed to allocate timeline rewrite event for ${sessionId}`);
+        }
+        const sequence = allocated.next_sequence - 1;
+        const payload: SessionTimelineRewrittenPayload = {
+          eventEpoch: epochRow.epoch,
+          reason: 'conversation_rewind',
+        };
+        const ordered: WSMessage<SessionTimelineRewrittenPayload> = {
+          type: 'session.timeline_rewritten',
+          sessionId,
+          eventId,
+          epoch: epochRow.epoch,
+          sequence,
+          timestamp,
+          payload,
+        };
+        this.insertEvent.run(
+          eventId,
+          sessionId,
+          epochRow.epoch,
+          sequence,
+          timestamp,
+          ordered.type,
+          null,
+          null,
+          JSON.stringify(payload),
+          now,
+        );
+        return ordered;
+      },
+    );
   }
 
   append(message: WSMessage): WSMessage {
     if (!message.sessionId || message.sequence !== undefined) return message;
-    return this.appendTransaction(message, crypto.randomUUID());
+    return this.appendTransaction(message, message.eventId ?? crypto.randomUUID());
   }
 
   markDispatched(eventId: string | undefined): void {
@@ -174,6 +248,16 @@ export class OrderedEventLog {
     return this.resetEpochTransaction(sessionId);
   }
 
+  /** Atomically rotate the session epoch and append its sequence-one rewrite
+   * control event so every connected or reconnecting renderer can invalidate
+   * the discarded branch. */
+  rewriteTimeline(
+    sessionId: string,
+    timestamp = Date.now(),
+  ): WSMessage<SessionTimelineRewrittenPayload> {
+    return this.rewriteTimelineTransaction(sessionId, timestamp, crypto.randomUUID());
+  }
+
   getAfter(sessionId: string, epoch: number, afterSequence: number, limit = 512): WSMessage[] {
     const safeLimit = Math.max(1, Math.min(2_048, Math.trunc(limit)));
     const rows = this.readAfter.all(
@@ -182,18 +266,22 @@ export class OrderedEventLog {
       afterSequence,
       safeLimit,
     ) as OrderedEventRow[];
-    return rows.map((row) => ({
-      eventId: row.event_id,
-      sessionId: row.session_id,
-      epoch: row.epoch,
-      sequence: row.sequence,
-      timestamp: row.timestamp,
-      type: row.type as WSEventType,
-      agentId: row.agent_id ?? undefined,
-      parentSequence: row.parent_sequence ?? undefined,
-      payload: JSON.parse(row.payload),
-    }));
+    return rows.map(orderedEventFromRow);
   }
+}
+
+function orderedEventFromRow(row: OrderedEventRow): WSMessage {
+  return {
+    eventId: row.event_id,
+    sessionId: row.session_id,
+    epoch: row.epoch,
+    sequence: row.sequence,
+    timestamp: row.timestamp,
+    type: row.type as WSEventType,
+    agentId: row.agent_id ?? undefined,
+    parentSequence: row.parent_sequence ?? undefined,
+    payload: JSON.parse(row.payload),
+  };
 }
 
 function causalIdentity(

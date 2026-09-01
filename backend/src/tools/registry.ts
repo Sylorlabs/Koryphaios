@@ -266,12 +266,64 @@ export class ToolRegistry {
           durationMs: performance.now() - start,
         };
       }
-      const selection = await ctx.waitForUserInput(
-        `${permission.reason}. Allow ${call.name} once?`,
-        ['Allow once', 'Reject'],
-        { allowOther: false, allowKeepChatting: false },
-      );
-      if (selection !== 'Allow once') {
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const liveRace = new Promise<string>((resolve) => {
+        poll = setInterval(() => {
+          try {
+            const fresh = decideToolPermission(ctx.permissionPolicy, call.name, change);
+            if (fresh.action === 'allow') {
+              clearInterval(poll);
+              resolve('__LIVE_ALLOW__');
+            } else if (fresh.action === 'deny') {
+              clearInterval(poll);
+              resolve('__LIVE_DENY__');
+            }
+          } catch {}
+          if (ctx.signal?.aborted) {
+            clearInterval(poll);
+            resolve('__LIVE_ABORT__');
+          }
+        }, 250);
+        if (ctx.signal) {
+          ctx.signal.addEventListener(
+            'abort',
+            () => {
+              clearInterval(poll);
+              resolve('__LIVE_ABORT__');
+            },
+            { once: true },
+          );
+        }
+      });
+      const selection = await Promise.race([
+        ctx.waitForUserInput(
+          `${permission.reason}. Allow ${call.name} once?`,
+          ['Allow once', 'Reject'],
+          { allowOther: false, allowKeepChatting: false },
+        ),
+        liveRace,
+      ]);
+      if (poll) clearInterval(poll);
+      if (selection === '__LIVE_ALLOW__') {
+        (ctx.approvedToolCallIds ??= new Set()).add(call.id);
+      } else if (selection === '__LIVE_DENY__') {
+        const fresh = decideToolPermission(ctx.permissionPolicy, call.name, change);
+        return {
+          callId: call.id,
+          name: call.name,
+          output: fresh.reason,
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      } else if (selection === '__LIVE_ABORT__') {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: 'Tool aborted.',
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      } else if (selection !== 'Allow once') {
         return {
           callId: call.id,
           name: call.name,

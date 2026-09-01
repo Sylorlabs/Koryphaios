@@ -4,7 +4,13 @@ import { getContext } from '../../context';
 import { PROJECT_ROOT } from '../../runtime/paths';
 import { syncProviderConfigsToConfig, removeProviderFromConfig } from '../../runtime/config';
 import { removeProviderSecrets } from '../../security/secret-store';
-import { customProviderId } from '../../providers/custom';
+import { customProviderId, probeCustomProvider } from '../../providers/custom';
+import {
+  CUSTOM_PROVIDER_ICON_MAX_BYTES,
+  deleteCustomProviderIcon,
+  readCustomProviderIcon,
+  storeCustomProviderIcon,
+} from '../../providers/custom-provider-icons';
 import type { ProviderName } from '@koryphaios/shared';
 import { serverLog } from '../../logger';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -20,6 +26,7 @@ import {
   type BrowserAuthProvider,
 } from '../../providers/browser-auth';
 import { detectAgentClis } from '../../providers/cli-detection';
+import { scanAwsCredentialSources } from '../../providers/aws-credential-scan';
 import { cliResearchBoundary } from '../../providers/cli-research';
 import { getManagedCodexAppServer } from '../../providers/codex-app-server';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
@@ -61,6 +68,8 @@ const providerConfigBody = t.Object({
   authToken: t.Optional(t.String()),
   baseUrl: t.Optional(t.String()),
   deployment: t.Optional(t.String()),
+  awsRegion: t.Optional(t.String()),
+  awsSessionToken: t.Optional(t.String()),
   selectedModels: t.Optional(t.Array(t.String())),
   hideModelSelector: t.Optional(t.Boolean()),
 });
@@ -72,9 +81,9 @@ function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
   return {};
 }
 
-function syncProviderConfigsSafely(providers: ReturnType<typeof getContext>['providers']): void {
-  if (process.env.NODE_ENV === 'test') return;
-  syncProviderConfigsToConfig(PROJECT_ROOT, providers.getConfigs());
+function syncProviderConfigsSafely(providers: ReturnType<typeof getContext>['providers']): boolean {
+  if (process.env.NODE_ENV === 'test') return true;
+  return syncProviderConfigsToConfig(PROJECT_ROOT, providers.getConfigs());
 }
 
 function providerSecretStoreRoot(): string {
@@ -202,6 +211,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     const { providers } = getContext();
     await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
+    await providers.autoConnectCliProviders(forceRefreshModels);
     if (forceRefreshModels) {
       await providers.refreshModelCatalogs();
     }
@@ -215,6 +225,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     const { providers } = getContext();
     await adoptManagedCodexSession();
     const forceRefreshModels = new URL(request.url).searchParams.get('refreshModels') === '1';
+    await providers.autoConnectCliProviders(forceRefreshModels);
     if (forceRefreshModels) {
       await providers.refreshModelCatalogs();
     }
@@ -272,6 +283,16 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       })),
     };
   })
+  // AWS credential source scan for Bedrock. Reports WHERE credentials live on
+  // the system (env vars, ~/.aws/credentials, ~/.aws/config) — never the secret
+  // material itself — so the UI can offer "Connect" or "Ignore".
+  .get('/bedrock/credentials/scan', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return {
+      ok: true,
+      data: scanAwsCredentialSources(),
+    };
+  })
   .post('/test-connected', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
@@ -312,22 +333,76 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       }
       const { providers } = getContext();
       const id = customProviderId(label);
-      const result = providers.registerCustomProvider({
-        id,
-        label,
-        kind: body.kind ?? 'openai',
+      if (providers.getConfigs()[id]?.custom) {
+        set.status = 409;
+        return {
+          ok: false,
+          error: `A custom provider named "${label}" already exists. Open its card to update it.`,
+        };
+      }
+      const kind = body.kind ?? 'openai';
+      const manualModels = [...new Set(body.models?.map((m) => m.trim()).filter(Boolean) ?? [])];
+      const probe = await probeCustomProvider({
+        kind,
         baseUrl,
         apiKey: body.apiKey?.trim() || undefined,
         authToken: body.authToken?.trim() || undefined,
         headers: body.headers,
-        models: body.models?.map((m) => m.trim()).filter(Boolean),
+      });
+      const saveUnverified = body.allowUnverified === true;
+      if (!probe.success) {
+        if (!saveUnverified || !probe.canSaveUnverified) {
+          set.status = 422;
+          return {
+            ok: false,
+            error: probe.error ?? 'Koryphaios could not verify this endpoint.',
+            canSaveUnverified: probe.canSaveUnverified,
+            requiresManualModels: probe.canSaveUnverified && manualModels.length === 0,
+            normalizedBaseUrl: probe.normalizedBaseUrl,
+          };
+        }
+        if (manualModels.length === 0) {
+          set.status = 422;
+          return {
+            ok: false,
+            error: 'Add at least one model ID before saving an endpoint without discovery.',
+            canSaveUnverified: true,
+            requiresManualModels: true,
+            normalizedBaseUrl: probe.normalizedBaseUrl,
+          };
+        }
+      }
+      const models = [...new Set([...manualModels, ...(probe.success ? probe.models : [])])];
+      const result = providers.registerCustomProvider({
+        id,
+        label,
+        kind,
+        baseUrl: probe.normalizedBaseUrl ?? baseUrl,
+        apiKey: body.apiKey?.trim() || undefined,
+        authToken: body.authToken?.trim() || undefined,
+        headers: body.headers,
+        models,
+        catalogDetected: probe.success,
       });
       if (!result.success) {
         throw new ValidationError(result.error ?? 'Failed to add custom provider');
       }
       syncProviderConfigsSafely(providers);
-      serverLog.info({ provider: id, kind: body.kind ?? 'openai' }, 'Custom provider added');
-      return { ok: true, data: { id, label, kind: body.kind ?? 'openai' } };
+      serverLog.info(
+        { provider: id, kind, catalogDetected: probe.success },
+        'Custom provider added',
+      );
+      return {
+        ok: true,
+        data: {
+          id,
+          label,
+          kind,
+          catalogDetected: probe.success,
+          normalizedBaseUrl: probe.normalizedBaseUrl ?? baseUrl,
+          models,
+        },
+      };
     },
     {
       body: t.Object({
@@ -340,12 +415,127 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         authToken: t.Optional(t.String()),
         models: t.Optional(t.Array(t.String())),
         headers: t.Optional(t.Record(t.String(), t.String())),
+        allowUnverified: t.Optional(t.Boolean()),
       }),
     },
   )
+  .put('/custom/:id/icon', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    const config = providers.getConfigs()[id];
+    if (!config?.custom) {
+      set.status = 404;
+      return { ok: false, error: 'Custom provider not found' };
+    }
+
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      throw new ValidationError('Upload a PNG icon using multipart form data');
+    }
+    const icon = form.get('icon');
+    const shape = form.get('shape');
+    if (!(icon instanceof File)) throw new ValidationError('Choose an icon image to upload');
+    if (icon.size < 1 || icon.size > CUSTOM_PROVIDER_ICON_MAX_BYTES) {
+      throw new ValidationError(
+        `Custom provider icon must be between 1 and ${CUSTOM_PROVIDER_ICON_MAX_BYTES} bytes`,
+      );
+    }
+
+    try {
+      const previousIcon = config.customIcon;
+      const metadata = await storeCustomProviderIcon({
+        providerId: id,
+        bytes: new Uint8Array(await icon.arrayBuffer()),
+        contentType: icon.type,
+        shape,
+      });
+      const updated = providers.setCustomProviderIcon(id as ProviderName, metadata);
+      if (!updated.success) {
+        await deleteCustomProviderIcon(id, metadata.assetId);
+        throw new ValidationError(updated.error ?? 'Custom provider not found');
+      }
+      if (!syncProviderConfigsSafely(providers)) {
+        providers.setCustomProviderIcon(id as ProviderName, previousIcon);
+        await deleteCustomProviderIcon(id, metadata.assetId).catch(() => undefined);
+        throw new InternalError('The custom provider icon could not be persisted');
+      }
+      if (previousIcon && previousIcon.assetId !== metadata.assetId) {
+        await deleteCustomProviderIcon(id, previousIcon.assetId).catch((error: unknown) => {
+          serverLog.warn(
+            { provider: id, error },
+            'Replaced custom provider icon but could not clean up the previous asset',
+          );
+        });
+      }
+      return { ok: true, data: metadata };
+    } catch (error: unknown) {
+      if (error instanceof ValidationError) throw error;
+      if (error instanceof InternalError) throw error;
+      if (error instanceof Error && error.name === 'CustomProviderIconValidationError') {
+        throw new ValidationError(error.message);
+      }
+      throw new InternalError('The custom provider icon could not be stored');
+    }
+  })
+  .get('/custom/:id/icon', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const config = getContext().providers.getConfigs()[id];
+    if (!config?.customIcon) {
+      return new Response(null, { status: 404 });
+    }
+    const icon = await readCustomProviderIcon(id, config.customIcon.assetId);
+    if (!icon) return new Response(null, { status: 404 });
+    if (request.headers.get('if-none-match') === icon.etag) {
+      return new Response(null, { status: 304, headers: { ETag: icon.etag } });
+    }
+    const body = new Uint8Array(icon.bytes.byteLength);
+    body.set(icon.bytes);
+    return new Response(body.buffer, {
+      headers: {
+        'Content-Type': icon.contentType,
+        'Content-Length': String(icon.bytes.byteLength),
+        'Cache-Control': 'private, max-age=31536000, immutable',
+        ETag: icon.etag,
+        'X-Content-Type-Options': 'nosniff',
+      },
+    });
+  })
+  .delete('/custom/:id/icon', async ({ request, params: { id }, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const { providers } = getContext();
+    const config = providers.getConfigs()[id];
+    if (!config?.custom) {
+      set.status = 404;
+      return { ok: false, error: 'Custom provider not found' };
+    }
+    if (config.customIcon) {
+      const previousIcon = config.customIcon;
+      providers.setCustomProviderIcon(id as ProviderName, undefined);
+      if (!syncProviderConfigsSafely(providers)) {
+        providers.setCustomProviderIcon(id as ProviderName, previousIcon);
+        throw new InternalError('The custom provider icon could not be removed from settings');
+      }
+      await deleteCustomProviderIcon(id, previousIcon.assetId).catch((error: unknown) => {
+        serverLog.warn(
+          { provider: id, error },
+          'Removed custom provider icon from settings but could not clean up its asset',
+        );
+      });
+    }
+    return { ok: true };
+  })
   .delete('/custom/:id', async ({ request, params: { id }, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const { providers } = getContext();
+    const config = providers.getConfigs()[id];
+    if (!config?.custom) {
+      set.status = 404;
+      return { ok: false, error: 'Custom provider not found' };
+    }
+    const customIcon = config.customIcon;
+    if (customIcon) await deleteCustomProviderIcon(id, customIcon.assetId);
     providers.removeCustomProvider(id as ProviderName);
     removeProviderSecrets(providerSecretStoreRoot(), id);
     if (process.env.NODE_ENV !== 'test') removeProviderFromConfig(PROJECT_ROOT, id);

@@ -22,6 +22,8 @@ const MAX_PERSISTED_ERROR_LENGTH = 2_000;
 const MAX_PERSISTED_JSON_LENGTH = 16_000;
 const MAX_STRUCTURED_DEPTH = 5;
 const MAX_STRUCTURED_ENTRIES = 50;
+const MIN_PROCESS_RETENTION_DAYS = 0;
+const MAX_PROCESS_RETENTION_DAYS = 3_650;
 
 export interface PersistedProcess {
   id: string;
@@ -203,20 +205,42 @@ function sanitizeExistingProcessEvidence(sqlite: SqliteMigrationClient): void {
   );
   for (const process of processes) {
     const command = sanitizePrefix(process.command, MAX_PERSISTED_COMMAND_LENGTH);
+    const name = sanitizePrefix(process.name, MAX_PERSISTED_NAME_LENGTH);
+    const commandReplayable =
+      process.commandReplayable === 1 && command === process.command ? 1 : 0;
+    const terminalError = process.terminalError
+      ? sanitizePrefix(process.terminalError, MAX_PERSISTED_ERROR_LENGTH)
+      : null;
+    const stdoutSnapshot = process.stdoutSnapshot
+      ? sanitizeTail(process.stdoutSnapshot, MAX_PERSISTED_LOG_LENGTH)
+      : null;
+    const stderrSnapshot = process.stderrSnapshot
+      ? sanitizeTail(process.stderrSnapshot, MAX_PERSISTED_LOG_LENGTH)
+      : null;
+    const metadata = sanitizeMetadata(process.metadata ?? undefined);
+
+    // This is a startup maintenance pass, not a migration. Avoid taking a
+    // write lock when an already-safe row needs no change: another legitimate
+    // local SQLite client may be writing while Koryphaios starts.
+    if (
+      name === process.name &&
+      command === process.command &&
+      commandReplayable === process.commandReplayable &&
+      terminalError === (process.terminalError ?? null) &&
+      stdoutSnapshot === (process.stdoutSnapshot ?? null) &&
+      stderrSnapshot === (process.stderrSnapshot ?? null) &&
+      metadata === (process.metadata ?? null)
+    ) {
+      continue;
+    }
     updateProcess.run(
-      sanitizePrefix(process.name, MAX_PERSISTED_NAME_LENGTH),
+      name,
       command,
-      process.commandReplayable === 1 && command === process.command ? 1 : 0,
-      process.terminalError
-        ? sanitizePrefix(process.terminalError, MAX_PERSISTED_ERROR_LENGTH)
-        : null,
-      process.stdoutSnapshot
-        ? sanitizeTail(process.stdoutSnapshot, MAX_PERSISTED_LOG_LENGTH)
-        : null,
-      process.stderrSnapshot
-        ? sanitizeTail(process.stderrSnapshot, MAX_PERSISTED_LOG_LENGTH)
-        : null,
-      sanitizeMetadata(process.metadata ?? undefined),
+      commandReplayable,
+      terminalError,
+      stdoutSnapshot,
+      stderrSnapshot,
+      metadata,
       process.id,
     );
   }
@@ -231,9 +255,11 @@ function sanitizeExistingProcessEvidence(sqlite: SqliteMigrationClient): void {
   for (const event of events) {
     if (!event.eventData) continue;
     try {
-      updateEvent.run(boundedJson(JSON.parse(event.eventData)), event.id);
+      const sanitized = boundedJson(JSON.parse(event.eventData));
+      if (sanitized !== event.eventData) updateEvent.run(sanitized, event.id);
     } catch {
-      updateEvent.run(boundedJson({ unparsed: event.eventData }), event.id);
+      const sanitized = boundedJson({ unparsed: event.eventData });
+      if (sanitized !== event.eventData) updateEvent.run(sanitized, event.id);
     }
   }
 
@@ -245,8 +271,18 @@ function sanitizeExistingProcessEvidence(sqlite: SqliteMigrationClient): void {
   );
   for (const entry of health) {
     if (!entry.lastError) continue;
-    updateHealth.run(sanitizePrefix(entry.lastError, MAX_PERSISTED_ERROR_LENGTH), entry.processId);
+    const sanitized = sanitizePrefix(entry.lastError, MAX_PERSISTED_ERROR_LENGTH);
+    if (sanitized !== entry.lastError) updateHealth.run(sanitized, entry.processId);
   }
+}
+
+function isSqliteBusyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'SQLITE_BUSY'
+  );
 }
 
 function ensureSchema(): void {
@@ -319,7 +355,20 @@ function ensureSchema(): void {
   // the additive migration. Old rows remain explicitly legacy/unknown; we do
   // not guess ownership from mutable metadata or command text.
   migrateLegacyProcessColumns(sqlite);
-  sanitizeExistingProcessEvidence(sqlite);
+  try {
+    sanitizeExistingProcessEvidence(sqlite);
+  } catch (error) {
+    // Sanitizing pre-existing diagnostic evidence is valuable, but it must
+    // never make the product unavailable. A concurrent local SQLite writer
+    // can hold the write lock longer than our busy timeout. Fresh writes are
+    // still sanitized at their normal persistence boundary, and this pass
+    // will be retried on the next startup.
+    if (!isSqliteBusyError(error)) throw error;
+    serverLog.warn(
+      { err: error instanceof Error ? error.message : String(error) },
+      'Deferred process-evidence maintenance because the database is busy',
+    );
+  }
 
   schemaEnsured = true;
 }
@@ -497,6 +546,37 @@ export async function updateProcessStatus(
   }
 }
 
+/**
+ * Persist a bounded, redacted live-output checkpoint without touching lifecycle
+ * fields. A late stream flush must never turn a terminal process back into
+ * `running` after a backend restart race.
+ */
+export async function updateLiveProcessLogSnapshot(
+  id: string,
+  stdoutSnapshot: string,
+  stderrSnapshot: string,
+): Promise<void> {
+  try {
+    ensureSchema();
+    await db
+      .update(supervisedProcesses)
+      .set({
+        updatedAt: new Date(),
+        stdoutSnapshot: sanitizeTail(stdoutSnapshot, MAX_PERSISTED_LOG_LENGTH),
+        stderrSnapshot: sanitizeTail(stderrSnapshot, MAX_PERSISTED_LOG_LENGTH),
+      })
+      .where(
+        and(
+          eq(supervisedProcesses.id, id),
+          inArray(supervisedProcesses.status, ['starting', 'running', 'detached']),
+        ),
+      );
+  } catch (err) {
+    serverLog.error({ err, processId: id }, 'Failed to persist live process log snapshot');
+    throw err;
+  }
+}
+
 export async function incrementRestartCount(id: string): Promise<number> {
   try {
     ensureSchema();
@@ -607,11 +687,20 @@ export async function deleteProcess(id: string): Promise<void> {
 }
 
 export async function cleanupOldProcesses(daysToKeep: number = 7): Promise<number> {
+  if (
+    !Number.isSafeInteger(daysToKeep) ||
+    daysToKeep < MIN_PROCESS_RETENTION_DAYS ||
+    daysToKeep > MAX_PROCESS_RETENTION_DAYS
+  ) {
+    throw new RangeError(
+      `daysToKeep must be an integer between ${MIN_PROCESS_RETENTION_DAYS} and ${MAX_PROCESS_RETENTION_DAYS}`,
+    );
+  }
   try {
     ensureSchema();
     const sqlite = db.$client ?? null;
     const cutoff = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000);
-    await db
+    const result = await db
       .delete(supervisedProcesses)
       .where(
         and(
@@ -624,11 +713,23 @@ export async function cleanupOldProcesses(daysToKeep: number = 7): Promise<numbe
             'detached',
           ]),
           lte(supervisedProcesses.endedAt, cutoff),
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM session_run_continuation_processes AS continuation_process
+            INNER JOIN session_run_continuations AS continuation
+              ON continuation.id = continuation_process.continuation_id
+            WHERE continuation_process.process_id = ${supervisedProcesses.id}
+              AND continuation.state IN ('pending', 'ready', 'claimed')
+          )`,
         ),
       );
 
-    serverLog.info({ daysToKeep }, 'Cleaned up old processes');
-    return (sqlite as { changes?: number } | null)?.changes ?? 0;
+    const deleted =
+      (result as unknown as { changes?: number }).changes ??
+      (sqlite as { changes?: number } | null)?.changes ??
+      0;
+    serverLog.info({ daysToKeep, deleted }, 'Cleaned up old processes');
+    return deleted;
   } catch (err) {
     serverLog.error({ err }, 'Failed to cleanup old processes');
     return 0;

@@ -1,8 +1,11 @@
 <script lang="ts">
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { feedStore } from '$lib/stores/feed.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
+  import { projectStore } from '$lib/stores/project.svelte';
   import MessageSquare from 'lucide-svelte/icons/message-square';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
   import Trash2 from 'lucide-svelte/icons/trash-2';
@@ -19,6 +22,7 @@
   import VirtualList from './VirtualList.svelte';
   import type { FeedEntryLocal } from '$lib/types';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
+  import { welcomePreferencesStore } from '$lib/stores/welcome-preferences.svelte';
 
   let feedContainer = $state<HTMLDivElement>();
   let virtualList = $state<VirtualList<FeedEntryLocal>>();
@@ -69,7 +73,54 @@
         'Help me trace a bug in this project. Start by asking for the failing behavior or error, then narrow the likely root cause.',
     },
   ];
+
+  const workspaceSuggestions: DashboardSuggestion[] = [
+    {
+      id: 'map-workspace',
+      label: 'Map the workspace',
+      icon: Zap,
+      prompt:
+        'Inspect this workspace and summarize the projects, key entry points, and the highest-leverage next steps.',
+    },
+    {
+      id: 'review-workspace',
+      label: 'Review workspace changes',
+      icon: GitBranch,
+      prompt:
+        'Review the current uncommitted changes across all projects in this workspace and identify the most likely bugs, regressions, or missing tests.',
+    },
+    {
+      id: 'manage-projects',
+      label: 'Manage projects',
+      icon: Paintbrush,
+      prompt:
+        'Help me manage the projects in this workspace — add, remove, or organize them, and recommend the most important setup fixes.',
+    },
+    {
+      id: 'debug-workspace',
+      label: 'Debug across workspace',
+      icon: Bug,
+      prompt:
+        'Help me trace a bug across this workspace. Start by asking for the failing behavior or error, then narrow the likely root cause.',
+    },
+  ];
+
+  let isWorkspaceReady = $derived(
+    !!projectStore.revision || !!projectStore.workspaceRoot || !!projectStore.currentPath,
+  );
+  let isWorkspace = $derived(
+    isWorkspaceReady && !!projectStore.workspaceRoot && !projectStore.currentPath,
+  );
   let suggestions = $state<DashboardSuggestion[]>(defaultSuggestions);
+
+  $effect(() => {
+    const source = isWorkspace ? workspaceSuggestions : defaultSuggestions;
+    const savedPrompts = welcomePreferencesStore.preferences.suggestionPrompts;
+    suggestions = source.map((suggestion) => ({
+      ...suggestion,
+      prompt: savedPrompts[suggestion.id] ?? suggestion.prompt,
+    }));
+  });
 
   let filteredFeed = $derived(wsStore.groupedFeed);
   let isManagerStreaming = $derived(
@@ -154,8 +205,13 @@
   // hide-from-me / delete) replaced the select-then-bulk-delete flow.
   function handleEntryClick(_entry: FeedEntryLocal, _e: MouseEvent) {}
 
-  function deleteSingle(id: string) {
-    wsStore.removeEntries(new Set([id]));
+  async function deleteSingle(entry: FeedEntryLocal, messageId?: string) {
+    try {
+      await feedStore.deleteEntry(entry, messageId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Message deletion failed.';
+      toastStore.error(detail);
+    }
   }
 
   function runSuggestion(prompt: string) {
@@ -175,6 +231,7 @@
   function saveSuggestionEdit(id: string) {
     const nextText = editingSuggestionText.trim();
     if (!nextText) return;
+    welcomePreferencesStore.updateSuggestion(id, nextText);
     suggestions = suggestions.map((suggestion) =>
       suggestion.id === id ? { ...suggestion, prompt: nextText } : suggestion,
     );
@@ -207,6 +264,15 @@
           <span>Loading this chat…</span>
         </div>
       </div>
+    {:else if !isWorkspaceReady && filteredFeed.length === 0}
+      <div class="absolute inset-0 flex items-center justify-center p-6">
+        <div
+          class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg"
+        >
+          <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
+          <span>Loading workspace…</span>
+        </div>
+      </div>
     {:else if filteredFeed.length === 0}
       <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
         <div class="px-6 py-10 max-w-5xl mx-auto">
@@ -220,7 +286,9 @@
                   class="text-3xl font-semibold leading-tight mb-4 tracking-tight"
                   style="color: var(--color-text-primary);"
                 >
-                  What should Koryphaios do with your project?
+                  {isWorkspace
+                    ? 'What should Koryphaios do with your workspace?'
+                    : 'What should Koryphaios do with your project?'}
                 </h2>
 
                 <p
@@ -231,8 +299,9 @@
                   your task in the composer below.
                 </p>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
-                  {#each suggestions as suggestion (suggestion.id)}
+                {#if welcomePreferencesStore.preferences.enabled.suggestions}
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                    {#each suggestions as suggestion (suggestion.id)}
                     {@const Icon = suggestion.icon}
                     <div
                       class="suggestion-card relative flex flex-col items-start p-5 rounded-2xl border text-left transition-all duration-300 group overflow-hidden {editingSuggestionId ===
@@ -334,11 +403,14 @@
                         </div>
                       {/if}
                     </div>
-                  {/each}
-                </div>
+                    {/each}
+                  </div>
+                {/if}
               </div>
 
-              <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              {#if welcomePreferencesStore.preferences.enabled.proTips || welcomePreferencesStore.preferences.enabled.workflow}
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {#if welcomePreferencesStore.preferences.enabled.proTips}
                 <div
                   class="rounded-[24px] border p-6 flex flex-col justify-between transition-all hover:border-[var(--color-accent)]/20"
                   style="background: var(--color-surface-2); border-color: var(--color-border);"
@@ -351,7 +423,7 @@
                       Pro Tips
                     </div>
                     <div class="space-y-4">
-                      {#each ['Ask for a repo walkthrough before making changes.', 'Review spacing and hierarchy before polish work.'] as tip}
+                      {#each welcomePreferencesStore.preferences.proTips as tip}
                         <div class="flex items-start gap-3">
                           <div
                             class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-amber-500/40"
@@ -380,7 +452,9 @@
                     Plan next improvement
                   </button>
                 </div>
+                {/if}
 
+                {#if welcomePreferencesStore.preferences.enabled.workflow}
                 <div
                   class="rounded-[24px] border p-6 transition-all hover:border-[var(--color-accent)]/20"
                   style="background: var(--color-surface-2); border-color: var(--color-border);"
@@ -392,7 +466,7 @@
                     Workflow
                   </div>
                   <div class="space-y-4">
-                    {#each ['Use composer below for direct tasks.', 'Open Git panel for change review.'] as tip}
+                    {#each welcomePreferencesStore.preferences.workflow as tip}
                       <div class="flex items-start gap-3">
                         <div class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-blue-500/40"></div>
                         <p
@@ -405,7 +479,9 @@
                     {/each}
                   </div>
                 </div>
+                {/if}
               </div>
+              {/if}
             </div>
           </div>
         </div>
@@ -430,7 +506,7 @@
                 isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
                 onSelect={(e) => handleEntryClick(entry, e)}
                 onToggleGroup={() => toggleGroup(entry.id)}
-                onDelete={() => deleteSingle(entry.id)}
+                onDelete={(_event, target) => deleteSingle(entry, target?.messageId)}
               />
             </div>
           {/snippet}

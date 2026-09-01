@@ -11,6 +11,10 @@ export interface SessionSyncOptions {
 export function useSessionSync(options: SessionSyncOptions = {}) {
   let lastSubscribedSessionId = $state('');
   let lastLoadedAgentThreadsSessionId = $state('');
+  // A session switch is activated in a microtask so the effect does not
+  // synchronously mutate a store it observes. Until that handoff completes,
+  // do not let a reactive re-run subscribe and replay into the previous feed.
+  let activatingSessionId = '';
 
   // Monotonic counter incremented every time the user switches to a
   // different session. Used to discard stale fetches that resolve after
@@ -25,6 +29,7 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
       loadGeneration++;
       activeLoadController?.abort();
       activeLoadController = null;
+      activatingSessionId = '';
       // Svelte effects must not synchronously mutate the reactive stores they
       // observe. Move the atomic feed handoff to the next microtask.
       queueMicrotask(() => {
@@ -38,7 +43,7 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
 
     if (activeId === lastSubscribedSessionId) {
       // Same session — just re-subscribe if the WS is up.
-      if (wsStore.status === 'connected') {
+      if (wsStore.status === 'connected' && activatingSessionId !== activeId) {
         wsStore.subscribeToSession(activeId);
       }
       return;
@@ -50,21 +55,24 @@ export function useSessionSync(options: SessionSyncOptions = {}) {
     activeLoadController?.abort();
     const controller = new AbortController();
     activeLoadController = controller;
-
-    if (wsStore.status === 'connected') {
-      wsStore.subscribeToSession(activeId);
-    }
+    activatingSessionId = activeId;
 
     queueMicrotask(async () => {
       if (
         controller.signal.aborted ||
         myGen !== loadGeneration ||
         sessionStore.activeSessionId !== activeId
-      ) return;
+      ) {
+        if (activatingSessionId === activeId) activatingSessionId = '';
+        return;
+      }
 
       // Atomically restore this session's isolated snapshot before its fresh
-      // history request begins, without mutating state during effect evaluation.
+      // history request or ordered-event replay begins, without mutating state
+      // during effect evaluation.
       const feedGeneration = wsStore.activateSessionFeed(activeId);
+      if (activatingSessionId === activeId) activatingSessionId = '';
+      if (wsStore.status === 'connected') wsStore.subscribeToSession(activeId);
       try {
         const messages = await sessionStore.fetchMessages(activeId, controller.signal);
         // A newer switch has happened — drop this stale result.

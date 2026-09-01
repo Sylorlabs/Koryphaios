@@ -1,4 +1,4 @@
-// Provider secret store — API keys and auth tokens live HERE, never in
+// Provider secret store — API keys, auth tokens, and custom headers live HERE, never in
 // koryphaios.json. That file is settings; committing it (or an auto-committer
 // snapshotting it) must never leak a credential again.
 //
@@ -16,7 +16,23 @@ import { ensureSecureDir } from './fs-permissions';
 
 export const SECRET_FIELDS = ['apiKey', 'authToken'] as const;
 type SecretField = (typeof SECRET_FIELDS)[number];
-export type ProviderSecrets = Record<string, Partial<Record<SecretField, string>>>;
+type ProviderSecretEntry = Partial<Record<SecretField, string>> & {
+  /** Custom headers are all treated as secret because arbitrary gateways use
+   * non-standard names for tokens and tenant credentials. */
+  headers?: Record<string, string>;
+};
+export type ProviderSecrets = Record<string, ProviderSecretEntry>;
+
+function normalizedSecretHeaders(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const headers = Object.fromEntries(
+    Object.entries(value).filter(
+      ([name, headerValue]) =>
+        name.trim().length > 0 && typeof headerValue === 'string' && headerValue.length > 0,
+    ),
+  );
+  return Object.keys(headers).length > 0 ? headers : undefined;
+}
 
 function secretsPath(projectRoot: string): string {
   return join(projectRoot, '.koryphaios', 'credentials.json');
@@ -54,14 +70,24 @@ export function saveProviderSecrets(projectRoot: string, secrets: ProviderSecret
 export function upsertProviderSecrets(
   projectRoot: string,
   provider: string,
-  values: Partial<Record<SecretField, string>>,
+  values: ProviderSecretEntry,
 ): void {
-  const filtered = Object.fromEntries(
-    Object.entries(values).filter(([, v]) => typeof v === 'string' && v.trim()),
+  const filtered: ProviderSecretEntry = Object.fromEntries(
+    SECRET_FIELDS.flatMap((field) => {
+      const value = values[field];
+      return typeof value === 'string' && value.trim() ? [[field, value]] : [];
+    }),
   );
+  const headers = normalizedSecretHeaders(values.headers);
+  if (headers) filtered.headers = headers;
   if (Object.keys(filtered).length === 0) return;
   const secrets = loadProviderSecrets(projectRoot);
-  secrets[provider] = { ...secrets[provider], ...filtered };
+  const existing = secrets[provider] ?? {};
+  secrets[provider] = {
+    ...existing,
+    ...filtered,
+    ...(headers && { headers: { ...(existing.headers ?? {}), ...headers } }),
+  };
   saveProviderSecrets(projectRoot, secrets);
 }
 
@@ -113,6 +139,11 @@ export function stripProviderSecrets(providers: Record<string, unknown>): {
       }
       delete copy[field];
     }
+    const headers = normalizedSecretHeaders(copy.headers);
+    // Treat the whole map as confidential. Gateways frequently use custom
+    // header names for credentials, so a name-based denylist cannot be safe.
+    delete copy.headers;
+    if (headers) (secrets[name] ??= {}).headers = headers;
     clean[name] = copy;
   }
   return { clean, secrets };
@@ -126,7 +157,15 @@ export function hydrateProviderSecrets<T extends Record<string, unknown>>(
   const secrets = loadProviderSecrets(projectRoot);
   const out: Record<string, unknown> = { ...providers };
   for (const [name, vals] of Object.entries(secrets)) {
-    out[name] = { ...((out[name] as Record<string, unknown>) ?? {}), ...vals };
+    const existing = (out[name] as Record<string, unknown>) ?? {};
+    const headers = normalizedSecretHeaders(vals.headers);
+    const existingHeaders = normalizedSecretHeaders(existing.headers);
+    const { headers: _secretHeaders, ...flatSecrets } = vals;
+    out[name] = {
+      ...existing,
+      ...flatSecrets,
+      ...(headers && { headers: { ...(existingHeaders ?? {}), ...headers } }),
+    };
   }
   return out as T;
 }
@@ -256,8 +295,8 @@ export function hydrateMcpEnvSecrets<T extends Record<string, unknown>>(
   return out as T;
 }
 
-/** One-time healing: if koryphaios.json still carries apiKey/authToken values,
- *  move them into the secret store and rewrite the config without them. */
+/** One-time healing: if koryphaios.json still carries provider credentials or
+ * custom headers, move them into the secret store and rewrite without them. */
 export function migrateSecretsOutOfConfig(projectRoot: string): void {
   const configPath = join(projectRoot, 'koryphaios.json');
   if (!existsSync(configPath)) return;
@@ -270,7 +309,13 @@ export function migrateSecretsOutOfConfig(projectRoot: string): void {
     if (Object.keys(secrets).length === 0) return;
     const existing = loadProviderSecrets(projectRoot);
     for (const [name, vals] of Object.entries(secrets)) {
-      existing[name] = { ...existing[name], ...vals };
+      existing[name] = {
+        ...existing[name],
+        ...vals,
+        ...(vals.headers && {
+          headers: { ...(existing[name]?.headers ?? {}), ...vals.headers },
+        }),
+      };
     }
     saveProviderSecrets(projectRoot, existing);
     config.providers = clean;

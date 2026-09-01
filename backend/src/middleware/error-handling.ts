@@ -30,6 +30,8 @@ const PUBLIC_CONFLICT_DETAIL_KEYS = new Set([
   'actualRevision',
   'sourceChanged',
   'sourceDeleted',
+  'expectedDraftRevision',
+  'currentDraftRevision',
 ]);
 
 /** Conflict recovery needs a small amount of authoritative state, but arbitrary

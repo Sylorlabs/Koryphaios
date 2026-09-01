@@ -425,9 +425,14 @@ describe('Git Workflow Integration Tests', () => {
   describe('TimeTravelService session isolation', () => {
     const messageStore = {
       add: async () => {},
+      addIdempotent: async () => 'inserted' as const,
+      addIdempotentAtBoundary: async () => 'inserted' as const,
+      getById: async () => undefined,
       getAll: async () => [],
+      getDisplayMessages: async () => [],
       getRecent: async () => [],
       getContextMessages: async () => [],
+      getContextMessagesAtBoundary: async () => [],
       commitCompaction: async () => ({ sourceRevision: 0, targetRevision: 1 }),
       getActiveBoundary: async () => ({ messageId: null, contextRevision: 0 }),
       setActiveBoundary: async (sessionId: string, messageId: string) => ({
@@ -436,6 +441,11 @@ describe('Git Workflow Integration Tests', () => {
         current: { messageId, contextRevision: 0, updatedAt: 1 },
       }),
       restoreActiveBoundary: async () => {},
+      getRegenerationCandidate: async () => undefined,
+      prepareRegenerationBranch: async () => {
+        throw new Error('not used by this Time Travel test');
+      },
+      commitRegeneratedResponse: async () => {},
       truncateAfter: async () => {},
       assignVariantGroup: async () => {},
       replaceAndTruncate: async () => 0,

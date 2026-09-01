@@ -1,23 +1,44 @@
-import { test, expect, describe, beforeAll, setDefaultTimeout } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // These tests create 3k+ notes and do heavy DB operations that are slow
 // under parallel test load.
 setDefaultTimeout(30000);
-import { initDb, db } from '../../db';
-import { notes } from '../../db/schema';
+
+// This file is often run directly while tuning the notes index. Set its own
+// database before importing app modules so a direct `bun test <this file>` can
+// never seed or clean a developer's live Koryphaios database. The isolated
+// suite runner supplies DATABASE_URL, which remains authoritative there.
+const notesScaleDatabaseDir = process.env.DATABASE_URL
+  ? undefined
+  : mkdtempSync(join(tmpdir(), 'kory-notes-scale-'));
+process.env.DATABASE_URL ??= `sqlite:${join(notesScaleDatabaseDir!, 'notes-scale.sqlite')}`;
+
+const { initDb, db } = await import('../../db');
+const { notes } = await import('../../db/schema');
 import { nanoid } from 'nanoid';
-import {
+const {
   searchNotes,
   listNotes,
   getGraphData,
+  getNotesCatalog,
   createNote,
   updateNote,
   parseFrontmatter,
+  getNoteByTitle,
   resolveNoteRef,
   invalidateNotesCache,
-} from '../notes-service';
+} = await import('../notes-service');
 
 const N = 3000;
+
+afterAll(() => {
+  if (notesScaleDatabaseDir) {
+    rmSync(notesScaleDatabaseDir, { recursive: true, force: true });
+  }
+});
 
 describe('notes at scale', () => {
   beforeAll(async () => {
@@ -114,6 +135,33 @@ describe('notes at scale', () => {
     );
     expect(linkerAfter?.content).toContain('[[RenamedTarget]]');
   });
+
+  test('agent catalog remains complete beyond the graph node envelope', async () => {
+    const now = new Date();
+    const extraRows = Array.from({ length: 2_100 }, (_, index) => ({
+      id: `catalog-extra-${String(index).padStart(4, '0')}`,
+      title: `Catalog Extra ${index}`,
+      content: '',
+      folderPath: '/Catalog',
+      tags: '[]',
+      pinned: 0,
+      includeInContext: 0,
+      format: 'markdown',
+      userId: null,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    for (let index = 0; index < extraRows.length; index += 500) {
+      await db.insert(notes).values(extraRows.slice(index, index + 500));
+    }
+    invalidateNotesCache();
+
+    const catalog = await getNotesCatalog();
+    expect(catalog.filter((entry) => entry.folderPath === '/Catalog')).toHaveLength(
+      extraRows.length,
+    );
+    expect(catalog.length).toBeGreaterThan(5_000);
+  });
 });
 
 describe('frontmatter, aliases, ghost nodes', () => {
@@ -153,6 +201,27 @@ describe('frontmatter, aliases, ghost nodes', () => {
       );
       expect(edgeToCanonical).toBe(true);
     }
+  });
+
+  test('duplicate titles and aliases fail closed while qualified paths stay exact', async () => {
+    const suffix = nanoid();
+    const duplicateTitle = `Duplicate ${suffix}`;
+    const first = await createNote({
+      title: duplicateTitle,
+      folderPath: '/Alpha',
+      content: `---\naliases: [Shared-${suffix}]\n---\nFirst`,
+    });
+    const second = await createNote({
+      title: duplicateTitle,
+      folderPath: '/Beta',
+      content: `---\naliases: [Shared-${suffix}]\n---\nSecond`,
+    });
+
+    expect(await getNoteByTitle(duplicateTitle)).toBeNull();
+    expect(await resolveNoteRef(duplicateTitle)).toBeNull();
+    expect(await resolveNoteRef(`Shared-${suffix}`)).toBeNull();
+    expect(await resolveNoteRef(`/Alpha/${duplicateTitle}`)).toBe(first.id);
+    expect(await resolveNoteRef(`Beta/${duplicateTitle}`)).toBe(second.id);
   });
 
   test('unresolved wikilinks become ghost nodes', async () => {

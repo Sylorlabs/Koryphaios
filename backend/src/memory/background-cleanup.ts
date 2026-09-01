@@ -135,6 +135,17 @@ export class BackgroundCleanupService {
       // Cleanup abandoned resources in KoryManager
       this.kory.cleanupAbandonedResources();
 
+      // A process can lose a claimed answered-question handoff without the
+      // backend itself restarting (for example, a provider stack crashes while
+      // the server remains alive). Periodically requeue expired leases so the
+      // durable command does not depend on another deployment to make progress.
+      void this.kory.recoverDurableQuestionHandoffs().catch((err) => {
+        serverLog.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Durable answered-question handoff recovery failed',
+        );
+      });
+
       // Note: git resource pruning (worktree refs, old checkpoints) runs on
       // a separate slower interval (pruneIntervalMs, default 1h) via
       // pruneInterval — see start(). It's not triggered here because it

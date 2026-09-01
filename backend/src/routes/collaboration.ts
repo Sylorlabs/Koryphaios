@@ -8,6 +8,21 @@ import type { CollaborationAccessTier, SandboxPolicy } from '@koryphaios/shared'
 
 export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
+  // Rebuild the host-control projection after a renderer reload. If the
+  // backend itself restarted, the manager creates a fresh checked relay host
+  // instead of advertising a stale in-memory connection.
+  .get(
+    '/active',
+    async ({ request, query }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      return {
+        ok: true,
+        data: await collaborationManager.restoreHostForBaseSession(query.baseSessionId),
+      };
+    },
+    { query: t.Object({ baseSessionId: t.String({ minLength: 1, maxLength: 200 }) }) },
+  )
+
   // Canonical host start endpoint. Keeping the session id in the JSON body
   // avoids route ambiguity and gives host configuration a stable contract.
   .post(
@@ -124,14 +139,17 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   )
 
   // Get pending guest prompts waiting for host approval
-  .get('/:id/pending', async ({ request }) => {
+  .get('/:id/pending', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    if (!(await collaborationManager.hydrateRuntimeForSession(id))) {
+      throw new NotFoundError('Collaboration session', id);
+    }
     return {
       ok: true,
       data: {
-        prompts: collaborationManager.getPendingPrompts(),
-        joins: collaborationManager.getPendingJoins(),
-        participants: collaborationManager.getConnectedGuests(),
+        prompts: collaborationManager.getPendingPrompts(id),
+        joins: collaborationManager.getPendingJoins(id),
+        participants: collaborationManager.getConnectedGuests(id),
       },
     };
   })
@@ -139,34 +157,72 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // Host approves or rejects a guest prompt
   .post(
     '/:id/approve',
-    async ({ request, params: { id }, body }) => {
+    async ({ request, params: { id }, body, set }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Body shape is validated by the Elysia schema below.
       const { promptId, approved } = body as { promptId: string; approved: boolean };
-      const prompt = collaborationManager.resolveGuestPrompt(promptId, approved);
-      if (approved && prompt) {
-        const state = await collaborationManager.getSessionState(id);
-        if (state)
-          void getContext().kory.processTask(
-            state.session.baseSessionId,
-            prompt.content,
-            prompt.model || undefined,
-            prompt.reasoningLevel || undefined,
-            undefined,
-            {
-              commandAllowlist: prompt.commandAllowlist || [],
-              commandBlocklist: prompt.commandBlocklist || [],
-            },
-          );
+      await collaborationManager.hydrateRuntimeForSession(id);
+      const pending = collaborationManager.getPendingPrompt(promptId);
+      if (!pending || pending.sessionId !== id) {
+        throw new NotFoundError('Pending guest prompt', promptId);
       }
-      return { ok: true, data: { approved, prompt } };
+      if (!approved) {
+        const prompt = await collaborationManager.resolveGuestPrompt(promptId, false);
+        return { ok: true, data: { approved: false, prompt } };
+      }
+      if (approved) {
+        const state = await collaborationManager.getSessionState(id);
+        if (!state) throw new NotFoundError('Collaboration session not found');
+        const submission = await getContext().kory.startSessionTurn({
+          sessionId: state.session.baseSessionId,
+          source: 'collaboration',
+          sourceCommandId: pending.sourceCommandId,
+          userMessage: pending.content,
+          preferredModel: pending.model || undefined,
+          reasoningLevel: pending.reasoningLevel || undefined,
+          collaborationToolPolicy: {
+            commandAllowlist: pending.commandAllowlist || [],
+            commandBlocklist: pending.commandBlocklist || [],
+          },
+        });
+        if (!submission.accepted) {
+          if (submission.result.status === 'rejected') {
+            set.status = 409;
+            return {
+              ok: false,
+              error: 'The target chat is busy; the guest prompt remains pending.',
+            };
+          }
+          if (submission.result.status !== 'completed') {
+            set.status = 409;
+            return {
+              ok: false,
+              error:
+                'This guest prompt has an incomplete prior execution and was not replayed. It remains pending; reject it and submit a new prompt to retry explicitly.',
+            };
+          }
+        }
+        const prompt = await collaborationManager.resolveGuestPrompt(promptId, true);
+        if (submission.accepted) {
+          void submission.completion.catch(() => undefined);
+        }
+        return {
+          ok: true,
+          data: {
+            approved: true,
+            prompt,
+            runId: submission.accepted ? submission.runId : submission.result.runId,
+          },
+        };
+      }
+      throw new Error('Unreachable collaboration approval state');
     },
     { body: t.Object({ promptId: t.String(), approved: t.Boolean() }) },
   )
 
   .post(
     '/:id/join-decision',
-    async ({ request, body }) => {
+    async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Body shape is validated by the Elysia schema below.
       const { guestId, approved, tierId } = body as {
@@ -174,6 +230,9 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         approved: boolean;
         tierId?: string;
       };
+      await collaborationManager.hydrateRuntimeForSession(id);
+      const pending = collaborationManager.getPendingJoins(id).find((join) => join.guestId === guestId);
+      if (!pending) throw new NotFoundError('Pending guest join', guestId);
       return { ok: true, data: collaborationManager.resolveJoin(guestId, approved, tierId) };
     },
     {
@@ -187,11 +246,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
 
   .post(
     '/:id/assign-tier',
-    async ({ request, body }) => {
+    async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Body shape is validated by the Elysia schema below.
       const { guestId, tierId } = body as { guestId: string; tierId: string };
-      collaborationManager.assignParticipantTier(guestId, tierId);
+      await collaborationManager.hydrateRuntimeForSession(id);
+      collaborationManager.assignParticipantTier(guestId, tierId, id);
       return { ok: true };
     },
     { body: t.Object({ guestId: t.String(), tierId: t.String() }) },

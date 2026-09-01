@@ -56,5 +56,7 @@ export interface StoredMessage {
   attachments?: MessageAttachment[];
   /** Conversation generation used for manager context. Older revisions remain visible/auditable. */
   contextRevision?: number;
+  /** Display projection only: true when this retained row belongs to the durable active lineage. */
+  isActiveBranch?: boolean;
   createdAt: number;
 }

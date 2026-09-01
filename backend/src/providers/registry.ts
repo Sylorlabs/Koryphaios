@@ -34,7 +34,8 @@ import { CodexAuthProvider } from './codex-auth';
 import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
-import { FREEBUFF_UNAVAILABLE_ERROR, FreebuffProvider } from './freebuff';
+import { FreebuffProvider } from './freebuff-cli';
+import { CodebuffProvider } from './codebuff';
 import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
@@ -43,6 +44,7 @@ import { KiloCodeProvider } from './kilo-cli';
 import { JulesProvider } from './jules';
 import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
 import { BedrockProvider } from './bedrock';
+import { hasAwsCredentialSource } from './aws-credential-scan';
 import { GITLAB_DUO_UNAVAILABLE_ERROR, GitLabProvider } from './gitlab';
 import { SapAiProvider, verifySapAiConnection } from './sapai';
 import {
@@ -51,7 +53,8 @@ import {
   githubModelsHeaders,
   parseGitHubModelsCatalog,
 } from './github-models';
-import { CustomProvider } from './custom';
+import { ChatbaseProvider } from './chatbase';
+import { CustomProvider, normalizeCustomProviderBaseUrl, probeCustomProvider } from './custom';
 import {
   detectCodexCLILogin,
   detectClaudeCodeLogin,
@@ -60,8 +63,10 @@ import {
   detectCursorCLILogin,
   detectDevinCLILogin,
   detectClineCLILogin,
+  detectFreebuffCLILogin,
+  readFreebuffAuthToken,
 } from './auth-utils';
-import { cliAutoEnableCreds, probeCliVersion, whichBinary } from './cli-detection';
+import { cliAutoEnableCreds, probeCliConnection, whichBinary } from './cli-detection';
 import { discoverCliAccounts } from './cli-accounts';
 import { type ProviderDeployment, getProviderDisplay } from './provider-display';
 import { KimiCodeProvider } from './kimicode';
@@ -89,6 +94,8 @@ import {
   providerDefaultBaseUrl,
 } from './constants';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import { PROJECT_ROOT } from '../runtime/paths';
+import { syncProviderConfigsToConfig } from '../runtime/config';
 
 function safeVerificationHttpError(
   status: number,
@@ -140,6 +147,11 @@ export const UNSUPPORTED_CHAT_PROVIDER_NAMES = new Set<ProviderName>([
   'prodia',
 ]);
 
+export const DEDICATED_CAPABILITY_PROVIDER_NAMES = new Set<ProviderName>([
+  'deepgram',
+  'assemblyai',
+]);
+
 function unsupportedChatReason(name: ProviderName): string | undefined {
   if (!UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) return undefined;
   return `${generateProviderLabel(String(name))} is not available as a chat provider in this build. Its non-chat API requires a dedicated capability adapter; no generic chat fallback will be used.`;
@@ -147,9 +159,8 @@ function unsupportedChatReason(name: ProviderName): string | undefined {
 
 function unavailableProviderReason(name: ProviderName): string | undefined {
   return (
-    unsupportedChatReason(name) ??
+    (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name) ? undefined : unsupportedChatReason(name)) ??
     (name === 'gitlab' ? GITLAB_DUO_UNAVAILABLE_ERROR : undefined) ??
-    (name === 'freebuff' ? FREEBUFF_UNAVAILABLE_ERROR : undefined) ??
     (name === 'jules' ? JULES_APPROVAL_REQUIRED_ERROR : undefined)
   );
 }
@@ -188,6 +199,8 @@ type ProviderVerificationResult = {
   success: boolean;
   /** Omitted successful results are fully verified for backwards compatibility. */
   state?: ProviderConnectionState;
+  /** Exact evidence established by this probe. */
+  scope?: ProviderVerificationScope;
   error?: string;
 };
 
@@ -351,9 +364,11 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   // Devin subscription — runs Cognition's official `devin` CLI harness (no API key).
   devin: (c) => new DevinProvider(c),
   cline: (c) => new ClineProvider(c),
-  // Visible for explicit recovery messaging; execution fails closed.
+  // Freebuff — real TUI driven through a sandboxed tmux PTY + Kory MCP.
   freebuff: (c) => new FreebuffProvider(c),
+  codebuff: (c) => (c.apiKey ? new CodebuffProvider(c) : null),
   // Kilo Code AI Gateway — OpenAI-compatible, API key auth.
+  chatbase: (c) => new ChatbaseProvider(c),
   kilocode: (c) => new KiloCodeProvider(c),
   // Visible as approval-required; this adapter cannot mutate remote state.
   jules: (c) => new JulesProvider(c),
@@ -416,6 +431,9 @@ class ProviderRegistry {
   private circuitStates = new Map<ProviderName, CircuitState>();
   /** Process-local probe verdicts. Credential/file presence is tracked separately. */
   private verificationRecords = new Map<ProviderName, ProviderVerificationRecord>();
+  private cliAutoConnectInFlight: Promise<void> | null = null;
+  private cliAutoConnectCheckedAt = 0;
+  private modelCatalogRefreshInFlight: Promise<void> | null = null;
   /** IDs of user-defined custom providers (e.g. "custom:my-llm"). */
   private customProviderIds = new Set<ProviderName>();
   /** Capability-based model selection — replaces blind first-match fallback. */
@@ -525,7 +543,11 @@ class ProviderRegistry {
     if (!config || config.disabled) return false;
     if (config.custom) return !!config.baseUrl?.trim();
     const authMode = this.authModeFor(name);
-    if (authMode === 'env_auth') return this.hasBedrockEnvironment();
+    if (authMode === 'env_auth') {
+      // A system AWS credential source OR credentials the user entered in
+      // Settings (access key ID + secret access key) both count as detected.
+      return this.hasBedrockEnvironment() || !!(config.apiKey && config.authToken);
+    }
     if (authMode === 'base_url_only') return !!config.baseUrl?.trim();
     if (authMode === 'auth_only') return !!config.authToken?.trim();
     if (authMode === 'api_key_or_auth') {
@@ -546,6 +568,70 @@ class ProviderRegistry {
     )
       return 'catalog';
     return 'credential';
+  }
+
+  private restoreVerificationRecord(name: ProviderName, config: ProviderConfig): void {
+    if (config.disabled || !config.lastVerifiedAt || !config.lastVerificationScope) return;
+    this.verificationRecords.set(name, {
+      state: 'verified',
+      checkedAt: config.lastVerifiedAt,
+      scope: config.lastVerificationScope,
+    });
+  }
+
+  private isDefinitiveVerificationFailure(error: string | undefined): boolean {
+    return /\b(?:401|403|unauthori[sz]ed|not authenticated|not signed in|no .+ login|missing (?:api key|token|authtoken)|invalid api key|login material was detected)\b/i.test(
+      error ?? '',
+    );
+  }
+
+  async autoConnectCliProviders(force = false): Promise<void> {
+    if (this.cliAutoConnectInFlight) return this.cliAutoConnectInFlight;
+    if (!force && Date.now() - this.cliAutoConnectCheckedAt < 5_000) return;
+
+    const names = new Set<ProviderName>(
+      process.env.KORY_DISABLE_CLI_AUTODETECT ? [] : CLI_HARNESS_PROVIDERS,
+    );
+    for (const [name, config] of this.providerConfigs) {
+      if (process.env.KORY_DISABLE_CLI_AUTODETECT && CLI_HARNESS_PROVIDERS.has(name)) continue;
+      // Custom endpoints are user-owned network targets. New definitions are
+      // probed before they are saved; legacy definitions stay configured until
+      // an explicit Refresh or a real runtime request supplies fresh evidence.
+      // A cold status read must never wait on an arbitrary custom endpoint.
+      if (config.custom && !force) continue;
+      const verification = this.verificationRecords.get(name);
+      if (!config.disabled && (!verification || (force && verification.state !== 'verified'))) {
+        names.add(name);
+      }
+    }
+    let verificationChanged = false;
+    this.cliAutoConnectInFlight = Promise.all(
+      [...names].map(async (name) => {
+        if (this.config?.providers?.[name]?.disabled === true) return;
+        const providerConfig = this.providerConfigs.get(name);
+        if (providerConfig?.disabled) {
+          if (!CLI_HARNESS_PROVIDERS.has(name) || !cliAutoEnableCreds(name)) return;
+          const result = await this.setCredentials(name, {});
+          verificationChanged ||= result.success;
+          return;
+        }
+        if (this.verificationRecords.get(name)?.state === 'verified') return;
+        const before = providerConfig?.lastVerifiedAt;
+        await this.verifyConnection(name);
+        verificationChanged ||= providerConfig?.lastVerifiedAt !== before;
+      }),
+    )
+      .then(() => {
+        if (verificationChanged && process.env.NODE_ENV !== 'test') {
+          syncProviderConfigsToConfig(PROJECT_ROOT, this.getConfigs());
+        }
+      })
+      .finally(() => {
+        this.cliAutoConnectCheckedAt = Date.now();
+        this.cliAutoConnectInFlight = null;
+      });
+
+    return this.cliAutoConnectInFlight;
   }
 
   /** Get explicit detection, verification, availability, and model status for every provider. */
@@ -580,6 +666,7 @@ class ProviderRegistry {
     /** Display label for custom providers. */
     label?: string;
     iconPath?: string;
+    customIcon?: ProviderConfig['customIcon'];
     deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
     description?: string;
     credentialUrl?: string;
@@ -614,6 +701,7 @@ class ProviderRegistry {
       custom?: boolean;
       label?: string;
       iconPath?: string;
+      customIcon?: ProviderConfig['customIcon'];
       deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
       description?: string;
       credentialUrl?: string;
@@ -662,7 +750,8 @@ class ProviderRegistry {
       const blocksChatConfiguration = !!providerUnavailableReason;
       const connectionState = blocksChatConfiguration
         ? ('unavailable' as const)
-        : verification?.state === 'verified' && isProviderAvailable
+        : verification?.state === 'verified' &&
+            (isProviderAvailable || DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name))
           ? ('verified' as const)
           : verification?.state === 'failed'
             ? ('failed' as const)
@@ -730,16 +819,26 @@ class ProviderRegistry {
         authMode,
         supportsApiKey:
           !blocksChatConfiguration &&
-          (isCustom || authMode === 'api_key' || authMode === 'api_key_or_auth'),
+          (isCustom ||
+            authMode === 'api_key' ||
+            authMode === 'api_key_or_auth' ||
+            // Bedrock's env_auth mode also accepts explicit AWS keys in Settings.
+            name === 'bedrock'),
         supportsAuthToken:
-          !blocksChatConfiguration && (authMode === 'auth_only' || authMode === 'api_key_or_auth'),
+          !blocksChatConfiguration &&
+          !CLI_HARNESS_PROVIDERS.has(name) &&
+          (authMode === 'auth_only' || authMode === 'api_key_or_auth' || name === 'bedrock'),
         requiresBaseUrl,
         ...(requiresDeployment && { requiresDeployment: true }),
         ...(config?.deployment && { deploymentName: config.deployment }),
         ...(blocksChatConfiguration && { configurationBlocked: true }),
         circuitOpen,
         ...(modelDiscoveryError && { error: modelDiscoveryError }),
-        ...(isCustom && { custom: true, label: config?.label ?? String(name) }),
+        ...(isCustom && {
+          custom: true,
+          label: config?.label ?? String(name),
+          ...(config?.customIcon && { customIcon: config.customIcon }),
+        }),
         ...(display?.label && !isCustom && { label: display.label }),
         // Auto-generate a human-readable label for providers without a display entry.
         ...(!display?.label &&
@@ -767,6 +866,15 @@ class ProviderRegistry {
 
   /** Refresh model catalogs for enabled providers that expose a refresh hook. */
   async refreshModelCatalogs(): Promise<void> {
+    if (this.modelCatalogRefreshInFlight) return this.modelCatalogRefreshInFlight;
+
+    this.modelCatalogRefreshInFlight = this.refreshModelCatalogsInternal().finally(() => {
+      this.modelCatalogRefreshInFlight = null;
+    });
+    return this.modelCatalogRefreshInFlight;
+  }
+
+  private async refreshModelCatalogsInternal(): Promise<void> {
     const refreshes: Promise<unknown>[] = [];
     const names = this.getVisibleProviderNames();
 
@@ -775,6 +883,13 @@ class ProviderRegistry {
       const config = this.providerConfigs.get(name);
       const isEnabled = config ? !config.disabled : false;
       if (!provider || !isEnabled) continue;
+
+      // A forced status request probes custom-provider credentials immediately
+      // before refreshing catalogs. If that probe failed, a second /models call
+      // cannot add information and only repeats the rejected credential. The
+      // next explicit verification remains free to retry this provider.
+      const isCustom = config?.custom === true || this.customProviderIds.has(name);
+      if (isCustom && this.verificationRecords.get(name)?.state === 'failed') continue;
 
       try {
         const result = provider.refreshModels?.(true);
@@ -814,21 +929,34 @@ class ProviderRegistry {
     authToken?: string;
     headers?: Record<string, string>;
     models?: string[];
+    catalogDetected?: boolean;
   }): { success: boolean; error?: string } {
     if (!def.baseUrl?.trim())
       return { success: false, error: 'Custom provider requires a base URL' };
+    let normalizedBaseUrl: string;
+    try {
+      normalizedBaseUrl = normalizeCustomProviderBaseUrl(def.baseUrl);
+    } catch (error: unknown) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Custom provider endpoint is invalid',
+      };
+    }
+    const catalogDetectedAt = def.catalogDetected ? Date.now() : undefined;
+    const previous = this.providerConfigs.get(def.id);
     const providerConfig: ProviderConfig = {
       name: def.id,
       custom: true,
       kind: def.kind ?? 'openai',
       label: def.label,
-      baseUrl: def.baseUrl.trim(),
+      baseUrl: normalizedBaseUrl,
       apiKey: def.apiKey?.trim() || undefined,
       authToken: def.authToken?.trim() || undefined,
       headers: def.headers,
       models: def.models,
       selectedModels: def.models ?? [],
       hideModelSelector: false,
+      ...(previous?.customIcon && { customIcon: previous.customIcon }),
       disabled: false,
     };
     this.providerConfigs.set(def.id, providerConfig);
@@ -841,7 +969,32 @@ class ProviderRegistry {
     }
     this.providers.set(def.id, provider);
     this.circuitStates.delete(def.id);
+    if (catalogDetectedAt) {
+      this.verificationRecords.set(def.id, {
+        state: 'detected',
+        checkedAt: catalogDetectedAt,
+        scope: 'catalog',
+      });
+    } else {
+      this.verificationRecords.delete(def.id);
+    }
     providerLog.info({ provider: def.id, kind: providerConfig.kind }, 'Custom provider registered');
+    return { success: true };
+  }
+
+  /** Merge icon metadata without rebuilding or weakening the provider config. */
+  setCustomProviderIcon(
+    id: ProviderName,
+    customIcon: ProviderConfig['customIcon'] | undefined,
+  ): { success: boolean; error?: string } {
+    const existing = this.providerConfigs.get(id);
+    if (!existing?.custom || !this.customProviderIds.has(id)) {
+      return { success: false, error: 'Custom provider not found' };
+    }
+    this.providerConfigs.set(id, {
+      ...existing,
+      customIcon,
+    });
     return { success: true };
   }
 
@@ -977,6 +1130,12 @@ class ProviderRegistry {
         let hasContent = false;
         let accTokensIn = 0;
         let accTokensOut = 0;
+        let accTokensCacheExcluded = 0;
+        let accTokensCacheRead: number | undefined;
+        let accTokensCacheWrite: number | undefined;
+        let accBillingTokensIn: number | undefined;
+        let accBillingTokensOut: number | undefined;
+        let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
         let usageAccountId: string | undefined;
         const stream = provider.streamResponse({ ...request, model: currentModel });
 
@@ -985,6 +1144,24 @@ class ProviderRegistry {
           if (event.type === 'usage_update') {
             if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
             if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
+            if (typeof event.tokensCache === 'number') {
+              accTokensCacheExcluded = event.tokensCache;
+            }
+            if (typeof event.tokensCacheRead === 'number') {
+              accTokensCacheRead = event.tokensCacheRead;
+            }
+            if (typeof event.tokensCacheWrite === 'number') {
+              accTokensCacheWrite = event.tokensCacheWrite;
+            }
+            if (typeof event.billingTokensIn === 'number') {
+              accBillingTokensIn = event.billingTokensIn;
+            }
+            if (typeof event.billingTokensOut === 'number') {
+              accBillingTokensOut = event.billingTokensOut;
+            }
+            if (event.billingUsageSamples) {
+              accBillingUsageSamples = event.billingUsageSamples;
+            }
             if (event.accountId) usageAccountId = event.accountId;
           }
           yield event;
@@ -995,26 +1172,67 @@ class ProviderRegistry {
           // Local files, env vars, and CLI presence remain "detected" until the
           // provider actually accepts a request; after that, Billing and
           // Settings may truthfully show the connection as active.
+          const checkedAt = Date.now();
+          const providerConfig = this.providerConfigs.get(provider.name);
+          const scope: ProviderVerificationScope = providerConfig?.custom
+            ? 'runtime'
+            : this.verificationScopeFor(provider.name);
           this.verificationRecords.set(provider.name, {
             state: 'verified',
-            checkedAt: Date.now(),
-            scope: this.verificationScopeFor(provider.name),
+            checkedAt,
+            scope,
           });
-          if (accTokensIn > 0 || accTokensOut > 0) {
-            creditRecordUsage(currentModel, provider.name, accTokensIn, accTokensOut, {
-              accountId: usageAccountId,
-              sessionId: request.sessionId,
-            });
+          if (providerConfig) {
+            providerConfig.lastVerifiedAt = checkedAt;
+            providerConfig.lastVerificationScope = scope;
+          }
+          if (accBillingUsageSamples?.length) {
+            for (const sample of accBillingUsageSamples) {
+              creditRecordUsage(
+                currentModel,
+                provider.name,
+                sample.tokensIn,
+                sample.tokensOut,
+                {
+                  accountId: usageAccountId,
+                  sessionId: request.sessionId,
+                },
+                {
+                  cacheReadTokens: sample.tokensCacheRead,
+                  cacheWriteTokens: sample.tokensCacheWrite,
+                },
+              );
+            }
+          } else {
+            const recordedTokensIn = accBillingTokensIn ?? accTokensIn + accTokensCacheExcluded;
+            const recordedTokensOut = accBillingTokensOut ?? accTokensOut;
+            if (recordedTokensIn > 0 || recordedTokensOut > 0) {
+              creditRecordUsage(
+                currentModel,
+                provider.name,
+                recordedTokensIn,
+                recordedTokensOut,
+                {
+                  accountId: usageAccountId,
+                  sessionId: request.sessionId,
+                },
+                {
+                  cacheReadTokens: accTokensCacheRead,
+                  cacheWriteTokens: accTokensCacheWrite,
+                },
+              );
+            }
           }
           this.recordSuccess(provider.name);
           return;
         }
 
-        providerLog.warn(
-          { model: currentModel, provider: provider.name },
-          'Empty response, trying fallback',
-        );
+        yield {
+          type: 'error',
+          error: `The model returned an empty response. The provider ${provider.name} did not stream any content before timing out or closing. Try again, switch model/provider, or split a large prompt.`,
+        };
         this.recordFailure(provider.name);
+        return;
       } catch (err: unknown) {
         const diagnostic = safeProviderDiagnostic(provider.name, 'stream', err);
         providerLog.error({ ...diagnostic, model: currentModel }, 'Provider error');
@@ -1058,13 +1276,37 @@ class ProviderRegistry {
         (credentials.baseUrl ?? undefined) === (existing?.baseUrl ?? undefined) &&
         (credentials.deployment ?? undefined) === (existing?.deployment ?? undefined));
     const result = await this.verifyConnectionInternal(name, credentials);
-    if (probesActiveConfig) {
-      this.verificationRecords.set(name, {
-        state: result.state ?? (result.success ? 'verified' : 'failed'),
-        checkedAt: Date.now(),
-        scope: this.verificationScopeFor(name),
-        ...(result.error && { error: result.error }),
-      });
+    if (!probesActiveConfig) return result;
+
+    const previous = this.verificationRecords.get(name);
+    const nextState = result.state ?? (result.success ? 'verified' : 'failed');
+    if (previous?.state === 'verified') {
+      if (result.success && nextState === 'detected') {
+        return { success: true, state: 'verified' };
+      }
+      if (!result.success && !this.isDefinitiveVerificationFailure(result.error)) {
+        return result;
+      }
+    }
+
+    const checkedAt = Date.now();
+    const scope = result.scope ?? this.verificationScopeFor(name);
+    this.verificationRecords.set(name, {
+      state: nextState,
+      checkedAt,
+      scope,
+      ...(result.error && { error: result.error }),
+    });
+    if (nextState === 'verified' && existing) {
+      existing.lastVerifiedAt = checkedAt;
+      existing.lastVerificationScope = scope;
+    } else if (
+      nextState === 'failed' &&
+      existing &&
+      this.isDefinitiveVerificationFailure(result.error)
+    ) {
+      existing.lastVerifiedAt = undefined;
+      existing.lastVerificationScope = undefined;
     }
     return result;
   }
@@ -1089,6 +1331,18 @@ class ProviderRegistry {
         (credentials.deployment ?? undefined) === (existing?.deployment ?? undefined));
 
     try {
+      if (existing?.custom || this.customProviderIds.has(name)) {
+        const probe = await probeCustomProvider({
+          kind: existing?.kind,
+          baseUrl: baseUrl ?? '',
+          apiKey,
+          authToken,
+          headers: existing?.headers,
+        });
+        return probe.success
+          ? { success: true, state: 'detected', scope: 'catalog' }
+          : { success: false, error: probe.error };
+      }
       switch (name) {
         case 'claude': {
           // Claude Code subscription is verified by confirming the official CLI is
@@ -1108,12 +1362,12 @@ class ProviderRegistry {
                 'No Claude Code login material was detected. Run "claude login" in your terminal, then check again.',
             };
           }
-          if (!probeCliVersion(claudeBin, 'claude')) {
+          if (!probeCliConnection(claudeBin, 'claude')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Claude Code CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Claude Code CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1133,12 +1387,12 @@ class ProviderRegistry {
                 'No Grok Build login material was detected. Install the grok CLI, run "grok login", then check again.',
             };
           }
-          if (!probeCliVersion(grokBin, 'grok')) {
+          if (!probeCliConnection(grokBin, 'grok')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Grok Build CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Grok Build CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1158,12 +1412,12 @@ class ProviderRegistry {
                 'No Antigravity login material was detected. Install agy, run "agy login", then check again.',
             };
           }
-          if (!probeCliVersion(agyBin, 'antigravity')) {
+          if (!probeCliConnection(agyBin, 'antigravity')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Antigravity CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Antigravity CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1185,12 +1439,12 @@ class ProviderRegistry {
                 'No Cursor login material was detected. Install cursor-agent, run "cursor-agent login", then check again.',
             };
           }
-          if (!probeCliVersion(cursorBin, 'cursor')) {
+          if (!probeCliConnection(cursorBin, 'cursor')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Cursor CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Cursor CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1210,12 +1464,12 @@ class ProviderRegistry {
                 'No Devin login material was detected. Install devin, run "devin auth login", then check again.',
             };
           }
-          if (!probeCliVersion(devinBin, 'devin')) {
+          if (!probeCliConnection(devinBin, 'devin')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Devin CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Devin CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1235,15 +1489,55 @@ class ProviderRegistry {
                 'No Cline credential material was detected. Install cline, configure it with "cline auth --provider <p> --apikey <k>", then check again.',
             };
           }
-          if (!probeCliVersion(clineBin, 'cline')) {
+          if (!probeCliConnection(clineBin, 'cline')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Cline CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Cline CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
+        }
+        case 'freebuff': {
+          if (detectFreebuffCLILogin() || readFreebuffAuthToken()) {
+            const runtime = new FreebuffProvider({
+              name: 'freebuff',
+              authToken: authToken || 'cli:freebuff:detected',
+              baseUrl: '',
+              disabled: false,
+            });
+            if (runtime.isAvailable()) {
+              return {
+                success: true,
+                state: 'detected',
+                error:
+                  'Freebuff CLI login and the required PTY sandbox runtime were detected. Account/model access is verified only by an actual Freebuff turn.',
+              };
+            }
+            return {
+              success: false,
+              error:
+                'Freebuff login exists, but the real PTY adapter requires the native launcher plus tmux and working bubblewrap isolation.',
+            };
+          }
+          return {
+            success: false,
+            error:
+              'Freebuff CLI is not logged in. Run "freebuff login" in your terminal, then reconnect.',
+          };
+        }
+        case 'codebuff': {
+          if (!apiKey) return { success: false, error: 'Missing Codebuff API key' };
+          const response = await fetch('https://www.codebuff.com/api/v1/me?fields=id,email', {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (response.ok) return { success: true, state: 'verified' };
+          return {
+            success: false,
+            error: safeVerificationHttpError(response.status, 'Codebuff account verification'),
+          };
         }
         case 'anthropic': {
           if (!apiKey && !authToken)
@@ -1362,6 +1656,12 @@ class ProviderRegistry {
             'openai',
           );
         }
+        case 'chatbase': {
+          if (!apiKey) return { success: false, error: 'Chatbase requires an API key' };
+          return this.verifyCapabilityGet('https://www.chatbase.co/api/v2/agents', {
+            Authorization: `Bearer ${apiKey}`,
+          });
+        }
         case 'openrouter':
           return this.verifyModelCatalog(
             'https://openrouter.ai/api/v1/models',
@@ -1398,6 +1698,18 @@ class ProviderRegistry {
           return this.verifyBearerGet('https://api.mistral.ai/v1/models', apiKey);
         case 'groq':
           return this.verifyBearerGet('https://api.groq.com/openai/v1/models', apiKey);
+        case 'deepgram':
+          if (!apiKey) return { success: false, error: 'Missing API key' };
+          return this.verifyCapabilityGet(
+            `${(baseUrl || 'https://api.deepgram.com/v1').replace(/\/$/, '')}/projects`,
+            { Authorization: `Token ${apiKey}` },
+          );
+        case 'assemblyai':
+          if (!apiKey) return { success: false, error: 'Missing API key' };
+          return this.verifyCapabilityGet(
+            `${(baseUrl || 'https://api.assemblyai.com/v2').replace(/\/$/, '')}/account`,
+            { Authorization: apiKey },
+          );
         case 'xai':
           return this.verifyBearerGet('https://api.x.ai/v1/models', apiKey);
         case 'azure': {
@@ -1445,8 +1757,13 @@ class ProviderRegistry {
           return this.verifyModelCatalog(`${trimmed}/api/tags`, undefined, 'ollama');
         }
         case 'bedrock': {
-          if (!this.hasBedrockEnvironment()) {
-            return { success: false, error: 'AWS credential source not detected' };
+          const hasStoredAwsCreds = !!(existing?.apiKey && existing?.authToken);
+          if (!this.hasBedrockEnvironment() && !hasStoredAwsCreds) {
+            return {
+              success: false,
+              error:
+                'No AWS credential source detected on this system. Enter an access key ID and secret access key, or configure the AWS CLI.',
+            };
           }
           const provider = new BedrockProvider({
             ...(existing ?? { name: 'bedrock' }),
@@ -1481,12 +1798,12 @@ class ProviderRegistry {
                 'No Codex CLI login material was detected. Run "codex login" in your terminal, then check again.',
             };
           }
-          if (!probeCliVersion(codexBin, 'codex')) {
+          if (!probeCliConnection(codexBin, 'codex')) {
             return {
               success: true,
               state: 'detected',
               error:
-                'Codex CLI was found on PATH with login material but did not respond to a version probe. The binary may be broken or its dependencies may be missing.',
+                'Codex CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
             };
           }
           return { success: true, state: 'verified' };
@@ -1609,6 +1926,8 @@ class ProviderRegistry {
       authToken?: string;
       baseUrl?: string;
       deployment?: string;
+      awsRegion?: string;
+      awsSessionToken?: string;
       selectedModels?: string[];
       hideModelSelector?: boolean;
     },
@@ -1618,20 +1937,41 @@ class ProviderRegistry {
       if (unavailableReason) return { success: false, error: unavailableReason };
 
       const existing = this.providerConfigs.get(name);
+      const isEnvAuth = this.authModeFor(name) === 'env_auth';
 
-      // Auto-detect if blank
+      // Auto-detect if blank. env_auth providers (Bedrock) never auto-bake
+      // machine-level AWS credentials into the persisted config — the AWS SDK
+      // resolves them from the standard credential chain at runtime. Only
+      // explicit user-entered keys are stored.
       const resolvedApiKey =
-        credentials.apiKey?.trim() || existing?.apiKey || this.detectEnvKey(name) || undefined;
+        credentials.apiKey?.trim() ||
+        existing?.apiKey ||
+        (!isEnvAuth ? this.detectEnvKey(name) : null) ||
+        undefined;
       // CLI harnesses own their credentials. A reconnect must re-read the local
       // CLI state, never ask the user to paste a token Koryphaios does not own.
       const localCliAuth = CLI_HARNESS_PROVIDERS.has(name) ? cliAutoEnableCreds(name) : null;
       const resolvedAuthToken = CLI_HARNESS_PROVIDERS.has(name)
         ? localCliAuth?.authToken
         : credentials.authToken?.trim() || existing?.authToken || undefined;
-      const resolvedBaseUrl =
+      const rawResolvedBaseUrl =
         credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
+      let resolvedBaseUrl = rawResolvedBaseUrl;
+      if (existing?.custom && rawResolvedBaseUrl) {
+        try {
+          resolvedBaseUrl = normalizeCustomProviderBaseUrl(rawResolvedBaseUrl);
+        } catch (error: unknown) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Custom provider endpoint is invalid',
+          };
+        }
+      }
       const resolvedDeployment =
         credentials.deployment?.trim() || existing?.deployment || undefined;
+      const resolvedAwsRegion = credentials.awsRegion?.trim() || existing?.awsRegion || undefined;
+      const resolvedAwsSessionToken =
+        credentials.awsSessionToken?.trim() || existing?.awsSessionToken || undefined;
 
       // Return the CLI's actionable local state rather than the generic
       // auth-only validation error when there is no existing session marker.
@@ -1644,6 +1984,8 @@ class ProviderRegistry {
         authToken: resolvedAuthToken,
         baseUrl: resolvedBaseUrl,
         deployment: resolvedDeployment,
+        awsRegion: resolvedAwsRegion,
+        awsSessionToken: resolvedAwsSessionToken,
       };
 
       const validation = this.validateCredentials(name, nextConnection, existing);
@@ -1653,9 +1995,13 @@ class ProviderRegistry {
         existing?.apiKey !== nextConnection.apiKey ||
         existing?.authToken !== nextConnection.authToken ||
         existing?.baseUrl !== nextConnection.baseUrl ||
-        existing?.deployment !== nextConnection.deployment;
+        existing?.deployment !== nextConnection.deployment ||
+        existing?.awsRegion !== nextConnection.awsRegion ||
+        existing?.awsSessionToken !== nextConnection.awsSessionToken;
       let acceptedState: ProviderConnectionState =
         this.verificationRecords.get(name)?.state ?? 'unknown';
+      let acceptedScope: ProviderVerificationScope | undefined =
+        this.verificationRecords.get(name)?.scope;
 
       // A CLI may have moved off PATH or lost its local login material since
       // its marker was saved. Re-evaluate that detection on every reconnect;
@@ -1668,16 +2014,34 @@ class ProviderRegistry {
         const verification = await this.verifyConnection(name, nextConnection);
         if (!verification.success) return verification;
         acceptedState = verification.state ?? 'verified';
+        acceptedScope = verification.scope ?? this.verificationScopeFor(name);
       }
 
+      const verifiedAt =
+        acceptedState === 'verified'
+          ? Date.now()
+          : connectionChanged
+            ? undefined
+            : existing?.lastVerifiedAt;
+      const verificationScope =
+        acceptedState === 'verified'
+          ? (acceptedScope ?? this.verificationScopeFor(name))
+          : connectionChanged
+            ? undefined
+            : existing?.lastVerificationScope;
       const providerConfig: ProviderConfig = {
+        ...existing,
         name,
         apiKey: resolvedApiKey,
         authToken: resolvedAuthToken,
         baseUrl: resolvedBaseUrl,
         deployment: resolvedDeployment,
+        awsRegion: resolvedAwsRegion,
+        awsSessionToken: resolvedAwsSessionToken,
         selectedModels: credentials.selectedModels ?? existing?.selectedModels,
         hideModelSelector: credentials.hideModelSelector ?? existing?.hideModelSelector,
+        lastVerifiedAt: verifiedAt,
+        lastVerificationScope: verificationScope,
         disabled: false, // Explicitly enable on setCredentials
         headers: existing?.headers,
       };
@@ -1697,10 +2061,20 @@ class ProviderRegistry {
         this.clearKeyInvalid(name); // New key may be valid
         this.verificationRecords.set(name, {
           state: acceptedState,
-          checkedAt: Date.now(),
-          scope: this.verificationScopeFor(name),
+          checkedAt: verifiedAt ?? Date.now(),
+          scope: acceptedScope ?? verificationScope ?? this.verificationScopeFor(name),
         });
         providerLog.info({ provider: name }, 'Provider configured');
+        return { success: true };
+      }
+      if (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name)) {
+        this.clearKeyInvalid(name);
+        this.verificationRecords.set(name, {
+          state: acceptedState,
+          checkedAt: verifiedAt ?? Date.now(),
+          scope: acceptedScope ?? verificationScope ?? this.verificationScopeFor(name),
+        });
+        providerLog.info({ provider: name }, 'Dedicated capability provider configured');
         return { success: true };
       }
       return { success: false, error: 'Failed to initialize provider' };
@@ -1765,8 +2139,14 @@ class ProviderRegistry {
 
     if (authMode === 'env_auth') {
       const envReady = this.hasBedrockEnvironment();
-      if (!envReady)
-        return { success: false, error: `${name} environment credentials not detected` };
+      // Bedrock accepts explicit AWS credentials entered in Settings as an
+      // alternative to a system-wide credential source (env vars / AWS CLI).
+      const explicitAwsCreds = name === 'bedrock' && !!(apiKey && authToken);
+      if (!envReady && !explicitAwsCreds)
+        return {
+          success: false,
+          error: `${name} environment credentials not detected. Enter an AWS access key ID and secret access key, or configure the AWS CLI.`,
+        };
     }
 
     if (authMode === 'base_url_only' && !baseUrl) {
@@ -1813,6 +2193,8 @@ class ProviderRegistry {
     if (config) {
       config.apiKey = undefined;
       config.authToken = undefined;
+      config.lastVerifiedAt = undefined;
+      config.lastVerificationScope = undefined;
       config.disabled = true;
       this.providerConfigs.set(name, config);
     }
@@ -1848,6 +2230,7 @@ class ProviderRegistry {
       // constructor/listModels path, so constructing them here would bypass both
       // the user's Disconnect choice and KORY_DISABLE_CLI_AUTODETECT.
       if (providerConfig.disabled) continue;
+      this.restoreVerificationRecord(name, providerConfig);
 
       try {
         const provider = this.createProvider(name, providerConfig);
@@ -1867,6 +2250,7 @@ class ProviderRegistry {
       const providerConfig = this.buildProviderConfig(id as ProviderName);
       this.providerConfigs.set(id, providerConfig);
       if (providerConfig.disabled) continue;
+      this.restoreVerificationRecord(id as ProviderName, providerConfig);
       try {
         const provider = this.createProvider(id as ProviderName, providerConfig);
         if (provider) this.providers.set(id, provider);
@@ -1911,11 +2295,22 @@ class ProviderRegistry {
     // an agent CLI the user has installed + logged in, which we treat as intent and auto-enable
     // (Claude Code, Codex, Grok Build). Opt out with KORY_DISABLE_CLI_AUTODETECT=1.
     const defaultDisabled = true;
-    // An explicit Disconnect/disabled setting always wins over machine-level
-    // discovery. Otherwise a still-installed CLI would silently reconnect on
-    // the next launch.
     const autoCli = userConfig?.disabled === true ? null : cliAutoEnableCreds(name);
-    const isDisabled = userConfig?.disabled ?? (autoCli ? false : defaultDisabled);
+    const hasStoredCredential = !!(
+      userConfig?.apiKey?.trim() ||
+      userConfig?.authToken?.trim() ||
+      userConfig?.baseUrl?.trim() ||
+      userConfig?.deployment?.trim() ||
+      userConfig?.awsRegion?.trim() ||
+      userConfig?.lastVerifiedAt
+    );
+    const isDisabled =
+      userConfig?.disabled ?? (hasStoredCredential ? false : autoCli ? false : defaultDisabled);
+    const userBaseUrl =
+      name === 'tokenrouter' &&
+      userConfig?.baseUrl?.replace(/\/+$/, '') === 'https://tokenrouter.me/v1'
+        ? undefined
+        : userConfig?.baseUrl;
 
     const providerConfig: ProviderConfig = {
       name,
@@ -1931,11 +2326,14 @@ class ProviderRegistry {
         undefined,
       // One canonical default reaches both runtime construction and the
       // synthetic request-shape suite. Explicit user/env URLs still win.
-      baseUrl:
-        userConfig?.baseUrl ?? this.detectEnvUrl(name) ?? providerDefaultBaseUrl(name) ?? undefined,
+      baseUrl: userBaseUrl ?? this.detectEnvUrl(name) ?? providerDefaultBaseUrl(name) ?? undefined,
       deployment: userConfig?.deployment,
+      awsRegion: userConfig?.awsRegion,
+      awsSessionToken: userConfig?.awsSessionToken,
       selectedModels: userConfig?.selectedModels ?? [],
       hideModelSelector: userConfig?.hideModelSelector ?? false,
+      lastVerifiedAt: userConfig?.lastVerifiedAt,
+      lastVerificationScope: userConfig?.lastVerificationScope,
       disabled: isDisabled,
       headers: userConfig?.headers,
       // Preserve custom-provider metadata so BYO providers survive restarts.
@@ -1944,6 +2342,7 @@ class ProviderRegistry {
         kind: userConfig.kind,
         label: userConfig.label,
         models: userConfig.models,
+        customIcon: userConfig.customIcon,
       }),
     };
 
@@ -1961,7 +2360,7 @@ class ProviderRegistry {
       (authMode === 'api_key' && hasApi) ||
       (authMode === 'auth_only' && hasAuth) ||
       (authMode === 'api_key_or_auth' && (hasApi || hasAuth)) ||
-      (authMode === 'env_auth' && this.hasBedrockEnvironment()) ||
+      (authMode === 'env_auth' && (this.hasBedrockEnvironment() || (hasApi && hasAuth))) ||
       (authMode === 'base_url_only' && (hasUrl || name === 'lmstudio' || name === 'llamacpp'));
 
     if (hasAnyAuth) return true;
@@ -2072,10 +2471,8 @@ class ProviderRegistry {
   }
 
   private hasBedrockEnvironment(): boolean {
-    return !!(
-      (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
-      process.env.AWS_PROFILE
-    );
+    // Environment variables, ~/.aws/credentials, or ~/.aws/config profiles.
+    return hasAwsCredentialSource();
   }
 
   private logProviderStatus() {
@@ -2085,6 +2482,23 @@ class ProviderRegistry {
 
     if (names.length === 0) {
       providerLog.warn('No providers configured - set API keys in .env');
+    }
+  }
+
+  private async verifyCapabilityGet(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await fetch(url, {
+        headers: { ...headers, 'User-Agent': 'Koryphaios/1.0' },
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (!response.ok)
+        return { success: false, error: safeVerificationHttpError(response.status) };
+      return { success: true };
+    } catch {
+      return { success: false, error: 'Provider verification failed safely.' };
     }
   }
 
@@ -2152,11 +2566,11 @@ class ProviderRegistry {
       }
 
       if (!this.hasValidModelCatalogEntry(payload, shape)) {
-        return {
-          success: false,
-          status: response.status,
-          error: `HTTP ${response.status}: model catalog returned no valid ${shape} model entries`,
-        };
+        serverLog.debug(
+          { status: response.status, shape, url },
+          'Model catalog returned no valid entries but HTTP auth succeeded — treating as verified',
+        );
+        return { success: true, status: response.status };
       }
       return { success: true, status: response.status };
     } catch (err: unknown) {

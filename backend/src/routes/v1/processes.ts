@@ -35,6 +35,33 @@ async function buildLogs(processId: string, lines: number) {
   };
 }
 
+async function requireActiveProcessSession(sessionId: string): Promise<void> {
+  const { sessions } = getContext();
+  if (await sessions.getActive(sessionId)) return;
+  if (await sessions.get(sessionId)) {
+    throw new ConflictError('Recover this archived chat before starting or controlling processes.');
+  }
+  throw new NotFoundError('Session', sessionId);
+}
+
+async function withActiveProcessSession<T>(
+  sessionId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const { kory } = getContext();
+  const hasExecution = kory.hasActiveSessionExecution(sessionId);
+  const lease = hasExecution ? null : kory.tryAcquireSessionMutationBarrier(sessionId);
+  if (!hasExecution && !lease) {
+    throw new ConflictError('Wait for chat lifecycle work to finish before controlling processes.');
+  }
+  try {
+    await requireActiveProcessSession(sessionId);
+    return await operation();
+  } finally {
+    lease?.release();
+  }
+}
+
 export const processRoutes = new Elysia({ prefix: '/api/processes' })
   .get(
     '/',
@@ -64,12 +91,11 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
       if (!validation.safe) {
         throw new ValidationError(`Unsafe command: ${validation.reason}`);
       }
-      if (!(await getContext().sessions.get(body.sessionId))) {
-        throw new NotFoundError('Session', body.sessionId);
-      }
       // This user/API surface is always a manual service. Provenance is
       // server-assigned and cannot be forged in the request body.
-      const process = await processSupervisor.startManualProcess(body);
+      const process = await withActiveProcessSession(body.sessionId, () =>
+        processSupervisor.startManualProcess(body),
+      );
       return {
         ok: true,
         process: await serializeProcess(process),
@@ -139,7 +165,9 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
         'Process restart was refused because its durable command was redacted or truncated. Start a fresh process with the intended command.',
       );
     }
-    const restarted = await processSupervisor.restartProcess(id);
+    const restarted = await withActiveProcessSession(known.sessionId, () =>
+      processSupervisor.restartProcess(id),
+    );
     if (!restarted) {
       throw new ConflictError(
         'Process restart was refused because the existing process remains active/degraded or its termination could not be verified.',
@@ -151,7 +179,11 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
     '/:id/input',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      const success = await processSupervisor.writeInput(id, body.input);
+      const known = processSupervisor.getProcess(id) ?? (await getProcessById(id));
+      if (!known) throw new NotFoundError('Process', id);
+      const success = await withActiveProcessSession(known.sessionId, () =>
+        processSupervisor.writeInput(id, body.input),
+      );
       if (!success) {
         throw new ConflictError('Process is not running or does not accept input');
       }

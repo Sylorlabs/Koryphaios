@@ -44,7 +44,12 @@ function detect(): { mechanism: SandboxMechanism; path: string | null } {
     if (bw) {
       // Verify user namespaces actually work (some kernels disable them).
       try {
-        execFileSync(bw, ['--ro-bind', '/usr', '/usr', 'true'], {
+        const probeArgs = ['--ro-bind', '/usr', '/usr'];
+        for (const lib of ['/lib', '/lib64']) {
+          if (existsSync(lib)) probeArgs.push('--ro-bind-try', lib, lib);
+        }
+        probeArgs.push('--', '/usr/bin/true');
+        execFileSync(bw, probeArgs, {
           timeout: 4000,
           stdio: 'ignore',
         });
@@ -126,6 +131,27 @@ function buildBwrap(bw: string, bin: string, args: string[], opts: WrapOptions):
   for (const p of SYSTEM_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
   if (opts.policy.allowNetwork) {
     for (const p of NET_RO) if (existsSync(p)) flags.push('--ro-bind-try', p, p);
+  }
+  // bubblewrap does not create destination parents for arbitrary bind mounts.
+  // Managed CLI homes and bridge runtimes commonly live below /home/<user>,
+  // which is intentionally absent from the base namespace. Create only the
+  // directory skeleton needed by the explicit mounts; no host content is
+  // exposed by these --dir entries.
+  const mountTargets = [
+    opts.cwd,
+    ...(opts.configDirs ?? []),
+    ...(opts.readonlyConfigDirs ?? []),
+  ];
+  const created = new Set<string>();
+  for (const target of mountTargets) {
+    const parts = target.split('/').filter(Boolean);
+    let parent = '';
+    for (const part of parts.slice(0, -1)) {
+      parent += `/${part}`;
+      if (SYSTEM_RO.includes(parent) || created.has(parent)) continue;
+      flags.push('--dir', parent);
+      created.add(parent);
+    }
   }
   flags.push(
     opts.policy.allowEdits ? '--bind' : '--ro-bind',

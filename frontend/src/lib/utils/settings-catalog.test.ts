@@ -23,6 +23,17 @@ describe('settings catalog', () => {
     expect(filterSettingsCatalog(SETTINGS_CATALOG, 'PAUSE').map((entry) => entry.id)).toEqual([
       'experimental',
     ]);
+    expect(
+      filterSettingsCatalog(SETTINGS_CATALOG, 'chat history').map((entry) => entry.id),
+    ).toEqual(['archived']);
+  });
+
+  it('places archived chats precisely in Workspace after Notes', () => {
+    const archivedIndex = SETTINGS_CATALOG.findIndex((entry) => entry.id === 'archived');
+    expect(archivedIndex).toBeGreaterThan(0);
+    expect(SETTINGS_CATALOG[archivedIndex - 1]?.id).toBe('notes');
+    expect(SETTINGS_CATALOG[archivedIndex]?.group).toBe('Workspace');
+    expect(SETTINGS_CATALOG[archivedIndex]?.scope).toBe('This app');
   });
 
   it('prefers a contextual destination, then a valid saved pane, then the default', () => {

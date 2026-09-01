@@ -1,10 +1,9 @@
 import type { Session as SharedSession } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
-import { db, getDb, sessions, type Session as DbSession } from '../db';
-import { eq, and, desc } from 'drizzle-orm';
+import { db, sessions, type Session as DbSession } from '../db';
+import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
 import { serverLog } from '../logger';
-import { eraseSessionDataTransaction } from './session-erasure';
 
 export interface ISessionStore {
   create(
@@ -14,6 +13,12 @@ export interface ISessionStore {
     workingDirectory?: string,
   ): Promise<SharedSession>;
   get(id: string): Promise<SharedSession | undefined>;
+  getActive(id: string): Promise<SharedSession | undefined>;
+  listActive(): Promise<SharedSession[]>;
+  listArchived(): Promise<SharedSession[]>;
+  listAll(): Promise<SharedSession[]>;
+  /** @deprecated Prefer an explicit lifecycle scope. This remains all-inclusive
+   * so erasure/inventory callers cannot accidentally omit archived chats. */
   list(): Promise<SharedSession[]>;
   listForUser(userId: string): Promise<SharedSession[]>;
   getForUser(id: string, userId: string): Promise<SharedSession | undefined>;
@@ -26,9 +31,8 @@ export interface ISessionStore {
     id: string,
     updates: Partial<SharedSession>,
   ): Promise<SharedSession | undefined>;
-  delete(id: string): Promise<void>;
-  deleteForUser(id: string, userId: string): Promise<void>;
-  clear(): Promise<void>;
+  archive(id: string, archivedAt?: number): Promise<SharedSession | undefined>;
+  restore(id: string): Promise<SharedSession | undefined>;
 }
 
 function toSharedSession(s: DbSession): SharedSession {
@@ -36,12 +40,17 @@ function toSharedSession(s: DbSession): SharedSession {
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'session metadata parse failed — using empty metadata');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'session metadata parse failed — using empty metadata',
+    );
     metadata = {};
   }
   return {
     id: s.id,
     title: s.title,
+    archivedAt: s.archivedAt?.getTime(),
+    status: s.archivedAt ? 'archived' : 'active',
     parentSessionId: s.parentId ?? undefined,
     workingDirectory: s.workingDirectory ?? undefined,
     interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
@@ -98,9 +107,38 @@ export class SessionStore implements ISessionStore {
     return session ? toSharedSession(session) : undefined;
   }
 
-  async list(): Promise<SharedSession[]> {
+  async getActive(id: string): Promise<SharedSession | undefined> {
+    const session = await db.query.sessions.findFirst({
+      where: and(eq(sessions.id, id), isNull(sessions.archivedAt)),
+    });
+    return session ? toSharedSession(session) : undefined;
+  }
+
+  async listActive(): Promise<SharedSession[]> {
+    const results = await db
+      .select()
+      .from(sessions)
+      .where(isNull(sessions.archivedAt))
+      .orderBy(desc(sessions.updatedAt));
+    return results.map(toSharedSession);
+  }
+
+  async listArchived(): Promise<SharedSession[]> {
+    const results = await db
+      .select()
+      .from(sessions)
+      .where(isNotNull(sessions.archivedAt))
+      .orderBy(desc(sessions.archivedAt), desc(sessions.updatedAt));
+    return results.map(toSharedSession);
+  }
+
+  async listAll(): Promise<SharedSession[]> {
     const results = await db.select().from(sessions).orderBy(desc(sessions.updatedAt));
     return results.map(toSharedSession);
+  }
+
+  async list(): Promise<SharedSession[]> {
+    return this.listAll();
   }
 
   async listForUser(userId: string): Promise<SharedSession[]> {
@@ -141,7 +179,10 @@ export class SessionStore implements ISessionStore {
       try {
         metadata = prior?.metadata ? JSON.parse(prior.metadata) : {};
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'session metadata parse failed during update — using empty metadata');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'session metadata parse failed during update — using empty metadata',
+        );
         metadata = {};
       }
       if (updates.interactionMode !== undefined) metadata.interactionMode = updates.interactionMode;
@@ -162,9 +203,10 @@ export class SessionStore implements ISessionStore {
       drizzleUpdates.version = (current.version ?? 1) + 1;
     }
 
-    const whereClause = expectedVersion
-      ? and(eq(sessions.id, id), eq(sessions.version, expectedVersion))
-      : eq(sessions.id, id);
+    const whereClause =
+      expectedVersion !== undefined
+        ? and(eq(sessions.id, id), eq(sessions.version, expectedVersion))
+        : eq(sessions.id, id);
 
     const [updated] = await db.update(sessions).set(drizzleUpdates).where(whereClause).returning();
 
@@ -186,18 +228,39 @@ export class SessionStore implements ISessionStore {
     return this.update(id, updates, current.version);
   }
 
-  async delete(id: string): Promise<void> {
-    eraseSessionDataTransaction(getDb(), { kind: 'selected', sessionIds: [id] });
+  /** Atomically move an active chat into the archive. Retrying an already
+   * committed request returns the existing row without changing its timestamp
+   * or version, so a lost HTTP response is safe to retry. */
+  async archive(id: string, archivedAt = Date.now()): Promise<SharedSession | undefined> {
+    const at = new Date(archivedAt);
+    const [updated] = await db
+      .update(sessions)
+      .set({
+        archivedAt: at,
+        version: sql`COALESCE(${sessions.version}, 1) + 1`,
+      })
+      .where(and(eq(sessions.id, id), isNull(sessions.archivedAt)))
+      .returning();
+    if (updated) return toSharedSession(updated);
+
+    const current = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+    return current?.archivedAt ? toSharedSession(current) : undefined;
   }
 
-  async deleteForUser(id: string, userId: string): Promise<void> {
-    const owned = await db.query.sessions.findFirst({
-      where: and(eq(sessions.id, id), eq(sessions.userId, userId)),
-    });
-    if (owned) eraseSessionDataTransaction(getDb(), { kind: 'selected', sessionIds: [id] });
-  }
+  /** Atomically recover an archived chat. Retrying an already recovered chat is
+   * a no-op and does not perturb sidebar ordering or optimistic versions. */
+  async restore(id: string): Promise<SharedSession | undefined> {
+    const [updated] = await db
+      .update(sessions)
+      .set({
+        archivedAt: null,
+        version: sql`COALESCE(${sessions.version}, 1) + 1`,
+      })
+      .where(and(eq(sessions.id, id), isNotNull(sessions.archivedAt)))
+      .returning();
+    if (updated) return toSharedSession(updated);
 
-  async clear(): Promise<void> {
-    eraseSessionDataTransaction(getDb(), { kind: 'all' });
+    const current = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
+    return current && !current.archivedAt ? toSharedSession(current) : undefined;
   }
 }

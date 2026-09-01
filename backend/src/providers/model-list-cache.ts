@@ -140,6 +140,11 @@ export function isLikelyChatModelId(id: string, provider: ProviderName): boolean
     lowerId.includes('rerank') ||
     lowerId.includes('transcribe') ||
     lowerId.includes('realtime') ||
-    lowerId.includes('audio')
+    lowerId.includes('audio') ||
+    lowerId.includes('imagine') ||
+    lowerId.includes('image-quality') ||
+    lowerId.includes('flux') ||
+    lowerId.includes('stable-diffusion') ||
+    lowerId.includes('imagen')
   );
 }

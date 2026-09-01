@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { WSMessage } from '@koryphaios/shared';
 import { OrderedEventLog } from '../ordered-event-log';
 
-function createLog(): { sqlite: Database; log: OrderedEventLog } {
-  const sqlite = new Database(':memory:');
+function initializeSchema(sqlite: Database): void {
   sqlite.exec(`
     CREATE TABLE session_event_cursors (
       session_id TEXT PRIMARY KEY, epoch INTEGER NOT NULL DEFAULT 1,
@@ -23,6 +25,11 @@ function createLog(): { sqlite: Database; log: OrderedEventLog } {
       sequence INTEGER NOT NULL, PRIMARY KEY(session_id, epoch, cause_key)
     );
   `);
+}
+
+function createLog(): { sqlite: Database; log: OrderedEventLog } {
+  const sqlite = new Database(':memory:');
+  initializeSchema(sqlite);
   return { sqlite, log: new OrderedEventLog(sqlite) };
 }
 
@@ -53,6 +60,31 @@ describe('OrderedEventLog', () => {
     expect(other.sequence).toBe(1);
     expect(first.eventId).not.toBe(second.eventId);
     expect(log.getCursor('s1')).toEqual({ epoch: 1, latestSequence: 2 });
+  });
+
+  test('reuses a caller-supplied event id without allocating a duplicate sequence', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    const message = { ...event('s1', 'once'), eventId: 'outbox-event-1' };
+
+    const first = log.append(message);
+    const retried = log.append(message);
+
+    expect(retried).toEqual(first);
+    expect(log.getCursor('s1')).toEqual({ epoch: 1, latestSequence: 1 });
+    expect(sqlite.query('SELECT COUNT(*) AS count FROM ordered_session_events').get()).toEqual({
+      count: 1,
+    });
+  });
+
+  test('rejects reusing a caller-supplied event id for different content', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    log.append({ ...event('s1', 'first'), eventId: 'outbox-event-1' });
+
+    expect(() => log.append({ ...event('s1', 'different'), eventId: 'outbox-event-1' })).toThrow(
+      'different content',
+    );
   });
 
   test('replays strictly after the acknowledged cursor and is idempotency-ready', () => {
@@ -94,6 +126,39 @@ describe('OrderedEventLog', () => {
       'stream.delta',
       'stream.thinking',
     ]);
+  });
+
+  test('reopens a durable system error after the backend database connection restarts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kory-ordered-events-'));
+    const file = join(root, 'events.db');
+    try {
+      const firstDatabase = new Database(file);
+      initializeSchema(firstDatabase);
+      const firstLog = new OrderedEventLog(firstDatabase);
+      firstLog.append({
+        type: 'system.error',
+        sessionId: 'restart-session',
+        timestamp: 123,
+        payload: { error: 'Provider failed before relaunch.' },
+      });
+      firstDatabase.close();
+
+      const restartedDatabase = new Database(file);
+      const restartedLog = new OrderedEventLog(restartedDatabase);
+      const replay = restartedLog.getAfter('restart-session', 1, 0);
+      restartedDatabase.close();
+
+      expect(replay).toHaveLength(1);
+      expect(replay[0]).toMatchObject({
+        type: 'system.error',
+        sessionId: 'restart-session',
+        epoch: 1,
+        sequence: 1,
+        payload: { error: 'Provider failed before relaunch.' },
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test('records outbox dispatch only after publication', () => {
@@ -186,5 +251,25 @@ describe('OrderedEventLog', () => {
         payload: { toolResult: { callId: 'old-call' } },
       }),
     ).toThrow('without causal parent');
+  });
+
+  test('atomically opens a rewritten epoch with its durable sequence-one control row', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    log.append(event('s1', 'discarded branch'));
+
+    const control = log.rewriteTimeline('s1', 456);
+
+    expect(control).toMatchObject({
+      type: 'session.timeline_rewritten',
+      sessionId: 's1',
+      epoch: 2,
+      sequence: 1,
+      timestamp: 456,
+      payload: { eventEpoch: 2, reason: 'conversation_rewind' },
+    });
+    expect(log.getCursor('s1')).toEqual({ epoch: 2, latestSequence: 1 });
+    expect(log.getAfter('s1', 2, 0)).toEqual([control]);
+    expect(log.append(event('s1', 'replacement branch'))).toMatchObject({ epoch: 2, sequence: 2 });
   });
 });

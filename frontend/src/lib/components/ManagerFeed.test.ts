@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   removeEntries: vi.fn(),
+  deleteEntry: vi.fn(),
   sessionStore: { activeSessionId: 'session-1' },
 }));
 
@@ -19,8 +20,32 @@ vi.mock('$lib/stores/sessions.svelte', () => ({
   sessionStore: mocks.sessionStore,
 }));
 
+vi.mock('$lib/stores/feed.svelte', () => ({
+  feedStore: { deleteEntry: mocks.deleteEntry },
+}));
+
+vi.mock('$lib/stores/toast.svelte', () => ({
+  toastStore: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+}));
+
 vi.mock('$lib/stores/auth.svelte', () => ({
   authStore: { token: undefined },
+}));
+
+vi.mock('$lib/stores/project.svelte', () => ({
+  // ManagerFeed's empty-state (with the suggestion cards and the Pro
+  // Tips/Workflow panels the test exercises) only renders once the project
+  // store reports a ready workspace. Tests that don't care about project
+  // state must still supply a non-empty `currentPath` so the empty state
+  // appears instead of the perpetual "Loading workspace…" placeholder.
+  projectStore: {
+    currentPath: '/tmp/project',
+    workspaceRoot: '/tmp',
+    revision: 1,
+    scope: 'project',
+    setScope: vi.fn(),
+  },
+  projectDisplayName: (path: string) => path.split('/').at(-1) ?? path,
 }));
 
 vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));

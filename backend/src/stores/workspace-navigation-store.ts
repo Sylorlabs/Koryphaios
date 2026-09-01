@@ -13,6 +13,7 @@ type NavigationRow = {
   selected_project: string | null;
   unavailable_workspace: string | null;
   unavailable_project: string | null;
+  updated_at: number;
 };
 
 export interface WorkspaceProjectEntry {
@@ -28,6 +29,8 @@ export interface WorkspaceNavigationSnapshot {
   revision: string;
   unavailableWorkspace: string | null;
   unavailableProject: string | null;
+  /** Monotonic write sequence — clients discard snapshots older than the last applied one. */
+  seq: number;
 }
 
 function isBroadDirectory(path: string): boolean {
@@ -113,7 +116,7 @@ export class WorkspaceNavigationStore {
     return (
       this.database
         .query<NavigationRow, [string]>(
-          `SELECT workspace_root, selected_project, unavailable_workspace, unavailable_project
+          `SELECT workspace_root, selected_project, unavailable_workspace, unavailable_project, updated_at
            FROM workspace_navigation WHERE id = ?`,
         )
         .get(NAVIGATION_ID) ?? {
@@ -121,6 +124,7 @@ export class WorkspaceNavigationStore {
         selected_project: null,
         unavailable_workspace: null,
         unavailable_project: null,
+        updated_at: 0,
       }
     );
   }
@@ -131,6 +135,9 @@ export class WorkspaceNavigationStore {
     unavailableWorkspace: string | null = null,
     unavailableProject: string | null = null,
   ): void {
+    // Monotonic sequence: equal-millisecond writes still advance, so clients
+    // can discard stale snapshots that arrive after newer ones.
+    const seq = Math.max(Date.now(), this.readRow().updated_at + 1);
     this.database.run(
       `INSERT INTO workspace_navigation (
          id, workspace_root, selected_project, unavailable_workspace, unavailable_project, updated_at
@@ -147,7 +154,7 @@ export class WorkspaceNavigationStore {
         selectedProject,
         unavailableWorkspace,
         unavailableProject,
-        Date.now(),
+        seq,
       ],
     );
   }
@@ -166,7 +173,10 @@ export class WorkspaceNavigationStore {
     if (current.workspace_root) {
       try {
         const currentRoot = validateWorkspaceRoot(current.workspace_root);
-        if (dirname(project) === currentRoot) workspaceRoot = currentRoot;
+        // The workspace root itself is a valid working project — working in
+        // the root workspace must not detach the workspace context.
+        if (project === currentRoot || dirname(project) === currentRoot)
+          workspaceRoot = currentRoot;
       } catch {
         // A stale workspace must not prevent selecting a current project.
       }
@@ -221,7 +231,14 @@ export class WorkspaceNavigationStore {
     if (selectedProject) {
       try {
         selectedProject = canonicalDirectory(selectedProject, 'Project directory');
-        if (workspaceRoot && !projects.some((project) => project.path === selectedProject)) {
+        // The workspace root is a valid selection even though it is not part
+        // of the immediate-children project list.
+        const isWorkspaceRootSelection = workspaceRoot === selectedProject;
+        if (
+          workspaceRoot &&
+          !isWorkspaceRootSelection &&
+          !projects.some((project) => project.path === selectedProject)
+        ) {
           unavailableProject = selectedProject;
           selectedProject = null;
         }
@@ -250,6 +267,12 @@ export class WorkspaceNavigationStore {
       this.write(workspaceRoot, selectedProject, unavailableWorkspace, unavailableProject);
     }
 
+    const healed =
+      workspaceRoot !== row.workspace_root ||
+      selectedProject !== row.selected_project ||
+      unavailableWorkspace !== row.unavailable_workspace ||
+      unavailableProject !== row.unavailable_project;
+
     return {
       workspaceRoot,
       selectedProject,
@@ -263,6 +286,15 @@ export class WorkspaceNavigationStore {
       ),
       unavailableWorkspace,
       unavailableProject,
+      seq: this.readRow().updated_at,
     };
+  }
+
+  /** Snapshot plus whether the filesystem self-heal wrote a new state —
+   *  callers (GET /state) broadcast when true so other windows learn. */
+  snapshotWithStatus(): { snapshot: WorkspaceNavigationSnapshot; healed: boolean } {
+    const before = this.readRow().updated_at;
+    const snapshot = this.snapshot();
+    return { snapshot, healed: snapshot.seq !== before };
   }
 }

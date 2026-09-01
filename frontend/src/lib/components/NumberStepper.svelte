@@ -12,6 +12,7 @@
     onchange: (value: number) => unknown | Promise<unknown>;
     compact?: boolean;
     disabled?: boolean;
+    unit?: string;
   }
 
   let {
@@ -24,6 +25,7 @@
     onchange,
     compact = false,
     disabled = false,
+    unit = 'cents',
   }: Props = $props();
 
   let editing = $state(false);
@@ -83,7 +85,7 @@
 </script>
 
 <div
-  class="flex w-full items-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] shadow-inner focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent)]/45 {compact
+  class="flex w-full items-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] shadow-inner focus-within:border-[var(--color-accent)] {compact
     ? 'h-10 min-w-0'
     : 'h-12 min-w-[170px]'}"
 >
@@ -98,27 +100,35 @@
   >
     <Minus size={compact ? 15 : 18} strokeWidth={2.25} />
   </button>
-  <input
-    type="text"
-    inputmode={Number.isInteger(step) ? 'numeric' : 'decimal'}
-    role="spinbutton"
-    aria-label={label}
-    aria-valuenow={value}
-    aria-valuetext={valueText}
-    aria-valuemin={min}
-    aria-valuemax={max}
-    {disabled}
-    bind:value={draft}
-    onfocus={(event) => {
-      editing = true;
-      event.currentTarget.select();
-    }}
-    onblur={commitDraft}
-    onkeydown={handleKeydown}
-    class="min-w-0 flex-1 bg-transparent px-1 text-center font-semibold tabular-nums text-[var(--color-text-primary)] outline-none disabled:cursor-not-allowed disabled:opacity-50 {compact
-      ? 'text-sm'
-      : 'text-base'}"
-  />
+  <div class="relative flex min-w-0 flex-1 items-center">
+    <input
+      type="text"
+      inputmode={Number.isInteger(step) ? 'numeric' : 'decimal'}
+      role="spinbutton"
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuetext={valueText}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      {disabled}
+      bind:value={draft}
+      onfocus={(event) => {
+        editing = true;
+        event.currentTarget.select();
+      }}
+      onblur={commitDraft}
+      onkeydown={handleKeydown}
+      class="min-w-0 w-full flex-1 bg-transparent px-12 text-center font-semibold tabular-nums text-[var(--color-text-primary)] !border-0 !outline-none !ring-0 !shadow-none focus:!border-0 focus:!outline-none focus:!ring-0 focus-visible:!border-0 focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!shadow-none disabled:cursor-not-allowed disabled:opacity-50 {compact
+        ? 'text-sm'
+        : 'text-base'}"
+    />
+    {#if unit}
+      <span
+        class="pointer-events-none absolute right-2 shrink-0 text-[10px] font-medium tracking-wide text-[var(--color-text-muted)]"
+        aria-hidden="true">{unit}</span
+      >
+    {/if}
+  </div>
   <button
     type="button"
     aria-label={`Increase ${label}`}

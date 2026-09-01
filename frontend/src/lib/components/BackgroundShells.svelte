@@ -136,7 +136,7 @@
           {#if expanded[process.id]}
             <div class="border-t border-[var(--color-border)]">
               <pre
-                class="max-h-36 min-h-14 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{logs[
+                class="max-h-36 min-h-14 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{logs[
                   process.id
                 ] || 'Waiting for output…'}</pre>
               <form

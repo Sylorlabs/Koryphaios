@@ -14,6 +14,7 @@ export const ProviderName = {
   TokenRouter: 'tokenrouter',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',
+  Chatbase: 'chatbase',
 
   // Auth-only providers (OAuth/CLI based)
   Claude: 'claude',
@@ -25,6 +26,7 @@ export const ProviderName = {
   Cursor: 'cursor',
   Devin: 'devin',
   Freebuff: 'freebuff',
+  Codebuff: 'codebuff',
   Grok: 'grok',
   Jules: 'jules',
   KiloCode: 'kilocode',

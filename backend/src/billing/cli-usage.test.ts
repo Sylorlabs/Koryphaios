@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   byModelFromSamples,
+  applyOpenRouterEquivalentPricingFromCatalog,
   makeApiEquivalentResolver,
   CLI_API_PROVIDER_MAP,
+  type CliUsageReport,
   type UsageSample,
 } from './cli-usage';
+import { SUBSCRIPTION_PROVIDERS } from '../pricing';
+import { parseOpenRouterPricingCatalog } from '../providers/openrouter-pricing';
 
 const NOW = 1_700_000_000_000;
 const DAY = 24 * 60 * 60 * 1000;
@@ -95,7 +99,7 @@ describe('CLI_API_PROVIDER_MAP', () => {
     expect(CLI_API_PROVIDER_MAP['cline']).toBe('cline');
     expect(CLI_API_PROVIDER_MAP['kimicode']).toBe('kimicode');
     expect(CLI_API_PROVIDER_MAP['kilocode']).toBe('kilocode');
-    expect(CLI_API_PROVIDER_MAP['freebuff']).toBe('freebuff');
+    expect(CLI_API_PROVIDER_MAP['freebuff']).toBe('openrouter');
     expect(CLI_API_PROVIDER_MAP['jules']).toBe('google');
   });
 
@@ -104,6 +108,10 @@ describe('CLI_API_PROVIDER_MAP', () => {
       expect(key.length).toBeGreaterThan(0);
       expect(value.length).toBeGreaterThan(0);
     }
+  });
+
+  test('treats Freebuff as free CLI value rather than metered API spend', () => {
+    expect(SUBSCRIPTION_PROVIDERS.has('freebuff')).toBe(true);
   });
 });
 
@@ -142,5 +150,66 @@ describe('makeApiEquivalentResolver', () => {
     const result = resolver('');
     // Should not throw; returns fallback or null
     expect(() => resolver('')).not.toThrow();
+  });
+});
+
+describe('OpenRouter equivalent valuation', () => {
+  test('prices a provider-native model through its canonical OpenRouter equivalent', () => {
+    const report: CliUsageReport = {
+      provider: 'claude',
+      apiProviderName: 'anthropic',
+      available: true,
+      attribution: 'account' as const,
+      windows: [],
+      dailyUsage: [],
+      quotas: [],
+      byModel: [
+        {
+          model: 'claude-sonnet-4-5-20250929',
+          tokensIn: 10_000,
+          tokensOut: 1_000,
+          apiEquivalent: 'claude-sonnet-4-5-20250929',
+          apiProvider: 'anthropic',
+        },
+      ],
+      updatedAt: NOW,
+    };
+    const catalog = parseOpenRouterPricingCatalog({
+      data: [
+        {
+          id: 'anthropic/claude-sonnet-4.5',
+          canonical_slug: 'anthropic/claude-4.5-sonnet-20250929',
+          pricing: {
+            prompt: '0.000003',
+            completion: '0.000015',
+            input_cache_read: '0.0000003',
+            input_cache_write: '0.00000375',
+          },
+        },
+      ],
+    });
+
+    applyOpenRouterEquivalentPricingFromCatalog(
+      report,
+      [
+        {
+          ...sample(NOW - DAY, 'claude-sonnet-4-5-20250929', 10_000, 1_000),
+          cacheRead: 5_000,
+          cacheReadIncludedInTokensIn: false,
+          cacheReadEvidence: true,
+        },
+      ],
+      NOW,
+      catalog,
+    );
+
+    expect(report.apiProviderName).toBe('openrouter');
+    expect(report.byModel[0]?.apiEquivalent).toBe('anthropic/claude-sonnet-4.5');
+    expect(report.apiValueCoverage).toBe('full');
+    expect(report.apiValueUsd).toBeCloseTo(0.06, 10);
+    expect(report.apiValueMinUsd).toBeCloseTo(0.0195, 10);
+    expect(report.apiValueMaxUsd).toBeCloseTo(0.07125, 10);
+    expect(report.apiCacheAdjustedValueUsd).toBeCloseTo(0.0465, 10);
+    expect(report.cacheAccounting).toBe('provider-reported');
   });
 });

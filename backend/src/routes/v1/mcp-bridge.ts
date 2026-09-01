@@ -22,10 +22,21 @@ import { getContext } from '../../context';
 import { providerLog, serverLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
 import { loadAgentSettings } from '../../agent-settings';
-import { resolveToolPermissionPolicy, resolveSandboxOptions } from '../../tools/permission-policy';
+import {
+  decideToolPermission,
+  resolveToolPermissionPolicy,
+  resolveSandboxOptions,
+} from '../../tools/permission-policy';
+import {
+  checkNoteToolPermission,
+  filterToolDefsForNotesPermissions,
+  formatNoteToolApprovalSummary,
+} from '../../notes/notes-settings';
+import { isNoteToolName } from '@koryphaios/shared';
 import {
   AuthenticationError,
   AuthorizationError,
+  ConflictError,
   SessionNotFoundError,
   ValidationError,
 } from '../../errors/types';
@@ -63,6 +74,9 @@ const SAFE_NATIVE_CONTROL_TOOLS = new Set([
   'todo_write',
   'todowrite',
   'update_plan',
+  'generate_image',
+  'generateimage',
+  'image_gen',
 ]);
 
 export function managedNativeToolDecision(
@@ -91,8 +105,7 @@ export function managedNativeToolDecision(
 }
 
 type BridgeRouteAuth =
-  | { kind: 'signed'; grant: VerifiedBridgeGrant }
-  | { kind: 'local'; session: SessionToken };
+  { kind: 'signed'; grant: VerifiedBridgeGrant } | { kind: 'local'; session: SessionToken };
 
 function authenticateBridgeRoute(
   request: Request,
@@ -118,8 +131,9 @@ function scopedCliRole(auth: BridgeRouteAuth, sessionId: string): string | null 
   }
   const prefix = `mcp:${sessionId}:`;
   return (
-    auth.session.permissions.find((permission) => permission.startsWith(prefix))?.slice(prefix.length) ??
-    (auth.session.permissions.includes('*') ? 'manager' : null)
+    auth.session.permissions
+      .find((permission) => permission.startsWith(prefix))
+      ?.slice(prefix.length) ?? (auth.session.permissions.includes('*') ? 'manager' : null)
   );
 }
 
@@ -128,6 +142,16 @@ function hasBridgeRole(auth: BridgeRouteAuth, sessionId: string, role: string): 
     return auth.grant.sessionId === sessionId && auth.grant.role === role;
   }
   return localAuth.hasPermission(auth.session, `mcp:${sessionId}:${role}`);
+}
+
+async function requireActiveBridgeSession(sessionId: string) {
+  const { sessions } = getContext();
+  const session = await sessions.getActive(sessionId);
+  if (session) return session;
+  if (await sessions.get(sessionId)) {
+    throw new ConflictError('Recover this archived chat before using its CLI bridge.');
+  }
+  throw new SessionNotFoundError(sessionId);
 }
 
 export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
@@ -146,15 +170,18 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       if (!hasBridgeRole(auth, sessionId, role)) {
         throw new AuthorizationError('The CLI capability is not scoped to this session and role');
       }
-      const { tools, sessions } = getContext();
-      if (!(await sessions.get(sessionId))) throw new SessionNotFoundError(sessionId);
+      const { tools } = getContext();
+      const session = await requireActiveBridgeSession(sessionId);
+      const root = session.workingDirectory || process.cwd();
 
       return {
         ok: true,
-        tools: tools.getToolDefsForRole(role).map((tool) => ({
-          ...tool,
-          name: `kory__${tool.name}`,
-        })),
+        tools: filterToolDefsForNotesPermissions(tools.getToolDefsForRole(role), root).map(
+          (tool) => ({
+            ...tool,
+            name: `kory__${tool.name}`,
+          }),
+        ),
       };
     },
     { body: t.Object({ sessionId: t.String(), role: t.String() }) },
@@ -176,62 +203,95 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       if (!sessionId || !toolName) {
         throw new ValidationError('sessionId and toolName are required');
       }
-      const { tools, sessions, goals, kory } = getContext();
-      const session = await sessions.get(sessionId);
-      if (!session) {
-        throw new SessionNotFoundError(sessionId);
+      const { tools, goals, kory } = getContext();
+      const managerOwnsLifecycle = kory.hasActiveSessionExecution(sessionId);
+      const bridgeLease = managerOwnsLifecycle
+        ? null
+        : kory.tryAcquireSessionMutationBarrier(sessionId);
+      if (!managerOwnsLifecycle && !bridgeLease) {
+        throw new ConflictError(
+          'Wait for chat lifecycle work to finish before using its CLI bridge.',
+        );
       }
-      if (role !== 'manager' && role !== 'worker' && role !== 'critic' && role !== 'coder') {
-        throw new ValidationError('A valid CLI role is required');
+      try {
+        const session = await requireActiveBridgeSession(sessionId);
+        if (role !== 'manager' && role !== 'worker' && role !== 'critic' && role !== 'coder') {
+          throw new ValidationError('A valid CLI role is required');
+        }
+        if (!hasBridgeRole(auth, sessionId, role)) {
+          throw new AuthorizationError('The CLI capability is not scoped to this session and role');
+        }
+        const normalizedRole = role;
+        if (!tools.isAllowedForRole(toolName, normalizedRole)) {
+          throw new AuthorizationError(`${normalizedRole} is not allowed to call ${toolName}`);
+        }
+        const activeGoal = (await goals.list()).find(
+          (goal) =>
+            goal.execution?.sessionId === sessionId &&
+            (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
+        );
+        const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
+        // The authenticated session owns the workspace and its saved policy.
+        const root = session.workingDirectory || workingDirectory || process.cwd();
+        const mcpSettings = loadAgentSettings(root);
+        const permissionPolicy = resolveToolPermissionPolicy(
+          mcpSettings,
+          normalizedRole === 'critic' ? 'plan' : 'act',
+        );
+        const mcpNaturalSandboxed = normalizedRole === 'critic' || permissionPolicy.mode !== 'yolo';
+        if (isNoteToolName(toolName)) {
+          const notePermission = checkNoteToolPermission(toolName, root, {
+            yoloMode: permissionPolicy.mode === 'yolo',
+          });
+          if (!notePermission.allowed) {
+            throw new AuthorizationError(`${normalizedRole} is not allowed to call ${toolName}`);
+          }
+          if (
+            notePermission.requiresApproval &&
+            decideToolPermission(permissionPolicy, toolName).action === 'allow'
+          ) {
+            const selection = await kory.requestToolApproval(
+              sessionId,
+              `Allow agent to ${formatNoteToolApprovalSummary(toolName, input)}?`,
+              ['Allow', 'Reject'],
+              { allowOther: false, allowKeepChatting: false },
+            );
+            if (selection !== 'Allow') {
+              throw new AuthorizationError(`Note action rejected for ${toolName}`);
+            }
+          }
+        }
+        const ctx: ToolContext = {
+          sessionId,
+          agentId: `mcp-bridge:${normalizedRole}`,
+          ...(activeGoal ? { goalId: activeGoal.id } : {}),
+          ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
+          workingDirectory: root,
+          signal: undefined,
+          isSandboxed: mcpNaturalSandboxed,
+          sandboxOptions: resolveSandboxOptions(mcpSettings, mcpNaturalSandboxed),
+          permissionPolicy,
+          approvedToolCallIds: new Set(),
+          waitForUserInput: (question, options, opts) =>
+            kory.requestToolApproval(sessionId, question, options, opts),
+          recordChange: (change) => {
+            kory.recordChange?.(sessionId, change);
+          },
+        };
+        const result = await tools.execute(ctx, {
+          id: `mcp-bridge-${Date.now()}`,
+          name: toolName,
+          input,
+        });
+        return {
+          ok: true,
+          output: result.output,
+          isError: result.isError,
+          durationMs: result.durationMs,
+        };
+      } finally {
+        bridgeLease?.release();
       }
-      if (!hasBridgeRole(auth, sessionId, role)) {
-        throw new AuthorizationError('The CLI capability is not scoped to this session and role');
-      }
-      const normalizedRole = role;
-      if (!tools.isAllowedForRole(toolName, normalizedRole)) {
-        throw new AuthorizationError(`${normalizedRole} is not allowed to call ${toolName}`);
-      }
-      const activeGoal = (await goals.list()).find(
-        (goal) =>
-          goal.execution?.sessionId === sessionId &&
-          (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
-      );
-      const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
-      // The authenticated session owns the workspace and its saved policy.
-      const root = session.workingDirectory || workingDirectory || process.cwd();
-      const mcpSettings = loadAgentSettings(root);
-      const permissionPolicy = resolveToolPermissionPolicy(
-        mcpSettings,
-        normalizedRole === 'critic' ? 'plan' : 'act',
-      );
-      const mcpNaturalSandboxed = normalizedRole === 'critic' || permissionPolicy.mode !== 'yolo';
-      const ctx: ToolContext = {
-        sessionId,
-        ...(activeGoal ? { goalId: activeGoal.id } : {}),
-        ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
-        workingDirectory: root,
-        signal: undefined,
-        isSandboxed: mcpNaturalSandboxed,
-        sandboxOptions: resolveSandboxOptions(mcpSettings, mcpNaturalSandboxed),
-        permissionPolicy,
-        approvedToolCallIds: new Set(),
-        waitForUserInput: (question, options, opts) =>
-          kory.requestToolApproval(sessionId, question, options, opts),
-        recordChange: (change) => {
-          kory.recordChange?.(sessionId, change);
-        },
-      };
-      const result = await tools.execute(ctx, {
-        id: `mcp-bridge-${Date.now()}`,
-        name: toolName,
-        input,
-      });
-      return {
-        ok: true,
-        output: result.output,
-        isError: result.isError,
-        durationMs: result.durationMs,
-      };
     },
     {
       body: t.Object({
@@ -257,11 +317,19 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       };
       try {
         const { kory, sessions } = getContext();
-        const session = await sessions.get(session_id);
-        if (!session) return { decision: 'block' as const, reason: 'Kory session not found' };
+        const session = await sessions.getActive(session_id);
+        if (!session) {
+          return {
+            decision: 'block' as const,
+            reason: 'Kory chat is missing or archived; recover it before using CLI tools',
+          };
+        }
         const role = scopedCliRole(auth, session_id);
         if (!role)
-          return { decision: 'block' as const, reason: 'CLI capability is not scoped to this session' };
+          return {
+            decision: 'block' as const,
+            reason: 'CLI capability is not scoped to this session',
+          };
         const decision = managedNativeToolDecision(tool_name);
         // Route native CLI tool calls through Kory's permission system.
         // If the tool is one Kory can handle (read, write, exec, etc.), block
@@ -351,11 +419,19 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         tool_input: Record<string, unknown>;
       };
       const { sessions } = getContext();
-      const session = await sessions.get(session_id);
-      if (!session) return { decision: 'block' as const, reason: 'Kory session not found' };
+      const session = await sessions.getActive(session_id);
+      if (!session) {
+        return {
+          decision: 'block' as const,
+          reason: 'Kory chat is missing or archived; recover it before using CLI tools',
+        };
+      }
       const role = scopedCliRole(auth, session_id);
       if (!role)
-        return { decision: 'block' as const, reason: 'CLI capability is not scoped to this session' };
+        return {
+          decision: 'block' as const,
+          reason: 'CLI capability is not scoped to this session',
+        };
       return managedNativeToolDecision(tool_name);
     },
     {
@@ -377,7 +453,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       if (!scopedCliRole(auth, session_id)) return { ok: false, error: 'Unauthorized' };
       try {
         const { kory, sessions } = getContext();
-        const session = await sessions.get(session_id);
+        const session = await sessions.getActive(session_id);
         if (!session) return { ok: true, additionalContext: '' };
         // Build the Kory context injection: notes network hint + smart context.
         // The KoryManager already assembles this for managed providers; here we
@@ -439,6 +515,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
       if (!auth) throw new AuthenticationError('Unauthorized');
       const { session_id } = body as { session_id: string };
       if (!scopedCliRole(auth, session_id)) throw new AuthorizationError('Unauthorized');
+      await requireActiveBridgeSession(session_id);
       providerLog.info({ sessionId: session_id }, 'CLI session started via hook');
       return { ok: true };
     },

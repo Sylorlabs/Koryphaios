@@ -86,4 +86,23 @@ describe('CLI account autodetection', () => {
     ).toHaveLength(1);
     debug.mockRestore();
   });
+
+  test('never reports non-JSON credential formats as malformed', () => {
+    const home = join(tmpdir(), `kory-cli-accounts-${crypto.randomUUID()}`);
+    roots.push(home);
+    mkdirSync(join(home, '.local', 'share', 'devin'), { recursive: true });
+    writeFileSync(
+      join(home, '.local', 'share', 'devin', 'credentials.toml'),
+      '[oauth]\ntoken = "x"\n',
+    );
+    const debug = spyOn(serverLog, 'debug').mockImplementation(() => serverLog);
+
+    const accounts = discoverCliAccounts(home);
+    const devin = accounts.filter((account) => account.provider === 'devin');
+    expect(devin.length).toBeGreaterThan(0);
+    expect(
+      debug.mock.calls.filter((call) => call[1] === 'cli-accounts: account JSON is malformed'),
+    ).toHaveLength(0);
+    debug.mockRestore();
+  });
 });

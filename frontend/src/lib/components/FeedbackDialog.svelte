@@ -217,7 +217,7 @@
               rows="6"
               required
               placeholder="Share the details that would help us act on this."
-              class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15"
+              class="w-full resize-y rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm leading-6 text-[var(--color-text-primary)] outline-none transition focus:border-[var(--color-accent)]"
             ></textarea>
             <span class="mt-1 block text-right text-[10px] text-[var(--color-text-muted)]"
               >{message.length.toLocaleString()} / 8,000</span

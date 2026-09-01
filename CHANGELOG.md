@@ -4,6 +4,20 @@ All notable Koryphaios changes are recorded here. Release automation prepends a 
 
 ## Unreleased
 
+### ✨ Features
+
+- **Multi-provider image studio**: image generation now works across OpenAI (GPT Image 2/1.5/1/1-mini, DALL·E 3), xAI Grok, Google Gemini & AI Studio (Gemini 2.5 Flash Image, Imagen 4), OpenRouter, and Local / LM Studio / llama.cpp OpenAI-compatible endpoints, with per-model canvas, quality, format, and background options plus custom model IDs.
+- **Image editing**: GPT Image and Gemini 2.5 Flash Image models accept a source image for edit-style generation through the new `/api/images/edit` route.
+- **Image history**: generated and edited images persist under the data dir with a gallery that can re-open, copy prompts, and delete entries.
+- **API usage ledger**: every billable image/voice call is recorded with an estimated cost and surfaced via `GET /api/usage`.
+- **Multi-provider voice**: speech synthesis dispatches to the selected provider — OpenAI TTS, Groq PlayAI TTS, Deepgram Aura, and local/custom OpenAI-compatible endpoints — with per-provider voice lists and speech models discovered from connected providers.
+- **Voice model discovery**: transcription and speech model dropdowns merge models discovered from authenticated providers, so local endpoints and newly released audio models appear without app changes.
+
+### 🐛 Fixes
+
+- Image effect presets apply again — a refactor had silently stopped sending the effect field to the backend.
+- Voice settings no longer advertise downloadable model packs that nothing consumed; local speech models are supported through OpenAI-compatible endpoints, and the unused `liveTranscription` stub flag was removed.
+
 ## [0.2.0] - 2026-08-22
 
 ### ✨ Features

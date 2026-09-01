@@ -52,7 +52,7 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'tokenrouter',
-    baseUrl: 'https://tokenrouter.me/v1',
+    baseUrl: 'https://api.tokenrouter.io/v1',
     authMode: 'api_key',
     envKeys: ['TOKENROUTER_API_KEY'],
   },
@@ -103,6 +103,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
+  {
+    name: 'codebuff',
+    baseUrl: 'https://www.codebuff.com/api',
+    authMode: 'api_key',
+    envKeys: ['CODEBUFF_API_KEY'],
+  },
   { name: 'kilocode', baseUrl: 'https://api.kilo.ai/api/gateway', authMode: 'api_key', envKeys: ['KILO_API_KEY'] },
   // Cloud async agent (API key, not a CLI harness)
   {
@@ -571,6 +577,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://api.moark.ai/v1',
     authMode: 'api_key',
     envKeys: ['MOARK_API_KEY'],
+  },
+  {
+    name: 'chatbase',
+    baseUrl: 'https://www.chatbase.co/api/v2',
+    authMode: 'api_key',
+    envKeys: ['CHATBASE_API_KEY'],
   },
   // Legacy/enterprise providers kept for backward compatibility with existing configs.
   {

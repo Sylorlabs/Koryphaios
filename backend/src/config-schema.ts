@@ -6,6 +6,7 @@ import { IMPLEMENTED_PROVIDERS } from '@koryphaios/shared';
 import { ConfigError } from './errors';
 import { serverLog } from './logger';
 import { PROVIDER_AUTH_MODE } from './providers/constants';
+import { isCustomProviderId } from './providers/custom';
 
 export type AppConfig = KoryphaiosConfig;
 
@@ -100,6 +101,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     ]);
 
     for (const [name, providerConfig] of Object.entries(config.providers)) {
+      if (isCustomProviderId(name)) continue;
       // Keep an old disabled provider record inert rather than making the
       // whole desktop app unbootable after a provider registry update. It is
       // not exposed or executable until a real adapter is registered.

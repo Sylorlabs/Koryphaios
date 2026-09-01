@@ -76,6 +76,8 @@ export interface AgentSettings {
   toolAllowlist: string[];
   /** Tool names that are always denied. */
   toolBlocklist: string[];
+  /** Per-tier tool overrides. Keys are permissionMode values. */
+  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[] }>;
   /** Bash base-command patterns that bypass the sandbox safety prompt. */
   bashCommandAllowlist: string[];
   /** Bash base-command patterns that are always blocked without prompting. */
@@ -94,6 +96,8 @@ export interface AgentSettings {
   contextSelfAwareness: boolean;
   /** Compact a completed turn after it reaches the trusted context threshold. */
   autoCompactEnabled: boolean;
+  /** Context-window percentage at which automatic compaction triggers. */
+  autoCompactThreshold: number;
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
   skillCollisionChoices: Record<string, 'personal' | 'project'>;
@@ -132,6 +136,10 @@ export interface SkillRevision {
   source: 'personal' | 'project';
   state: 'active' | 'draft';
   path: string;
+  storageVersion: 1 | 2;
+  document: SkillDocumentSpec;
+  sourceContent: string;
+  coreInstructions: string;
   content: string;
   hash: string;
   metadata: {
@@ -163,6 +171,16 @@ export interface SkillRevision {
   };
   /** True when a newer bundled version exists and the local copy has user edits. */
   bundledUpdateAvailable?: boolean;
+}
+
+export type SkillFormatKind = 'markdown' | 'text' | 'html' | 'custom';
+export type SkillRenderer = 'markdown' | 'plain' | 'html';
+
+export interface SkillDocumentSpec {
+  kind: SkillFormatKind;
+  extension: string;
+  renderer: SkillRenderer;
+  mediaType: string;
 }
 
 export interface HarnessQualificationRecord {
@@ -223,6 +241,19 @@ export interface SkillRevisionComparison {
   changed: boolean;
   active: string;
   draft: string;
+  activeDocument: SkillDocumentSpec;
+  draftDocument: SkillDocumentSpec;
+}
+
+export interface SkillConversionPreview {
+  sourceDocument: SkillDocumentSpec;
+  targetDocument: SkillDocumentSpec;
+  sourceContent: string;
+  convertedContent: string;
+  coreInstructions: string;
+  warnings: string[];
+  lossy: boolean;
+  draft?: SkillRevision;
 }
 
 export interface BundledSkillComparison {
@@ -231,6 +262,8 @@ export interface BundledSkillComparison {
   changed: boolean;
   local: string;
   bundled: string;
+  localDocument: SkillDocumentSpec;
+  bundledDocument: SkillDocumentSpec;
 }
 
 export interface SkillResolutionPreview {
@@ -299,6 +332,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   subAgentApproval: 'manager',
   toolAllowlist: [],
   toolBlocklist: [],
+  toolPermissionsByTier: {},
   bashCommandAllowlist: [],
   bashCommandBlocklist: [],
   localWebSearch: 'fallback',
@@ -308,6 +342,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   contextPruneMinChars: 600,
   contextSelfAwareness: true,
   autoCompactEnabled: true,
+  autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,
   skillCollisionChoices: {},
 };
@@ -563,6 +598,9 @@ function createAgentSettingsStore() {
     targetMedia?: string[];
     depth?: number;
     contextBudget?: number;
+    document?: SkillDocumentSpec;
+    sourceContent?: string;
+    coreInstructions?: string;
   }): Promise<SkillRevision | null> {
     try {
       const res = await apiFetch(apiUrl('/api/agent/skills'), {
@@ -608,32 +646,77 @@ function createAgentSettingsStore() {
     }
   }
 
-  async function saveSkillDraft(skill: SkillRevision, content: string): Promise<boolean> {
+  async function saveSkillDraft(
+    skill: SkillRevision,
+    sourceContent: string,
+    coreInstructions = skill.coreInstructions,
+  ): Promise<SkillRevision | null> {
     try {
+      const legacyBody =
+        skill.storageVersion === 1
+          ? (sourceContent.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n([\s\S]*)$/)?.[1] ?? sourceContent)
+          : sourceContent;
       const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/draft`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: skill.source, content }),
+        body: JSON.stringify({
+          source: skill.source,
+          document: skill.document,
+          sourceContent: legacyBody,
+          coreInstructions:
+            skill.storageVersion === 1 ? legacyBody.trim() : coreInstructions.trim(),
+          expectedHash: skill.hash,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error);
       await loadSkills();
       toastStore.success('Skill saved as draft');
-      return true;
+      return data.data as SkillRevision;
     } catch (err: unknown) {
       toastStore.error(
         (err instanceof Error ? err.message : String(err)) ?? 'Failed to save skill draft',
       );
-      return false;
+      return null;
     }
   }
 
-  async function testAndActivateSkill(skill: SkillRevision): Promise<boolean> {
+  async function convertSkill(
+    skill: SkillRevision,
+    document: SkillDocumentSpec,
+    dryRun = true,
+  ): Promise<SkillConversionPreview | null> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/convert`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: skill.source,
+          state: skill.state,
+          document,
+          dryRun,
+          expectedHash: skill.hash,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error);
+      if (!dryRun) {
+        await loadSkills();
+        toastStore.success('Converted draft created for review');
+      }
+      return data.data as SkillConversionPreview;
+    } catch (err: unknown) {
+      toastStore.error((err instanceof Error ? err.message : String(err)) ?? 'Conversion failed');
+      return null;
+    }
+  }
+
+  async function testAndActivateSkill(skill: SkillRevision): Promise<SkillRevision | null> {
     try {
       const testRes = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/test`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: skill.source, state: 'draft' }),
+        body: JSON.stringify({ source: skill.source, state: 'draft', expectedHash: skill.hash }),
       });
       const tested = await testRes.json();
       if (!testRes.ok || !tested.ok || !tested.data.passed)
@@ -641,18 +724,18 @@ function createAgentSettingsStore() {
       const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/activate`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: skill.source }),
+        body: JSON.stringify({ source: skill.source, expectedHash: skill.hash }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error);
       await loadSkills();
       toastStore.success('Validated skill activated');
-      return true;
+      return data.data as SkillRevision;
     } catch (err: unknown) {
       toastStore.error(
         (err instanceof Error ? err.message : String(err)) ?? 'Failed to activate skill',
       );
-      return false;
+      return null;
     }
   }
 
@@ -694,13 +777,13 @@ function createAgentSettingsStore() {
   async function applyBundledSkillUpdate(
     skill: SkillRevision,
     choice: 'replace' | 'merge' | 'keep-local' | 'merge-with-agent',
-  ): Promise<boolean> {
+  ): Promise<SkillRevision | null> {
     if (choice === 'merge-with-agent') isMergingSkill = true;
     try {
       const res = await apiFetch(apiUrl(`/api/agent/skills/${skill.name}/update-default`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice }),
+        body: JSON.stringify({ choice, expectedHash: skill.hash }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error);
@@ -714,12 +797,12 @@ function createAgentSettingsStore() {
         'keep-local': 'Kept your local version',
       };
       toastStore.success(messages[choice] ?? 'Skill update choice applied');
-      return true;
+      return data.data as SkillRevision;
     } catch (err: unknown) {
       toastStore.error(
         (err instanceof Error ? err.message : String(err)) ?? 'Failed to apply bundled update',
       );
-      return false;
+      return null;
     } finally {
       isMergingSkill = false;
     }
@@ -923,6 +1006,7 @@ function createAgentSettingsStore() {
     createSkillDraft,
     createFreeformSkillDraft,
     saveSkillDraft,
+    convertSkill,
     testAndActivateSkill,
     compareSkillDraft,
     compareBundledSkill: compareBundledSkillFn,

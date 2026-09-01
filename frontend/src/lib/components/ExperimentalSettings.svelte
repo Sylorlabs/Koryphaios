@@ -154,13 +154,13 @@
             </div>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid auto-rows-fr gap-3 sm:grid-cols-2">
             {#each limitControls as control (control.key)}
               <div
-                class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                class="flex min-h-[148px] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
               >
                 <div class="flex items-start justify-between gap-3">
-                  <div>
+                  <div class="min-w-0 flex-1">
                     <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
                       {control.label}
                     </h5>
@@ -172,7 +172,7 @@
                     >{config[control.key] === 0 ? 'Off' : dollars(config[control.key])}</span
                   >
                 </div>
-                <div class="mt-3">
+                <div class="mt-auto pt-3">
                   <NumberStepper
                     compact
                     value={config[control.key]}
@@ -180,6 +180,7 @@
                     max={1_000_000}
                     step={50}
                     label={`${control.label} in cents`}
+                    unit="cents"
                     disabled={experimentalStore.isLoading}
                     onchange={(value) => save({ [control.key]: value }, `${control.label} saved.`)}
                   />

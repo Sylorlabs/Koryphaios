@@ -1,7 +1,7 @@
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { ensureSecureDir } from '../security/fs-permissions';
 
-export type DatabasePathEnvironment = { DATABASE_URL?: string };
+export type DatabasePathEnvironment = { DATABASE_URL?: string; NODE_ENV?: string };
 
 /**
  * Resolve the primary application database without depending on process cwd.
@@ -10,16 +10,36 @@ export type DatabasePathEnvironment = { DATABASE_URL?: string };
  */
 export function resolveDatabasePath(
   projectRoot: string,
-  environment: DatabasePathEnvironment = { DATABASE_URL: process.env.DATABASE_URL },
+  environment: DatabasePathEnvironment = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    NODE_ENV: process.env.NODE_ENV,
+  },
 ): string {
   const configured = environment.DATABASE_URL?.trim();
+  const defaultPath = join(projectRoot, 'data', 'koryphaios.db');
+  if (environment.NODE_ENV === 'test' && !configured) {
+    throw new Error(
+      'Refusing to open the default Koryphaios database in a test process. Set DATABASE_URL to an isolated SQLite database or use bun run test:backend:isolated.',
+    );
+  }
+
   if (configured) {
     // Accept sqlite://path, sqlite:path, and plain filesystem paths. A Windows
     // drive path remains intact after the sqlite: prefix is removed.
-    return configured.replace(/^sqlite:\/\//, '').replace(/^sqlite:/, '');
+    const configuredPath = configured.replace(/^sqlite:\/\//, '').replace(/^sqlite:/, '');
+    if (
+      environment.NODE_ENV === 'test' &&
+      configuredPath !== ':memory:' &&
+      resolve(configuredPath) === resolve(defaultPath)
+    ) {
+      throw new Error(
+        'Refusing to open the live Koryphaios database in a test process. Choose a dedicated test DATABASE_URL.',
+      );
+    }
+    return configuredPath;
   }
 
-  return join(projectRoot, 'data', 'koryphaios.db');
+  return defaultPath;
 }
 
 /**

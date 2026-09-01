@@ -17,9 +17,12 @@ describe('managed CLI native tool boundary', () => {
     expect(managedNativeToolDecision('mystery_host_tool').decision).toBe('block');
   });
 
-  test('allows only provider-local bookkeeping without host authority', () => {
+  test('allows only provider-local bookkeeping and internal generation without host authority', () => {
     expect(managedNativeToolDecision('manage_task').decision).toBe('approve');
     expect(managedNativeToolDecision('finish').decision).toBe('approve');
+    expect(managedNativeToolDecision('generate_image').decision).toBe('approve');
+    expect(managedNativeToolDecision('Generate_Image').decision).toBe('approve');
+    expect(managedNativeToolDecision('image_gen').decision).toBe('approve');
   });
 
   test('keeps delegation inside Koryphaios', () => {

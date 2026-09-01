@@ -24,6 +24,8 @@ export interface SendMessageRequest {
   /** Route-aware acceleration chosen in the composer. Codex uses its Fast tier;
    * OpenAI API uses Priority processing. */
   fastMode?: boolean;
+  /** Explicit user decision for models whose adapter cannot carry image input. */
+  imageInputMode?: 'reject' | 'omit';
 }
 
 export interface CreateSessionRequest {
@@ -33,7 +35,6 @@ export interface CreateSessionRequest {
 
 export interface UpdateSessionRequest {
   title?: string;
-  status?: 'active' | 'archived';
 }
 
 export interface GetMessagesRequest {

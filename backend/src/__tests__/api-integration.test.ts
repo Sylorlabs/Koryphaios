@@ -184,12 +184,17 @@ describe.skipIf(!LOOPBACK_AVAILABLE)('API Integration Tests', () => {
       expect(res.json?.data?.title).toBe(newTitle);
     });
 
-    test('GET /api/messages/:sessionId returns array', async () => {
+    test('GET /api/messages/:sessionId returns message projection object', async () => {
       const res = request(`/api/messages/${sessionId}`, { headers: authHeaders() });
 
       expect(res.status).toBe(200);
       expect(res.json?.ok).toBe(true);
-      expect(Array.isArray(res.json?.data)).toBe(true);
+      const data = res.json?.data;
+      expect(data).toBeDefined();
+      expect(Array.isArray(data?.messages)).toBe(true);
+      expect(data?.activeMessageId === null || typeof data?.activeMessageId === 'string').toBe(true);
+      expect(typeof data?.conversationRevision).toBe('number');
+      expect(typeof data?.providerConversationRevision).toBe('number');
     });
 
     test('DELETE /api/sessions/:id deletes session', async () => {

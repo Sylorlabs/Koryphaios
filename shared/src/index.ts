@@ -127,6 +127,26 @@ export type { PermissionRequest, PermissionResponse } from './permissions/Permis
 
 // ============== WebSocket Protocol ==============
 export type { WSEventType, WSMessage, WSMessagePayload } from './websocket/WSEvents';
+export {
+  SESSION_RUN_ACTIVE_PHASES,
+  SESSION_RUN_WAITING_PHASES,
+  SESSION_RUN_TERMINAL_PHASES,
+  SessionRunTransitionError,
+  createIdleSessionRun,
+  reduceSessionRun,
+  sessionRunStatusForPhase,
+} from './run/SessionRun';
+export type {
+  SessionRunActivePhase,
+  SessionRunWaitingPhase,
+  SessionRunTerminalPhase,
+  SessionRunPhase,
+  SessionRunStatus,
+  SessionRunSnapshot,
+  SessionRunCommand,
+  SessionRunTransition,
+  SessionRunStatePayload,
+} from './run/SessionRun';
 
 // ============== WebSocket Payloads ==============
 export type {
@@ -146,9 +166,13 @@ export type {
   SessionCreatedPayload,
   SessionUpdatedPayload,
   SessionIdlePayload,
+  SessionTimelineRewrittenPayload,
   ChangeSummary,
   ChangeSummaryPayload,
   KorySessionChangesPayload,
+  KorySessionChangesResolvedPayload,
+  KoryAskUserResolvedPayload,
+  SessionActionableWaitsPayload,
   StreamUsagePayload,
   CompactionProgressPayload,
   ContextBreakdown,
@@ -249,13 +273,13 @@ export {
 
 // ============== Notes Network ==============
 export * from './types/NoteTypes';
+export * from './types/NoteWorkspaceTypes';
+export * from './notes/NoteProperties';
 
 // ============== Voice Types ==============
 export type {
   VoiceSettings,
   VoiceProviderDescriptor,
-  VoicePackManifest,
-  VoicePackStatus,
   TranscriptionResult,
   SynthesisRequest,
   SynthesisResult,

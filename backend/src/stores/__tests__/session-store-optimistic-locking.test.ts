@@ -30,6 +30,7 @@ await reopenDatabase(tempDbPath);
 // Import SessionStore AFTER reopening the database so it picks up the
 // temp-file drizzle instance.
 const { SessionStore } = await import('../session-store');
+const { MessageStore } = await import('../message-store');
 
 afterAll(async () => {
   // Restore the shared `db` singleton to its original path so subsequent
@@ -154,5 +155,74 @@ describe('SessionStore optimistic locking (expectedVersion)', () => {
     const final = await store.get(created.id);
     expect(final?.title).toBe('writer A');
     expect(final?.version).toBe(2);
+  });
+
+  test('archive filtering and ordering are explicit while listAll remains complete', async () => {
+    const active = await store.create('local-user', 'Active');
+    const olderArchive = await store.create('local-user', 'Older archive');
+    const newerArchive = await store.create('local-user', 'Newer archive');
+
+    await store.archive(olderArchive.id, 10_000);
+    await store.archive(newerArchive.id, 20_000);
+
+    expect((await store.listActive()).map((session) => session.id)).toEqual([active.id]);
+    expect((await store.listArchived()).map((session) => session.id)).toEqual([
+      newerArchive.id,
+      olderArchive.id,
+    ]);
+    expect(new Set((await store.listAll()).map((session) => session.id))).toEqual(
+      new Set([active.id, olderArchive.id, newerArchive.id]),
+    );
+    // The legacy inventory alias deliberately stays all-inclusive.
+    expect(new Set((await store.list()).map((session) => session.id))).toEqual(
+      new Set([active.id, olderArchive.id, newerArchive.id]),
+    );
+    expect(await store.getActive(olderArchive.id)).toBeUndefined();
+  });
+
+  test('archive and restore are atomic, retry-safe, and preserve last-active ordering time', async () => {
+    const created = await store.create('local-user', 'Preserve activity time');
+    const originalUpdatedAt = created.updatedAt;
+
+    const archived = await store.archive(created.id, 123_456);
+    expect(archived).toMatchObject({ archivedAt: 123_456, status: 'archived', version: 2 });
+    expect(archived?.updatedAt).toBe(originalUpdatedAt);
+
+    const archiveRetry = await store.archive(created.id, 999_999);
+    expect(archiveRetry).toEqual(archived);
+    expect(archiveRetry?.version).toBe(2);
+    expect(archiveRetry?.archivedAt).toBe(123_456);
+
+    const restored = await store.restore(created.id);
+    expect(restored).toMatchObject({ status: 'active', version: 3 });
+    expect(restored?.archivedAt).toBeUndefined();
+    expect(restored?.updatedAt).toBe(originalUpdatedAt);
+
+    const restoreRetry = await store.restore(created.id);
+    expect(restoreRetry).toEqual(restored);
+    expect(restoreRetry?.version).toBe(3);
+    expect((await store.listArchived()).map((session) => session.id)).not.toContain(created.id);
+    expect((await store.listActive()).map((session) => session.id)).toContain(created.id);
+  });
+
+  test('message persistence fails closed inside the transaction for archived chats', async () => {
+    const created = await store.create('local-user', 'Read only archive');
+    await store.archive(created.id, 12_345);
+    const messages = new MessageStore();
+
+    await expect(
+      messages.add(created.id, {
+        id: 'blocked-message',
+        sessionId: created.id,
+        role: 'user',
+        content: 'must not persist',
+        createdAt: 99_999,
+      }),
+    ).rejects.toThrow('Recover this archived chat');
+
+    expect(
+      getDb().query('SELECT COUNT(*) AS count FROM messages WHERE session_id = ?').get(created.id),
+    ).toEqual({ count: 0 });
+    expect((await store.get(created.id))?.messageCount).toBe(0);
   });
 });

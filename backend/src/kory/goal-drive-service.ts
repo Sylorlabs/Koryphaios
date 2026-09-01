@@ -91,53 +91,71 @@ export class GoalDriveService {
     if (prior.scope === 'session' && prior.sessionId !== execution.sessionId) {
       throw new Error('This session goal can only run in its owning chat');
     }
-    const session = await this.sessions.get(execution.sessionId);
-    if (!session) throw new Error('The execution chat no longer exists');
-    this.resolveWorkingDirectory(prior, session);
-    const resumed = prior.status === 'paused' || prior.status === 'blocked';
-    prior = (await this.goals.reopenUnverifiedItems(goalId)) ?? prior;
-    const attemptStartedAt = Date.now();
-    const attemptId = crypto.randomUUID();
-    const executionAttempt: GoalExecutionConfig = {
-      ...execution,
-      attemptId,
-      attemptStartedAt,
-    };
-    const linkedSessionIds = prior.linkedSessionIds.includes(execution.sessionId)
-      ? prior.linkedSessionIds
-      : [...prior.linkedSessionIds, execution.sessionId];
-    let updated = await this.goals.update(goalId, {
-      status: 'queued',
-      blocker: undefined,
-      execution: executionAttempt,
-      linkedSessionIds,
-      activity: [
-        ...prior.activity,
-        {
-          id: crypto.randomUUID(),
-          type: 'execution_attempt_started',
-          message: `${attemptId}|${resumed ? 'resumed' : 'started'}`,
-          sessionId: execution.sessionId,
-          createdAt: attemptStartedAt,
-        },
-      ],
-    });
-    if (!updated) throw new Error('Goal not found');
-    const interrupted = updated.checklist.find((item) => item.status === 'running');
-    if (interrupted) {
-      updated = await this.goals.resetItem(
-        goalId,
-        interrupted.id,
-        resumed
-          ? 'Resumed in a fresh execution attempt; replaying the interrupted checklist item.'
-          : 'Starting in a fresh execution attempt; replaying the interrupted checklist item.',
-        attemptId,
-      );
-      if (!updated) throw new Error('Goal execution attempt changed before it could start');
+    const hasExecution =
+      typeof this.kory.hasActiveSessionExecution === 'function'
+        ? this.kory.hasActiveSessionExecution(execution.sessionId)
+        : this.kory.isSessionRunning(execution.sessionId);
+    const admissionLease = hasExecution
+      ? null
+      : (
+          this.options.acquireSessionMutationBarrier ??
+          ((sessionId: string) => this.kory.tryAcquireSessionMutationBarrier(sessionId))
+        )(execution.sessionId);
+    if (!hasExecution && !admissionLease) {
+      throw new Error('Goal start refused while the chat archive or recovery state is changing');
     }
-    this.publish(updated);
-    this.schedule(goalId);
-    return updated;
+    try {
+      const session = await this.sessions.getActive(execution.sessionId);
+      if (!session)
+        throw new Error('Recover the archived execution chat before starting this Goal');
+      this.resolveWorkingDirectory(prior, session);
+      const resumed = prior.status === 'paused' || prior.status === 'blocked';
+      prior = (await this.goals.reopenUnverifiedItems(goalId)) ?? prior;
+      const attemptStartedAt = Date.now();
+      const attemptId = crypto.randomUUID();
+      const executionAttempt: GoalExecutionConfig = {
+        ...execution,
+        attemptId,
+        attemptStartedAt,
+      };
+      const linkedSessionIds = prior.linkedSessionIds.includes(execution.sessionId)
+        ? prior.linkedSessionIds
+        : [...prior.linkedSessionIds, execution.sessionId];
+      let updated = await this.goals.update(goalId, {
+        status: 'queued',
+        blocker: undefined,
+        execution: executionAttempt,
+        linkedSessionIds,
+        activity: [
+          ...prior.activity,
+          {
+            id: crypto.randomUUID(),
+            type: 'execution_attempt_started',
+            message: `${attemptId}|${resumed ? 'resumed' : 'started'}`,
+            sessionId: execution.sessionId,
+            createdAt: attemptStartedAt,
+          },
+        ],
+      });
+      if (!updated) throw new Error('Goal not found');
+      const interrupted = updated.checklist.find((item) => item.status === 'running');
+      if (interrupted) {
+        updated = await this.goals.resetItem(
+          goalId,
+          interrupted.id,
+          resumed
+            ? 'Resumed in a fresh execution attempt; replaying the interrupted checklist item.'
+            : 'Starting in a fresh execution attempt; replaying the interrupted checklist item.',
+          attemptId,
+        );
+        if (!updated) throw new Error('Goal execution attempt changed before it could start');
+      }
+      this.publish(updated);
+      this.schedule(goalId);
+      return updated;
+    } finally {
+      admissionLease?.release();
+    }
   }
 
   async pause(goalId: string, reason = 'Paused by user'): Promise<Goal> {
@@ -337,8 +355,7 @@ export class GoalDriveService {
           );
           for (const goal of related) this.stopCheckpointTimer(goal.id);
           const inFlight = related.some(
-            (goal) =>
-              this.goalTurnInFlight.has(goal.id) || this.checkpointInFlight.has(goal.id),
+            (goal) => this.goalTurnInFlight.has(goal.id) || this.checkpointInFlight.has(goal.id),
           );
           if (!inFlight) return;
           if (Date.now() >= deadline) {
@@ -399,8 +416,8 @@ export class GoalDriveService {
         return;
       }
       if (this.erasingSessions.has(goal.execution.sessionId)) return;
-      const session = await this.sessions.get(goal.execution.sessionId);
-      if (!session) throw new Error('Goal execution chat no longer exists');
+      const session = await this.sessions.getActive(goal.execution.sessionId);
+      if (!session) throw new Error('Goal execution chat is missing or archived');
       const workingDirectory = this.resolveWorkingDirectory(goal, session);
       if (this.kory.isSessionRunning(goal.execution.sessionId)) {
         koryLog.debug({ goalId }, 'Deferred periodic goal checkpoint until the session is idle');
@@ -573,11 +590,11 @@ export class GoalDriveService {
       if (this.erasingSessions.has(execution.sessionId)) return;
       const attemptId = execution.attemptId;
       if (!attemptId) return;
-      const session = await this.sessions.get(execution.sessionId);
+      const session = await this.sessions.getActive(execution.sessionId);
       if (!session) {
         const blocked = await this.goals.transitionActiveAttempt(goalId, attemptId, {
           status: 'blocked',
-          blocker: 'The execution chat no longer exists. Choose another chat to resume.',
+          blocker: 'The execution chat is missing or archived. Recover it or choose another chat.',
         });
         if (!blocked) return;
         this.publish(blocked);
@@ -652,35 +669,52 @@ Continue until this checklist item is genuinely complete. You may invoke a regis
 
       const blockerCountBefore = this.blockerCandidates(currentGoal, currentItem.id).length;
       const evidenceCountBefore = this.evidenceCandidates(currentGoal, currentItem.id).length;
-      const dispatched = await this.goals.addActivityForActiveAttempt(
-        goalId,
-        attemptId,
-        'provider_dispatched',
-        `${execution.provider}: ${policy.verification}`,
-        execution.sessionId,
-      );
-      if (!dispatched) return;
+      const turnOrdinal = this.attemptActivity(currentGoal).filter(
+        (event) => event.type === 'provider_dispatched',
+      ).length;
       if (!(await this.waitUntilCheckpointIdle(goalId))) return;
       this.goalTurnInFlight.add(goalId);
+      let turnOutcome: Awaited<ReturnType<KoryManager['submitSessionTurn']>>;
       try {
-        await this.kory.processTask(
-          execution.sessionId,
-          prompt,
-          execution.model,
-          execution.reasoningLevel,
-          undefined,
-          undefined,
-          undefined,
-          {
+        turnOutcome = await this.kory.submitSessionTurn({
+          sessionId: execution.sessionId,
+          source: 'goal',
+          sourceCommandId: `${goalId}:${attemptId}:${currentItem.id}:${turnOrdinal}`,
+          userMessage: prompt,
+          preferredModel: execution.model,
+          reasoningLevel: execution.reasoningLevel,
+          goalContext: {
             goalId: currentGoal.id,
             objective: currentGoal.objective,
             itemId: currentItem.id,
             itemTitle: currentItem.title,
             verification: policy.verification,
           },
-        );
+        });
       } finally {
         this.goalTurnInFlight.delete(goalId);
+      }
+
+      if (turnOutcome.status === 'rejected') {
+        throw new Error('Goal turn admission lost a race with another session operation');
+      }
+      const dispatched = await this.goals.addActivityForActiveAttempt(
+        goalId,
+        attemptId,
+        'provider_dispatched',
+        `${execution.provider}: ${policy.verification}; run=${turnOutcome.runId || 'recovered'}`,
+        execution.sessionId,
+      );
+      if (!dispatched) return;
+      if (turnOutcome.status === 'waiting') return;
+      if (turnOutcome.status === 'cancelled') return;
+      if (turnOutcome.status !== 'completed') {
+        const paused = await this.goals.transitionActiveAttempt(goalId, attemptId, {
+          status: 'paused',
+          blocker: `The provider turn failed after admission (${turnOutcome.reason ?? turnOutcome.phase}). Automatic replay is disabled because tool side effects may already have occurred. Review the chat and resume explicitly.`,
+        });
+        if (paused) this.publish(paused);
+        return;
       }
 
       if (this.erasingSessions.has(execution.sessionId)) return;

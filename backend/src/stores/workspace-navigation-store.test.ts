@@ -108,4 +108,37 @@ describe('WorkspaceNavigationStore', () => {
     expect(restarted.projects.map((entry) => entry.name)).toEqual(['new-folder', 'project']);
     database.close();
   });
+
+  test('allows working in the workspace root without detaching the workspace', () => {
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'alpha'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
+    const { database, store } = createStore();
+    store.openWorkspace(root);
+
+    const selected = store.selectProject(root);
+    expect(selected.selectedProject).toBe(root);
+    expect(selected.workspaceRoot).toBe(root);
+    // Survives a fresh snapshot: the root is not in the children list but is
+    // still a legitimate selection.
+    expect(store.snapshot().selectedProject).toBe(root);
+    expect(store.snapshot().workspaceRoot).toBe(root);
+    expect(store.snapshot().unavailableProject).toBeNull();
+    database.close();
+  });
+
+  test('keeps the workspace attached when a child project is selected after the root', () => {
+    const rawRoot = join(tmpdir(), `kory-workspace-${crypto.randomUUID()}`);
+    roots.push(rawRoot);
+    mkdirSync(join(rawRoot, 'alpha'), { recursive: true });
+    const root = canonicalRoot(rawRoot);
+    const { database, store } = createStore();
+    store.openWorkspace(root);
+    store.selectProject(root);
+    const child = store.selectProject(join(root, 'alpha'));
+    expect(child.selectedProject).toBe(join(root, 'alpha'));
+    expect(child.workspaceRoot).toBe(root);
+    database.close();
+  });
 });

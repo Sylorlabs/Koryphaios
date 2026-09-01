@@ -3,6 +3,14 @@
   import { onMount, onDestroy } from 'svelte';
   import { notesStore } from '$lib/stores/notes.svelte';
   import { theme } from '$lib/stores/theme.svelte';
+  import {
+    GRAPH_AUTO_FOCUS_THRESHOLD,
+    GRAPH_STATIC_LAYOUT_THRESHOLD,
+    graphNeighborIds,
+    selectGraphView,
+    shouldDimGraphNode,
+    stableGraphHash,
+  } from '$lib/utils/note-graph-view';
   import type { GraphNode, GraphEdge } from '@koryphaios/shared';
   import Share2 from 'lucide-svelte/icons/share-2';
 
@@ -18,6 +26,7 @@
   let simulation: d3.Simulation<any, any> | null = null;
   let searchQuery = $state('');
   let showLabels = $state(true);
+  let showAllNodes = $state(false);
   let localGraph = $state(false);
   let selectedNodeId = $state<string | null>(null);
   let hoveredNodeId = $state<string | null>(null);
@@ -37,28 +46,21 @@
     '--color-text-secondary',
   ] as const;
 
-  const folderColorMap = new Map<string, (typeof FOLDER_COLOR_TOKENS)[number]>();
-  let colorIndex = 0;
-
   type SimNode = d3.SimulationNodeDatum &
     GraphNode & { x: number; y: number; vx: number; vy: number };
   type SimLink = { source: SimNode; target: SimNode };
 
-  function themeColor(token: string): string {
-    if (!containerEl) return 'currentColor';
-    return getComputedStyle(containerEl).getPropertyValue(token).trim() || 'currentColor';
-  }
-
   function getFolderColorToken(folderPath: string): (typeof FOLDER_COLOR_TOKENS)[number] {
-    if (!folderColorMap.has(folderPath)) {
-      folderColorMap.set(folderPath, FOLDER_COLOR_TOKENS[colorIndex % FOLDER_COLOR_TOKENS.length]);
-      colorIndex++;
-    }
-    return folderColorMap.get(folderPath)!;
+    return FOLDER_COLOR_TOKENS[stableGraphHash(folderPath) % FOLDER_COLOR_TOKENS.length];
   }
 
-  function getFolderColor(folderPath: string): string {
-    return themeColor(getFolderColorToken(folderPath));
+  function initialPoint(id: string): { x: number; y: number } {
+    const first = stableGraphHash(id) / 0xffffffff;
+    const second = stableGraphHash(`${id}:y`) / 0xffffffff;
+    return {
+      x: width / 2 + (first - 0.5) * width * 0.35,
+      y: height / 2 + (second - 0.5) * height * 0.35,
+    };
   }
 
   function getNodeRadius(linkCount: number, includeInContext: boolean): number {
@@ -66,20 +68,10 @@
     return Math.min(base + (includeInContext ? 2 : 0), 22);
   }
 
-  function getNeighborSet(nodeId: string | null, edges: GraphEdge[]): Set<string> {
-    if (!nodeId) return new Set();
-    const neighbors = new Set<string>([nodeId]);
-    for (const edge of edges) {
-      if (edge.from === nodeId) neighbors.add(edge.to);
-      if (edge.to === nodeId) neighbors.add(edge.from);
-    }
-    return neighbors;
-  }
-
   // ── Canvas render state ─────────────────────────────────────────────────────
-  // Canvas 2D scales to thousands of nodes where an equivalent SVG DOM janks, so
-  // there is no node cap — the whole vault renders. World↔screen is a manual
-  // affine transform (scale + translate) we also use for hit-testing.
+  // Canvas 2D scales far beyond an equivalent SVG DOM. Large vaults default to
+  // their connected/contextual subset, while All notes uses a stable one-shot
+  // layout. World↔screen is a manual transform also used for hit-testing.
   let simNodes: SimNode[] = [];
   let simLinks: SimLink[] = [];
   let scale = 1;
@@ -88,6 +80,9 @@
   let width = 0;
   let height = 0;
   let dpr = 1;
+  const positionCache = new Map<string, { x: number; y: number }>();
+  let drawFrame: number | null = null;
+  let buildFrame: number | null = null;
 
   function toWorld(sx: number, sy: number): [number, number] {
     return [(sx - tx) / scale, (sy - ty) / scale];
@@ -95,14 +90,7 @@
 
   function getVisibleGraph(): { nodes: GraphNode[]; edges: GraphEdge[] } {
     const { nodes, edges } = notesStore.graphData;
-    if (localGraph && selectedNodeId) {
-      const keep = getNeighborSet(selectedNodeId, edges);
-      const filteredNodes = nodes.filter((n) => keep.has(n.id));
-      const ids = new Set(filteredNodes.map((n) => n.id));
-      const filteredEdges = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-      return { nodes: filteredNodes, edges: filteredEdges };
-    }
-    return { nodes, edges };
+    return selectGraphView(nodes, edges, { showAllNodes, localGraph, selectedNodeId });
   }
 
   function nodeAt(sx: number, sy: number): SimNode | null {
@@ -118,6 +106,22 @@
     return null;
   }
 
+  function readPaintColors() {
+    const styles = containerEl ? getComputedStyle(containerEl) : null;
+    const read = (token: string, fallback: string) =>
+      styles?.getPropertyValue(token).trim() || fallback;
+    return {
+      accent: read('--color-accent', '#7c8cff'),
+      warning: read('--color-warning', '#f2b84b'),
+      textPrimary: read('--color-text-primary', '#f5f5f5'),
+      textMuted: read('--color-text-muted', '#8a8a8a'),
+      borderBright: read('--color-border-bright', '#777777'),
+      folders: new Map(
+        FOLDER_COLOR_TOKENS.map((token) => [token, read(token, '#8a8a8a')] as const),
+      ),
+    };
+  }
+
   function draw() {
     const canvas = canvasEl;
     if (!canvas) return;
@@ -131,15 +135,17 @@
     ctx.scale(scale, scale);
 
     const edges = notesStore.graphData.edges;
-    const focusId = hoveredNodeId ?? selectedNodeId;
-    const neighbors = getNeighborSet(focusId, edges);
+    const highlightId = hoveredNodeId ?? selectedNodeId;
+    const selectedNeighbors = graphNeighborIds(selectedNodeId, edges);
     const q = searchQuery.trim().toLowerCase();
+    const searchActive = q.length > 0;
+    const colors = readPaintColors();
 
     // Links
     for (const l of simLinks) {
       const s = l.source;
       const t = l.target;
-      const lit = focusId && (s.id === focusId || t.id === focusId);
+      const lit = highlightId && (s.id === highlightId || t.id === highlightId);
       const dx = t.x - s.x;
       const dy = t.y - s.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -149,21 +155,33 @@
       ctx.beginPath();
       ctx.moveTo(s.x, s.y);
       ctx.quadraticCurveTo(mx, my, t.x, t.y);
-      ctx.strokeStyle = lit ? themeColor('--color-accent') : themeColor('--color-text-muted');
-      ctx.globalAlpha = lit ? 0.8 : focusId ? 0.1 : 0.3;
+      ctx.strokeStyle = lit ? colors.accent : colors.textMuted;
+      // Hover only highlights the nearby edge. Dimming the entire graph on
+      // every hover-target change produced a full-canvas strobe in dense areas.
+      ctx.globalAlpha = lit ? 0.8 : selectedNodeId ? 0.1 : 0.3;
       ctx.lineWidth = (lit ? 1.8 : 1) / scale;
       ctx.stroke();
     }
 
     // Nodes
-    const drawLabels = showLabels && (scale >= 0.85 || simNodes.length <= 220);
+    const drawLabels = showLabels;
+    const labelCandidates: SimNode[] = [];
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const n of simNodes) {
       const r = getNodeRadius(n.linkCount, n.includeInContext);
       const matches = !q || n.title.toLowerCase().includes(q);
-      const dim = (focusId && !neighbors.has(n.id)) || !matches;
-      const color = getFolderColor(n.folderPath);
+      // Isolation is an intentional selection state, never a transient hover
+      // state. Keep the hovered node readable even outside the selection.
+      const dim = shouldDimGraphNode(
+        n.id,
+        selectedNodeId,
+        hoveredNodeId,
+        selectedNeighbors,
+        searchActive,
+        matches,
+      );
+      const color = colors.folders.get(getFolderColorToken(n.folderPath)) ?? colors.textMuted;
       ctx.globalAlpha = dim ? 0.14 : 1;
 
       // halo
@@ -179,24 +197,92 @@
       ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
-      ctx.lineWidth = (n.id === focusId ? 2.5 : n.includeInContext ? 2 : 1.2) / scale;
+      ctx.lineWidth = (n.id === highlightId ? 2.5 : n.includeInContext ? 2 : 1.2) / scale;
       ctx.strokeStyle = n.includeInContext
-        ? themeColor('--color-warning')
-        : n.id === focusId
-          ? themeColor('--color-text-primary')
-          : themeColor('--color-border-bright');
+        ? colors.warning
+        : n.id === highlightId
+          ? colors.textPrimary
+          : colors.borderBright;
       ctx.stroke();
 
-      if (drawLabels && !dim) {
-        ctx.globalAlpha = 0.85;
-        ctx.fillStyle = themeColor('--color-text-primary');
-        ctx.font = `${n.linkCount >= 3 ? '600 ' : ''}${9.5 / Math.max(scale, 0.75)}px ui-sans-serif, system-ui, sans-serif`;
-        const label = n.title.length > 24 ? n.title.slice(0, 22) + '…' : n.title;
-        ctx.fillText(label, n.x, n.y + r + 9 / Math.max(scale, 0.75));
+      const explicitlyRelevant =
+        n.id === hoveredNodeId ||
+        n.id === selectedNodeId ||
+        n.includeInContext ||
+        (q.length > 0 && matches);
+      if (
+        drawLabels &&
+        !dim &&
+        (explicitlyRelevant ||
+          localGraph ||
+          simNodes.length <= 160 ||
+          scale >= 1.55 ||
+          n.linkCount >= 3)
+      ) {
+        labelCandidates.push(n);
+      }
+    }
+
+    // Labels are the dominant source of visual noise in a large vault. Rank
+    // useful names first, then reject screen-space overlaps instead of painting
+    // hundreds of titles over one another. Hovered, selected, searched, and
+    // context-included notes always win the budget.
+    if (drawLabels && labelCandidates.length > 0) {
+      const isForced = (node: SimNode) =>
+        node.id === hoveredNodeId ||
+        node.id === selectedNodeId ||
+        node.includeInContext ||
+        (q.length > 0 && node.title.toLowerCase().includes(q));
+      labelCandidates.sort((a, b) => {
+        const forcedDelta = Number(isForced(b)) - Number(isForced(a));
+        if (forcedDelta !== 0) return forcedDelta;
+        return b.linkCount - a.linkCount || a.title.localeCompare(b.title);
+      });
+      const budget = localGraph ? 120 : simNodes.length > 400 ? 56 : simNodes.length > 220 ? 84 : 160;
+      const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+      let painted = 0;
+      for (const node of labelCandidates) {
+        const forced = isForced(node);
+        if (!forced && painted >= budget) continue;
+        const radius = getNodeRadius(node.linkCount, node.includeInContext);
+        const fontSize = 9.5 / Math.max(scale, 0.75);
+        ctx.font = `${node.linkCount >= 3 ? '600 ' : ''}${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+        const label = node.title.length > 24 ? node.title.slice(0, 22) + '…' : node.title;
+        const labelY = node.y + radius + 9 / Math.max(scale, 0.75);
+        const screenX = tx + node.x * scale;
+        const screenY = ty + labelY * scale;
+        const halfWidth = (ctx.measureText(label).width * scale) / 2 + 4;
+        const rect = {
+          left: screenX - halfWidth,
+          right: screenX + halfWidth,
+          top: screenY - 7,
+          bottom: screenY + 7,
+        };
+        const overlaps = occupied.some(
+          (other) =>
+            rect.left < other.right &&
+            rect.right > other.left &&
+            rect.top < other.bottom &&
+            rect.bottom > other.top,
+        );
+        if (overlaps && !forced) continue;
+        occupied.push(rect);
+        painted += 1;
+        ctx.globalAlpha = 0.88;
+        ctx.fillStyle = colors.textPrimary;
+        ctx.fillText(label, node.x, labelY);
       }
     }
     ctx.globalAlpha = 1;
     ctx.restore();
+  }
+
+  function requestDraw(): void {
+    if (drawFrame !== null) return;
+    drawFrame = requestAnimationFrame(() => {
+      drawFrame = null;
+      draw();
+    });
   }
 
   function resize() {
@@ -208,13 +294,45 @@
     canvasEl.height = Math.floor(height * dpr);
     canvasEl.style.width = `${width}px`;
     canvasEl.style.height = `${height}px`;
-    draw();
+    if (performanceLayout) fitView();
+    requestDraw();
+  }
+
+  function rememberPositions(): void {
+    for (const node of simNodes) positionCache.set(node.id, { x: node.x, y: node.y });
+  }
+
+  function fitView(): void {
+    if (!simNodes.length || width <= 0 || height <= 0) {
+      scale = 1;
+      tx = 0;
+      ty = 0;
+      return;
+    }
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const node of simNodes) {
+      const radius = getNodeRadius(node.linkCount, node.includeInContext) + 18;
+      minX = Math.min(minX, node.x - radius);
+      maxX = Math.max(maxX, node.x + radius);
+      minY = Math.min(minY, node.y - radius);
+      maxY = Math.max(maxY, node.y + radius);
+    }
+    const graphWidth = Math.max(1, maxX - minX);
+    const graphHeight = Math.max(1, maxY - minY);
+    scale = Math.min(
+      2,
+      Math.max(0.08, Math.min((width - 56) / graphWidth, (height - 56) / graphHeight)),
+    );
+    tx = width / 2 - ((minX + maxX) / 2) * scale;
+    ty = height / 2 - ((minY + maxY) / 2) * scale;
   }
 
   function buildGraph() {
     if (!canvasEl || !containerEl) return;
-    folderColorMap.clear();
-    colorIndex = 0;
+    rememberPositions();
     simulation?.stop();
     resize();
 
@@ -222,20 +340,17 @@
     if (!nodes.length) {
       simNodes = [];
       simLinks = [];
-      draw();
+      requestDraw();
       return;
     }
 
     const settings = notesStore.settings;
     const { chargeStrength, linkDistance, gravity } = settings.graphPhysics;
 
-    simNodes = nodes.map((n) => ({
-      ...n,
-      x: width / 2 + (Math.random() - 0.5) * width * 0.35,
-      y: height / 2 + (Math.random() - 0.5) * height * 0.35,
-      vx: 0,
-      vy: 0,
-    }));
+    simNodes = nodes.map((n) => {
+      const point = positionCache.get(n.id) ?? initialPoint(n.id);
+      return { ...n, x: point.x, y: point.y, vx: 0, vy: 0 };
+    });
     const nodeById = new Map(simNodes.map((n) => [n.id, n]));
     simLinks = edges
       .filter((e) => nodeById.has(e.from) && nodeById.has(e.to))
@@ -245,8 +360,7 @@
     // main-thread frame drops at very large sizes. Above this boundary, place
     // every node deterministically in folder clusters and draw once. The full
     // graph remains searchable, pannable, zoomable, hoverable, and clickable.
-    const STATIC_LAYOUT_THRESHOLD = 2500;
-    if (simNodes.length > STATIC_LAYOUT_THRESHOLD) {
+    if (simNodes.length > GRAPH_STATIC_LAYOUT_THRESHOLD) {
       performanceLayout = true;
       const groups = new Map<string, SimNode[]>();
       for (const node of simNodes) {
@@ -254,9 +368,12 @@
         group.push(node);
         groups.set(node.folderPath, group);
       }
-      const entries = [...groups.values()];
+      const entries = [...groups.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, group]) => group.sort((left, right) => left.id.localeCompare(right.id)));
       const columns = Math.max(1, Math.ceil(Math.sqrt(entries.length)));
-      const clusterGap = 260;
+      const largestGroup = Math.max(...entries.map((group) => group.length));
+      const clusterGap = Math.max(220, 22 * Math.sqrt(largestGroup) + 90);
       const rows = Math.ceil(entries.length / columns);
       entries.forEach((group, groupIndex) => {
         const column = groupIndex % columns;
@@ -270,9 +387,11 @@
           node.y = cy + Math.sin(angle) * radius;
           node.vx = 0;
           node.vy = 0;
+          positionCache.set(node.id, { x: node.x, y: node.y });
         });
       });
-      draw();
+      fitView();
+      requestDraw();
       return;
     }
     performanceLayout = false;
@@ -280,7 +399,7 @@
     // Adaptive physics: big vaults drop the (expensive) collide force, cap the
     // charge range, and settle faster so the sim reaches idle quickly — once
     // idle it stops ticking, so a large static graph costs nothing to display.
-    const big = simNodes.length > 800;
+    const big = simNodes.length > 500;
     simulation = d3
       .forceSimulation(simNodes)
       .force(
@@ -311,7 +430,15 @@
           .radius((d) => getNodeRadius(d.linkCount, d.includeInContext) + 10),
       );
     }
-    simulation.on('tick', draw);
+    simulation.on('tick', requestDraw).on('end', rememberPositions);
+  }
+
+  function scheduleBuild(): void {
+    if (buildFrame !== null) cancelAnimationFrame(buildFrame);
+    buildFrame = requestAnimationFrame(() => {
+      buildFrame = null;
+      buildGraph();
+    });
   }
 
   // ── Pointer interaction (pan / zoom / node drag / hover) ────────────────────
@@ -319,6 +446,97 @@
   let panning = false;
   let panStart = { x: 0, y: 0, tx: 0, ty: 0 };
   let moved = false;
+  const hoverDwellMs = 95;
+  const hoverReleaseMs = 150;
+  const hoverRetentionScale = 11;
+  let hoverIntentTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingHoverNodeId: string | null | undefined = undefined;
+  let hoverPointer = { x: 0, y: 0 };
+  let lastHoverCommittedAt = 0;
+  let tooltipUpdateFrame: number | null = null;
+  let pendingTooltip: { node: SimNode; sx: number; sy: number } | null = null;
+
+  function clearHoverIntent(): void {
+    if (hoverIntentTimer !== null) clearTimeout(hoverIntentTimer);
+    hoverIntentTimer = null;
+    pendingHoverNodeId = undefined;
+  }
+
+  function clearTooltipUpdate(): void {
+    if (tooltipUpdateFrame !== null) cancelAnimationFrame(tooltipUpdateFrame);
+    tooltipUpdateFrame = null;
+    pendingTooltip = null;
+  }
+
+  function updateTooltip(node: SimNode, sx: number, sy: number): void {
+    tooltipTitle = node.title;
+    tooltipMeta = `${node.linkCount} links · ${node.folderPath}${node.unresolved ? ' · unresolved' : ''}`;
+    tooltipX = sx + 14;
+    tooltipY = sy - 12;
+    tooltipVisible = true;
+  }
+
+  function scheduleTooltipUpdate(node: SimNode, sx: number, sy: number): void {
+    pendingTooltip = { node, sx, sy };
+    if (tooltipUpdateFrame !== null) return;
+    tooltipUpdateFrame = requestAnimationFrame(() => {
+      tooltipUpdateFrame = null;
+      const next = pendingTooltip;
+      pendingTooltip = null;
+      if (!next || hoveredNodeId !== next.node.id) return;
+      updateTooltip(next.node, next.sx, next.sy);
+    });
+  }
+
+  function commitHover(nodeId: string | null): void {
+    hoverIntentTimer = null;
+    pendingHoverNodeId = undefined;
+    if (nodeId === hoveredNodeId) return;
+    hoveredNodeId = nodeId;
+    lastHoverCommittedAt = performance.now();
+    const node = nodeId ? simNodes.find((candidate) => candidate.id === nodeId) : undefined;
+    if (node) updateTooltip(node, hoverPointer.x, hoverPointer.y);
+    else tooltipVisible = false;
+    requestDraw();
+  }
+
+  function updateHover(hit: SimNode | null, sx: number, sy: number): void {
+    hoverPointer = { x: sx, y: sy };
+    let target = hit;
+
+    // Once acquired, retain a node through a small padded hit area. Dense
+    // clusters frequently contain overlapping circles, and selecting whichever
+    // node happens to be last in the array makes tiny pointer motion flicker.
+    if (hoveredNodeId && hit?.id !== hoveredNodeId) {
+      const current = simNodes.find((node) => node.id === hoveredNodeId);
+      if (current) {
+        const [wx, wy] = toWorld(sx, sy);
+        const radius = getNodeRadius(current.linkCount, current.includeInContext) + hoverRetentionScale / scale;
+        if ((current.x - wx) ** 2 + (current.y - wy) ** 2 <= radius ** 2) target = current;
+      }
+    }
+
+    if (hoveredNodeId && performance.now() - lastHoverCommittedAt < hoverReleaseMs) {
+      const current = simNodes.find((node) => node.id === hoveredNodeId);
+      if (current) {
+        const [wx, wy] = toWorld(sx, sy);
+        const radius = getNodeRadius(current.linkCount, current.includeInContext) + 3 / scale;
+        if ((current.x - wx) ** 2 + (current.y - wy) ** 2 <= radius ** 2) return;
+      }
+    }
+
+    const targetId = target?.id ?? null;
+    if (targetId === hoveredNodeId) {
+      clearHoverIntent();
+      if (target) scheduleTooltipUpdate(target, sx, sy);
+      else tooltipVisible = false;
+      return;
+    }
+    if (pendingHoverNodeId === targetId) return;
+    clearHoverIntent();
+    pendingHoverNodeId = targetId;
+    hoverIntentTimer = setTimeout(() => commitHover(targetId), targetId ? hoverDwellMs : 100);
+  }
 
   function onPointerDown(event: PointerEvent) {
     if (!canvasEl) return;
@@ -327,16 +545,15 @@
     const sy = event.clientY - rect.top;
     moved = false;
     const hit = nodeAt(sx, sy);
+    panStart = { x: sx, y: sy, tx, ty };
     canvasEl.setPointerCapture(event.pointerId);
     if (hit) {
       dragNode = hit;
-      simulation?.alphaTarget(0.25).restart();
       const [wx, wy] = toWorld(sx, sy);
       hit.fx = wx;
       hit.fy = wy;
     } else {
       panning = true;
-      panStart = { x: sx, y: sy, tx, ty };
     }
   }
 
@@ -347,38 +564,27 @@
     const sy = event.clientY - rect.top;
 
     if (dragNode) {
+      if (!moved && Math.hypot(sx - panStart.x, sy - panStart.y) < 3) return;
+      if (!moved) simulation?.alphaTarget(0.25).restart();
       moved = true;
       const [wx, wy] = toWorld(sx, sy);
       dragNode.fx = wx;
       dragNode.fy = wy;
       dragNode.x = wx;
       dragNode.y = wy;
-      if (performanceLayout) draw();
+      requestDraw();
       return;
     }
     if (panning) {
+      if (!moved && Math.hypot(sx - panStart.x, sy - panStart.y) < 3) return;
       moved = true;
       tx = panStart.tx + (sx - panStart.x);
       ty = panStart.ty + (sy - panStart.y);
-      draw();
+      requestDraw();
       return;
     }
     // Hover
-    const hit = nodeAt(sx, sy);
-    const id = hit?.id ?? null;
-    if (id !== hoveredNodeId) {
-      hoveredNodeId = id;
-      draw();
-    }
-    if (hit) {
-      tooltipTitle = hit.title;
-      tooltipMeta = `${hit.linkCount} links · ${hit.folderPath}${hit.unresolved ? ' · unresolved' : ''}`;
-      tooltipX = sx + 14;
-      tooltipY = sy - 12;
-      tooltipVisible = true;
-    } else {
-      tooltipVisible = false;
-    }
+    updateHover(nodeAt(sx, sy), sx, sy);
   }
 
   function onPointerUp(event: PointerEvent) {
@@ -392,14 +598,23 @@
       const clicked = dragNode;
       dragNode = null;
       if (!moved) {
-        selectedNodeId = selectedNodeId === clicked.id ? null : clicked.id;
-        if (localGraph) buildGraph();
-        onNodeClick(clicked.id);
-        draw();
+        selectedNodeId = clicked.id;
+        requestDraw();
+      } else {
+        rememberPositions();
       }
       return;
     }
+    if (!moved) {
+      selectedNodeId = null;
+      requestDraw();
+    }
     panning = false;
+  }
+
+  function onDoubleClick(event: MouseEvent): void {
+    event.preventDefault();
+    if (selectedNodeId) onNodeClick(selectedNodeId);
   }
 
   function onWheel(event: WheelEvent) {
@@ -415,7 +630,7 @@
     scale = next;
     tx = sx - wx * scale;
     ty = sy - wy * scale;
-    draw();
+    requestDraw();
   }
 
   function keyboardCandidates(): SimNode[] {
@@ -435,7 +650,7 @@
     // the selected node is outside the current viewport.
     tx = width / 2 - node.x * scale;
     ty = height / 2 - node.y * scale;
-    draw();
+    requestDraw();
   }
 
   function onCanvasKeydown(event: KeyboardEvent): void {
@@ -460,11 +675,11 @@
     } else if (event.key === '+' || event.key === '=') {
       event.preventDefault();
       scale = Math.min(6, scale * 1.2);
-      draw();
+      requestDraw();
     } else if (event.key === '-') {
       event.preventDefault();
       scale = Math.max(0.1, scale / 1.2);
-      draw();
+      requestDraw();
     } else if (event.key === '0') {
       event.preventDefault();
       resetView();
@@ -486,7 +701,7 @@
     // Redraw when label/search toggles change (no rebuild needed).
     void showLabels;
     void searchQuery;
-    draw();
+    requestDraw();
   });
 
   $effect(() => {
@@ -494,18 +709,18 @@
     // either the preset or accent changes instead of keeping old pixel colors.
     void theme.preset;
     void theme.accent;
-    requestAnimationFrame(draw);
+    requestDraw();
   });
 
   $effect(() => {
     void notesStore.graphData;
-    void localGraph;
-    void selectedNodeId;
-    requestAnimationFrame(() => buildGraph());
+    void showAllNodes;
+    const isLocal = localGraph;
+    if (isLocal) void selectedNodeId;
+    scheduleBuild();
   });
 
   onMount(() => {
-    void notesStore.fetchGraph().then(() => buildGraph());
     if (containerEl && 'ResizeObserver' in globalThis) {
       // ResizeObserver callbacks run during layout delivery. Mutating canvas
       // dimensions in the callback itself can trigger the browser's
@@ -520,13 +735,15 @@
     simulation?.stop();
     resizeObserver?.disconnect();
     if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+    if (drawFrame !== null) cancelAnimationFrame(drawFrame);
+    if (buildFrame !== null) cancelAnimationFrame(buildFrame);
+    clearHoverIntent();
+    clearTooltipUpdate();
   });
 
   function resetView() {
-    scale = 1;
-    tx = 0;
-    ty = 0;
-    draw();
+    fitView();
+    requestDraw();
   }
 
   let legendEntries = $derived.by(() => {
@@ -534,7 +751,7 @@
     const entries: { folder: string; colorToken: string }[] = [];
     void theme.preset;
     void theme.accent;
-    for (const n of notesStore.graphData.nodes) {
+    for (const n of getVisibleGraph().nodes) {
       if (!seen.has(n.folderPath)) {
         seen.add(n.folderPath);
         entries.push({ folder: n.folderPath, colorToken: getFolderColorToken(n.folderPath) });
@@ -544,8 +761,17 @@
   });
 
   let stats = $derived.by(() => {
-    const g = notesStore.graphData;
-    return { notes: g.nodes.length, links: g.edges.length };
+    const full = notesStore.graphData;
+    const visible = getVisibleGraph();
+    const linkedIds = new Set(full.edges.flatMap((edge) => [edge.from, edge.to]));
+    return {
+      shown: visible.nodes.length,
+      total: full.nodes.length,
+      links: visible.edges.length,
+      hasIsolated:
+        full.nodes.length > GRAPH_AUTO_FOCUS_THRESHOLD &&
+        full.nodes.some((node) => !linkedIds.has(node.id) && !node.includeInContext),
+    };
   });
   let graphLoadFailed = $derived(
     Boolean(notesStore.error) &&
@@ -589,6 +815,22 @@
     >
       Labels
     </button>
+    {#if stats.hasIsolated}
+      <button
+        type="button"
+        class="h-8 px-2.5 rounded-md text-[11px] border transition-colors"
+        style="
+          background: {showAllNodes ? 'var(--color-info-bg)' : 'var(--color-surface-2)'};
+          border-color: var(--color-border);
+          color: var(--color-text-primary);
+        "
+        onclick={() => (showAllNodes = !showAllNodes)}
+        aria-pressed={showAllNodes}
+        title="Connected keeps large vaults useful by hiding notes with no relationships"
+      >
+        {showAllNodes ? 'All notes' : 'Connected'}
+      </button>
+    {/if}
     <button
       type="button"
       class="h-8 px-2.5 rounded-md text-[11px] border transition-colors"
@@ -620,12 +862,15 @@
     class="absolute top-3 right-3 z-10 flex items-center gap-2 text-[11px]"
     style="color: var(--color-text-muted);"
   >
-    <span>{stats.notes} notes · {stats.links} links</span>
+    <span>
+      {stats.shown}{stats.shown < stats.total ? ` of ${stats.total}` : ''} notes · {stats.links}
+      links
+    </span>
     {#if performanceLayout}
       <span
         class="rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider"
         style="border-color: var(--color-border); color: var(--color-success);"
-        >Performance layout</span
+        >Stable layout</span
       >
     {/if}
     <button
@@ -634,7 +879,7 @@
       style="border-color: var(--color-border);"
       onclick={() => {
         simulation?.stop();
-        void notesStore.fetchGraph().then(() => buildGraph());
+        void notesStore.fetchGraph();
       }}
     >
       Refresh
@@ -648,8 +893,14 @@
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
+    onpointercancel={onPointerUp}
+    ondblclick={onDoubleClick}
     onpointerleave={() => {
+      clearHoverIntent();
+      clearTooltipUpdate();
       tooltipVisible = false;
+      hoveredNodeId = null;
+      requestDraw();
     }}
     onwheel={onWheel}
     onkeydown={onCanvasKeydown}
@@ -659,8 +910,9 @@
   ></canvas>
 
   <p id="note-graph-instructions" class="sr-only">
-    Use arrow keys to move between filtered notes, Enter or Space to open the selected note, plus
-    and minus to zoom, and zero to reset the view.
+    Click once to focus a note and double-click to open it. Use arrow keys to move between filtered
+    notes, Enter or Space to open the selected note, plus and minus to zoom, and zero to fit the
+    graph in view.
   </p>
   <p id="note-graph-selection" class="sr-only" aria-live="polite">
     {selectedNodeId ? `${tooltipTitle}. ${tooltipMeta}` : 'No graph node selected.'}
@@ -714,7 +966,7 @@
         class="mt-2 pt-2 border-t text-[10px]"
         style="border-color: var(--color-border); color: var(--color-text-muted);"
       >
-        Outlined ring = explicitly included in agent context · scroll to zoom, drag to pan
+        Ring = agent context · click to focus · double-click to open · scroll to zoom
       </div>
     </div>
   {/if}
@@ -748,9 +1000,13 @@
     <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
       <div class="text-center" style="color: var(--color-text-muted);">
         <Share2 size={32} class="mx-auto mb-3 opacity-40" />
-        <div class="text-sm font-medium">Empty vault</div>
+        <div class="text-sm font-medium">
+          {notesStore.isIndexing ? 'Indexing project notes…' : 'Empty vault'}
+        </div>
         <div class="text-xs mt-1 opacity-70">
-          Create notes or ask an agent to build your network
+          {notesStore.isIndexing
+            ? 'The graph will appear as documents are discovered'
+            : 'Create notes or ask an agent to build your network'}
         </div>
       </div>
     </div>

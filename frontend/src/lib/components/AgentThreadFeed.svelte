@@ -10,6 +10,10 @@
   import Send from 'lucide-svelte/icons/send';
   import { untrack } from 'svelte';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
+  import { feedStore } from '$lib/stores/feed.svelte';
+  import { agentStore } from '$lib/stores/agents.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
 
   interface Props {
     agent: {
@@ -93,7 +97,22 @@
   }
 
   function noopSelect() {}
-  function noopDelete() {}
+
+  async function deleteThreadEntry(entry: FeedEntryLocal, messageId?: string) {
+    try {
+      await feedStore.deleteEntry(entry, messageId);
+      const sessionId = sessionStore.activeSessionId;
+      if (sessionId) agentStore.applySessionFeedVisibility(sessionId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Feed entry deletion failed.';
+      toastStore.error(detail);
+    }
+  }
+
+  function refreshThreadVisibility() {
+    const sessionId = sessionStore.activeSessionId;
+    if (sessionId) agentStore.applySessionFeedVisibility(sessionId);
+  }
 
   function providerLabel(provider: string): string {
     if (provider === 'openai') return 'OpenAI';
@@ -166,7 +185,8 @@
                 isStreaming={i === feed.length - 1 && isStreaming}
                 onSelect={noopSelect}
                 onToggleGroup={() => toggleGroup(entry.id)}
-                onDelete={noopDelete}
+                onDelete={(_event, target) => deleteThreadEntry(entry, target?.messageId)}
+                onUserVisibilityChanged={refreshThreadVisibility}
               />
             </div>
           {/snippet}

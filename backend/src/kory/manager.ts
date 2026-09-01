@@ -10,12 +10,18 @@ import type {
   ProviderName,
   KoryphaiosConfig,
   KoryAskUserPayload,
+  KoryAskUserResolvedPayload,
+  KorySessionChangesPayload,
+  KorySessionChangesResolvedPayload,
   ChangeSummary,
   StreamUsagePayload,
   StreamThinkingPayload,
   ContextBreakdown,
+  SessionRunActivePhase,
+  SessionRunPhase,
+  StoredMessage,
 } from '@koryphaios/shared';
-import { SANDBOX_PRESETS } from '@koryphaios/shared';
+import { SANDBOX_PRESETS, SessionRunTransitionError } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
 import { AGENT, DOMAIN, SESSION } from '../constants';
 import {
@@ -32,6 +38,11 @@ import type { ProviderMessage } from '../providers/types';
 import { JULES_APPROVAL_REQUIRED_ERROR } from '../providers/jules-runner';
 import { JULES_SYNC_INSTRUCTIONS, getProviderDisplay } from '../providers/provider-display';
 import {
+  imageAttachmentAdmissionError,
+  omitImageInputs,
+  type ImageInputMode,
+} from '../providers/attachment-admission';
+import {
   ToolRegistry,
   decideToolPermission,
   resolveToolPermissionPolicy,
@@ -44,8 +55,13 @@ import {
 } from '../tools';
 import { wsBroker } from '../pubsub';
 import { koryLog, serverLog } from '../logger';
-import { initContextArchive, getContextArchive } from './context-archive';
+import {
+  initContextArchive,
+  getContextArchive,
+  usageSnapshotMatchesBoundary,
+} from './context-archive';
 import { nanoid } from 'nanoid';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { redactSecretsInText, sanitizeForPrompt } from '../security';
 import { logBackgroundRegistrationFailure } from '../security/bash-sandbox';
 import {
@@ -73,11 +89,23 @@ import { join, resolve } from 'node:path';
 import { db, sessions } from '../db';
 import { eq } from 'drizzle-orm';
 import type { ISessionStore } from '../stores/session-store';
-import type { IMessageStore } from '../stores/message-store';
+import type {
+  IMessageStore,
+  RegenerationBranchReservation,
+} from '../stores/message-store';
 import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
 import { processSupervisor } from '../process-supervisor/supervisor';
 import type { ProcessLifecycleEvent } from '../process-supervisor/supervisor';
+import type { PersistedProcess } from '../process-supervisor/database';
+import {
+  canonicalSessionTurnInputHash,
+  deriveSessionTurnCommandIdentity,
+  SessionTurnCommandConflictError,
+  type SessionTurnCommandRecord,
+  type RestartHandoffConversationBoundary,
+  type SessionRunRestartHandoff,
+} from '../runs/session-run-store';
 import { GitManager } from './git-manager';
 import { WorkspaceManager } from './workspace-manager';
 import {
@@ -98,6 +126,12 @@ import {
 import { getModeManager } from '../mode';
 import type { WorkerPipelineHost } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
+import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
+import {
+  ManagerRunLifecycle,
+  type ManagerRunHandle,
+} from './services/ManagerRunLifecycle';
+import { ConflictError } from '../errors/types';
 import {
   CRITIC_OUTPUT_TOKEN_LIMIT,
   MANAGER_OUTPUT_TOKEN_LIMIT,
@@ -125,10 +159,17 @@ import {
 import { assembleMemoryContext, formatMemoryForContext } from '../memory/unified-memory';
 import { readSessionMemory, writeSessionMemory } from '../memory/unified-memory';
 import {
-  answerPendingQuestion,
-  createPendingQuestion,
-  getPendingQuestion,
-} from '../stores/pending-question-store';
+  acceptSessionReview,
+  beginSessionReviewRejection,
+  completeSessionReviewRejection,
+  ensurePendingSessionReview,
+  getPendingSessionReview,
+  getSessionReview,
+  terminalizeInterruptedSessionReviewRejections,
+  terminalizeSessionReview,
+  type DurableSessionReview,
+  type SessionReviewRollback,
+} from '../stores/session-review-store';
 import { ensurePlanNote, syncPlanNote } from './plan-mode';
 import { automaticMemoryPrompt } from './settings-contract';
 import { resolveSkills } from './skills';
@@ -139,6 +180,7 @@ import {
   type CollaborationToolPolicy,
 } from '../collaboration/tool-policy';
 import { checkAndEnforceCaps } from '../security/spend-caps-enforced';
+import { getCliConversationRevision } from '../providers/cli-session-state';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
@@ -158,7 +200,14 @@ interface InternalMessage {
 interface LLMTurnResult {
   success: boolean;
   content?: string;
-  usage?: { tokensIn: number; tokensOut: number };
+  usage?: {
+    tokensIn: number;
+    tokensOut: number;
+    usageKnown: boolean;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+    breakdown?: ContextBreakdown;
+  };
   completedToolCalls?: CompletedToolCall[];
   /** A native CLI harness performed work, even though it did not request a Kory tool call. */
   observedNativeTool?: boolean;
@@ -189,6 +238,7 @@ interface AgentThreadState {
   systemPrompt: string;
   promptManifestHash: string;
   taskContractHash: string;
+  promptCache: StreamRequest['promptCache'];
   toolRole: 'worker' | 'critic';
   reasoningLevel?: string;
   maxTurns: number;
@@ -198,6 +248,9 @@ interface AgentThreadState {
   ctx: ToolContext;
   abort?: AbortController;
   busy: boolean;
+  /** Exact owner task for a post-run follow-up. It remains set until the
+   * provider/tool stack has acknowledged cancellation and released SessionRun. */
+  activeRun?: Promise<void>;
   updatedAt: number;
 }
 
@@ -269,6 +322,82 @@ export interface ManagerSessionErasureLease {
   rollback(): void;
 }
 
+export type SessionTurnReason =
+  | 'user_turn'
+  | 'goal_turn'
+  | 'collaboration_turn'
+  | 'internal_turn'
+  | 'regenerate_turn'
+  | 'image_turn'
+  | 'image_regenerate_turn'
+  | 'agent_followup_turn'
+  | 'user_input_after_restart';
+
+/** Opaque, single-use proof that a session claim and durable run were acquired. */
+export interface SessionTurnAdmission {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly signal: AbortSignal;
+}
+
+export interface SessionTurnResult {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly status:
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'waiting'
+    | 'rejected'
+    | 'unknown';
+  readonly phase: SessionRunPhase;
+  readonly reason: string | null;
+}
+
+export interface SessionTurnCommandInput extends AdmittedTaskInput {
+  sessionId: string;
+  source: 'goal' | 'collaboration' | 'internal';
+  /** Stable source-owned identity. Reusing it never replays an interrupted turn. */
+  sourceCommandId: string;
+}
+
+export type SessionTurnSubmission =
+  | {
+      accepted: true;
+      sessionId: string;
+      runId: string;
+      completion: Promise<SessionTurnResult>;
+    }
+  | { accepted: false; result: SessionTurnResult };
+
+export interface AdmittedTaskInput {
+  userMessage: string;
+  preferredModel?: string;
+  reasoningLevel?: string;
+  attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>;
+  collaborationToolPolicy?: CollaborationToolPolicy;
+  responseVariant?: { groupId: string; index: number };
+  goalContext?: import('./prompts').TaskContract['goalContext'];
+  interactionMode?: 'act' | 'plan';
+  fastMode?: boolean;
+  inputAlreadyPersisted?: boolean;
+  imageInputMode?: ImageInputMode;
+  /** Anchored sibling branch. It changes the active head only when a response commits. */
+  regenerationBranch?: RegenerationBranchReservation;
+  /** Stable completion projection for a durable command retry. */
+  responseMessageId?: string;
+}
+
+export interface AdmittedWorkContext {
+  readonly signal: AbortSignal;
+  phase(phase: SessionRunActivePhase, reason?: string): Promise<void>;
+}
+
+interface AdmissionRecord {
+  controller: AbortController;
+  handle: ManagerRunHandle;
+}
+
 export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
@@ -283,6 +412,13 @@ export class KoryManager implements WorkerPipelineHost {
    * barrier so a new manager turn cannot start between its busy check and the
    * workspace transaction. */
   private sessionRunClaims = new Set<string>();
+  /** Object-identity registry makes admission tokens single-use and unforgeable. */
+  private turnAdmissions = new Map<SessionTurnAdmission, AdmissionRecord>();
+  /** Async execution provenance. A callback retains the exact run generation
+   * that created it, so late work from run A cannot borrow run B's lease. */
+  private readonly runContext = new AsyncLocalStorage<ManagerRunHandle>();
+  private readonly runControllerByHandle = new WeakMap<ManagerRunHandle, AbortController>();
+  private shutdownPromise: Promise<void> | null = null;
   private sessionMutationBarriers = new Set<string>();
   /** Permanent process-lifetime tombstones stop stale callbacks from reviving
    * a session after its durable row and archives have been erased. */
@@ -304,6 +440,7 @@ export class KoryManager implements WorkerPipelineHost {
   private state: SessionStateService;
   private workerPipeline: WorkerPipelineService;
   private processCompletionCoordinator: ProcessCompletionCoordinator;
+  private runLifecycle: ManagerRunLifecycle;
   private unsubscribeProcessLifecycle?: () => void;
   /** Sessions whose title has already been auto-generated. Prevents racing
    *  LLM calls when the user sends a second message before the first title
@@ -324,6 +461,16 @@ export class KoryManager implements WorkerPipelineHost {
     { model: string; provider: ProviderName | undefined }
   >();
   private compactingSessions = new Map<string, AbortController>();
+  private readonly restartHandoffOwner = `kory-manager-${crypto.randomUUID()}`;
+  private readonly restartHandoffTasks = new Map<string, Promise<void>>();
+  private readonly restartHandoffConsumers = new Map<
+    string,
+    { sessionId: string; controller: AbortController }
+  >();
+  private readonly restartHandoffRetryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   /** Goal state is immutable task context, not a conversational suggestion. */
   private goalContextBySession = new Map<
     string,
@@ -344,6 +491,7 @@ export class KoryManager implements WorkerPipelineHost {
     private messages?: IMessageStore,
     private tasks?: ITaskStore,
     private timeTravel?: TimeTravelService,
+    private readonly runs: SessionRunCoordinator | undefined = undefined,
   ) {
     this.memoryDir = join(workingDirectory, '.koryphaios/memory');
     mkdirSync(this.memoryDir, { recursive: true });
@@ -356,9 +504,10 @@ export class KoryManager implements WorkerPipelineHost {
     this.routing = new RoutingServiceEnhanced({ config: this.config, providers: this.providers });
     this.workers = new WorkerLifecycleService({ events: this.events });
     this.state = new SessionStateService();
+    this.runLifecycle = new ManagerRunLifecycle(runs);
 
     this.processCompletionCoordinator = new ProcessCompletionCoordinator({
-      isSessionBusy: (sessionId) => this.isSessionRunning(sessionId),
+      isSessionBusy: (sessionId) => this.isLocallyBlockedForProcessWake(sessionId),
       hasActiveAgentProcess: (sessionId) =>
         processSupervisor.hasActiveAgentToolForSession(sessionId),
       wakeSession: (sessionId, events) => this.wakeForProcessCompletions(sessionId, events),
@@ -442,6 +591,17 @@ export class KoryManager implements WorkerPipelineHost {
     this.recoverState();
   }
 
+  /** Resolve only a work-admissible session. The fallback keeps narrow test
+   * doubles honest while production stores use the indexed active lookup. */
+  private async getActiveSession(sessionId: string) {
+    if (!this.sessions) return undefined;
+    if (typeof this.sessions.getActive === 'function') {
+      return this.sessions.getActive(sessionId);
+    }
+    const session = await this.sessions.get(sessionId);
+    return session?.archivedAt === undefined ? session : undefined;
+  }
+
   private async wakeForProcessCompletions(
     sessionId: string,
     events: ProcessLifecycleEvent[],
@@ -465,10 +625,76 @@ export class KoryManager implements WorkerPipelineHost {
     sessionId: string,
     events: ProcessLifecycleEvent[],
   ): Promise<void> {
-    if (this.sessions && !(await this.sessions.get(sessionId))) {
-      koryLog.info({ sessionId }, 'Discarding process completion for a deleted session');
+    if (this.sessions && !(await this.getActiveSession(sessionId))) {
+      koryLog.info(
+        { sessionId },
+        'Discarding process completion for a missing or archived session',
+      );
       return;
     }
+
+    const resumed = await this.runLifecycle.resumeProcessWait(sessionId);
+    if (!resumed.handle) {
+      throw new Error(`Session ${sessionId} process wait resumed without an execution handle`);
+    }
+    const ownerController = this.managerAbortBySession.get(sessionId);
+    if (!ownerController) {
+      throw new Error(`Session ${sessionId} process wake has no cancellation owner`);
+    }
+    this.runControllerByHandle.set(resumed.handle, ownerController);
+    await this.runContext.run(resumed.handle, async () => {
+      try {
+        await this.continueProcessWake(
+          sessionId,
+          events,
+          resumed.processIds,
+          resumed.continuationId,
+          resumed.expectedBoundary,
+        );
+      } catch (error) {
+        const aborted =
+          ownerController.signal.aborted ||
+          (error instanceof Error && error.name === 'AbortError');
+        await this.runLifecycle.finish(
+          resumed.handle!,
+          aborted ? 'cancel' : 'fail',
+          aborted
+            ? 'cancelled_by_user'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        );
+        // Once the durable continuation is claimed, replaying a provider/tool
+        // turn is unsafe: external side effects may already have happened.
+        // The failed SessionRun is the explicit recovery surface; consume the
+        // coordinator batch instead of silently retrying it.
+        if (!aborted) {
+          this.emitError(
+            sessionId,
+            `Background-process continuation failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    });
+  }
+
+  private async continueProcessWake(
+    sessionId: string,
+    events: ProcessLifecycleEvent[],
+    processIds: readonly string[],
+    continuationId: string | null,
+    expectedBoundary: RestartHandoffConversationBoundary | null,
+  ): Promise<void> {
+    if (!this.messages) throw new Error('Message store unavailable for process continuation');
+    if (!continuationId || !expectedBoundary) {
+      throw new Error('Process continuation has no durable conversation boundary');
+    }
+    const handle = this.requireRunHandle(sessionId);
+    this.assertRunHandleActive(handle);
+    events = this.toRecoveredProcessEvents(
+      await this.loadExactAgentProcesses(sessionId, processIds),
+    );
+    this.assertRunHandleActive(handle);
 
     const outcomes = events
       .map((event) => {
@@ -488,18 +714,196 @@ export class KoryManager implements WorkerPipelineHost {
       `${outcomes.slice(0, 8_000)}\n` +
       'Review the outcomes, inspect full captured logs with shell_manage when needed, repair concrete failures, and report truthfully.';
 
+    const inputMessageId = `process-wake-user-${continuationId}`;
+    const responseMessageId = `process-wake-response-${continuationId}`;
+    this.assertRunHandleActive(handle);
+    await this.messages.addIdempotentAtBoundary(
+      sessionId,
+      {
+        id: inputMessageId,
+        sessionId,
+        role: 'user',
+        content: summary,
+        createdAt: Date.now(),
+      },
+      expectedBoundary,
+    );
+    this.assertRunHandleActive(handle);
+
     // Runtime waits already have a parked heartbeat; restart-recovery wakes do
     // not. Re-baseline both cases before entering the provider turn.
     this.startHeartbeat(sessionId);
+    this.setHeartbeatPhase(sessionId, 'analyzing');
     this.emitWSMessage(sessionId, 'agent.status', {
       agentId: KORY_IDENTITY.id,
-      status: 'thinking',
+      status: 'analyzing',
+      detail: 'Preparing the request',
     });
-    this.setHeartbeatPhase(sessionId, 'thinking');
-    await this.handleDirectly(sessionId, summary, undefined, undefined);
+    this.assertRunHandleActive(handle);
+    await this.handleDirectly(
+      sessionId,
+      summary,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+      'reject',
+      undefined,
+      responseMessageId,
+    );
+    const snapshot = this.runs?.get(sessionId);
+    if (!snapshot || (snapshot.status !== 'waiting' && snapshot.status !== 'terminal')) {
+      throw new Error('Process continuation returned without a durable run outcome');
+    }
+  }
+
+  /**
+   * Reconcile process waits whose terminal database rows predate this backend
+   * process. The normal supervisor subscription covers terminals discovered
+   * during initialize(); this covers rows that were already terminal before
+   * the previous backend crashed after persistence but before callback drain.
+   */
+  async recoverDurableProcessWaits(): Promise<{
+    queued: number;
+    preserved: number;
+    cancelled: number;
+    failed: number;
+  }> {
+    let queued = 0;
+    let preserved = 0;
+    let cancelled = 0;
+    let failed = 0;
+    for (const wait of this.runLifecycle.listProcessWaits()) {
+      try {
+        const processes = await this.loadExactAgentProcesses(
+          wait.snapshot.sessionId,
+          wait.processIds,
+        );
+        if (processes.some((process) => process.terminalReason === 'session-cancelled')) {
+          this.processCompletionCoordinator.cancelSession(wait.snapshot.sessionId);
+          await this.runLifecycle.cancelCurrent(
+            wait.snapshot.sessionId,
+            'recovered_session_cancellation',
+          );
+          cancelled++;
+          continue;
+        }
+        if (processes.some((process) => process.terminalReason === 'killed-for-restart')) {
+          throw new Error('Durable process wait ended during an incomplete process restart');
+        }
+        if (
+          processes.some((process) => process.status === 'starting' || process.status === 'running')
+        ) {
+          preserved++;
+          continue;
+        }
+        const events = this.toRecoveredProcessEvents(processes);
+        this.processCompletionCoordinator.resumeSession(wait.snapshot.sessionId);
+        const accepted = this.processCompletionCoordinator.enqueueRecoveredBatch(events);
+        // Zero can mean initialize() already queued or is draining this exact
+        // continuation. Either case is healthy and must not be double-woken.
+        if (
+          accepted > 0 ||
+          this.processCompletionCoordinator.pendingCount(wait.snapshot.sessionId) > 0 ||
+          this.processCompletionCoordinator.isWaking(wait.snapshot.sessionId)
+        ) {
+          queued++;
+        }
+      } catch (error) {
+        failed++;
+        const reason = `process_wait_recovery_failed: ${error instanceof Error ? error.message : String(error)}`;
+        await this.runLifecycle.failCurrent(wait.snapshot.sessionId, reason);
+        koryLog.error(
+          { sessionId: wait.snapshot.sessionId, error },
+          'Failed closed while reconciling a durable background-process wait',
+        );
+      }
+    }
+    return { queued, preserved, cancelled, failed };
+  }
+
+  private async loadExactAgentProcesses(
+    sessionId: string,
+    processIds: readonly string[],
+  ): Promise<PersistedProcess[]> {
+    if (processIds.length === 0) throw new Error('Durable process wait has no process ids');
+    const records = await processSupervisor.getAgentBackgroundProcessesBySession(sessionId);
+    const byId = new Map(records.map((process) => [process.id, process]));
+    const exact = processIds.map((id) => byId.get(id));
+    const missing = processIds.filter((_id, index) => !exact[index]);
+    if (missing.length > 0) {
+      throw new Error(`Durable process wait references missing ids: ${missing.join(', ')}`);
+    }
+    return exact as PersistedProcess[];
+  }
+
+  private toRecoveredProcessEvents(
+    processes: readonly PersistedProcess[],
+  ): ProcessLifecycleEvent[] {
+    return processes.map((process) => {
+      if (
+        process.status === 'starting' ||
+        process.status === 'running' ||
+        process.status === 'detached' ||
+        process.terminalReason === 'session-cancelled' ||
+        process.terminalReason === 'killed-for-restart'
+      ) {
+        throw new Error(
+          `Process ${process.id} is not in an authoritative terminal state (${process.status})`,
+        );
+      }
+      return {
+        type: 'exited',
+        id: process.id,
+        name: process.name,
+        command: process.command,
+        sessionId: process.sessionId,
+        pid: process.pid,
+        exitCode: process.exitCode,
+        status: process.status,
+        provenance: process.provenance,
+        supervision: process.supervision,
+        isBackground: process.isBackground,
+        terminalReason: process.terminalReason,
+        terminalError: process.terminalError,
+        willRestart: false,
+        logsTail:
+          [process.stdoutSnapshot, process.stderrSnapshot]
+            .filter(Boolean)
+            .join('\n')
+            .slice(-2_000) || undefined,
+        recovered: true,
+      };
+    });
   }
 
   private async recoverState() {
+    try {
+      const interrupted = await terminalizeInterruptedSessionReviewRejections();
+      for (const review of interrupted) {
+        const payload: KorySessionChangesResolvedPayload = {
+          reviewId: review.reviewId,
+          status: 'terminalized',
+          reason: review.resolutionReason,
+        };
+        this.emitWSMessage(review.sessionId, 'session.changes_resolved', payload);
+      }
+      if (interrupted.length > 0) {
+        koryLog.warn(
+          { count: interrupted.length },
+          'Terminalized interrupted session change rejections after restart',
+        );
+      }
+    } catch (err) {
+      // A review left in `rejecting` must never be retried blindly. Startup
+      // proceeds so the explicit response path can surface the error, but the
+      // failure is visible in the operational log.
+      koryLog.error({ err }, 'Failed to reconcile interrupted session change rejections');
+    }
+
     if (!this.tasks) return;
     try {
       const activeTasks = await this.tasks.listActive();
@@ -620,23 +1024,64 @@ export class KoryManager implements WorkerPipelineHost {
     if (!this.tryBeginSessionRun(input.sessionId)) {
       throw new Error('This session is already running or applying a Time Travel recovery');
     }
+    // Install cancellation ownership before the first await. Without this,
+    // cancelSessionWorkers can correctly detect the local run claim yet have
+    // nothing to abort while archived-session/lifecycle/provider preflight is
+    // still in progress.
+    const abort = new AbortController();
+    this.compactingSessions.set(input.sessionId, abort);
+    let handle: ManagerRunHandle | null = null;
     try {
-      return await this.compactSessionWithClaim(input);
+      if (this.sessions && !(await this.getActiveSession(input.sessionId))) {
+        throw new Error('Recover this archived chat before compacting its conversation');
+      }
+      abort.signal.throwIfAborted();
+      handle = await this.runLifecycle.begin(
+        input.sessionId,
+        input.automatic ? 'automatic_compaction' : 'manual_compaction',
+      );
+      abort.signal.throwIfAborted();
+      return await this.runContext.run(handle, async () => {
+        await this.runLifecycle.phase(handle!, 'compacting', 'compacting_conversation');
+        abort.signal.throwIfAborted();
+        const result = await this.compactSessionWithClaim(input, abort);
+        await this.runLifecycle.finish(handle!, 'complete', 'compaction_completed');
+        return result;
+      });
+    } catch (error) {
+      if (handle) {
+        const cancelled =
+          abort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+        await this.runLifecycle.finish(
+          handle,
+          cancelled ? 'cancel' : 'fail',
+          cancelled
+            ? 'cancelled_by_user'
+            : error instanceof Error
+              ? error.message
+              : String(error),
+        );
+      }
+      throw error;
     } finally {
+      if (this.compactingSessions.get(input.sessionId) === abort) {
+        this.compactingSessions.delete(input.sessionId);
+      }
       this.endSessionRun(input.sessionId);
     }
   }
 
-  private async compactSessionWithClaim(input: {
-    sessionId: string;
-    selectedModel: string;
-    reasoningLevel?: string;
-    automatic?: boolean;
-  }): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
+  private async compactSessionWithClaim(
+    input: {
+      sessionId: string;
+      selectedModel: string;
+      reasoningLevel?: string;
+      automatic?: boolean;
+    },
+    abort: AbortController,
+  ): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
     if (!this.messages) throw new Error('Message store unavailable');
-    if (this.compactingSessions.has(input.sessionId)) {
-      throw new Error('This session is already running');
-    }
+    abort.signal.throwIfAborted();
     const separator = input.selectedModel.indexOf(':');
     if (separator < 1) throw new Error('Select a model before compacting');
     const providerName = input.selectedModel.slice(0, separator) as ProviderName;
@@ -647,11 +1092,10 @@ export class KoryManager implements WorkerPipelineHost {
     }
     const provider = await this.providers.resolveProvider(model, providerName);
     if (!provider) throw new Error('The selected model provider is unavailable');
+    abort.signal.throwIfAborted();
 
     const compactionId = nanoid(12);
     const automatic = input.automatic === true;
-    const abort = new AbortController();
-    this.compactingSessions.set(input.sessionId, abort);
     const emit = (
       phase: 'preparing' | 'summarizing' | 'validating' | 'committing' | 'complete' | 'failed',
       progress: number,
@@ -725,6 +1169,7 @@ export class KoryManager implements WorkerPipelineHost {
           tokensOut = Math.max(tokensOut, event.tokensOut ?? 0);
         }
       }
+      abort.signal.throwIfAborted();
 
       emit('validating', 75, 'Validating the continuation checkpoint', {
         sourceMessages: conversational.length,
@@ -776,6 +1221,7 @@ export class KoryManager implements WorkerPipelineHost {
         sourceMessages: conversational.length,
         sourceTokens,
       });
+      abort.signal.throwIfAborted();
       await this.messages.commitCompaction({
         id: compactionId,
         sessionId: input.sessionId,
@@ -819,40 +1265,262 @@ export class KoryManager implements WorkerPipelineHost {
       });
       throw error;
     } finally {
-      this.compactingSessions.delete(input.sessionId);
-      await this.updateWorkflowState(input.sessionId, 'idle');
+      try {
+        await this.updateWorkflowState(input.sessionId, 'idle');
+      } catch (error) {
+        koryLog.warn(
+          { error, sessionId: input.sessionId },
+          'Legacy workflow-state projection failed after compaction settled',
+        );
+      }
     }
   }
 
   async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
+    if (this.sessions && !(await this.getActiveSession(sessionId))) return;
     const answer = text || selection;
-    const question = await answerPendingQuestion(sessionId, answer, 'answered', questionId);
-    if (questionId && !question) return;
-    if (this.state.resolveUserInput(sessionId, answer)) return;
-    // A backend restart loses the suspended provider stack, but not the
-    // decision. Resume as a new durable turn containing both sides.
-    if (!question || !this.sessions || !this.messages) return;
-    const session = await this.sessions.get(sessionId);
-    if (!session) return;
-    const content = `Resume after restart. Pending question: ${question.question}\nUser answer: ${answer}`;
-    await this.messages.add(sessionId, {
-      id: nanoid(12),
+    const hadLiveWaiter = this.state.hasPendingInput(sessionId);
+    const answered = await this.runLifecycle.answerQuestion(
       sessionId,
-      role: 'user',
-      content,
-      createdAt: Date.now(),
-    });
-    void this.processTask(
-      sessionId,
-      content,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      session.interactionMode ?? 'act',
+      answer,
+      questionId,
+      hadLiveWaiter,
     );
+    if (questionId && !answered) return;
+    if (answered) {
+      // The lifecycle commits answered/cancelled input before returning. The
+      // ordered control row then clears every subscribed renderer and prevents
+      // a historical ask event from remaining actionable after reload.
+      this.emitQuestionResolution(sessionId, answered.question.questionId, 'answered');
+    }
+    if (hadLiveWaiter && this.state.resolveUserInput(sessionId, answer)) return;
+    if (hadLiveWaiter && answered?.handle) {
+      const ownerController = this.runControllerByHandle.get(answered.handle);
+      if (!ownerController?.signal.aborted) {
+        await this.runLifecycle.finish(
+          answered.handle,
+          'fail',
+          'live_user_input_waiter_disappeared',
+        );
+      }
+    }
+    if (answered?.handoff) this.scheduleRestartHandoff(answered.handoff);
+  }
+
+  async recoverDurableQuestionHandoffs(): Promise<{ requeued: number; queued: number }> {
+    if (!this.runs) return { requeued: 0, queued: 0 };
+    const requeued = this.runs.requeueExpiredRestartHandoffs(Date.now(), 100);
+    const pending = this.runs.listPendingRestartHandoffs(100);
+    for (const handoff of pending) this.scheduleRestartHandoff(handoff);
+    return { requeued, queued: pending.length };
+  }
+
+  private scheduleRestartHandoff(handoff: SessionRunRestartHandoff): void {
+    if (!this.runs || this.restartHandoffTasks.has(handoff.id)) return;
+    const retryTimer = this.restartHandoffRetryTimers.get(handoff.id);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      this.restartHandoffRetryTimers.delete(handoff.id);
+    }
+    const controller = new AbortController();
+    this.restartHandoffConsumers.set(handoff.id, {
+      sessionId: handoff.sessionId,
+      controller,
+    });
+    const task = this.processRestartHandoff(handoff.id, controller.signal)
+      .catch((error: unknown) => {
+        koryLog.error(
+          { handoffId: handoff.id, sessionId: handoff.sessionId, error },
+          'Durable answered-question handoff failed',
+        );
+      })
+      .finally(() => {
+        this.restartHandoffTasks.delete(handoff.id);
+        this.restartHandoffConsumers.delete(handoff.id);
+      });
+    this.restartHandoffTasks.set(handoff.id, task);
+  }
+
+  private scheduleRestartHandoffRetry(handoffId: string, attemptCount: number): void {
+    if (!this.runs || this.restartHandoffRetryTimers.has(handoffId)) return;
+    const delayMs = Math.min(30_000, Math.max(500, 500 * 2 ** Math.min(attemptCount, 6)));
+    const timer = setTimeout(() => {
+      this.restartHandoffRetryTimers.delete(handoffId);
+      const pending = this.runs?.getRestartHandoff(handoffId);
+      if (pending?.state === 'pending') this.scheduleRestartHandoff(pending);
+    }, delayMs);
+    timer.unref?.();
+    this.restartHandoffRetryTimers.set(handoffId, timer);
+  }
+
+  private async processRestartHandoff(handoffId: string, signal: AbortSignal): Promise<void> {
+    if (!this.runs || !this.sessions || !this.messages) return;
+    if (signal.aborted) return;
+    const LEASE_MS = 30_000;
+    const claimed = this.runs.claimRestartHandoff(
+      handoffId,
+      this.restartHandoffOwner,
+      LEASE_MS,
+    );
+    if (!claimed) return;
+    const userMessageId = `restart-user-${claimed.id}`;
+    const responseMessageId = `restart-response-${claimed.id}`;
+    const renew = setInterval(() => {
+      const renewed = this.runs?.renewRestartHandoff(
+        claimed.id,
+        claimed.claimToken,
+        LEASE_MS,
+      );
+      if (!renewed) clearInterval(renew);
+    }, LEASE_MS / 3);
+    renew.unref?.();
+
+    let admission: SessionTurnAdmission | null = null;
+    let executionProjected = false;
+    try {
+      if (signal.aborted) return;
+      // A prior attempt that durably projected its final answer is complete
+      // even if the process died before acknowledging this command lease.
+      if (await this.messages.getById(claimed.sessionId, responseMessageId)) {
+        this.runs.consumeRestartHandoff(claimed.id, claimed.claimToken);
+        return;
+      }
+      if (!claimed.expectedBoundary) {
+        this.runs.abandonRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          'legacy restart handoff has no conversation boundary',
+        );
+        return;
+      }
+      if (await this.messages.getById(claimed.sessionId, userMessageId)) {
+        // The prior owner crossed the durable execution boundary. Retrying a
+        // model/tool turn could duplicate external side effects, so surface the
+        // interrupted SessionRun and require an explicit user retry.
+        this.runs.abandonRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          'replacement turn previously started but has no durable response',
+        );
+        return;
+      }
+      const session = await this.getActiveSession(claimed.sessionId);
+      if (signal.aborted) return;
+      if (!session) {
+        const requeued = this.runs.requeueRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          'session unavailable or archived',
+        );
+        if (requeued) this.scheduleRestartHandoffRetry(claimed.id, claimed.attemptCount);
+        return;
+      }
+      admission = await this.reserveSessionTurn(
+        claimed.sessionId,
+        'user_input_after_restart',
+      );
+      if (signal.aborted) {
+        if (admission) {
+          await this.cancelSessionTurn(admission, 'restart_handoff_cancelled_before_dispatch');
+          admission = null;
+        }
+        return;
+      }
+      if (!admission) {
+        const requeued = this.runs.requeueRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          'session busy; retry durable handoff',
+        );
+        if (requeued) this.scheduleRestartHandoffRetry(claimed.id, claimed.attemptCount);
+        return;
+      }
+      const content = `Resume after restart. Pending question: ${claimed.question.question}\nUser answer: ${claimed.answer}`;
+      try {
+        await this.messages.addIdempotentAtBoundary(
+          claimed.sessionId,
+          {
+            id: userMessageId,
+            sessionId: claimed.sessionId,
+            role: 'user',
+            content,
+            createdAt: claimed.createdAt,
+          },
+          claimed.expectedBoundary,
+        );
+        executionProjected = true;
+      } catch (error) {
+        await this.rejectSessionTurn(admission, 'restart_handoff_input_persistence_failed');
+        admission = null;
+        if (error instanceof ConflictError) {
+          this.runs.abandonRestartHandoff(
+            claimed.id,
+            claimed.claimToken,
+            `stale conversation boundary: ${error.message}`,
+          );
+          return;
+        }
+        throw error;
+      }
+
+      if (signal.aborted) {
+        await this.cancelSessionTurn(admission, 'restart_handoff_cancelled_before_dispatch');
+        admission = null;
+        return;
+      }
+
+      const work = this.dispatchAdmittedTask(admission, {
+        userMessage: content,
+        interactionMode: session.interactionMode ?? 'act',
+        inputAlreadyPersisted: true,
+        responseMessageId,
+      });
+      admission = null;
+      const outcome = await work;
+      const responsePersisted = await this.messages.getById(
+        claimed.sessionId,
+        responseMessageId,
+      );
+      if (
+        responsePersisted ||
+        (outcome.status === 'waiting' && outcome.phase === 'waiting_terminal')
+      ) {
+        const consumed = this.runs.consumeRestartHandoff(claimed.id, claimed.claimToken);
+        if (!consumed) throw new Error('Durable restart handoff lease expired before consumption');
+        return;
+      }
+      this.runs.abandonRestartHandoff(
+        claimed.id,
+        claimed.claimToken,
+        `replacement turn ${outcome.status}: ${outcome.reason ?? outcome.phase}; explicit retry required`,
+      );
+    } catch (error) {
+      if (admission) {
+        await (signal.aborted
+          ? this.cancelSessionTurn(admission, 'restart_handoff_cancelled_before_dispatch')
+          : this.rejectSessionTurn(admission, 'restart_handoff_dispatch_failed')
+        ).catch(() => undefined);
+      }
+      if (signal.aborted) return;
+      const reason = error instanceof Error ? error.message : String(error);
+      if (executionProjected) {
+        this.runs.abandonRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          `${reason}; replacement execution had already started`,
+        );
+      } else {
+        const requeued = this.runs.requeueRestartHandoff(
+          claimed.id,
+          claimed.claimToken,
+          reason,
+        );
+        if (requeued) this.scheduleRestartHandoffRetry(claimed.id, claimed.attemptCount);
+      }
+      throw error;
+    } finally {
+      clearInterval(renew);
+    }
   }
 
   /** Resolve the exact durable project for a destructive keep/reject decision.
@@ -883,6 +1551,87 @@ export class KoryManager implements WorkerPipelineHost {
     return realpathSync(requested);
   }
 
+  /** Build a durable, session-bound rollback contract before exposing a
+   * change review. A best-effort `latest` snapshot is never a safe substitute
+   * after restart: it can belong to another turn or an incomplete write. */
+  private async reviewRollbackBinding(
+    sessionId: string,
+  ): Promise<{ projectRoot: string | null; rollback: SessionReviewRollback }> {
+    let projectRoot: string | null = null;
+    try {
+      projectRoot = await this.resolveSessionProjectForResponse(sessionId);
+    } catch (error) {
+      return {
+        projectRoot: null,
+        rollback: {
+          kind: 'unavailable',
+          reason: `No exact session project is available: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      };
+    }
+    const baselineHash = this.state.getCheckpoint(sessionId);
+    if (baselineHash && new GitManager(projectRoot).isGitRepo()) {
+      return { projectRoot, rollback: { kind: 'git', baselineHash } };
+    }
+    return {
+      projectRoot,
+      rollback: {
+        kind: 'unavailable',
+        reason:
+          'No durable pre-change Git checkpoint was recorded for this review. Snapshot fallback is disabled because it cannot prove the exact pre-review baseline after restart.',
+      },
+    };
+  }
+
+  /** Persist the current actionable review before publishing it to the event
+   * log. Replaying the event alone is never enough to authorize rollback. */
+  private async publishPendingSessionReview(
+    sessionId: string,
+    changes: ChangeSummary[],
+  ): Promise<DurableSessionReview> {
+    const binding = await this.reviewRollbackBinding(sessionId);
+    const review = await ensurePendingSessionReview({
+      sessionId,
+      changes,
+      ...binding,
+    });
+    if (review.status !== 'pending') {
+      throw new ConflictError('This change review was resolved while its projection was being prepared.');
+    }
+    const payload: KorySessionChangesPayload = {
+      changes: review.changes,
+      reviewId: review.reviewId,
+    };
+    this.emitWSMessage(sessionId, 'session.changes', payload);
+    return review;
+  }
+
+  private emitSessionReviewResolution(
+    sessionId: string,
+    review: DurableSessionReview,
+  ): void {
+    const payload: KorySessionChangesResolvedPayload = {
+      reviewId: review.reviewId,
+      status: review.status === 'accepted' || review.status === 'rejected' || review.status === 'terminalized'
+        ? review.status
+        : 'terminalized',
+      ...(review.resolutionReason ? { reason: review.resolutionReason } : {}),
+    };
+    this.emitWSMessage(sessionId, 'session.changes_resolved', payload);
+  }
+
+  private emitQuestionResolution(
+    sessionId: string,
+    questionId: string | undefined,
+    status: KoryAskUserResolvedPayload['status'],
+  ): void {
+    const payload: KoryAskUserResolvedPayload = {
+      ...(questionId ? { questionId } : {}),
+      status,
+    };
+    this.emitWSMessage(sessionId, 'kory.ask_user_resolved', payload);
+  }
+
   async handleSessionResponse(sessionId: string, accepted: boolean) {
     const sessionLease = this.tryAcquireSessionMutationBarrier(sessionId);
     if (!sessionLease) {
@@ -894,33 +1643,125 @@ export class KoryManager implements WorkerPipelineHost {
       throw new Error('Wait for active agent terminals to finish before applying this decision');
     }
     try {
-      const projectRoot = await this.resolveSessionProjectForResponse(sessionId);
-      if (accepted) {
-        this.emitThought(sessionId, 'synthesizing', 'User accepted changes.');
-      } else {
-        this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
-        const prevHash = this.state.getCheckpoint(sessionId);
-        const projectGit = new GitManager(projectRoot);
-        if (prevHash && projectGit.isGitRepo()) {
-          const rolledBack = await projectGit.rollback(prevHash);
-          if (!rolledBack) {
-            throw new Error('The session project could not be restored to its recorded checkpoint');
-          }
-        } else {
-          const restored = await new SnapshotManager(projectRoot).restoreSnapshot(
-            sessionId,
-            'latest',
-            projectRoot,
+      if (this.sessions && !(await this.getActiveSession(sessionId))) {
+        const current = await this.sessions.get(sessionId);
+        if (current?.archivedAt !== undefined) {
+          throw new ConflictError(
+            'Recover this archived chat before accepting or rejecting its changes.',
           );
-          if (!restored.success) {
-            throw new Error(
-              `The session project snapshot could not be restored: ${restored.error}`,
-            );
-          }
         }
+        throw new Error(
+          `Cannot apply the change decision because session ${sessionId} was not found`,
+        );
+      }
+      const projectRoot = await this.resolveSessionProjectForResponse(sessionId);
+      let review = await getPendingSessionReview(sessionId);
+      // Compatibility for a still-live manager that predates durable review
+      // publication. This path has the exact process-local baseline; after a
+      // restart there is no in-memory fallback and the operation fails closed.
+      const legacyChanges = this.state.getChanges(sessionId);
+      if (!review && legacyChanges.length > 0) {
+        review = await this.publishPendingSessionReview(sessionId, legacyChanges);
+      }
+      if (!review) {
+        const previous = await getSessionReview(sessionId);
+        if (previous?.status === 'rejecting') {
+          const terminalized = await terminalizeSessionReview(
+            previous,
+            'Backend restarted while a rejection rollback was in progress. No additional rollback was attempted.',
+          );
+          if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+          throw new Error(
+            'The prior rejection was interrupted during rollback. Koryphaios made no additional filesystem changes; review the project manually before continuing.',
+          );
+        }
+        if (previous) {
+          throw new Error('This change review is no longer actionable.');
+        }
+        throw new Error('There is no pending change review for this session.');
+      }
+      if (review.projectRoot !== projectRoot) {
+        const terminalized = await terminalizeSessionReview(
+          review,
+          'The session project changed after this review was created. Koryphaios refused to apply a decision against a different project.',
+        );
+        if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+        throw new Error(
+          'This review is bound to a different project directory. No change decision was applied.',
+        );
+      }
+
+      if (accepted) {
+        const resolved = await acceptSessionReview(review);
+        if (!resolved) {
+          throw new ConflictError('This change review was resolved by another operation.');
+        }
+        this.emitThought(sessionId, 'synthesizing', 'User accepted changes.');
+        this.state.clearCheckpoint(sessionId);
+        this.state.clearChanges(sessionId);
+        this.emitSessionReviewResolution(sessionId, resolved);
+        return;
+      }
+
+      if (review.rollback.kind !== 'git') {
+        const terminalized = await terminalizeSessionReview(review, review.rollback.reason);
+        if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+        throw new Error(
+          `Koryphaios cannot safely reject this review: ${review.rollback.reason}`,
+        );
+      }
+      const baselineHash = review.rollback.baselineHash;
+
+      // Persist the destructive operation claim first. If this backend dies
+      // after Git starts, startup terminalizes the review instead of rerunning
+      // reset/clean against a workspace whose current state is unknown.
+      const rejecting = await beginSessionReviewRejection(review);
+      if (!rejecting) {
+        throw new ConflictError('This change review was resolved by another operation.');
+      }
+      if (rejecting.rollback.kind !== 'git') {
+        const terminalized = await terminalizeSessionReview(
+          rejecting,
+          'The recorded Git rollback checkpoint was unavailable after the rejection was claimed.',
+        );
+        if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+        throw new Error(
+          'Koryphaios cannot safely reject this review because its rollback checkpoint is unavailable.',
+        );
+      }
+      this.emitThought(sessionId, 'synthesizing', 'User rejected changes. Rolling back...');
+      const projectGit = new GitManager(projectRoot);
+      try {
+        if (!projectGit.isGitRepo()) {
+          throw new Error('The review project is no longer a Git repository.');
+        }
+        const rolledBack = await projectGit.rollback(baselineHash);
+        if (!rolledBack) {
+          throw new Error('The session project could not be restored to its recorded checkpoint.');
+        }
+      } catch (error) {
+        const reason = `Rollback outcome is not safe to retry automatically: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        const terminalized = await terminalizeSessionReview(rejecting, reason);
+        if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+        throw error;
+      }
+
+      const resolved = await completeSessionReviewRejection(rejecting);
+      if (!resolved) {
+        const terminalized = await terminalizeSessionReview(
+          rejecting,
+          'Rollback completed but its durable acknowledgement could not be proven. No automatic retry will occur.',
+        );
+        if (terminalized) this.emitSessionReviewResolution(sessionId, terminalized);
+        throw new Error(
+          'Rollback completed but Koryphaios could not durably acknowledge it. No automatic retry will occur.',
+        );
       }
       this.state.clearCheckpoint(sessionId);
       this.state.clearChanges(sessionId);
+      this.emitSessionReviewResolution(sessionId, resolved);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.emitError(sessionId, message);
@@ -1016,7 +1857,7 @@ export class KoryManager implements WorkerPipelineHost {
     options: string[],
     opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
   ): Promise<string> {
-    const payload = await createPendingQuestion(sessionId, {
+    const payload = await this.runLifecycle.waitForQuestion(this.requireRunHandle(sessionId), {
       question,
       options,
       allowOther: opts?.allowOther ?? true,
@@ -1025,7 +1866,8 @@ export class KoryManager implements WorkerPipelineHost {
     this.emitWSMessage(sessionId, 'kory.ask_user', payload satisfies KoryAskUserPayload);
     // The global task timeout may end the suspended provider run, but the DB
     // record remains answerable and resumes as a fresh turn after restart.
-    return this.state.requestUserInput(sessionId, 0);
+    const answer = await this.state.requestUserInput(sessionId, 0);
+    return answer;
   }
 
   /** Surface an authenticated CLI bridge approval through the same durable UI
@@ -1080,6 +1922,172 @@ export class KoryManager implements WorkerPipelineHost {
     return choices;
   }
 
+  /**
+   * Reserve a turn before any route persists work it promises to execute.
+   * The synchronous claim/controller installation closes the pre-await race;
+   * the returned token is issued only after SessionRun start is committed.
+   */
+  async reserveSessionTurn(
+    sessionId: string,
+    reason: SessionTurnReason,
+  ): Promise<SessionTurnAdmission | null> {
+    if (!this.tryBeginSessionRun(sessionId)) return null;
+    const controller = new AbortController();
+    this.managerAbortBySession.set(sessionId, controller);
+    let handle: ManagerRunHandle | null = null;
+    try {
+      if (this.sessions && !(await this.getActiveSession(sessionId))) {
+        throw new Error('Recover this archived chat before starting new work.');
+      }
+      handle = await this.runLifecycle.begin(sessionId, reason);
+      this.runControllerByHandle.set(handle, controller);
+      if (controller.signal.aborted) {
+        await this.runLifecycle.finish(handle, 'cancel', 'cancelled_during_admission');
+        return null;
+      }
+      const admission = Object.freeze({
+        sessionId,
+        runId: handle.runId,
+        signal: controller.signal,
+      });
+      this.turnAdmissions.set(admission, { controller, handle });
+      return admission;
+    } catch (error) {
+      if (handle) {
+        await this.runLifecycle.finish(handle, 'cancel', 'admission_failed').catch(() => undefined);
+      }
+      if (error instanceof SessionRunTransitionError && error.code === 'RUN_ALREADY_ACTIVE') {
+        return null;
+      }
+      throw error;
+    } finally {
+      if (!handle || controller.signal.aborted) {
+        if (this.managerAbortBySession.get(sessionId) === controller) {
+          this.managerAbortBySession.delete(sessionId);
+        }
+        this.endSessionRun(sessionId);
+      }
+    }
+  }
+
+  /** Consume an admission synchronously, then execute the normal manager path. */
+  dispatchAdmittedTask(
+    admission: SessionTurnAdmission,
+    input: AdmittedTaskInput,
+  ): Promise<SessionTurnResult> {
+    const record = this.consumeTurnAdmission(admission);
+    return this.executeClaimedTask(admission.sessionId, record.controller, input, record.handle);
+  }
+
+  /** Execute non-provider-loop work (currently image turns) under the same run/erasure lease. */
+  dispatchAdmittedWork<T>(
+    admission: SessionTurnAdmission,
+    work: (context: AdmittedWorkContext) => Promise<T>,
+    completeReason: string,
+  ): Promise<T> {
+    const { controller, handle } = this.consumeTurnAdmission(admission);
+    return this.runContext.run(handle, async () => {
+      this.processCompletionCoordinator.resumeSession(admission.sessionId);
+      this.isProcessing = true;
+      try {
+        this.assertRunHandleActive(handle);
+        const result = await work({
+          signal: controller.signal,
+          phase: async (phase, reason) => {
+            this.assertRunHandleActive(handle);
+            await this.runLifecycle.phase(handle, phase, reason);
+          },
+        });
+        this.assertRunHandleActive(handle);
+        await this.finishRunAndProject(handle, 'complete', completeReason, 'idle');
+        return result;
+      } catch (error) {
+        const aborted =
+          controller.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+        await this.finishRunAndProject(
+          handle,
+          aborted ? 'cancel' : 'fail',
+          aborted ? 'cancelled_by_user' : error instanceof Error ? error.message : String(error),
+          aborted ? 'idle' : 'error',
+        );
+        throw error;
+      } finally {
+        this.isProcessing = false;
+        if (this.managerAbortBySession.get(admission.sessionId) === controller) {
+          this.managerAbortBySession.delete(admission.sessionId);
+        }
+        this.endSessionRun(admission.sessionId);
+      }
+    });
+  }
+
+  /** Release a reserved run when route-side persistence fails before dispatch. */
+  rejectSessionTurn(admission: SessionTurnAdmission, reason: string): Promise<void> {
+    return this.settleUndispatchedSessionTurn(admission, 'fail', reason, 'error');
+  }
+
+  /** Cancellation is a first-class terminal outcome, including before dispatch. */
+  private cancelSessionTurn(admission: SessionTurnAdmission, reason: string): Promise<void> {
+    return this.settleUndispatchedSessionTurn(admission, 'cancel', reason, 'idle');
+  }
+
+  private settleUndispatchedSessionTurn(
+    admission: SessionTurnAdmission,
+    outcome: 'fail' | 'cancel',
+    reason: string,
+    workflowState: 'idle' | 'error',
+  ): Promise<void> {
+    const { controller, handle } = this.consumeTurnAdmission(admission);
+    return this.runContext.run(handle, async () => {
+      try {
+        await this.finishRunAndProject(handle, outcome, reason, workflowState);
+      } finally {
+        if (this.managerAbortBySession.get(admission.sessionId) === controller) {
+          this.managerAbortBySession.delete(admission.sessionId);
+        }
+        this.endSessionRun(admission.sessionId);
+      }
+    });
+  }
+
+  private consumeTurnAdmission(admission: SessionTurnAdmission): AdmissionRecord {
+    const record = this.turnAdmissions.get(admission);
+    if (
+      !record ||
+      admission.sessionId.length === 0 ||
+      this.managerAbortBySession.get(admission.sessionId) !== record.controller
+    ) {
+      throw new Error('Session turn admission is invalid, forged, or already consumed');
+    }
+    this.turnAdmissions.delete(admission);
+    return record;
+  }
+
+  /** Canonical terminal state is committed even when the legacy workflow projection fails. */
+  private async finishRunAndProject(
+    handle: ManagerRunHandle,
+    outcome: 'complete' | 'fail' | 'cancel',
+    reason: string,
+    workflowState: 'idle' | 'error',
+  ): Promise<void> {
+    const sessionId = handle.sessionId;
+    let lifecycleError: unknown;
+    try {
+      await this.runLifecycle.finish(handle, outcome, reason);
+    } catch (error) {
+      lifecycleError = error;
+    }
+    try {
+      await this.updateWorkflowState(sessionId, workflowState);
+    } catch (error) {
+      koryLog.warn(
+        { sessionId, error },
+        'Legacy workflow-state projection failed after authoritative run transition',
+      );
+    }
+    if (lifecycleError) throw lifecycleError;
+  }
+
   /** Main entry point for processing a task. The claim is installed before the
    * first await, so cancellation and Time Travel see intent discovery/provider
    * resolution as active work rather than a false idle window. */
@@ -1094,47 +2102,437 @@ export class KoryManager implements WorkerPipelineHost {
     goalContext?: import('./prompts').TaskContract['goalContext'],
     interactionMode?: 'act' | 'plan',
     fastMode?: boolean,
-  ): Promise<void> {
-    if (!this.tryBeginSessionRun(sessionId)) {
+    /** True when the caller has already durably inserted this exact user turn. */
+    inputAlreadyPersisted = false,
+    imageInputMode: ImageInputMode = 'reject',
+  ): Promise<SessionTurnResult> {
+    if (inputAlreadyPersisted) {
+      throw new Error(
+        'Legacy processTask cannot accept pre-persisted input; use reserveSessionTurn and dispatchAdmittedTask.',
+      );
+    }
+    const result = await this.submitSessionTurn({
+      sessionId,
+      source: goalContext ? 'goal' : collaborationToolPolicy ? 'collaboration' : 'internal',
+      sourceCommandId: crypto.randomUUID(),
+      userMessage,
+      preferredModel,
+      reasoningLevel,
+      attachments,
+      collaborationToolPolicy,
+      responseVariant,
+      goalContext,
+      interactionMode,
+      fastMode,
+      imageInputMode,
+    });
+    if (result.status === 'rejected') {
       this.emitError(
         sessionId,
-        'This session is already active or is applying a Time Travel recovery. Wait for it to finish before starting another turn.',
+        'This session is already active or is applying a conversation mutation. Wait for it to finish before starting another turn.',
       );
-      return;
     }
-    const intentAbort = new AbortController();
-    this.managerAbortBySession.set(sessionId, intentAbort);
+    return result;
+  }
+
+  /** Canonical submission boundary for non-HTTP producers. Input persistence,
+   * SessionRun admission, stable completion identity, and typed outcome are one
+   * contract. Once a command input exists without its response, automatic
+   * replay is rejected because provider/tool side effects may have occurred. */
+  async startSessionTurn(input: SessionTurnCommandInput): Promise<SessionTurnSubmission> {
+    if (!this.messages) throw new Error('Message store unavailable for session turn submission');
+    const sourceId = input.sourceCommandId;
+    const identity = deriveSessionTurnCommandIdentity({
+      sessionId: input.sessionId,
+      source: input.source,
+      sourceCommandId: sourceId,
+    });
+    const commandAttachments = input.attachments?.map((attachment) => ({
+      type: attachment.type === 'image' ? ('image' as const) : ('file' as const),
+      data: attachment.data,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+    }));
+    // Bind every caller-controlled field that can change execution. A stable
+    // producer id with a changed model, policy, branch, mode, or attachment is
+    // a conflict, not an idempotent retry.
+    const inputHash = canonicalSessionTurnInputHash({
+      version: 1,
+      userMessage: input.userMessage,
+      preferredModel: input.preferredModel ?? null,
+      reasoningLevel: input.reasoningLevel ?? null,
+      attachments: (input.attachments ?? []).map((attachment) => ({
+        type: attachment.type,
+        data: attachment.data,
+        name: attachment.name,
+        mimeType: attachment.mimeType ?? null,
+      })),
+      collaborationToolPolicy: input.collaborationToolPolicy ?? null,
+      responseVariant: input.responseVariant ?? null,
+      goalContext: input.goalContext ?? null,
+      interactionMode: input.interactionMode ?? null,
+      fastMode: input.fastMode ?? null,
+      imageInputMode: input.imageInputMode ?? 'reject',
+      regenerationBranch: input.regenerationBranch ?? null,
+    });
+    const matchesCommandUser = (message: StoredMessage | undefined): boolean => {
+      if (!message || message.role !== 'user' || message.content !== input.userMessage) return false;
+      const stored = message.attachments ?? [];
+      const expected = commandAttachments ?? [];
+      return (
+        stored.length === expected.length &&
+        stored.every(
+          (attachment, index) =>
+            attachment.type === expected[index]?.type &&
+            attachment.data === expected[index]?.data &&
+            attachment.name === expected[index]?.name &&
+            (!expected[index]?.mimeType || attachment.mimeType === expected[index]?.mimeType),
+        )
+      );
+    };
+    const receiptSubmission = async (
+      command: SessionTurnCommandRecord,
+    ): Promise<SessionTurnSubmission> => {
+      if (command.inputHash !== inputHash) {
+        throw new ConflictError(
+          'The producer command id is already bound to a different execution payload.',
+        );
+      }
+      const [existingUser, existingResponse] = await Promise.all([
+        this.messages!.getById(input.sessionId, command.userMessageId),
+        this.messages!.getById(input.sessionId, command.responseMessageId),
+      ]);
+      if (command.status === 'completed') {
+        if (!matchesCommandUser(existingUser) || existingResponse?.role !== 'assistant') {
+          return {
+            accepted: false,
+            result: {
+              sessionId: input.sessionId,
+              runId: command.runId,
+              status: 'failed',
+              phase: 'error',
+              reason: 'command_completion_projection_missing_or_corrupt',
+            },
+          };
+        }
+        return {
+          accepted: false,
+          result: {
+            sessionId: input.sessionId,
+            runId: command.runId,
+            status: 'completed',
+            phase: 'done',
+            reason: command.terminalReason,
+          },
+        };
+      }
+      if (command.status === 'failed' || command.status === 'cancelled') {
+        return {
+          accepted: false,
+          result: {
+            sessionId: input.sessionId,
+            runId: command.runId,
+            status: command.status,
+            phase: command.status === 'cancelled' ? 'cancelled' : 'error',
+            reason: command.terminalReason,
+          },
+        };
+      }
+      const current = this.runs?.get(input.sessionId);
+      if (!current || current.runId !== command.runId) {
+        return {
+          accepted: false,
+          result: {
+            sessionId: input.sessionId,
+            runId: command.runId,
+            status: 'failed',
+            phase: 'error',
+            reason: 'command_execution_was_interrupted; explicit retry required',
+          },
+        };
+      }
+      return {
+        accepted: false,
+        result: {
+          sessionId: input.sessionId,
+          runId: command.runId,
+          status: command.status === 'waiting' ? 'waiting' : 'rejected',
+          phase: current.phase,
+          reason:
+            command.status === 'waiting'
+              ? current.terminalReason
+              : 'command_execution_is_already_active',
+        },
+      };
+    };
+
+    const existingCommand = this.runs?.getSessionTurnCommand(identity.commandKey);
+    if (existingCommand) return receiptSubmission(existingCommand);
+
+    // Databases upgraded from the pre-ledger build may contain deterministic
+    // message projections without a terminal witness. Never infer completion
+    // from those rows; doing so turns cancelled partial output into success.
+    const [legacyUser, legacyResponse] = await Promise.all([
+      this.messages.getById(input.sessionId, identity.userMessageId),
+      this.messages.getById(input.sessionId, identity.responseMessageId),
+    ]);
+    if (legacyUser || legacyResponse) {
+      if (
+        !matchesCommandUser(legacyUser) ||
+        (legacyResponse && legacyResponse.role !== 'assistant')
+      ) {
+        throw new ConflictError(
+          'The producer command id is already bound to different durable input or output.',
+        );
+      }
+      return {
+        accepted: false,
+        result: {
+          sessionId: input.sessionId,
+          runId: '',
+          status: 'failed',
+          phase: 'error',
+          reason: 'legacy_command_has_no_terminal_receipt; explicit retry required',
+        },
+      };
+    }
+
+    const reason: SessionTurnReason =
+      input.source === 'goal'
+        ? 'goal_turn'
+        : input.source === 'collaboration'
+          ? 'collaboration_turn'
+          : 'internal_turn';
+    if (!this.tryBeginSessionRun(input.sessionId)) {
+      return {
+        accepted: false,
+        result: {
+          sessionId: input.sessionId,
+          runId: '',
+          status: 'rejected',
+          phase: this.runs?.get(input.sessionId)?.phase ?? 'idle',
+          reason: 'session_busy',
+        },
+      };
+    }
+    if (!this.runs) {
+      this.endSessionRun(input.sessionId);
+      throw new Error('Session turn command ledger is unavailable');
+    }
+    const controller = new AbortController();
+    this.managerAbortBySession.set(input.sessionId, controller);
+    let handle: ManagerRunHandle | null = null;
+    let admission: SessionTurnAdmission | null = null;
+    let command: SessionTurnCommandRecord | null = null;
     try {
-      await this.processTaskWithClaim(
-        sessionId,
-        userMessage,
-        preferredModel,
-        reasoningLevel,
-        attachments,
-        collaborationToolPolicy,
-        responseVariant,
-        goalContext,
-        interactionMode,
-        fastMode,
+      if (this.sessions && !(await this.getActiveSession(input.sessionId))) {
+        throw new Error('Recover this archived chat before starting new work.');
+      }
+      const begun = await this.runLifecycle.beginCommand({
+        sessionId: input.sessionId,
+        source: input.source,
+        sourceCommandId: sourceId,
+        inputHash,
+        reason,
+        activeAgentIds: ['kory-manager'],
+      });
+      command = begun.command;
+      if (begun.disposition === 'existing') {
+        return await receiptSubmission(begun.command);
+      }
+      handle = begun.handle;
+      this.runControllerByHandle.set(handle, controller);
+      if (controller.signal.aborted) {
+        await this.runLifecycle.finish(handle, 'cancel', 'cancelled_during_admission');
+        return await receiptSubmission(
+          this.runs.getSessionTurnCommand(command.commandKey) ?? command,
+        );
+      }
+      admission = Object.freeze({
+        sessionId: input.sessionId,
+        runId: handle.runId,
+        signal: controller.signal,
+      });
+      this.turnAdmissions.set(admission, { controller, handle });
+    } catch (error) {
+      if (handle && !admission) {
+        await this.runLifecycle
+          .finish(
+            handle,
+            controller.signal.aborted ? 'cancel' : 'fail',
+            controller.signal.aborted ? 'cancelled_during_admission' : 'command_admission_failed',
+          )
+          .catch(() => undefined);
+      }
+      if (error instanceof SessionTurnCommandConflictError) {
+        throw new ConflictError(error.message);
+      }
+      if (error instanceof SessionRunTransitionError && error.code === 'RUN_ALREADY_ACTIVE') {
+        return {
+          accepted: false,
+          result: {
+            sessionId: input.sessionId,
+            runId: '',
+            status: 'rejected',
+            phase: this.runs.get(input.sessionId)?.phase ?? 'idle',
+            reason: 'session_busy',
+          },
+        };
+      }
+      throw error;
+    } finally {
+      if (!admission) {
+        if (this.managerAbortBySession.get(input.sessionId) === controller) {
+          this.managerAbortBySession.delete(input.sessionId);
+        }
+        this.endSessionRun(input.sessionId);
+      }
+    }
+
+    if (!command || !admission) throw new Error('Session turn command admission was not created');
+    try {
+      const inserted = await this.messages.addIdempotent(input.sessionId, {
+        id: command.userMessageId,
+        sessionId: input.sessionId,
+        role: 'user',
+        content: input.userMessage,
+        attachments: commandAttachments,
+        createdAt: Date.now(),
+      });
+      if (inserted !== 'inserted') {
+        await this.rejectSessionTurn(admission, 'command_input_was_already_persisted');
+        return {
+          accepted: false,
+          result: {
+            sessionId: input.sessionId,
+            runId: admission.runId,
+            status: 'failed',
+            phase: 'error',
+            reason: 'command_execution_was_interrupted; explicit retry required',
+          },
+        };
+      }
+    } catch (error) {
+      await this.rejectSessionTurn(admission, 'command_input_persistence_failed');
+      throw error;
+    }
+    const completion = this.dispatchAdmittedTask(admission, {
+      ...input,
+      inputAlreadyPersisted: true,
+      responseMessageId: command.responseMessageId,
+    });
+    return {
+      accepted: true,
+      sessionId: input.sessionId,
+      runId: admission.runId,
+      completion,
+    };
+  }
+
+  async submitSessionTurn(input: SessionTurnCommandInput): Promise<SessionTurnResult> {
+    const submission = await this.startSessionTurn(input);
+    return submission.accepted ? submission.completion : submission.result;
+  }
+
+  private async executeClaimedTask(
+    sessionId: string,
+    intentAbort: AbortController,
+    input: AdmittedTaskInput,
+    admittedHandle?: ManagerRunHandle,
+  ): Promise<SessionTurnResult> {
+    let handle = admittedHandle;
+    try {
+      if (!handle) {
+        if (this.sessions && !(await this.getActiveSession(sessionId))) {
+          throw new Error('Recover this archived chat before starting new work.');
+        }
+        handle = await this.runLifecycle.begin(
+          sessionId,
+          input.goalContext ? 'goal_turn' : 'user_turn',
+        );
+        this.runControllerByHandle.set(handle, intentAbort);
+      }
+      await this.runContext.run(handle, () =>
+        this.processTaskWithClaim(
+          sessionId,
+          input.userMessage,
+          input.preferredModel,
+          input.reasoningLevel,
+          input.attachments,
+          input.collaborationToolPolicy,
+          input.responseVariant,
+          input.goalContext,
+          input.interactionMode,
+          input.fastMode,
+          input.inputAlreadyPersisted,
+          input.imageInputMode ?? 'reject',
+          intentAbort,
+          input.regenerationBranch,
+          input.responseMessageId,
+        ),
       );
     } catch (error) {
       const aborted =
         intentAbort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
-      await this.updateWorkflowState(sessionId, aborted ? 'idle' : 'error');
+      let terminalError: unknown;
+      try {
+        if (handle) {
+          await this.finishRunAndProject(
+            handle,
+            aborted ? 'cancel' : 'fail',
+            aborted ? 'cancelled_by_user' : error instanceof Error ? error.message : String(error),
+            aborted ? 'idle' : 'error',
+          );
+        }
+      } catch (finishError) {
+        terminalError = finishError;
+      }
       if (aborted) {
         this.emitWSMessage(sessionId, 'system.info', { message: 'Stopped by user.' });
       } else {
         koryLog.error({ sessionId, error }, 'Manager run failed before provider execution');
         this.emitError(sessionId, error instanceof Error ? error.message : String(error));
       }
+      if (terminalError) throw terminalError;
     } finally {
       if (this.managerAbortBySession.get(sessionId) === intentAbort) {
         this.managerAbortBySession.delete(sessionId);
       }
       this.endSessionRun(sessionId);
     }
+    return this.readSessionTurnResult(sessionId, handle?.runId);
+  }
+
+  private readSessionTurnResult(sessionId: string, runId?: string): SessionTurnResult {
+    const snapshot = this.runs?.get(sessionId);
+    if (!runId || !snapshot || snapshot.runId !== runId) {
+      return {
+        sessionId,
+        runId: runId ?? '',
+        status: 'unknown',
+        phase: snapshot?.phase ?? 'idle',
+        reason: snapshot?.terminalReason ?? null,
+      };
+    }
+    const status: SessionTurnResult['status'] =
+      snapshot.status === 'waiting'
+        ? 'waiting'
+        : snapshot.phase === 'done'
+          ? 'completed'
+          : snapshot.phase === 'cancelled'
+            ? 'cancelled'
+            : snapshot.phase === 'error'
+              ? 'failed'
+              : 'unknown';
+    return {
+      sessionId,
+      runId,
+      status,
+      phase: snapshot.phase,
+      reason: snapshot.terminalReason,
+    };
   }
 
   private async processTaskWithClaim(
@@ -1148,18 +2546,34 @@ export class KoryManager implements WorkerPipelineHost {
     goalContext?: import('./prompts').TaskContract['goalContext'],
     interactionMode?: 'act' | 'plan',
     fastMode?: boolean,
+    inputAlreadyPersisted = false,
+    imageInputMode: ImageInputMode = 'reject',
+    intentAbort?: AbortController,
+    regenerationBranch?: RegenerationBranchReservation,
+    responseMessageId?: string,
   ): Promise<void> {
+    if (!intentAbort) throw new Error('Session execution is missing its abort controller');
+    const handle = this.requireRunHandle(sessionId);
     this.processCompletionCoordinator.resumeSession(sessionId);
-    const session = await this.sessions?.get(sessionId);
-    this.assertSessionRunActive(sessionId);
+    const session = await this.getActiveSession(sessionId);
+    if (this.sessions && !session) {
+      throw new Error('Recover this archived chat before starting new work.');
+    }
+    this.assertRunHandleActive(handle);
     interactionMode = interactionMode ?? session?.interactionMode ?? 'act';
     this.isProcessing = true;
     this.startHeartbeat(sessionId);
+    this.setHeartbeatPhase(sessionId, 'analyzing');
+    this.emitWSMessage(sessionId, 'agent.status', {
+      agentId: KORY_IDENTITY.id,
+      status: 'analyzing',
+      detail: 'Preparing the request',
+    });
     this.state.clearChanges(sessionId);
     userMessage = sanitizeForPrompt(userMessage);
 
     const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
-    this.assertSessionRunActive(sessionId);
+    this.assertRunHandleActive(handle);
     const workflowSettings = loadAgentSettings(sessionRoot);
     const remembered = workflowSettings.agentCanUpdatePreferences
       ? rememberExplicitPreference(sessionRoot, userMessage)
@@ -1194,7 +2608,7 @@ export class KoryManager implements WorkerPipelineHost {
         break;
       decisions.push(`${question.question} ${answer}`);
     }
-    this.assertSessionRunActive(sessionId);
+    this.assertRunHandleActive(handle);
     if (decisions.length > 0) {
       userMessage += `\n\nResolved intent decisions:\n- ${decisions.join('\n- ')}`;
     }
@@ -1205,7 +2619,7 @@ export class KoryManager implements WorkerPipelineHost {
       userMessage,
       configuredCollisionChoices,
     );
-    this.assertSessionRunActive(sessionId);
+    this.assertRunHandleActive(handle);
 
     // Resolve provider before any UI updates or work. No provider = manager responds once and returns.
     let routing = this.resolveActiveRouting(
@@ -1224,7 +2638,7 @@ export class KoryManager implements WorkerPipelineHost {
         provider = this.providers.resolveProvider(routing.model, routing.provider);
       }
     }
-    this.assertSessionRunActive(sessionId);
+    this.assertRunHandleActive(handle);
     if (!provider) {
       await this.updateWorkflowState(sessionId, 'idle');
       this.emitError(sessionId, this.getModelConfigurationError(preferredModel));
@@ -1233,6 +2647,7 @@ export class KoryManager implements WorkerPipelineHost {
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
       this.processCompletionCoordinator.notifySessionIdle(sessionId);
+      await this.runLifecycle.finish(handle, 'fail', 'provider_unavailable');
       return;
     }
     this.managerRoutingBySession.set(sessionId, {
@@ -1261,6 +2676,7 @@ export class KoryManager implements WorkerPipelineHost {
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
       this.processCompletionCoordinator.notifySessionIdle(sessionId);
+      await this.runLifecycle.finish(handle, 'fail', 'spend_policy_blocked');
       return;
     }
 
@@ -1276,15 +2692,14 @@ export class KoryManager implements WorkerPipelineHost {
     if (collaborationToolPolicy) setCollaborationToolPolicy(sessionId, collaborationToolPolicy);
     try {
       koryLog.debug({ sessionId }, 'Calling handleDirectly');
-      this.emitThought(sessionId, 'analyzing', `Analyzing request...`);
+      this.emitThought(sessionId, 'analyzing', `Preparing provider request...`);
 
       // Global timeout: abort the task if it runs too long (prevents indefinite hangs)
       const TIMEOUT_MIN = AGENT.PROCESS_TASK_TIMEOUT_MS / 60_000;
       const processTimeout = setTimeout(() => {
         // Abort any active LLM stream
-        const abort = this.managerAbortBySession.get(sessionId);
-        if (abort) {
-          abort.abort(
+        if (!intentAbort.signal.aborted) {
+          intentAbort.abort(
             new DOMException(`Process task timed out after ${TIMEOUT_MIN} minutes`, 'TimeoutError'),
           );
         }
@@ -1302,6 +2717,10 @@ export class KoryManager implements WorkerPipelineHost {
           responseVariant,
           interactionMode,
           fastMode,
+          inputAlreadyPersisted,
+          imageInputMode,
+          regenerationBranch,
+          responseMessageId,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -1311,7 +2730,7 @@ export class KoryManager implements WorkerPipelineHost {
 
       await this.updateWorkflowState(sessionId, 'idle');
       const changes = this.state.getChanges(sessionId);
-      if (changes.length > 0) this.emitWSMessage(sessionId, 'session.changes', { changes });
+      if (changes.length > 0) await this.publishPendingSessionReview(sessionId, changes);
     } catch (err) {
       const errDetail =
         err instanceof Error
@@ -1321,6 +2740,11 @@ export class KoryManager implements WorkerPipelineHost {
       // Stop the heartbeat before emitting the error — the run is over.
       this.stopHeartbeat(sessionId);
       await this.updateWorkflowState(sessionId, 'error');
+      await this.runLifecycle.finish(
+        handle,
+        'fail',
+        err instanceof Error ? err.message : String(err),
+      );
       this.emitError(sessionId, err instanceof Error ? err.message : String(err));
     } finally {
       if (collaborationToolPolicy) clearCollaborationToolPolicy(sessionId);
@@ -1494,58 +2918,74 @@ export class KoryManager implements WorkerPipelineHost {
     reasoningLevel?: string,
     domainHint?: string,
   ): Promise<string> {
-    const before = await this.events.runWorkflowHooks('before-delegate', sessionId, {
-      task,
-      preferredModel: preferredModel ?? null,
-      domainHint: domainHint ?? null,
-    });
-    if (before.decision === 'deny') {
-      return `Delegation denied by workflow hook: ${before.reason ?? 'no reason supplied'}`;
-    }
-    const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
-    const managerRouting = this.resolveActiveRouting(
-      preferredModel,
-      'general',
-      true,
-      task,
-      undefined,
-      sessionRoot,
-    );
-    const workerDomain =
-      domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
-        ? (domainHint as WorkerDomain)
-        : 'general';
-    const workerRouting = this.resolveIndependentRouting(
-      managerRouting.model,
-      managerRouting.provider,
-      workerDomain,
-      [],
-      task,
-      'worker',
-      sessionRoot,
-    );
-    const selectedWorkerRouting = workerRouting ?? managerRouting;
-    if (!workerRouting) {
-      this.emitThought(
-        sessionId,
-        'delegating',
-        `The user-enabled ${workerDomain} pool has only the manager model; reusing ${managerRouting.provider ?? 'unknown'}:${managerRouting.model} for the subagent.`,
+    const managerOwnsLifecycle = this.hasActiveSessionExecution(sessionId);
+    const lifecycleLease = managerOwnsLifecycle
+      ? null
+      : this.tryAcquireSessionMutationBarrier(sessionId);
+    if (!managerOwnsLifecycle && !lifecycleLease) {
+      throw new ConflictError(
+        'Wait for chat lifecycle work to finish before delegating new worker work.',
       );
     }
-    const workerChoice = selectedWorkerRouting.provider
-      ? `${selectedWorkerRouting.provider}:${selectedWorkerRouting.model}`
-      : selectedWorkerRouting.model;
-    const result = await this.workerPipeline.runWorkerPipeline(
-      sessionId,
-      task,
-      workerChoice,
-      reasoningLevel,
-      domainHint,
-    );
-    const after = await this.events.runWorkflowHooks('after-worker', sessionId, { task, result });
-    return after.decision === 'deny'
-      ? `Worker result rejected by workflow hook: ${after.reason ?? 'no reason supplied'}`
-      : result;
+    try {
+      if (this.sessions && !(await this.getActiveSession(sessionId))) {
+        throw new ConflictError('Recover this archived chat before delegating new worker work.');
+      }
+      const before = await this.events.runWorkflowHooks('before-delegate', sessionId, {
+        task,
+        preferredModel: preferredModel ?? null,
+        domainHint: domainHint ?? null,
+      });
+      if (before.decision === 'deny') {
+        return `Delegation denied by workflow hook: ${before.reason ?? 'no reason supplied'}`;
+      }
+      const sessionRoot = await this.resolveSessionWorkingDirectory(sessionId);
+      const managerRouting = this.resolveActiveRouting(
+        preferredModel,
+        'general',
+        true,
+        task,
+        undefined,
+        sessionRoot,
+      );
+      const workerDomain =
+        domainHint && ['general', 'ui', 'backend', 'test', 'review'].includes(domainHint)
+          ? (domainHint as WorkerDomain)
+          : 'general';
+      const workerRouting = this.resolveIndependentRouting(
+        managerRouting.model,
+        managerRouting.provider,
+        workerDomain,
+        [],
+        task,
+        'worker',
+        sessionRoot,
+      );
+      const selectedWorkerRouting = workerRouting ?? managerRouting;
+      if (!workerRouting) {
+        this.emitThought(
+          sessionId,
+          'delegating',
+          `The user-enabled ${workerDomain} pool has only the manager model; reusing ${managerRouting.provider ?? 'unknown'}:${managerRouting.model} for the subagent.`,
+        );
+      }
+      const workerChoice = selectedWorkerRouting.provider
+        ? `${selectedWorkerRouting.provider}:${selectedWorkerRouting.model}`
+        : selectedWorkerRouting.model;
+      const result = await this.workerPipeline.runWorkerPipeline(
+        sessionId,
+        task,
+        workerChoice,
+        reasoningLevel,
+        domainHint,
+      );
+      const after = await this.events.runWorkflowHooks('after-worker', sessionId, { task, result });
+      return after.decision === 'deny'
+        ? `Worker result rejected by workflow hook: ${after.reason ?? 'no reason supplied'}`
+        : result;
+    } finally {
+      lifecycleLease?.release();
+    }
   }
 
   /** Whether Jules can run through Kory's enforced approval boundary. */
@@ -1577,7 +3017,7 @@ export class KoryManager implements WorkerPipelineHost {
     const controller = new AbortController();
     this.titleGenerationBySession.set(sessionId, controller);
     try {
-      const session = await this.sessions.get(sessionId);
+      const session = await this.getActiveSession(sessionId);
       if (!session || controller.signal.aborted || this.erasedSessions.has(sessionId)) return;
       // Only rename sessions that are still on the default title — user-renamed
       // sessions are sacred.
@@ -1826,7 +3266,6 @@ export class KoryManager implements WorkerPipelineHost {
       domain: 'critic',
       glowColor: DOMAIN.GLOW_COLORS.critic,
     };
-    this.events.emitAgentSpawned(sessionId, identity, 'Review delegated work');
     const criticAbort = new AbortController();
     let criticSessionWd: string;
     try {
@@ -1877,6 +3316,7 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt: criticSystemPrompt,
       promptManifestHash: criticCompilation.manifest.hash,
       taskContractHash: criticCompilation.manifest.taskContractHash,
+      promptCache: criticCompilation.promptCache,
       toolRole: 'critic',
       maxTurns: 5,
       maxTokens: CRITIC_OUTPUT_TOKEN_LIMIT,
@@ -1888,6 +3328,22 @@ export class KoryManager implements WorkerPipelineHost {
       updatedAt: Date.now(),
     };
     this.agentThreads.set(criticId, thread);
+    try {
+      // Persist membership before the first visible critic event. A restart
+      // after agent.spawned must have enough durable identity to close this
+      // exact card rather than replaying it as permanently thinking.
+      await this.recordAgentThreadRunMembership(thread, true);
+    } catch (error) {
+      this.agentThreads.delete(criticId);
+      rmSync(criticSessionWd, { recursive: true, force: true });
+      return {
+        passed: false,
+        feedback: `Could not durably start the critic: ${error instanceof Error ? error.message : String(error)}`,
+        model: criticRouting.model,
+        provider: provider.name,
+      };
+    }
+    this.events.emitAgentSpawned(sessionId, identity, 'Review delegated work');
     this.appendAgentThreadEntry(thread, 'manager', criticPrompt);
 
     try {
@@ -2063,7 +3519,12 @@ export class KoryManager implements WorkerPipelineHost {
     responseVariant?: { groupId: string; index: number },
     interactionMode: 'act' | 'plan' = 'act',
     fastMode?: boolean,
+    inputAlreadyPersisted = false,
+    imageInputMode: ImageInputMode = 'reject',
+    regenerationBranch?: RegenerationBranchReservation,
+    responseMessageId?: string,
   ): Promise<void> {
+    const handle = this.requireRunHandle(sessionId);
     koryLog.debug(
       { sessionId, reasoningLevel, preferredModel, fastMode },
       'Entering handleDirectly',
@@ -2109,6 +3570,7 @@ export class KoryManager implements WorkerPipelineHost {
           spendGate.reason ?? 'A configured spend limit blocked this request.',
         );
         this.stopHeartbeat(sessionId);
+        await this.runLifecycle.finish(handle, 'fail', 'spend_policy_blocked');
         return;
       }
       this.managerRoutingBySession.set(sessionId, {
@@ -2119,17 +3581,21 @@ export class KoryManager implements WorkerPipelineHost {
 
     const abort = this.managerAbortBySession.get(sessionId) ?? new AbortController();
     this.managerAbortBySession.set(sessionId, abort);
-    this.assertSessionRunActive(sessionId);
+    this.assertRunHandleActive(handle);
 
     try {
       this.emitWSMessage(sessionId, 'agent.status', {
         agentId: KORY_IDENTITY.id,
-        status: 'thinking',
+        status: 'analyzing',
+        detail: 'Preparing the provider request',
       });
-      this.setHeartbeatPhase(sessionId, 'thinking');
+      this.setHeartbeatPhase(sessionId, 'analyzing');
       let tokensIn = 0;
       let tokensOut = 0;
       let usageKnown = false;
+      let cachedInputTokens: number | undefined;
+      let cacheWriteInputTokens: number | undefined;
+      let usageBreakdown: ContextBreakdown | undefined;
       this.emitUsageUpdate(
         sessionId,
         KORY_IDENTITY.id,
@@ -2140,11 +3606,12 @@ export class KoryManager implements WorkerPipelineHost {
         usageKnown,
       );
 
-      const directSettings = loadAgentSettings(directWorkingDirectory);
       const directGit = new GitManager(directWorkingDirectory);
-      const directNaturalSandboxed = interactionMode === 'plan';
+      const directNaturalSandboxed = interactionMode === 'plan' || regenerationBranch !== undefined;
+      const permissionInteractionMode = regenerationBranch ? 'plan' : interactionMode;
       const managerCtx: ToolContext = {
         sessionId,
+        agentId: KORY_IDENTITY.id,
         activeProvider: providerName,
         activeModel: routing.model,
         reasoningLevel,
@@ -2152,9 +3619,6 @@ export class KoryManager implements WorkerPipelineHost {
         goalItemId: this.goalContextBySession.get(sessionId)?.itemId,
         workingDirectory: directWorkingDirectory,
         allowedPaths: [],
-        isSandboxed: directNaturalSandboxed,
-        sandboxOptions: resolveSandboxOptions(directSettings, directNaturalSandboxed),
-        permissionPolicy: resolveToolPermissionPolicy(directSettings, interactionMode),
         approvedToolCallIds: new Set(),
         signal: abort.signal,
         waitForUserInput: (
@@ -2181,9 +3645,41 @@ export class KoryManager implements WorkerPipelineHost {
             domainHint,
           ),
         delegateToJules: (task: string, opts) => this.runJulesDelegation(sessionId, task, opts),
-      };
+      } as ToolContext;
+      Object.defineProperties(managerCtx, {
+        permissionPolicy: {
+          get() {
+            return resolveToolPermissionPolicy(
+              loadAgentSettings(directWorkingDirectory),
+              permissionInteractionMode,
+            );
+          },
+          enumerable: true,
+          configurable: true,
+        },
+        sandboxOptions: {
+          get() {
+            return resolveSandboxOptions(
+              loadAgentSettings(directWorkingDirectory),
+              directNaturalSandboxed,
+            );
+          },
+          enumerable: true,
+          configurable: true,
+        },
+        isSandboxed: {
+          get() {
+            return resolveSandboxOptions(
+              loadAgentSettings(directWorkingDirectory),
+              directNaturalSandboxed,
+            ).isSandboxed;
+          },
+          enumerable: true,
+          configurable: true,
+        },
+      });
 
-      const history = await this.loadHistory(sessionId);
+      const history = await this.loadHistory(sessionId, regenerationBranch?.promptMessageId);
       koryLog.debug({ historyCount: history.length }, 'Loaded history');
 
       let finalContent: string | import('../providers/types').ProviderContentBlock[] = userMessage;
@@ -2208,15 +3704,33 @@ export class KoryManager implements WorkerPipelineHost {
         }
       }
 
-      const messages: InternalMessage[] = [...history, { role: 'user', content: finalContent }];
+      // `/api/messages` persists the user's row before handing it to the
+      // manager, so `history` already contains its text and attachments. Do
+      // not append it a second time: that doubled every current prompt and
+      // would hand a repaired native image transport the same screenshot twice.
+      // Internal/goal/collaboration callers that have not persisted a user row
+      // retain the historical append behavior.
+      let messages: InternalMessage[] = inputAlreadyPersisted
+        ? history
+        : [...history, { role: 'user', content: finalContent }];
+      if (imageInputMode === 'omit') messages = omitImageInputs(messages);
+      const attachmentError = imageAttachmentAdmissionError(provider, routing.model, messages);
+      if (attachmentError) throw new Error(attachmentError);
       let turnCount = 0;
       let stoppedByUser = false;
+      const observeCancellation = (): boolean => {
+        if (abort.signal.aborted) stoppedByUser = true;
+        return stoppedByUser;
+      };
       // Track whether the run produced anything user-visible — so an empty LLM response
       // surfaces a clear message instead of a silent "weird stop".
       let streamedAnyContent = false;
       let observedNativeTool = false;
       let delegatedWorkerCount = 0;
       let multiModeRetryIssued = false;
+      const providerConversationRevision = regenerationBranch
+        ? regenerationBranch.expectedProviderConversationRevision
+        : await getCliConversationRevision(sessionId);
 
       while (turnCount < 25) {
         if (abort.signal.aborted) {
@@ -2241,6 +3755,8 @@ export class KoryManager implements WorkerPipelineHost {
             reasoningLevel,
             interactionMode,
             fastMode,
+            providerConversationRevision,
+            regenerationBranch !== undefined,
           );
           koryLog.debug(
             {
@@ -2262,10 +3778,23 @@ export class KoryManager implements WorkerPipelineHost {
           }
           throw err;
         }
-        if (typeof result.usage?.tokensIn === 'number')
-          tokensIn = Math.max(tokensIn, result.usage.tokensIn);
-        if (typeof result.usage?.tokensOut === 'number')
-          tokensOut = Math.max(tokensOut, result.usage.tokensOut);
+        // Only the most recent provider turn can describe the completed
+        // context exactly. If it omits usage, fail closed instead of carrying
+        // an earlier tool-loop turn's occupancy onto the final boundary.
+        usageKnown = result.usage?.usageKnown === true;
+        if (usageKnown && result.usage) {
+          tokensIn = result.usage.tokensIn;
+          tokensOut = result.usage.tokensOut;
+          cachedInputTokens = result.usage.cachedInputTokens;
+          cacheWriteInputTokens = result.usage.cacheWriteInputTokens;
+          usageBreakdown = result.usage.breakdown;
+        } else {
+          tokensIn = 0;
+          tokensOut = 0;
+          cachedInputTokens = undefined;
+          cacheWriteInputTokens = undefined;
+          usageBreakdown = undefined;
+        }
         if (result.content && result.content.trim()) streamedAnyContent = true;
         observedNativeTool ||= result.observedNativeTool === true;
 
@@ -2374,13 +3903,13 @@ export class KoryManager implements WorkerPipelineHost {
             const visionMsg = this.buildViewImageMessage(toolResult);
             if (visionMsg) messages.push(visionMsg);
           }
-          if (abort.signal.aborted) stoppedByUser = true;
+          observeCancellation();
         }
       }
 
       // A stop that lands between turns (or breaks out of the stream loop)
       // must still be reported as user-stopped, not a normal completion.
-      if (abort.signal.aborted) stoppedByUser = true;
+      observeCancellation();
 
       // Direct manager edits must pass the same gate as delegated work. This
       // happens before the final response is persisted so a model's optimistic
@@ -2441,12 +3970,18 @@ export class KoryManager implements WorkerPipelineHost {
         }
       }
 
+      // Criticism, hooks, persistence, and checkpointing are all asynchronous.
+      // Cancellation must be sampled again after every such phase; the value
+      // observed when the provider loop ended is not a commit decision.
+      observeCancellation();
+
       const beforeComplete = await this.events.runWorkflowHooks('before-complete', sessionId, {
         stoppedByUser,
         changedFiles: directChanges.map((change) => change.path),
         lastAssistant:
           messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '',
       });
+      observeCancellation();
       if (!stoppedByUser && beforeComplete.decision === 'deny') {
         messages.push({
           role: 'assistant',
@@ -2499,14 +4034,17 @@ export class KoryManager implements WorkerPipelineHost {
       );
       let finalMessageId: string | undefined;
       if (this.messages && toPersist) {
-        finalMessageId = nanoid(12);
+        finalMessageId = responseMessageId ?? nanoid(12);
         // Persist the provider-reported token usage and computed cost with the
         // assistant message so the session counters (messageCount / totalCost)
         // reflect real spend — not just in the demo.
         const assistantCost = usageKnown
-          ? (computeCostUsd(providerName, routing.model, tokensIn, tokensOut)?.costUsd ?? 0)
+          ? (computeCostUsd(providerName, routing.model, tokensIn, tokensOut, {
+              cacheReadTokens: cachedInputTokens,
+              cacheWriteTokens: cacheWriteInputTokens,
+            })?.costUsd ?? 0)
           : 0;
-        await this.messages.add(sessionId, {
+        const persistedAssistant = {
           id: finalMessageId,
           sessionId,
           role: 'assistant',
@@ -2519,10 +4057,31 @@ export class KoryManager implements WorkerPipelineHost {
           tokensOut: usageKnown ? tokensOut : 0,
           cost: assistantCost,
           createdAt: Date.now(),
-        });
+        } as const;
+        if (regenerationBranch) {
+          await this.messages.commitRegeneratedResponse(regenerationBranch, persistedAssistant);
+        } else if (responseMessageId) {
+          await this.messages.addIdempotent(sessionId, persistedAssistant);
+        } else {
+          await this.messages.add(sessionId, persistedAssistant);
+        }
         koryLog.debug('Assistant message persisted');
+        observeCancellation();
+        if (usageKnown && !stoppedByUser) {
+          await this.persistCompletedManagerUsage(
+            sessionId,
+            finalMessageId,
+            routing.model,
+            providerName,
+            tokensIn,
+            tokensOut,
+            usageBreakdown,
+            cachedInputTokens,
+          );
+        }
       }
-      if (interactionMode === 'plan') {
+      observeCancellation();
+      if (interactionMode === 'plan' && !stoppedByUser) {
         try {
           const noteId = await syncPlanNote(
             sessionId,
@@ -2535,36 +4094,22 @@ export class KoryManager implements WorkerPipelineHost {
           koryLog.warn({ err, sessionId }, 'Failed to synchronize durable Plan note');
         }
       }
-      if (this.messages && stoppedByUser) {
-        await this.messages.add(sessionId, {
-          id: nanoid(12),
-          sessionId,
-          role: 'system',
-          content: 'Stopped by user.',
-          model: routing.model,
-          provider: providerName,
-          createdAt: Date.now(),
-        });
+      observeCancellation();
+      const hasActiveAgentProcess =
+        !stoppedByUser && processSupervisor.hasActiveAgentToolForSession(sessionId);
+      const activeProcessIds = hasActiveAgentProcess
+        ? (await processSupervisor.getAgentBackgroundProcessesBySession(sessionId))
+            .filter((process) => process.status === 'starting' || process.status === 'running')
+            .map((process) => process.id)
+        : [];
+      observeCancellation();
+      if (!stoppedByUser && hasActiveAgentProcess && activeProcessIds.length === 0) {
+        throw new Error('Active background process has no durable continuation identity');
       }
-      const terminalStatus = processSupervisor.hasActiveAgentToolForSession(sessionId)
-        ? 'waiting'
-        : 'done';
-      // Stop the heartbeat BEFORE emitting the terminal event. If we stop
-      // it after (in the finally block), the await in createRewindCheckpoint
-      // creates a window where a heartbeat can fire and arrive at the client
-      // after agent.status: done — resurrecting the session to streaming.
-      // For 'waiting' (background terminals), keep the heartbeat alive: the
-      // run is parked, not over, and the exit event will wake it back up.
-      if (terminalStatus === 'done') {
-        this.stopHeartbeat(sessionId);
-      }
-      this.emitWSMessage(sessionId, 'agent.status', {
-        agentId: KORY_IDENTITY.id,
-        status: terminalStatus,
-      });
-      this.setHeartbeatPhase(sessionId, terminalStatus);
-
-      // Create rewind point after every turn end — even if no final message
+      // Create the rewind point before publishing the authoritative terminal
+      // transition. A terminal SessionRun is a commit fence: clients may reload
+      // immediately after seeing it, so no turn-owned durable projection may be
+      // intentionally written afterward.
       // was produced (e.g. tool-only turns, aborted turns with changes).
       // Skip only when there's no message AND no changes (nothing to checkpoint).
       const turnChanges = this.state.getChanges(sessionId);
@@ -2581,22 +4126,68 @@ export class KoryManager implements WorkerPipelineHost {
         );
       }
 
+      observeCancellation();
+      if (this.messages && stoppedByUser && (!regenerationBranch || finalMessageId)) {
+        try {
+          await this.messages.add(sessionId, {
+            id: nanoid(12),
+            sessionId,
+            role: 'system',
+            content: 'Stopped by user.',
+            model: routing.model,
+            provider: providerName,
+            createdAt: Date.now(),
+          });
+        } catch (error) {
+          // The authoritative cancellation must not be downgraded to a failed
+          // run because its explanatory projection could not be appended.
+          koryLog.warn({ error, sessionId }, 'Failed to persist user-stop marker');
+        }
+      }
+
       const changes = this.state.getChanges(sessionId);
       if (changes.length > 0) {
-        this.emitWSMessage(sessionId, 'session.changes', { changes });
+        await this.publishPendingSessionReview(sessionId, changes);
       }
+
+      // This check and the following lifecycle call form the commit fence. No
+      // await may be inserted between them: cancellation observed before the
+      // fence wins; cancellation after finish starts loses to completion.
+      const cancelledAtCommit = observeCancellation();
+      const terminalStatus =
+        cancelledAtCommit || activeProcessIds.length === 0 ? 'done' : 'waiting';
+      if (cancelledAtCommit) {
+        await this.runLifecycle.finish(handle, 'cancel', 'cancelled_by_user');
+      } else if (terminalStatus === 'waiting') {
+        await this.runLifecycle.waitForProcesses(handle, activeProcessIds);
+      } else {
+        await this.runLifecycle.finish(handle, 'complete', 'provider_turn_completed');
+      }
+      // Stop the heartbeat BEFORE emitting the terminal event. For 'waiting'
+      // keep it alive: the run is parked, not over, and process completion will
+      // wake the same durable continuation.
+      if (terminalStatus === 'done') {
+        this.stopHeartbeat(sessionId);
+      }
+      this.emitWSMessage(sessionId, 'agent.status', {
+        agentId: KORY_IDENTITY.id,
+        status: terminalStatus,
+      });
+      this.setHeartbeatPhase(sessionId, terminalStatus);
 
       // Auto-compaction is intentionally post-turn: never replace context while
       // the manager or its tools are still using it. Only a provider-reported
       // input count and a trusted model window can trigger it.
       const autoSettings = loadAgentSettings(managerCtx.workingDirectory);
       const trustedWindow = resolveTrustedContextWindow(routing.model, providerName);
+      const thresholdPercent = Math.max(10, Math.min(99, autoSettings.autoCompactThreshold ?? 80));
       if (
+        !stoppedByUser &&
         autoSettings.autoCompactEnabled !== false &&
         tokensIn > 0 &&
         trustedWindow.contextKnown &&
         trustedWindow.contextWindow &&
-        tokensIn / trustedWindow.contextWindow >= 0.8
+        tokensIn / trustedWindow.contextWindow >= thresholdPercent / 100
       ) {
         const selectedModel = `${providerName}:${routing.model}`;
         setTimeout(() => {
@@ -2700,7 +4291,10 @@ export class KoryManager implements WorkerPipelineHost {
     reasoningLevel?: string,
     interactionMode: 'act' | 'plan' = 'act',
     fastMode?: boolean,
+    providerConversationRevision?: number,
+    forceFreshConversation = false,
   ): Promise<LLMTurnResult> {
+    const handle = this.requireRunHandle(sessionId);
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
     // Load agent settings to apply experimental overrides
@@ -2806,7 +4400,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (settings.localWebSearch === 'off') {
       tools = tools.filter((t) => t.name !== 'web_search');
     }
-    if (interactionMode === 'plan') {
+    if (interactionMode === 'plan' || forceFreshConversation) {
       const allowed = new Set([
         'read_file',
         'grep',
@@ -2822,13 +4416,16 @@ export class KoryManager implements WorkerPipelineHost {
         'list_notes',
         'get_note_backlinks',
         'get_note_graph_summary',
+        'get_note_properties',
+        'query_note_base',
         'render_note',
         'fetch_context',
         'load_skill_detail',
       ]);
       tools = tools.filter((tool) => allowed.has(tool.name));
-      systemPrompt +=
-        '\n\nPLAN MODE IS ENFORCED BY THE HOST. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write arbitrary Notes. Koryphaios synchronizes the dedicated Plan note after each turn.';
+      systemPrompt += forceFreshConversation
+        ? '\n\nRESPONSE-ONLY REGENERATION IS ENFORCED BY THE HOST. Produce another answer from retained evidence. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write Notes. If current workspace inspection would be required, say so instead of changing anything.'
+        : '\n\nPLAN MODE IS ENFORCED BY THE HOST. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write arbitrary Notes. Koryphaios synchronizes the dedicated Plan note after each turn.';
     }
 
     if (!this.isJulesAvailable()) {
@@ -2875,7 +4472,7 @@ export class KoryManager implements WorkerPipelineHost {
     // Koryphaios tool schemas are never sent to them, so counting our defs as
     // "Tools" misattributes the CLI's harness overhead. Their real overhead
     // shows up as the gap between this estimate and provider-reported usage
-    // (rendered as "Provider harness" in the context bar).
+    // (rendered neutrally as "Provider remainder" in the context bar).
     const NATIVE_TOOL_PROVIDERS = new Set(['claude', 'codex', 'grok', 'antigravity']);
     // Chat = user + assistant text only. Tools = tool definitions + all tool
     // calls/results in the history. Keep them strictly separate in the bar.
@@ -2954,7 +4551,10 @@ export class KoryManager implements WorkerPipelineHost {
           )
         : reasoningLevel;
     const normalizedReasoning = normalizeReasoningLevel(provider.name, modelId, resolvedReasoning);
-    const permissionPolicy = resolveToolPermissionPolicy(settings, interactionMode);
+    const permissionPolicy = resolveToolPermissionPolicy(
+      settings,
+      forceFreshConversation ? 'plan' : interactionMode,
+    );
 
     const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
@@ -2970,10 +4570,13 @@ export class KoryManager implements WorkerPipelineHost {
         // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
         workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
         sessionId,
+        providerConversationRevision,
+        ...(forceFreshConversation && { forceFreshConversation: true }),
         harnessRole: 'manager',
         permissionMode: permissionPolicy.mode as AgentSettings['permissionMode'],
         promptManifestHash: managerCompilation.manifest.hash,
         taskContractHash: managerCompilation.manifest.taskContractHash,
+        promptCache: managerCompilation.promptCache,
         sandbox: SANDBOX_PRESETS.readonly,
       },
       provider.name,
@@ -2986,6 +4589,9 @@ export class KoryManager implements WorkerPipelineHost {
     let observedNativeTool = false;
     let tokensIn = 0;
     let tokensOut = 0;
+    let cachedInputTokens = 0;
+    let cacheWriteInputTokens = 0;
+    let usageKnown = false;
 
     try {
       for await (const event of stream) {
@@ -3002,6 +4608,7 @@ export class KoryManager implements WorkerPipelineHost {
           // Stream live, token-by-token — so the user sees text appear immediately (no
           // "thinks then dumps" pause) and partial output survives a mid-stream error.
           if (delta) {
+            await this.runLifecycle.phase(handle, 'streaming', 'provider_content');
             this.setHeartbeatPhase(sessionId, 'streaming');
             this.emitWSMessage(sessionId, 'stream.delta', {
               agentId: KORY_IDENTITY.id,
@@ -3011,6 +4618,13 @@ export class KoryManager implements WorkerPipelineHost {
           }
         } else if (event.type === 'thinking_delta') {
           if (event.thinking || typeof event.thinkingTokens === 'number') {
+            await this.runLifecycle.phase(handle, 'thinking', 'provider_reasoning');
+            this.setHeartbeatPhase(sessionId, 'thinking');
+            this.emitWSMessage(sessionId, 'agent.status', {
+              agentId: KORY_IDENTITY.id,
+              status: 'thinking',
+              detail: 'Provider reported reasoning activity',
+            });
             this.emitWSMessage(sessionId, 'stream.thinking', {
               agentId: KORY_IDENTITY.id,
               thinking: event.thinking ?? '',
@@ -3040,6 +4654,7 @@ export class KoryManager implements WorkerPipelineHost {
           }
         } else if (event.type === 'tool_executed') {
           observedNativeTool = true;
+          await this.runLifecycle.phase(handle, 'tool_calling', 'provider_tool');
           // Agentic provider already ran a non-file tool — surface it in the tool feed.
           const callId = `agent-${nanoid(8)}`;
           // CLI-native background command (Claude Code's Bash run_in_background):
@@ -3087,6 +4702,7 @@ export class KoryManager implements WorkerPipelineHost {
             'tool_result',
             `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
             event.toolOutput ?? '',
+            event.isError === true,
           );
           this.emitWSMessage(sessionId, 'stream.tool_call', {
             agentId: KORY_IDENTITY.id,
@@ -3116,6 +4732,13 @@ export class KoryManager implements WorkerPipelineHost {
           if (typeof event.tokensIn === 'number')
             tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
           if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
+          if (typeof event.tokensCacheRead === 'number') {
+            cachedInputTokens = Math.max(cachedInputTokens, event.tokensCacheRead);
+          }
+          if (typeof event.tokensCacheWrite === 'number') {
+            cacheWriteInputTokens = Math.max(cacheWriteInputTokens, event.tokensCacheWrite);
+          }
+          usageKnown = true;
           this.emitUsageUpdate(
             sessionId,
             KORY_IDENTITY.id,
@@ -3125,9 +4748,11 @@ export class KoryManager implements WorkerPipelineHost {
             tokensOut,
             true,
             contextBreakdown,
+            cachedInputTokens,
           );
         } else if (event.type === 'tool_use_start') {
           hasToolCalls = true;
+          await this.runLifecycle.phase(handle, 'tool_calling', 'tool_requested');
           pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
           this.setHeartbeatPhase(sessionId, 'tool_calling');
           this.emitWSMessage(sessionId, 'stream.tool_call', {
@@ -3178,7 +4803,14 @@ export class KoryManager implements WorkerPipelineHost {
       return {
         success: true,
         content: assistantContent,
-        usage: { tokensIn, tokensOut },
+        usage: {
+          tokensIn,
+          tokensOut,
+          usageKnown,
+          ...(usageKnown
+            ? { cachedInputTokens, cacheWriteInputTokens, breakdown: contextBreakdown }
+            : {}),
+        },
         completedToolCalls,
         observedNativeTool,
       };
@@ -3186,7 +4818,14 @@ export class KoryManager implements WorkerPipelineHost {
     return {
       success: assistantContent.length > 0,
       content: assistantContent,
-      usage: { tokensIn, tokensOut },
+      usage: {
+        tokensIn,
+        tokensOut,
+        usageKnown,
+        ...(usageKnown
+          ? { cachedInputTokens, cacheWriteInputTokens, breakdown: contextBreakdown }
+          : {}),
+      },
       observedNativeTool,
     };
   }
@@ -3337,6 +4976,7 @@ export class KoryManager implements WorkerPipelineHost {
         tc.name === 'bash' || tc.name === 'shell_manage' ? 'terminal' : 'tool_result',
         `${tc.name} ${inputSummary}`,
         toolResult.output ?? '',
+        toolResult.isError,
       );
     } catch (err: unknown) {
       serverLog.debug(
@@ -3481,19 +5121,9 @@ export class KoryManager implements WorkerPipelineHost {
       domain,
       glowColor: DOMAIN.GLOW_COLORS[domain],
     };
-    this.events.emitAgentSpawned(sessionId, identity, userMessage);
     let tokensIn = 0;
     let tokensOut = 0;
     let usageKnown = false;
-    this.emitUsageUpdate(
-      sessionId,
-      workerId,
-      modelId,
-      provider.name,
-      tokensIn,
-      tokensOut,
-      usageKnown,
-    );
     this.workers.registerWorker(
       workerId,
       identity,
@@ -3509,12 +5139,21 @@ export class KoryManager implements WorkerPipelineHost {
       sessionId,
     );
 
+    const goalContext = this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext;
+    const resolvedReasoningLevel =
+      reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
     const ctx: ToolContext = {
       sessionId,
+      agentId: workerId,
+      activeProvider: provider.name,
+      activeModel: modelId,
+      reasoningLevel: resolvedReasoningLevel,
+      goalId: goalContext?.goalId,
+      goalItemId: goalContext?.itemId,
       workingDirectory: workerWorkingDirectory,
       signal: abort.signal,
       allowedPaths,
-      isSandboxed,
+      approvedToolCallIds: new Set(),
       emitFileEdit: (e) =>
         this.emitWSMessage(sessionId, 'stream.file_delta', { agentId: workerId, ...e }),
       emitFileComplete: (e) =>
@@ -3522,22 +5161,36 @@ export class KoryManager implements WorkerPipelineHost {
       recordChange: (c) => this.state.recordChange(sessionId, c),
       waitForUserInput: (question, options, opts) =>
         this.waitForUserInputInternal(sessionId, question, options, opts),
-    };
+    } as ToolContext;
+    Object.defineProperties(ctx, {
+      permissionPolicy: {
+        get() {
+          const s = loadAgentSettings(workerWorkingDirectory);
+          return resolveSubAgentPermissionPolicy(s, s.subAgentApproval);
+        },
+        enumerable: true,
+        configurable: true,
+      },
+      sandboxOptions: {
+        get() {
+          const s = loadAgentSettings(workerWorkingDirectory);
+          return resolveSubAgentSandboxOptions(s, s.subAgentApproval, isSandboxed);
+        },
+        enumerable: true,
+        configurable: true,
+      },
+      isSandboxed: {
+        get() {
+          const s = loadAgentSettings(workerWorkingDirectory);
+          return resolveSubAgentSandboxOptions(s, s.subAgentApproval, isSandboxed).isSandboxed;
+        },
+        enumerable: true,
+        configurable: true,
+      },
+    });
     const history = await this.loadHistory(sessionId);
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
-    const resolvedReasoningLevel =
-      reasoningLevel === 'auto' ? determineAutoReasoningLevel(userMessage) : reasoningLevel;
     const workerSettings = loadAgentSettings(workerWorkingDirectory);
-    ctx.permissionPolicy = resolveSubAgentPermissionPolicy(
-      workerSettings,
-      workerSettings.subAgentApproval,
-    );
-    ctx.sandboxOptions = resolveSubAgentSandboxOptions(
-      workerSettings,
-      workerSettings.subAgentApproval,
-      isSandboxed,
-    );
-    ctx.approvedToolCallIds = new Set();
     let workerSupplementalContext = '';
     const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
     if (workerGuidance.preferences.trim()) {
@@ -3579,7 +5232,7 @@ export class KoryManager implements WorkerPipelineHost {
             scope: allowedPaths,
             constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
           })),
-        goalContext: this.goalContextBySession.get(sessionId) ?? taskContract?.goalContext,
+        goalContext,
       },
       contextPaths: this.config.contextPaths,
       skillSelection: {
@@ -3603,6 +5256,7 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt: workerSystemPrompt,
       promptManifestHash: workerCompilation.manifest.hash,
       taskContractHash: workerCompilation.manifest.taskContractHash,
+      promptCache: workerCompilation.promptCache,
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
@@ -3615,6 +5269,28 @@ export class KoryManager implements WorkerPipelineHost {
       updatedAt: Date.now(),
     };
     this.agentThreads.set(workerId, thread);
+    try {
+      // Do not expose a worker until its active identity is on the durable
+      // SessionRun. That gives restart recovery an exact terminal target.
+      await this.recordAgentThreadRunMembership(thread, true);
+    } catch (error) {
+      this.agentThreads.delete(workerId);
+      this.workers.removeWorker(workerId);
+      return {
+        success: false,
+        error: `Could not durably start worker: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    this.events.emitAgentSpawned(sessionId, identity, userMessage);
+    this.emitUsageUpdate(
+      sessionId,
+      workerId,
+      modelId,
+      provider.name,
+      tokensIn,
+      tokensOut,
+      usageKnown,
+    );
     this.appendAgentThreadEntry(thread, 'manager', userMessage);
 
     try {
@@ -3737,37 +5413,70 @@ export class KoryManager implements WorkerPipelineHost {
     const thread = this.agentThreads.get(agentId);
     if (thread?.abort && thread.busy) {
       thread.abort.abort();
-      thread.status = 'done';
-      thread.busy = false;
-      this.emitWSMessage(thread.sessionId, 'agent.status', { agentId, status: 'done' });
+      // The owner stack clears busy and emits its terminal state only after
+      // provider/tool work acknowledges the signal. Clearing it here allowed
+      // a second follow-up to overlap the still-running cancelled one.
     }
     this.workers.cancelWorker(agentId);
   }
 
-  /** Re-baseline the session's context bar for a model the user just picked:
-   *  emits (and persists) a usage snapshot with the new model's trusted
-   *  window and the session's last-known occupancy. Backend stays the single
-   *  source of truth — works for every provider and CLI. */
+  /** Read the authoritative context preview for a model the user just picked.
+   *  Exact occupancy is reusable only when the last provider report came from
+   *  this same route and exact conversation boundary. The caller applies the
+   *  response for its current picker generation; this method never emits or
+   *  persists preview state. */
   async previewModelContext(sessionId: string, modelId: string, providerName: ProviderName) {
-    const last = await getContextArchive()?.getLastUsage(sessionId);
+    const imageAttachmentCountPromise = this.messages?.countContextImageAttachments
+      ? this.messages.countContextImageAttachments(sessionId, 1000)
+      : (this.messages?.getContextMessages(sessionId, 1000) ?? Promise.resolve([])).then(
+          (contextMessages) =>
+            contextMessages.reduce(
+              (count, message) =>
+                count +
+                (message.role === 'user'
+                  ? (message.attachments?.filter((attachment) => attachment.type === 'image')
+                      .length ?? 0)
+                  : 0),
+              0,
+            ),
+        );
+    const [last, boundary, imageAttachmentCount] = await Promise.all([
+      getContextArchive()?.getLastUsage(sessionId),
+      this.messages?.getActiveBoundary(sessionId),
+      imageAttachmentCountPromise,
+    ]);
     const context = resolveTrustedContextWindow(modelId, providerName);
-    this.emitUsageUpdate(
-      sessionId,
-      KORY_IDENTITY.id,
-      modelId,
-      providerName,
-      last?.used ?? 0,
-      0,
-      true,
-      last?.breakdown,
-    );
+    // Provider-reported token counts are only authoritative for the exact
+    // routing identity and conversation boundary that produced them.
+    // Different providers may tokenize the same transcript differently, and
+    // any new message, rewind, or compaction changes the occupied context.
+    // Reusing an old occupancy or breakdown would also retain a stale
+    // "Provider remainder" segment. Legacy snapshots fail closed here too.
+    const sameSnapshot =
+      last?.model === modelId &&
+      last?.provider === providerName &&
+      usageSnapshotMatchesBoundary(last, boundary);
+    const used = sameSnapshot ? last.used : 0;
+    const breakdown = sameSnapshot ? last.breakdown : undefined;
+    const cachedInputTokens = sameSnapshot ? last.cachedInputTokens : undefined;
+    // Preview is intentionally response-only. The composer guards HTTP
+    // responses with its current selection generation; an unsolicited usage
+    // websocket event has no such request identity and could let a delayed
+    // preview overwrite a newer provider/model choice. Real provider usage is
+    // emitted live, then persisted only after the final assistant message has
+    // established the completed conversation boundary.
     return {
-      used: last?.used ?? 0,
+      model: modelId,
+      provider: providerName,
+      used,
       contextWindow: context.contextWindow ?? 0,
       contextKnown: context.contextKnown,
       contextSource: context.contextSource,
-      usageKnown: true,
-      ...(last?.breakdown ? { breakdown: last.breakdown } : {}),
+      usageKnown: sameSnapshot,
+      hasImageAttachments: imageAttachmentCount > 0,
+      imageAttachmentCount,
+      ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
+      ...(breakdown ? { breakdown } : {}),
     };
   }
 
@@ -3788,14 +5497,30 @@ export class KoryManager implements WorkerPipelineHost {
 
   private endSessionRun(sessionId: string): void {
     this.sessionRunClaims.delete(sessionId);
+    this.state.touchSession(sessionId);
     this.processCompletionCoordinator.notifySessionIdle(sessionId);
   }
 
-  private assertSessionRunActive(sessionId: string): void {
-    const signal = this.managerAbortBySession.get(sessionId)?.signal;
-    if (signal?.aborted) {
-      throw signal.reason instanceof Error
-        ? signal.reason
+  private requireRunHandle(sessionId: string): ManagerRunHandle {
+    const handle = this.runContext.getStore();
+    if (!handle || handle.sessionId !== sessionId) {
+      throw new Error(`Session ${sessionId} has no generation-bound execution context`);
+    }
+    return handle;
+  }
+
+  private assertRunHandleActive(handle: ManagerRunHandle): void {
+    const current = this.requireRunHandle(handle.sessionId);
+    if (current.runId !== handle.runId) {
+      throw new DOMException('A stale session callback lost execution ownership', 'AbortError');
+    }
+    const controller = this.runControllerByHandle.get(handle);
+    if (!controller || this.managerAbortBySession.get(handle.sessionId) !== controller) {
+      throw new DOMException('Session execution generation is no longer current', 'AbortError');
+    }
+    if (controller.signal.aborted) {
+      throw controller.signal.reason instanceof Error
+        ? controller.signal.reason
         : new DOMException('Session run cancelled', 'AbortError');
     }
   }
@@ -3810,7 +5535,9 @@ export class KoryManager implements WorkerPipelineHost {
       this.sessionRunClaims.has(sessionId) ||
       this.managerAbortBySession.has(sessionId) ||
       this.compactingSessions.has(sessionId) ||
-      this.workers.hasSessionWorkers(sessionId)
+      this.titleGenerationBySession.has(sessionId) ||
+      this.workers.hasSessionWorkers(sessionId) ||
+      this.runLifecycle.isAuthoritativelyLive(sessionId)
     ) {
       return null;
     }
@@ -3842,6 +5569,9 @@ export class KoryManager implements WorkerPipelineHost {
       this.managerAbortBySession.has(sessionId) ||
       this.compactingSessions.has(sessionId) ||
       this.titleGenerationBySession.has(sessionId) ||
+      [...this.restartHandoffConsumers.values()].some(
+        (consumer) => consumer.sessionId === sessionId,
+      ) ||
       this.workers.hasSessionWorkers(sessionId);
     return {
       waitForIdle: async (timeoutMs = 10_000) => {
@@ -3874,6 +5604,19 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   async cancelSessionWorkers(sessionId: string): Promise<void> {
+    // Snapshot ownership before aborting. A process-local execution owner must
+    // be the only writer that publishes its terminal transition: it may still
+    // need to persist a partial assistant response and cleanup after observing
+    // the AbortSignal. Durable waits have no such stack and can be terminalized
+    // directly here.
+    const locallyOwned =
+      this.sessionRunClaims.has(sessionId) ||
+      this.managerAbortBySession.has(sessionId) ||
+      this.compactingSessions.has(sessionId);
+    for (const consumer of this.restartHandoffConsumers.values()) {
+      if (consumer.sessionId === sessionId) consumer.controller.abort();
+    }
+    this.runs?.cancelRestartHandoffsForSession(sessionId, 'cancelled_by_user');
     // Suppress queued wake work before aborting the manager or signalling
     // terminals, otherwise a kill event can immediately resurrect the session.
     this.processCompletionCoordinator.cancelSession(sessionId);
@@ -3881,65 +5624,151 @@ export class KoryManager implements WorkerPipelineHost {
     this.abortManagerRun(sessionId);
     this.abortCompaction(sessionId);
     this.workers.cancelSessionWorkers(sessionId);
-    await processSupervisor.cancelAgentBackgroundProcessesForSession(sessionId);
+    const cancellationWork: Promise<unknown>[] = [
+      processSupervisor.cancelAgentBackgroundProcessesForSession(sessionId),
+    ];
+    if (!locallyOwned) {
+      cancellationWork.push(
+        this.runLifecycle.cancelCurrent(sessionId, 'cancelled_by_user'),
+      );
+    }
+    const results = await Promise.allSettled(cancellationWork);
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures.map((failure) => failure.reason),
+        `Session ${sessionId} cancellation did not settle cleanly`,
+      );
+    }
   }
 
   /** True if the session has an active manager run or any worker. */
-  isSessionRunning(sessionId: string): boolean {
+  hasActiveSessionExecution(sessionId: string): boolean {
     if (this.sessionRunClaims.has(sessionId)) return true;
-    if (this.sessionMutationBarriers.has(sessionId)) return true;
     if (this.managerAbortBySession.has(sessionId)) return true;
     if (this.compactingSessions.has(sessionId)) return true;
     return this.workers.hasSessionWorkers(sessionId);
+  }
+
+  /** Durable liveness includes restart-safe waits even when no local stack owns them. */
+  hasDurableSessionRun(sessionId: string): boolean {
+    return this.runLifecycle.isAuthoritativelyLive(sessionId);
+  }
+
+  /** Process-wait wakeups must ignore the durable wait they are resuming, but
+   * still respect every process-local owner and mutation gate. */
+  isLocallyBlockedForProcessWake(sessionId: string): boolean {
+    return (
+      this.sessionMutationBarriers.has(sessionId) || this.hasActiveSessionExecution(sessionId)
+    );
+  }
+
+  /** Destructive/external callers need both local and durable lifecycle truth. */
+  isSessionRunning(sessionId: string): boolean {
+    return (
+      this.sessionMutationBarriers.has(sessionId) ||
+      this.hasActiveSessionExecution(sessionId) ||
+      this.hasDurableSessionRun(sessionId)
+    );
   }
 
   getStatus() {
     return this.workers.getStatus();
   }
 
-  cancel() {
+  async cancel(): Promise<void> {
     const sessionIds = new Set(this.workers.cancelAll());
-    for (const sid of this.sessionRunClaims) sessionIds.add(sid);
+    for (const handoff of this.runs?.listRestartHandoffs(1_000) ?? []) {
+      sessionIds.add(handoff.sessionId);
+    }
+    const locallyOwned = new Set<string>();
+    for (const sid of this.sessionRunClaims) {
+      sessionIds.add(sid);
+      locallyOwned.add(sid);
+    }
     this.managerAbortBySession.forEach((ac, sid) => {
       sessionIds.add(sid);
+      locallyOwned.add(sid);
       ac.abort();
     });
+    for (const sid of this.compactingSessions.keys()) {
+      sessionIds.add(sid);
+      locallyOwned.add(sid);
+    }
+    for (const controller of this.compactingSessions.values()) controller.abort();
+    const cancellations: Promise<void>[] = [];
     for (const sid of sessionIds) {
+      for (const consumer of this.restartHandoffConsumers.values()) {
+        if (consumer.sessionId === sid) consumer.controller.abort();
+      }
+      this.runs?.cancelRestartHandoffsForSession(sid, 'global_cancel');
       this.processCompletionCoordinator.cancelSession(sid);
       this.state.resolveUserInput(sid, '__cancelled__');
-      void processSupervisor.cancelAgentBackgroundProcessesForSession(sid);
-      this.stopHeartbeat(sid);
-      this.emitWSMessage(sid, 'agent.status', { agentId: KORY_IDENTITY.id, status: 'done' });
-      this.setHeartbeatPhase(sid, 'done');
+      if (!locallyOwned.has(sid)) {
+        this.stopHeartbeat(sid);
+        this.emitWSMessage(sid, 'agent.status', {
+          agentId: KORY_IDENTITY.id,
+          status: 'done',
+        });
+        this.setHeartbeatPhase(sid, 'done');
+      }
+      cancellations.push(
+        (async () => {
+          const work: Promise<unknown>[] = [
+            processSupervisor.cancelAgentBackgroundProcessesForSession(sid),
+          ];
+          if (!locallyOwned.has(sid)) {
+            work.push(this.runLifecycle.cancelCurrent(sid, 'global_cancel'));
+          }
+          const results = await Promise.allSettled(work);
+          for (const result of results) {
+            if (result.status === 'rejected') {
+              koryLog.error(
+                { sessionId: sid, error: result.reason },
+                'Global cancellation cleanup failed',
+              );
+            }
+          }
+        })(),
+      );
     }
     this.isProcessing = false;
     koryLog.info('All workers cancelled via global cancel');
+    await Promise.all(cancellations);
   }
 
-  private async loadHistory(sessionId: string): Promise<InternalMessage[]> {
+  private async loadHistory(
+    sessionId: string,
+    boundaryMessageId?: string,
+  ): Promise<InternalMessage[]> {
     return (
-      (await this.messages?.getContextMessages(sessionId, 1000))
+      (await (boundaryMessageId
+        ? this.messages?.getContextMessagesAtBoundary(sessionId, boundaryMessageId, 1000)
+        : this.messages?.getContextMessages(sessionId, 1000)))
         // System rows are UI markers (e.g. "Stopped by user.") — never part of
         // the conversation sent back to the model.
         ?.filter((m) => m.role !== 'system' || m.content.startsWith('[KORY_COMPACTION]'))
         .map((m) => {
           const images = m.attachments?.filter((attachment) => attachment.type === 'image') ?? [];
+          // Only user-supplied images are valid future image inputs. A
+          // generated assistant image is visible transcript history, but most
+          // provider protocols do not accept an image block in assistant role;
+          // reattaching it would silently flatten or reject the next turn.
+          const shouldAttachImages = m.role === 'user' && images.length > 0;
           return {
             role: (m.role === 'system' ? 'user' : m.role) as InternalMessage['role'],
-            content:
-              m.role === 'user' && images.length > 0
-                ? [
-                    { type: 'text' as const, text: m.content },
-                    ...images.map((attachment) => ({
-                      type: 'image' as const,
-                      imageData: attachment.data,
-                      imageMimeType: attachment.mimeType ?? 'image/png',
-                    })),
-                  ]
-                : m.content.replace(
-                    /^\[KORY_COMPACTION\]\n?/,
-                    'Authoritative compacted context:\n',
-                  ),
+            content: shouldAttachImages
+              ? [
+                  { type: 'text' as const, text: m.content },
+                  ...images.map((attachment) => ({
+                    type: 'image' as const,
+                    imageData: attachment.data,
+                    imageMimeType: attachment.mimeType ?? 'image/png',
+                  })),
+                ]
+              : m.content.replace(/^\[KORY_COMPACTION\]\n?/, 'Authoritative compacted context:\n'),
           };
         }) || []
     );
@@ -3975,7 +5804,10 @@ export class KoryManager implements WorkerPipelineHost {
     agentId: string,
     content: string,
     options?: { model?: string; reasoningLevel?: string },
-  ): Promise<void> {
+  ): Promise<{ runId: string }> {
+    if (this.sessions && !(await this.getActiveSession(sessionId))) {
+      throw new ConflictError('Recover this archived chat before messaging this agent.');
+    }
     const thread = this.agentThreads.get(agentId);
     if (!thread || thread.sessionId !== sessionId) {
       throw new Error('Agent thread not found');
@@ -3987,34 +5819,93 @@ export class KoryManager implements WorkerPipelineHost {
     if (!trimmed) {
       throw new Error('Message cannot be empty');
     }
-    // Same controls as the manager: the user can retarget a sub-agent's model
-    // and reasoning tier per message (picker value is "provider:modelId").
-    if (options?.model && options.model !== 'auto') {
-      const [prov, ...rest] = options.model.split(':');
-      const bareModel = rest.join(':');
-      if (prov && bareModel) {
-        thread.providerName = prov as ProviderName;
-        thread.modelId = bareModel;
-      } else {
-        thread.modelId = options.model;
+
+    // A follow-up is a new provider/tool turn, not a UI mutation and not an
+    // extension that may silently borrow whichever manager run happens to be
+    // active. It therefore acquires its own durable, cancellable SessionRun.
+    const admission = await this.reserveSessionTurn(sessionId, 'agent_followup_turn');
+    if (!admission) {
+      throw new ConflictError('Wait for chat lifecycle work to finish before messaging this agent.');
+    }
+    let dispatched = false;
+    try {
+      // Recheck after admission so a stale preflight cannot race another
+      // cancellation control against the thread object.
+      if (this.agentThreads.get(agentId) !== thread || thread.sessionId !== sessionId) {
+        throw new Error('Agent thread is no longer available');
       }
-      thread.identity.model = thread.modelId;
-      thread.identity.provider = thread.providerName;
-    }
-    if (options?.reasoningLevel) thread.reasoningLevel = options.reasoningLevel;
-    if (thread.abort?.signal.aborted) {
-      const abort = new AbortController();
-      thread.abort = abort;
-      thread.ctx = { ...thread.ctx, signal: abort.signal };
-    }
-    thread.messages.push({ role: 'user', content: trimmed });
-    this.appendAgentThreadEntry(thread, 'user', trimmed);
-    void this.runAgentThread(agentId).catch((err) => {
-      koryLog.error(
-        { agentId, sessionId, err: err instanceof Error ? err.message : String(err) },
-        'Direct agent message failed',
+      if (thread.busy) {
+        throw new Error('Agent is already working');
+      }
+      // Same controls as the manager: the user can retarget a sub-agent's model
+      // and reasoning tier per message (picker value is "provider:modelId").
+      if (options?.model && options.model !== 'auto') {
+        const [prov, ...rest] = options.model.split(':');
+        const bareModel = rest.join(':');
+        if (prov && bareModel) {
+          thread.providerName = prov as ProviderName;
+          thread.modelId = bareModel;
+        } else {
+          thread.modelId = options.model;
+        }
+        thread.identity.model = thread.modelId;
+        thread.identity.provider = thread.providerName;
+      }
+      if (options?.reasoningLevel) thread.reasoningLevel = options.reasoningLevel;
+
+      const ownerController = this.turnAdmissions.get(admission)?.controller;
+      if (!ownerController) throw new Error('Agent follow-up lost its session admission');
+      thread.abort = ownerController;
+      thread.ctx = { ...thread.ctx, signal: ownerController.signal };
+      // Publish busy before dispatching. A second message or individual cancel
+      // must see ownership even while provider resolution is awaiting.
+      thread.busy = true;
+      thread.updatedAt = Date.now();
+      thread.messages.push({ role: 'user', content: trimmed });
+      this.appendAgentThreadEntry(thread, 'user', trimmed);
+
+      const work = this.dispatchAdmittedWork(
+        admission,
+        async ({ signal, phase }) => {
+          await phase('thinking', 'agent_followup_started');
+          signal.throwIfAborted();
+          await this.runAgentThread(agentId);
+        },
+        'agent_followup_completed',
       );
-    });
+      dispatched = true;
+      thread.activeRun = work;
+      void work
+        .catch((err) => {
+          const cancelled =
+            admission.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+          const detail = {
+            agentId,
+            sessionId,
+            err: err instanceof Error ? err.message : String(err),
+          };
+          if (cancelled) koryLog.debug(detail, 'Direct agent message cancelled');
+          else koryLog.error(detail, 'Direct agent message failed');
+        })
+        .finally(() => {
+          if (thread.activeRun === work) thread.activeRun = undefined;
+        });
+      return { runId: admission.runId };
+    } catch (error) {
+      thread.busy = false;
+      if (!dispatched && this.turnAdmissions.has(admission)) {
+        await (admission.signal.aborted
+          ? this.cancelSessionTurn(admission, 'agent_followup_cancelled_before_dispatch')
+          : this.rejectSessionTurn(admission, 'agent_followup_dispatch_failed')
+        ).catch((settleError) => {
+          koryLog.error(
+            { sessionId, agentId, settleError },
+            'Failed to settle an undispatched agent follow-up',
+          );
+        });
+      }
+      throw error;
+    }
   }
 
   private appendAgentThreadEntry(
@@ -4038,23 +5929,70 @@ export class KoryManager implements WorkerPipelineHost {
     });
   }
 
+  /**
+   * Worker/critic/direct-agent UI state has an identity separate from the
+   * manager. Persist it on the authoritative run before advertising activity
+   * so restart recovery can close the exact card instead of leaving a replayed
+   * "thinking" worker alive forever. Calls outside an admitted manager run
+   * deliberately do nothing: they have no durable generation to mutate.
+   */
+  private async recordAgentThreadRunMembership(
+    thread: AgentThreadState,
+    active: boolean,
+  ): Promise<void> {
+    if (!this.runs) return;
+    const handle = this.runContext.getStore();
+    if (!handle || handle.sessionId !== thread.sessionId) return;
+    const snapshot = this.runs.get(thread.sessionId);
+    if (
+      !snapshot ||
+      snapshot.runId !== handle.runId ||
+      snapshot.status !== 'active' ||
+      !(
+        snapshot.phase === 'analyzing' ||
+        snapshot.phase === 'thinking' ||
+        snapshot.phase === 'streaming' ||
+        snapshot.phase === 'tool_calling' ||
+        snapshot.phase === 'compacting'
+      )
+    ) {
+      return;
+    }
+    const known = new Set(snapshot.activeAgentIds);
+    if (active) known.add(thread.identity.id);
+    else known.delete(thread.identity.id);
+    const activeAgentIds = [...known].sort();
+    if (
+      activeAgentIds.length === snapshot.activeAgentIds.length &&
+      activeAgentIds.every((agentId, index) => agentId === snapshot.activeAgentIds[index])
+    ) {
+      return;
+    }
+    await this.runLifecycle.phase(
+      handle,
+      snapshot.phase,
+      active ? 'agent_thread_started' : 'agent_thread_settled',
+      activeAgentIds,
+    );
+  }
+
   private async runAgentThread(agentId: string, providerOverride?: Provider): Promise<void> {
     const thread = this.agentThreads.get(agentId);
     if (!thread) throw new Error('Agent thread not found');
-    const provider =
-      providerOverride ??
-      (await this.providers.resolveProvider(thread.modelId, thread.providerName));
-    if (!provider) throw new Error('Agent provider unavailable');
-
     thread.busy = true;
     thread.status = 'thinking';
     thread.updatedAt = Date.now();
-    this.emitWSMessage(thread.sessionId, 'agent.status', {
-      agentId: thread.identity.id,
-      status: thread.status,
-    });
 
     try {
+      await this.recordAgentThreadRunMembership(thread, true);
+      this.emitWSMessage(thread.sessionId, 'agent.status', {
+        agentId: thread.identity.id,
+        status: thread.status,
+      });
+      const provider =
+        providerOverride ??
+        (await this.providers.resolveProvider(thread.modelId, thread.providerName));
+      if (!provider) throw new Error('Agent provider unavailable');
       let turnCount = 0;
       while (turnCount < thread.maxTurns) {
         turnCount++;
@@ -4079,19 +6017,34 @@ export class KoryManager implements WorkerPipelineHost {
         status: 'done',
       });
     } catch (err) {
-      thread.status = 'error';
+      const aborted =
+        thread.abort?.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+      thread.status = aborted ? 'done' : 'error';
       thread.updatedAt = Date.now();
-      this.emitWSMessage(thread.sessionId, 'agent.error', {
-        agentId: thread.identity.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      if (!aborted) {
+        this.emitWSMessage(thread.sessionId, 'agent.error', {
+          agentId: thread.identity.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
       this.emitWSMessage(thread.sessionId, 'agent.status', {
         agentId: thread.identity.id,
-        status: 'error',
+        status: thread.status,
       });
       throw err;
     } finally {
       thread.busy = false;
+      try {
+        // A terminal agent.status was emitted immediately before this finally
+        // block. If the durable membership cleanup cannot be acknowledged, it
+        // is safer to leave the id for restart recovery to terminalize again.
+        await this.recordAgentThreadRunMembership(thread, false);
+      } catch (error) {
+        koryLog.warn(
+          { error, sessionId: thread.sessionId, agentId: thread.identity.id },
+          'Could not clear durable agent-thread run membership',
+        );
+      }
       if (thread.kind === 'worker') {
         this.workers.removeWorker(agentId);
       }
@@ -4133,6 +6086,7 @@ export class KoryManager implements WorkerPipelineHost {
           : thread.ctx.permissionPolicy?.mode) as AgentSettings['permissionMode'] | undefined,
         promptManifestHash: thread.promptManifestHash,
         taskContractHash: thread.taskContractHash,
+        promptCache: thread.promptCache,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,
@@ -4306,6 +6260,7 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt: fallbackCompilation.systemPrompt,
       promptManifestHash: fallbackCompilation.manifest.hash,
       taskContractHash: fallbackCompilation.manifest.taskContractHash,
+      promptCache: fallbackCompilation.promptCache,
       toolRole: 'worker',
       reasoningLevel,
       maxTurns: 1,
@@ -4359,6 +6314,13 @@ export class KoryManager implements WorkerPipelineHost {
     // Abort any ongoing manager run
     this.abortManagerRun(sessionId);
     this.abortCompaction(sessionId);
+    for (const [handoffId, consumer] of this.restartHandoffConsumers) {
+      if (consumer.sessionId !== sessionId) continue;
+      consumer.controller.abort();
+      const retry = this.restartHandoffRetryTimers.get(handoffId);
+      if (retry) clearTimeout(retry);
+      this.restartHandoffRetryTimers.delete(handoffId);
+    }
 
     // Clear pending user inputs (reject with abort error)
     if (this.state.hasPendingInput(sessionId)) {
@@ -4371,6 +6333,7 @@ export class KoryManager implements WorkerPipelineHost {
     this.managerRoutingBySession.delete(sessionId);
     this.managerAbortBySession.delete(sessionId);
     this.compactingSessions.delete(sessionId);
+    this.runLifecycle.forget(sessionId);
     this.titledSessions.delete(sessionId);
     this.titleGenerationBySession.get(sessionId)?.abort();
     this.titleGenerationBySession.delete(sessionId);
@@ -4423,9 +6386,16 @@ export class KoryManager implements WorkerPipelineHost {
     // complete session cleanup path so its companion live caches (notably
     // agentThreads) cannot outlive the state entry that triggered cleanup.
     for (const sessionId of this.state.getSessionIds()) {
-      if (!activeSessionIds.has(sessionId)) {
-        this.cleanupSession(sessionId);
-      }
+      const lastActivityAt = this.state.getLastActivityAt(sessionId);
+      const isLive =
+        activeSessionIds.has(sessionId) ||
+        this.sessionRunClaims.has(sessionId) ||
+        this.managerAbortBySession.has(sessionId) ||
+        this.compactingSessions.has(sessionId) ||
+        this.state.hasPendingInput(sessionId) ||
+        this.runLifecycle.isAuthoritativelyLive(sessionId);
+      if (isLive || lastActivityAt === null || now - lastActivityAt < maxSessionAgeMs) continue;
+      this.cleanupSession(sessionId);
     }
 
     // A finished agent thread can exist without a SessionStateService entry
@@ -4491,8 +6461,22 @@ export class KoryManager implements WorkerPipelineHost {
    * Complete shutdown - cleanup all resources.
    * Call this during server shutdown.
    */
-  shutdown(): void {
+  shutdown(): Promise<void> {
+    if (!this.shutdownPromise) this.shutdownPromise = this.shutdownInternal();
+    return this.shutdownPromise;
+  }
+
+  private async shutdownInternal(): Promise<void> {
     koryLog.info('Shutting down KoryManager');
+
+    const activeAgentFollowups = [...this.agentThreads.values()]
+      .map((thread) => thread.activeRun)
+      .filter((run): run is Promise<void> => run !== undefined);
+
+    // Detach lifecycle writes before aborting stacks. Waiting continuations
+    // are restart-safe and must not be terminalized by their local AbortError;
+    // active rows are reconciled explicitly by the server after this returns.
+    this.runLifecycle.detach();
 
     this.unsubscribeProcessLifecycle?.();
     this.unsubscribeProcessLifecycle = undefined;
@@ -4512,12 +6496,31 @@ export class KoryManager implements WorkerPipelineHost {
       }
     }
     this.managerAbortBySession.clear();
+    for (const controller of this.compactingSessions.values()) controller.abort();
+    this.compactingSessions.clear();
     for (const controller of this.titleGenerationBySession.values()) controller.abort();
     this.titleGenerationBySession.clear();
+    for (const consumer of this.restartHandoffConsumers.values()) consumer.controller.abort();
+    for (const timer of this.restartHandoffRetryTimers.values()) clearTimeout(timer);
+    this.restartHandoffRetryTimers.clear();
+    // Handoff runners own ordinary manager abort controllers. Let those stacks
+    // observe the abort and release/requeue their durable command leases before
+    // the database is closed by the server.
+    await Promise.allSettled([...this.restartHandoffTasks.values()]);
+    // Direct agent follow-ups own provider/tool stacks outside WorkerLifecycle.
+    // Do not clear their thread/context state until those stacks acknowledge
+    // the shared SessionRun abort signal.
+    await Promise.allSettled(activeAgentFollowups);
+    // A runner can schedule a bounded retry while observing shutdown abort.
+    // Clear again after every runner has settled so no timer can outlive the
+    // manager and touch a closing database.
+    for (const timer of this.restartHandoffRetryTimers.values()) clearTimeout(timer);
+    this.restartHandoffRetryTimers.clear();
     for (const timers of this.usageRetryTimersBySession.values()) {
       for (const timer of timers) clearTimeout(timer);
     }
     this.usageRetryTimersBySession.clear();
+    this.turnAdmissions.clear();
     this.sessionRunClaims.clear();
     this.sessionMutationBarriers.clear();
     this.erasedSessions.clear();
@@ -4527,11 +6530,9 @@ export class KoryManager implements WorkerPipelineHost {
     this.state.cleanupAll();
     this.agentThreads.clear();
 
-    // Drain all active worktrees to prevent leaks across restarts.
-    // Fire-and-forget since shutdown() is sync — the event loop will wait
-    // for pending promises during graceful shutdown.
+    // Drain active worktrees before the server closes the database/process.
     if (this.workspaceManager) {
-      void this.workspaceManager.shutdown();
+      await this.workspaceManager.shutdown();
     }
 
     koryLog.info('KoryManager shutdown complete');
@@ -4646,6 +6647,54 @@ export class KoryManager implements WorkerPipelineHost {
     return value.length > maxLen ? value.slice(0, maxLen - 1) + '…' : value;
   }
 
+  private async persistCompletedManagerUsage(
+    sessionId: string,
+    expectedActiveMessageId: string,
+    model: string,
+    provider: ProviderName,
+    tokensIn: number,
+    tokensOut: number,
+    breakdown?: ContextBreakdown,
+    cachedInputTokens?: number,
+  ): Promise<boolean> {
+    const archive = getContextArchive();
+    if (!archive || !this.messages || this.erasedSessions.has(sessionId)) return false;
+    try {
+      const boundary = await this.messages.getActiveBoundary(sessionId);
+      // A new message can race the completed assistant write. Never stamp the
+      // previous turn's usage onto that newer conversation boundary.
+      if (boundary.messageId !== expectedActiveMessageId) {
+        serverLog.debug(
+          { sessionId, expectedActiveMessageId, activeMessageId: boundary.messageId },
+          'Skipped context usage snapshot because the conversation advanced',
+        );
+        return false;
+      }
+      const win = resolveTrustedContextWindow(model, provider);
+      await archive.recordUsage(sessionId, {
+        used: tokensIn + tokensOut,
+        max: win.contextWindow ?? 0,
+        contextKnown: win.contextKnown,
+        model,
+        provider,
+        activeMessageId: boundary.messageId,
+        contextRevision: boundary.contextRevision,
+        ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
+        ...(breakdown ? { breakdown } : {}),
+        ts: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      if (!this.erasedSessions.has(sessionId)) {
+        serverLog.debug(
+          { sessionId, error: error instanceof Error ? error.message : String(error) },
+          'Context usage snapshot could not be persisted',
+        );
+      }
+      return false;
+    }
+  }
+
   private emitUsageUpdate(
     sessionId: string,
     agentId: string,
@@ -4655,6 +6704,7 @@ export class KoryManager implements WorkerPipelineHost {
     tokensOut: number,
     usageKnown: boolean,
     breakdown?: ContextBreakdown,
+    cachedInputTokens?: number,
   ) {
     if (this.erasedSessions.has(sessionId)) return;
     this.events.emitUsageUpdate(
@@ -4666,24 +6716,13 @@ export class KoryManager implements WorkerPipelineHost {
       tokensOut,
       usageKnown,
       breakdown,
+      cachedInputTokens,
     );
-    // Persist only provider/CLI-reported usage. A chars/4 planning estimate
-    // must never survive a reload looking like a real token count.
+    // Live provider usage is response-only until the final assistant message
+    // establishes an exact conversation boundary. Stream-time archive writes
+    // could race that completed snapshot and make stale occupancy durable.
     if (agentId === KORY_IDENTITY.id && usageKnown) {
       const win = resolveTrustedContextWindow(model, provider);
-      void getContextArchive()
-        ?.recordUsage(sessionId, {
-          used: tokensIn + tokensOut,
-          max: win.contextWindow ?? 0,
-          contextKnown: win.contextKnown,
-          ...(breakdown ? { breakdown } : {}),
-          ts: Date.now(),
-        })
-        .catch(() => {
-          if (!this.erasedSessions.has(sessionId)) {
-            serverLog.debug({ sessionId }, 'Context usage snapshot could not be persisted');
-          }
-        });
       // Window resolution can lose the startup race (provider model lists
       // refresh in the background). Retry once shortly after — if the window
       // is known by then, re-emit so the bar stops saying "unknown".
@@ -4704,6 +6743,7 @@ export class KoryManager implements WorkerPipelineHost {
               tokensOut,
               usageKnown,
               breakdown,
+              cachedInputTokens,
             );
           }
         }, 6_000);

@@ -14,14 +14,23 @@ import { mcpLog, serverLog } from '../logger';
 import { VERSION } from '../constants';
 import { loadAgentSettings } from '../agent-settings';
 import { resolveToolPermissionPolicy, resolveSandboxOptions } from '../tools/permission-policy';
+import {
+  checkNoteToolPermission,
+  filterToolDefsForNotesPermissions,
+} from '../notes/notes-settings';
+import { isNoteToolName } from '@koryphaios/shared';
 
 // Only Koryphaios's KNOWLEDGE tools are exposed over MCP — file edits and shell
 // stay with each CLI's native tools (their strength); this is purely so CLIs
 // can contribute to memory/notes and read project rules.
 const MCP_EXPOSED_TOOLS = new Set([
+  'record_work_note',
   'create_note',
+  'set_note_property',
   'update_note',
   'read_note',
+  'get_note_properties',
+  'query_note_base',
   'search_notes',
   'recall_notes',
   'list_notes',
@@ -81,7 +90,7 @@ function rpcError(id: unknown, code: number, message: string) {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
 }
 
-function exposedToolDefs() {
+function exposedToolDefs(projectRoot: string) {
   const { kory } = getContext();
   const registry = (
     kory as unknown as {
@@ -89,9 +98,10 @@ function exposedToolDefs() {
     }
   ).tools;
   const all = registry?.getAll?.() ?? [];
-  return all
-    .filter((t) => MCP_EXPOSED_TOOLS.has(t.name))
-    .map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+  return filterToolDefsForNotesPermissions(
+    all.filter((t) => MCP_EXPOSED_TOOLS.has(t.name)),
+    projectRoot,
+  ).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
 }
 
 /** Handle one MCP JSON-RPC request. Returns the response body (or null for a
@@ -146,7 +156,7 @@ export async function handleMcpRequest(
       return rpcResult(
         id,
         {
-          tools: exposedToolDefs(),
+          tools: exposedToolDefs(workingDirectory),
           ttlMs: LIST_TTL_MS,
           cacheScope: LIST_CACHE_SCOPE,
         },
@@ -171,13 +181,38 @@ export async function handleMcpRequest(
             };
           }
         ).tools;
+        const settings = loadAgentSettings(workingDirectory);
+        const permissionPolicy = resolveToolPermissionPolicy(settings, 'act');
+        if (isNoteToolName(name)) {
+          const notePermission = checkNoteToolPermission(name, workingDirectory, {
+            yoloMode: permissionPolicy.mode === 'yolo',
+          });
+          if (!notePermission.allowed || notePermission.requiresApproval) {
+            return rpcResult(
+              id,
+              {
+                content: [
+                  {
+                    type: 'text',
+                    text: !notePermission.allowed
+                      ? `Unknown or blocked note tool: ${name}`
+                      : `Notes permission for ${name} requires approval, but this MCP endpoint has no approval channel.`,
+                  },
+                ],
+                isError: true,
+              },
+              isModernClient,
+            );
+          }
+        }
         const ctx: ToolContext = {
           sessionId: `mcp-${Date.now()}`,
+          agentId: 'external-mcp-client',
           workingDirectory,
           allowedPaths: [workingDirectory],
           isSandboxed: false,
-          sandboxOptions: resolveSandboxOptions(loadAgentSettings(workingDirectory), false),
-          permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(workingDirectory), 'act'),
+          sandboxOptions: resolveSandboxOptions(settings, false),
+          permissionPolicy,
           approvedToolCallIds: new Set(),
           signal: new AbortController().signal,
         };

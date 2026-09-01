@@ -159,7 +159,7 @@
               choose(draft);
             }
           }}
-          class="h-10 min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 font-mono text-xs uppercase text-[var(--color-text-primary)] outline-none focus-visible:border-[var(--color-accent)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40"
+          class="h-10 min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] px-3 font-mono text-xs uppercase text-[var(--color-text-primary)] outline-none focus-visible:border-[var(--color-accent)]"
         />
         <button
           type="button"

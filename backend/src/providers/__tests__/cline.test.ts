@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SANDBOX_PRESETS, type ProviderConfig } from '@koryphaios/shared';
 import { detectClineCLILogin } from '../auth-utils';
-import { ClineProvider, shouldUseClinePlanMode } from '../cline';
+import { clineRequiresArgvPrompt, ClineProvider, readConfiguredClineModels, shouldUseClinePlanMode } from '../cline';
 import type { ProviderEvent, StreamRequest } from '../types';
 
 type MapResult = {
@@ -117,6 +117,106 @@ describe('Cline CLI execution policy', () => {
     expect(
       shouldUseClinePlanMode(makeRequest({ permissionMode: 'yolo' }), false, false),
     ).toBe(false);
+  });
+});
+
+describe('Cline CLI argv prompt contract', () => {
+  it('requires an argv prompt placeholder for Cline 3.x JSON mode', () => {
+    expect(clineRequiresArgvPrompt('3.0.60')).toBe(true);
+    expect(clineRequiresArgvPrompt('3.1.0')).toBe(true);
+    expect(clineRequiresArgvPrompt('v3.0.0')).toBe(true);
+  });
+
+  it('keeps legacy stdin-only prompt behavior for pre-3.x and unknown versions', () => {
+    expect(clineRequiresArgvPrompt('2.1.0')).toBe(false);
+    expect(clineRequiresArgvPrompt('1.9.9')).toBe(false);
+    expect(clineRequiresArgvPrompt(undefined)).toBe(false);
+    expect(clineRequiresArgvPrompt('')).toBe(false);
+    expect(clineRequiresArgvPrompt('not-a-version')).toBe(false);
+  });
+});
+
+describe('Cline real model list resolution', () => {
+  let home = '';
+  let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'kory-cline-models-'));
+    originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  function writeProvidersJson(payload: unknown): void {
+    const settings = join(home, '.cline', 'data', 'settings');
+    mkdirSync(settings, { recursive: true });
+    writeFileSync(join(settings, 'providers.json'), JSON.stringify(payload));
+  }
+
+  it('returns the last-used provider model exactly as the CLI resolves it', () => {
+    writeProvidersJson({
+      version: 1,
+      lastUsedProvider: 'cline',
+      providers: {
+        cline: { settings: { provider: 'cline', model: 'z-ai/glm-5.3-flash' } },
+        openrouter: { settings: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' } },
+        sapaicore: { settings: { provider: 'sapaicore', model: 'anthropic--claude-3.5-sonnet' } },
+      },
+    });
+
+    const models = readConfiguredClineModels();
+    expect(models).toHaveLength(1);
+    expect(models[0]).toMatchObject({
+      id: 'cline-z-ai/glm-5.3-flash',
+      apiModelId: 'z-ai/glm-5.3-flash',
+      provider: 'cline',
+    });
+  });
+
+  it('does not scrape models from unrelated providers or secret material', () => {
+    writeProvidersJson({
+      lastUsedProvider: 'openrouter',
+      providers: {
+        openrouter: { settings: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' } },
+      },
+    });
+    // Legacy secret-bearing files must never contribute model entries.
+    const data = join(home, '.cline', 'data');
+    mkdirSync(data, { recursive: true });
+    writeFileSync(
+      join(data, 'secrets.json'),
+      JSON.stringify({ actModeApiKeyModelId: 'moonshot/kimi-k2' }),
+    );
+
+    const models = readConfiguredClineModels();
+    expect(models).toHaveLength(1);
+    expect(models[0]?.apiModelId).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  it('falls back to the harness "default" model when nothing is configured', () => {
+    expect(readConfiguredClineModels()).toEqual([
+      expect.objectContaining({ id: 'cline-default', apiModelId: 'default' }),
+    ]);
+  });
+
+  it('falls back to "default" when the last-used provider has no model set', () => {
+    writeProvidersJson({
+      lastUsedProvider: 'cline',
+      providers: { cline: { settings: { provider: 'cline' } } },
+    });
+    expect(readConfiguredClineModels()).toEqual([
+      expect.objectContaining({ id: 'cline-default', apiModelId: 'default' }),
+    ]);
   });
 });
 

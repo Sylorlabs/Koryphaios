@@ -173,6 +173,7 @@ export class EventEmitterService {
     tokensOut: number,
     usageKnown: boolean,
     breakdown?: ContextBreakdown,
+    cachedInputTokens?: number,
   ): void {
     const context = resolveTrustedContextWindow(model, provider);
     const payload: StreamUsagePayload = {
@@ -183,6 +184,7 @@ export class EventEmitterService {
       tokensOut,
       tokensUsed: tokensIn + tokensOut,
       usageKnown,
+      ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
       contextKnown: context.contextKnown,
       ...(context.contextSource ? { contextSource: context.contextSource } : {}),
       ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),

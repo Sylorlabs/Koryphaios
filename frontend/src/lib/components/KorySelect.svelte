@@ -5,7 +5,7 @@
 <script lang="ts">
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import Check from 'lucide-svelte/icons/check';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
   export interface KorySelectOption {
     value: string;
@@ -14,6 +14,7 @@
     disabled?: boolean;
   }
   interface Props {
+    id?: string;
     value: string;
     options: KorySelectOption[];
     onchange: (value: string) => unknown | Promise<unknown>;
@@ -27,6 +28,7 @@
     customPlaceholder?: string;
   }
   let {
+    id,
     value,
     options,
     onchange,
@@ -44,8 +46,33 @@
   let customMode = $state(false);
   let customValue = $state('');
   let root = $state<HTMLDivElement>();
+  let triggerEl = $state<HTMLButtonElement>();
+  let menuEl = $state<HTMLDivElement>();
+  let menuStyle = $state('');
   const listboxId = `kory-select-${++nextKorySelectId}`;
   const selected = $derived(options.find((option) => option.value === value));
+
+  function updatePosition() {
+    if (!triggerEl || !menuEl) return;
+    const rect = triggerEl.getBoundingClientRect();
+    const gap = 8;
+    const maxH = 288;
+    const width = Math.max(rect.width, 224);
+    let left = rect.left;
+    const vw = window.innerWidth;
+    if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
+    const spaceBelow = window.innerHeight - rect.bottom - gap;
+    const spaceAbove = rect.top - gap;
+    const flip = spaceBelow < 160 && spaceAbove > spaceBelow;
+    let top: number;
+    if (flip) {
+      const estH = Math.min(maxH, menuEl.scrollHeight || maxH);
+      top = Math.max(8, rect.top - estH - gap);
+    } else {
+      top = rect.bottom + gap;
+    }
+    menuStyle = `position:fixed;left:${left}px;top:${top}px;width:${width}px;`;
+  }
 
   function selectedIndex() {
     const index = options.findIndex((option) => option.value === value && !option.disabled);
@@ -60,7 +87,10 @@
   function toggleOpen() {
     if (disabled) return;
     open = !open;
-    if (open) activeIndex = selectedIndex();
+    if (open) {
+      activeIndex = selectedIndex();
+      void tick().then(updatePosition);
+    }
   }
 
   function choose(option: KorySelectOption) {
@@ -95,12 +125,14 @@
       if (!open) {
         open = true;
         activeIndex = selectedIndex();
+        void tick().then(updatePosition);
       } else if (options[activeIndex]) choose(options[activeIndex]);
       return;
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       open = true;
+      void tick().then(updatePosition);
       const available = options
         .map((option, index) => ({ option, index }))
         .filter(({ option }) => !option.disabled);
@@ -110,6 +142,7 @@
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       open = true;
+      void tick().then(updatePosition);
       const delta = event.key === 'ArrowDown' ? 1 : -1;
       let next = activeIndex;
       do {
@@ -120,15 +153,31 @@
   }
   onMount(() => {
     const close = (event: PointerEvent) => {
-      if (!root?.contains(event.target as Node)) open = false;
+      const target = event.target as Node;
+      if (!root?.contains(target) && !menuEl?.contains(target)) open = false;
+    };
+    const onReposition = () => {
+      if (open) updatePosition();
     };
     window.addEventListener('pointerdown', close);
-    return () => window.removeEventListener('pointerdown', close);
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition);
+    };
+  });
+
+  $effect(() => {
+    if (open) void tick().then(updatePosition);
   });
 </script>
 
 <div class="relative w-full" bind:this={root}>
   <button
+    bind:this={triggerEl}
+    {id}
     type="button"
     role="combobox"
     {disabled}
@@ -164,10 +213,12 @@
   {/if}
   {#if open}
     <div
+      bind:this={menuEl}
       id={listboxId}
       role="listbox"
       aria-label={label}
-      class="absolute z-[120] mt-2 max-h-72 w-full min-w-56 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/40"
+      style={menuStyle}
+      class="fixed z-[120] max-h-72 min-w-56 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/40"
     >
       {#each options as option, index (option.value)}
         <button

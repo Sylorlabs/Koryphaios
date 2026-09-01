@@ -68,7 +68,10 @@
 			.then(() => authStore.initialize())
 			.then((authReady) => {
 				if (!authReady) throw new Error('Backend authentication did not initialize.');
-				return loadProvidersFromApi({ forceRefreshModels: true });
+				// Registry initialization already warms enabled catalogs. Startup only
+				// needs the current status; forcing here re-probes every rejected custom
+				// credential before the user has asked to retry it.
+				return loadProvidersFromApi();
 			})
 			.then((providersReady) => {
 				if (!providersReady) throw new Error('Backend provider catalog failed to load.');

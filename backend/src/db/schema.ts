@@ -3,7 +3,16 @@
  * SQLite-only schema for Koryphaios desktop mode
  */
 
-import { sqliteTable, text, integer, real, primaryKey, unique } from 'drizzle-orm/sqlite-core';
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  primaryKey,
+  unique,
+  index,
+  check,
+} from 'drizzle-orm/sqlite-core';
 import { sql, relations } from 'drizzle-orm';
 
 // ============================================================================
@@ -23,6 +32,9 @@ export const sessions = sqliteTable('sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').references(() => users.id, { onDelete: 'set null' }),
   title: text('title').notNull(),
+  /** Null while visible in the normal chat list. A timestamp means the chat is
+   * archived but still fully recoverable; deletion remains a separate path. */
+  archivedAt: integer('archived_at', { mode: 'timestamp_ms' }),
   parentId: text('parent_id'),
   messageCount: integer('message_count').default(0),
   tokensIn: integer('tokens_in').default(0),
@@ -43,6 +55,194 @@ export const sessions = sqliteTable('sessions', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/**
+ * Durable, authoritative lifecycle projection for one session.
+ *
+ * `sessions.workflow_state` remains a compatibility projection while callers
+ * migrate. It is not allowed to decide whether a run is alive.
+ */
+export const sessionRuns = sqliteTable('session_runs', {
+  sessionId: text('session_id')
+    .primaryKey()
+    .references(() => sessions.id, { onDelete: 'cascade' }),
+  runId: text('run_id'),
+  revision: integer('revision').notNull().default(0),
+  phase: text('phase').notNull().default('idle'),
+  status: text('status').notNull().default('idle'),
+  waitingReason: text('waiting_reason').notNull().default(''),
+  continuationId: text('continuation_id'),
+  activeAgentIds: text('active_agent_ids').notNull().default('[]'),
+  startedAt: integer('started_at'),
+  updatedAt: integer('updated_at').notNull(),
+  finishedAt: integer('finished_at'),
+  terminalReason: text('terminal_reason'),
+});
+
+/**
+ * Idempotency and recovery authority for source-owned manager turns. Message
+ * rows are payload, not command receipts: this ledger survives partial writes
+ * and binds one producer command to one immutable input and run generation.
+ */
+export const sessionTurnCommands = sqliteTable(
+  'session_turn_commands',
+  {
+    commandKey: text('command_key').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    source: text('source', { enum: ['goal', 'collaboration', 'internal'] }).notNull(),
+    sourceCommandId: text('source_command_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    userMessageId: text('user_message_id').notNull(),
+    responseMessageId: text('response_message_id').notNull(),
+    runId: text('run_id').notNull(),
+    status: text('status', {
+      enum: ['active', 'completed', 'failed', 'cancelled', 'waiting'],
+    }).notNull(),
+    terminalReason: text('terminal_reason'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    finishedAt: integer('finished_at'),
+  },
+  (table) => [
+    unique('uq_session_turn_commands_source').on(
+      table.sessionId,
+      table.source,
+      table.sourceCommandId,
+    ),
+    unique('uq_session_turn_commands_user_message').on(table.userMessageId),
+    unique('uq_session_turn_commands_response_message').on(table.responseMessageId),
+    unique('uq_session_turn_commands_run').on(table.runId),
+    index('idx_session_turn_commands_session_status').on(
+      table.sessionId,
+      table.status,
+      table.updatedAt,
+    ),
+    check(
+      'ck_session_turn_commands_source',
+      sql`${table.source} IN ('goal', 'collaboration', 'internal')`,
+    ),
+    check(
+      'ck_session_turn_commands_status',
+      sql`${table.status} IN ('active', 'completed', 'failed', 'cancelled', 'waiting')`,
+    ),
+    check(
+      'ck_session_turn_commands_key',
+      sql`length(${table.commandKey}) = 40 AND ${table.commandKey} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      'ck_session_turn_commands_source_id',
+      sql`length(${table.sourceCommandId}) BETWEEN 1 AND 512`,
+    ),
+    check(
+      'ck_session_turn_commands_input_hash',
+      sql`length(${table.inputHash}) = 64 AND ${table.inputHash} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      'ck_session_turn_commands_user_message',
+      sql`${table.userMessageId} = 'command-user-' || ${table.commandKey}`,
+    ),
+    check(
+      'ck_session_turn_commands_response_message',
+      sql`${table.responseMessageId} = 'command-response-' || ${table.commandKey}`,
+    ),
+    check('ck_session_turn_commands_run_id', sql`length(${table.runId}) BETWEEN 1 AND 128`),
+    check(
+      'ck_session_turn_commands_timestamps',
+      sql`${table.createdAt} >= 0 AND ${table.updatedAt} >= ${table.createdAt} AND (${table.finishedAt} IS NULL OR ${table.finishedAt} >= ${table.createdAt})`,
+    ),
+    check(
+      'ck_session_turn_commands_terminal',
+      sql`((${table.status} IN ('active', 'waiting') AND ${table.terminalReason} IS NULL AND ${table.finishedAt} IS NULL) OR (${table.status} IN ('completed', 'failed', 'cancelled') AND ${table.terminalReason} IS NOT NULL AND length(trim(${table.terminalReason})) BETWEEN 1 AND 2048 AND ${table.finishedAt} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Transactional outbox for session-run transitions. */
+export const sessionRunEvents = sqliteTable(
+  'session_run_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    runId: text('run_id'),
+    revision: integer('revision').notNull(),
+    payload: text('payload').notNull(),
+    createdAt: integer('created_at').notNull(),
+    publishedAt: integer('published_at'),
+    deadLetterReason: text('dead_letter_reason'),
+  },
+  (table) => [unique('uq_session_run_event_revision').on(table.sessionId, table.revision)],
+);
+
+/** Durable ownership record for the external fact that may resume a wait. */
+export const sessionRunContinuations = sqliteTable(
+  'session_run_continuations',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    waitRevision: integer('wait_revision').notNull(),
+    kind: text('kind', { enum: ['user_question', 'process_set'] }).notNull(),
+    state: text('state', {
+      enum: ['pending', 'ready', 'claimed', 'consumed', 'cancelled'],
+    })
+      .notNull()
+      .default('pending'),
+    payload: text('payload').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    unique('uq_session_run_continuation_wait').on(table.sessionId, table.runId, table.waitRevision),
+  ],
+);
+
+/**
+ * Durable command emitted when an answered question cannot resume its original
+ * in-memory provider stack. Delivery is leased independently from SessionRun:
+ * claiming this row does not imply that a replacement turn has started.
+ */
+export const sessionRunHandoffs = sqliteTable(
+  'session_run_handoffs',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['resume_answered_question'] }).notNull(),
+    sourceRunId: text('source_run_id').notNull(),
+    sourceRunRevision: integer('source_run_revision').notNull(),
+    questionId: text('question_id').notNull(),
+    questionPayload: text('question_payload').notNull(),
+    answer: text('answer').notNull(),
+    state: text('state', { enum: ['pending', 'claimed', 'consumed'] })
+      .notNull()
+      .default('pending'),
+    claimToken: text('claim_token'),
+    claimedBy: text('claimed_by'),
+    claimedAt: integer('claimed_at'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    consumedAt: integer('consumed_at'),
+  },
+  (table) => [
+    unique('uq_session_run_handoff_question').on(table.questionId),
+    index('idx_session_run_handoffs_claimable').on(
+      table.state,
+      table.leaseExpiresAt,
+      table.createdAt,
+    ),
+    index('idx_session_run_handoffs_session').on(table.sessionId, table.createdAt),
+  ],
+);
+
 export const messages = sqliteTable('messages', {
   id: text('id').primaryKey(),
   sessionId: text('session_id')
@@ -60,8 +260,57 @@ export const messages = sqliteTable('messages', {
   contextRevision: integer('context_revision').notNull().default(0),
   /** Previous message in this retained conversation branch. */
   parentMessageId: text('parent_message_id'),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  // Feed reconciliation may compare a persisted final answer with live
+  // reasoning events from the same second. Preserve the actual write instant;
+  // causal event anchors remain authoritative, but second precision cannot be
+  // allowed to manufacture an inverted fallback order.
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 });
+
+/**
+ * Client-originated errors that were deliberately placed in a chat transcript.
+ * This is intentionally narrower than telemetry or toast storage: only the
+ * explicit `addClientError()` feed action is written here.
+ */
+export const sessionFeedEntries = sqliteTable(
+  'session_feed_entries',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['client_error'] }).notNull(),
+    text: text('text').notNull(),
+    timestamp: integer('timestamp', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [index('idx_session_feed_entries_session').on(table.sessionId, table.timestamp)],
+);
+
+/**
+ * A view-only tombstone is separate from the source transcript. Ordered
+ * events cannot be deleted from the immutable event log, so the target key
+ * names the exact replay identity (for example `event:3:18:24`). Messages
+ * still use their normal destructive route; these rows cover Hide-from-me and
+ * non-message feed evidence.
+ */
+export const sessionFeedTombstones = sqliteTable(
+  'session_feed_tombstones',
+  {
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    targetKey: text('target_key').notNull(),
+    visibility: text('visibility', { enum: ['hidden', 'deleted'] }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sessionId, table.targetKey] }),
+    index('idx_session_feed_tombstones_session').on(table.sessionId, table.updatedAt),
+  ],
+);
 
 export const sessionCompactions = sqliteTable('session_compactions', {
   id: text('id').primaryKey(),
@@ -263,6 +512,9 @@ export const userInputs = sqliteTable('user_inputs', {
   id: text('id').primaryKey(),
   sessionId: text('session_id').notNull(),
   inputData: text('input_data').notNull(), // JSON string
+  runId: text('run_id'),
+  runRevision: integer('run_revision'),
+  status: text('status', { enum: ['pending', 'answered', 'cancelled'] }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
 
@@ -407,6 +659,30 @@ export const supervisedProcesses = sqliteTable('supervised_processes', {
   metadata: text('metadata'), // JSON string
 });
 
+/**
+ * Relational ownership for process-backed continuations. The JSON payload on
+ * the continuation remains a compatibility projection; these rows are the
+ * authoritative identities protected from process-history cleanup.
+ */
+export const sessionRunContinuationProcesses = sqliteTable(
+  'session_run_continuation_processes',
+  {
+    continuationId: text('continuation_id')
+      .notNull()
+      .references(() => sessionRunContinuations.id, { onDelete: 'cascade' }),
+    processId: text('process_id')
+      .notNull()
+      .references(() => supervisedProcesses.id, { onDelete: 'restrict' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.continuationId, table.processId] }),
+    index('idx_session_run_continuation_processes_process').on(
+      table.processId,
+      table.continuationId,
+    ),
+  ],
+);
+
 export const processEvents = sqliteTable('process_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   processId: text('process_id').notNull(),
@@ -501,10 +777,42 @@ export const notes = sqliteTable('notes', {
   format: text('format').notNull().default('markdown'), // 'markdown' | 'html' — html renders in the sandboxed preview
   projectRoot: text('project_root'), // null means a legacy note owned by the launch project
   revision: integer('revision').notNull().default(1),
+  /** Soft-deleted notes stay recoverable with their links and attachments. */
+  trashedAt: integer('trashed_at', { mode: 'timestamp_ms' }),
+  trashReason: text('trash_reason', { enum: ['user', 'source_removed'] }),
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
+
+/** Immutable full-state snapshots. The current row remains the fast read model;
+ * this table is the recovery/history source of truth. */
+export const noteRevisions = sqliteTable(
+  'note_revisions',
+  {
+    noteId: text('note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    projectRoot: text('project_root').notNull(),
+    operation: text('operation').notNull(),
+    title: text('title').notNull(),
+    content: text('content').notNull(),
+    contentBytes: integer('content_bytes').notNull(),
+    folderPath: text('folder_path').notNull(),
+    tags: text('tags').notNull(),
+    pinned: integer('pinned').notNull(),
+    includeInContext: integer('include_in_context').notNull(),
+    format: text('format').notNull(),
+    sourcePath: text('source_path'),
+    trashedAt: integer('trashed_at', { mode: 'timestamp_ms' }),
+    trashReason: text('trash_reason'),
+    noteCreatedAt: integer('note_created_at', { mode: 'timestamp' }).notNull(),
+    noteUpdatedAt: integer('note_updated_at', { mode: 'timestamp' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.noteId, table.revision] })],
+);
 
 // Wiki-link graph edges
 export const noteLinks = sqliteTable(
@@ -534,6 +842,229 @@ export const noteAttachments = sqliteTable('note_attachments', {
   storagePath: text('storage_path').notNull(), // absolute path on disk
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
 });
+
+/** Stable installation-scoped identity for private Notes recovery data. The
+ * bearer token is intentionally not used: local auth sessions rotate across
+ * backend restarts, while the owner-only SQLite file is durable. */
+export const noteDraftPrincipals = sqliteTable('note_draft_principals', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['local'] })
+    .notNull()
+    .unique(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+});
+
+/** Non-authoritative, crash-durable editor branches. A draft deliberately has
+ * no FK to notes: deletion or a path-derived project-note rename must never
+ * cascade away the last unsaved copy. */
+export const noteDrafts = sqliteTable(
+  'note_drafts',
+  {
+    id: text('id').primaryKey(),
+    principalId: text('principal_id')
+      .notNull()
+      .references(() => noteDraftPrincipals.id, { onDelete: 'restrict' }),
+    projectRoot: text('project_root').notNull(),
+    noteId: text('note_id').notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    draftRevision: integer('draft_revision').notNull().default(1),
+    baseTitle: text('base_title').notNull(),
+    sourcePathAtBase: text('source_path_at_base'),
+    title: text('title').notNull(),
+    content: text('content').notNull(),
+    contentBytes: integer('content_bytes').notNull(),
+    folderPath: text('folder_path').notNull(),
+    tags: text('tags').notNull(),
+    pinned: integer('pinned').notNull(),
+    includeInContext: integer('include_in_context').notNull(),
+    format: text('format', { enum: ['markdown', 'html'] }).notNull(),
+    payloadHash: text('payload_hash').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('idx_note_drafts_scope_updated').on(
+      table.principalId,
+      table.projectRoot,
+      table.updatedAt,
+    ),
+    index('idx_note_drafts_scope_note').on(
+      table.principalId,
+      table.projectRoot,
+      table.noteId,
+      table.updatedAt,
+    ),
+  ],
+);
+
+/** One projection-health row per note. Base queries compare projectedRevision
+ * with notes.revision and repair or fail closed rather than silently omitting
+ * stale property values. */
+export const notePropertyDocuments = sqliteTable(
+  'note_property_documents',
+  {
+    noteId: text('note_id')
+      .primaryKey()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    projectRoot: text('project_root').notNull(),
+    projectedRevision: integer('projected_revision').notNull(),
+    frontmatterHash: text('frontmatter_hash').notNull(),
+    status: text('status', { enum: ['valid', 'invalid', 'unsupported'] }).notNull(),
+    issuesJson: text('issues_json').notNull().default('[]'),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('idx_note_property_documents_scope_revision').on(
+      table.projectRoot,
+      table.projectedRevision,
+    ),
+  ],
+);
+
+/** Query projection of supported frontmatter properties. Source Markdown is
+ * authoritative; this table is rebuilt from note content and exists only so
+ * Bases can stay complete and indexed for large vaults. */
+export const noteProperties = sqliteTable(
+  'note_properties',
+  {
+    noteId: text('note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    projectRoot: text('project_root').notNull(),
+    key: text('key').notNull(),
+    normalizedKey: text('normalized_key').notNull(),
+    type: text('type', {
+      enum: ['text', 'number', 'checkbox', 'date', 'datetime', 'list', 'tags'],
+    }).notNull(),
+    valueJson: text('value_json').notNull(),
+    valueText: text('value_text'),
+    valueNumber: real('value_number'),
+    valueBoolean: integer('value_boolean'),
+    noteRevision: integer('note_revision').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noteId, table.normalizedKey] }),
+    index('idx_note_properties_scope_key_text').on(
+      table.projectRoot,
+      table.normalizedKey,
+      table.valueText,
+    ),
+    index('idx_note_properties_scope_key_number').on(
+      table.projectRoot,
+      table.normalizedKey,
+      table.valueNumber,
+    ),
+    index('idx_note_properties_scope_key_boolean').on(
+      table.projectRoot,
+      table.normalizedKey,
+      table.valueBoolean,
+    ),
+  ],
+);
+
+/** Individually indexed list values for contains predicates. */
+export const notePropertyItems = sqliteTable(
+  'note_property_items',
+  {
+    noteId: text('note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    normalizedKey: text('normalized_key').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    projectRoot: text('project_root').notNull(),
+    valueText: text('value_text').notNull(),
+    normalizedText: text('normalized_text').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noteId, table.normalizedKey, table.ordinal] }),
+    index('idx_note_property_items_scope_key_value').on(
+      table.projectRoot,
+      table.normalizedKey,
+      table.normalizedText,
+    ),
+  ],
+);
+
+/** Project-wide typed property registry inferred from indexed Markdown. */
+export const notePropertySchemas = sqliteTable(
+  'note_property_schemas',
+  {
+    projectRoot: text('project_root').notNull(),
+    normalizedKey: text('normalized_key').notNull(),
+    displayName: text('display_name').notNull(),
+    kind: text('kind', {
+      enum: ['text', 'number', 'checkbox', 'date', 'datetime', 'list', 'tags'],
+    }).notNull(),
+    revision: integer('revision').notNull().default(1),
+    usageCount: integer('usage_count').notNull().default(0),
+    invalidCount: integer('invalid_count').notNull().default(0),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.projectRoot, table.normalizedKey] })],
+);
+
+/** Persistent project-scoped typed query definitions. */
+export const noteBases = sqliteTable(
+  'note_bases',
+  {
+    id: text('id').primaryKey(),
+    principalId: text('principal_id')
+      .notNull()
+      .references(() => noteDraftPrincipals.id, { onDelete: 'restrict' }),
+    projectRoot: text('project_root').notNull(),
+    name: text('name').notNull(),
+    definition: text('definition').notNull(),
+    revision: integer('revision').notNull().default(1),
+    trashedAt: integer('trashed_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    unique('uq_note_bases_scope_name').on(table.principalId, table.projectRoot, table.name),
+    index('idx_note_bases_scope_updated').on(table.principalId, table.projectRoot, table.updatedAt),
+  ],
+);
+
+export const noteBaseRevisions = sqliteTable(
+  'note_base_revisions',
+  {
+    baseId: text('base_id')
+      .notNull()
+      .references(() => noteBases.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    projectRoot: text('project_root').notNull(),
+    operation: text('operation', { enum: ['create', 'update', 'trash', 'restore'] }).notNull(),
+    name: text('name').notNull(),
+    definition: text('definition').notNull(),
+    trashedAt: integer('trashed_at', { mode: 'timestamp_ms' }),
+    baseCreatedAt: integer('base_created_at', { mode: 'timestamp_ms' }).notNull(),
+    baseUpdatedAt: integer('base_updated_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.baseId, table.revision] }),
+    index('idx_note_base_revisions_scope').on(table.projectRoot, table.baseId, table.revision),
+  ],
+);
+
+/** Durable commit witness for whole-vault restores. Project-local recovery
+ * journals use this row to distinguish a SQLite commit from files left behind
+ * by a process crash while the transaction was still open. */
+export const noteVaultRestoreCommits = sqliteTable(
+  'note_vault_restore_commits',
+  {
+    archiveSha256: text('archive_sha256').notNull(),
+    projectRoot: text('project_root').notNull(),
+    manifestSha256: text('manifest_sha256').notNull(),
+    planToken: text('plan_token').notNull(),
+    committedAt: integer('committed_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.archiveSha256, table.projectRoot] }),
+    index('idx_note_vault_restore_commits_project').on(table.projectRoot, table.committedAt),
+  ],
+);
 
 // ============================================================================
 // Type Exports
@@ -571,3 +1102,5 @@ export type NewSessionParticipant = typeof sessionParticipants.$inferInsert;
 
 export type ReplayEvent = typeof replayEvents.$inferSelect;
 export type NewReplayEvent = typeof replayEvents.$inferInsert;
+export type StoredNoteRevision = typeof noteRevisions.$inferSelect;
+export type NewStoredNoteRevision = typeof noteRevisions.$inferInsert;

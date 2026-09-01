@@ -31,22 +31,25 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
   const composer = page.getByTestId('composer-input');
   await expect(composer).toBeEnabled({ timeout: 30_000 });
 
-  // Type a goal creation command
+  // Type a goal creation command — the composer opens above the chat
   await composer.fill('/goal create Finish the release');
   await composer.press('Enter');
 
-  // The Active Goals panel should appear
-  const goals = page.getByLabel('Active Goals');
-  await expect(goals).toBeVisible({ timeout: 10_000 });
-
-  // The new goal input should contain the goal text
-  const newGoal = goals.getByLabel('New goal');
+  // The goal composer card should appear above the chat with the prefilled text
+  const goalComposer = page.getByRole('group', { name: 'New goal' });
+  await expect(goalComposer).toBeVisible({ timeout: 10_000 });
+  const newGoal = goalComposer.getByLabel('Goal objective');
   await expect(newGoal).toHaveValue('Finish the release');
 
   // Confirm the goal
   await newGoal.press('Enter');
 
-  // The Critic quality gate toggle should be visible
+  // The goal preview should appear on the left sidebar
+  const goals = page.getByLabel('Active Goals');
+  await expect(goals).toBeVisible({ timeout: 10_000 });
+  await expect(goals.getByText('Finish the release')).toBeVisible({ timeout: 10_000 });
+
+  // The Critic quality gate toggle should be visible for the selected goal
   await expect(goals.getByText(/Critic quality gate (on|off)/)).toBeVisible({ timeout: 10_000 });
 
   // Test goal resume command

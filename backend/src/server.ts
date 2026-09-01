@@ -48,6 +48,8 @@ import { mcpServerRoutes } from './routes/v1/mcp-servers';
 import { mcpRegistryRoutes } from './routes/v1/mcp-registry';
 import { voiceRoutes } from './routes/v1/voice';
 import { imageRoutes } from './routes/v1/images';
+import { usageRoutes } from './routes/v1/usage';
+import { feedRoutes } from './routes/v1/feed';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
 const SERVER_STARTED_AT = Date.now();
@@ -85,6 +87,7 @@ const baseApp = new Elysia()
   .post('/api/debug/log-error', () => ({ ok: true }))
   .onError(errorHandler)
   .use(sessionRoutes)
+  .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
   .use(collaborationRoutes)
@@ -105,7 +108,8 @@ const baseApp = new Elysia()
   .use(mcpServerRoutes)
   .use(mcpRegistryRoutes)
   .use(voiceRoutes)
-  .use(imageRoutes);
+  .use(imageRoutes)
+  .use(usageRoutes);
 
 export type App = typeof baseApp;
 
@@ -165,7 +169,7 @@ async function main() {
   // Bootstrap dependencies
   const ctx = await bootstrap();
   setContext(ctx);
-  const { config, kory, providers, sessions, messages, wsManager } = ctx;
+  const { config, kory, providers, sessions, messages, wsManager, runs } = ctx;
 
   // Default to 127.0.0.1 for local-only security. A network-exposed server
   // keeps the normal per-client rate limit below; a desktop loopback server
@@ -389,7 +393,7 @@ async function main() {
     Bun.serve<WSClientData>({
       port,
       hostname: serverConfig.host,
-      websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers }),
+      websocket: createWebSocketHandlers({ wsManager, sessions, kory, providers, runs }),
       async fetch(req, srv) {
         return fetchHandler(req, srv);
       },
@@ -452,11 +456,19 @@ async function main() {
   }
 
   // ─── Graceful Shutdown ──────────────────────────────────────────────────
+  let shutdownPromise: Promise<void> | null = null;
   async function gracefulShutdown(signal: string) {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
     serverLog.info({ signal }, 'Graceful shutdown');
     server.stop(true);
     clearActivePortFile();
-    kory.cancel();
+    // Freeze local lifecycle writers first. Durable user/process waits survive
+    // restart; only provider/compaction work that cannot survive is failed.
+    await kory.shutdown();
+    await runs.recoverInterruptedRuns();
+    await runs.drainOutbox();
+    runs.stopOutboxPump();
     shutdownAllBrokers();
     // Dispose the local auth manager so its session-cleanup interval is
     // cleared and the master key buffer is zeroed before exit.
@@ -472,6 +484,8 @@ async function main() {
       /* ignore */
     }
     process.exit(0);
+    })();
+    return shutdownPromise;
   }
 
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

@@ -40,6 +40,7 @@ import {
 } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
+import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
 
 const CURSOR_STREAM_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -344,7 +345,18 @@ export class CursorProvider implements Provider {
         finished = true;
         const models = parseCursorModelList(out);
         if (models.length > 0) {
-          this.cachedModels = models;
+          // Cursor's model listing only returns bare ids ("gpt-5",
+          // "claude-sonnet-4-5"); it does not report context windows. Stamp
+          // real numbers on from the public models.dev catalog — Cursor routes
+          // to OpenAI, Anthropic, Google and xAI models, so we look under
+          // all four providers. The catalog key list mirrors the antigravity
+          // case (multi-vendor under one subscription).
+          refreshModelsDevCache();
+          this.cachedModels = applyModelsDevMetadata(
+            'cursor',
+            models,
+            ['openai', 'anthropic', 'google', 'xai'],
+          );
           this.modelsFetchedAt = Date.now();
           this.modelsInFlight = false;
           providerLog.debug(
@@ -658,6 +670,8 @@ export class CursorProvider implements Provider {
             // detail breakdown) — emitting tokensCache would double count.
             tokensIn: row.usage.inputTokens ?? 0,
             tokensOut: row.usage.outputTokens ?? 0,
+            tokensCacheRead: row.usage.cacheReadTokens,
+            tokensCacheWrite: row.usage.cacheWriteTokens,
           };
         }
         if (row.is_error) {

@@ -13,7 +13,6 @@ import { whichBinary } from './cli-detection';
 import { discoverCliAccounts, type DiscoveredCliAccount } from './cli-accounts';
 import {
   type Provider,
-  type ProviderContentBlock,
   type ProviderEvent,
   type ProviderMessage,
   type StreamRequest,
@@ -23,8 +22,10 @@ import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   assertPrivateValuesAbsentFromArgv,
+  spawnWithPrivateArtifactCleanup,
   writePrivatePromptToStdin,
 } from './private-cli-transport';
+import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
 import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,
@@ -33,6 +34,10 @@ import {
 import { writeManagedCliFile } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
+import {
+  readAllCodexModelsCaches,
+  enrichCodexModelsWithCliCache,
+} from './codex-models-cache';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
@@ -180,14 +185,6 @@ async function queryCliModels(
   });
 }
 
-function flatten(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text as string)
-    .join('\n');
-}
-
 type KoryToolEnvelope = {
   name: string;
   input: Record<string, unknown>;
@@ -277,6 +274,12 @@ export function codexJsonEvents(
         type: 'usage_update',
         tokensIn: usage.input_tokens as number | undefined,
         tokensOut: usage.output_tokens as number | undefined,
+        // Codex input_tokens already includes this cached prefix. Carry it as
+        // explanatory metadata only; consumers must not add it a second time.
+        tokensCacheRead:
+          typeof usage.cached_input_tokens === 'number'
+            ? usage.cached_input_tokens
+            : undefined,
         accountId,
       });
     }
@@ -311,16 +314,20 @@ export function codexReasoningArgs(reasoningLevel: string | undefined): string[]
   return args;
 }
 
-function buildPrompt(
+/** Build the text part of a Codex turn. Image bytes travel through Codex's
+ * documented `--image` transport; the path in the prompt preserves the image's
+ * place in multi-turn context and lets the CLI inspect it with native tools. */
+export function buildCodexPrompt(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
   tools: StreamRequest['tools'],
   harnessRole: StreamRequest['harnessRole'],
+  attachments: Pick<CliAttachmentScope, 'renderContent'>,
 ): string {
   const turns = messages
     .filter((message) => message.role !== 'system')
     .map((message) => {
-      const text = flatten(message.content).trim();
+      const text = attachments.renderContent(message.content).trim();
       if (!text) return '';
       const label =
         message.role === 'assistant'
@@ -355,6 +362,14 @@ function buildPrompt(
       ].join('\n')
     : '';
   return [systemPrompt?.trim(), harnessNote, toolProtocol, ...turns].filter(Boolean).join('\n\n');
+}
+
+/** Build the official Codex image flags without ever putting image bytes in
+ * argv. The paths point to per-turn 0600 private artifacts. */
+export function codexImageArgs(
+  attachments: Pick<CliAttachmentScope, 'artifacts'>,
+): string[] {
+  return attachments.artifacts.flatMap((artifact) => ['--image', artifact.path]);
 }
 
 function resolveCliModel(modelId: string, models: ModelDef[]): string {
@@ -441,7 +456,12 @@ export class CodexCliProvider implements Provider {
             });
         });
         this.accountByModelId = accountByModelId;
-        this.models = models;
+        // Stamp each model with the real context window the Codex CLI wrote
+        // into its own on-disk cache (~/.codex/models_cache.json). The live
+        // `model/list` JSON-RPC response deliberately omits this metadata; the
+        // cache is the only authoritative source the running CLI exposes.
+        const cliCache = readAllCodexModelsCaches();
+        this.models = enrichCodexModelsWithCliCache(models, cliCache);
         this.modelsAt = Date.now();
         this.modelDiscoveryError =
           models.length > 0
@@ -486,11 +506,13 @@ export class CodexCliProvider implements Provider {
     }
 
     const researchOnly = request.capabilityProfile === 'research-only';
-    const prompt = buildPrompt(
+    const attachmentScope = createCliAttachmentScope();
+    const prompt = buildCodexPrompt(
       request.systemPrompt,
       request.messages,
       request.tools,
       request.harnessRole,
+      attachmentScope,
     );
     const sandbox = 'read-only';
 
@@ -548,6 +570,7 @@ export class CodexCliProvider implements Provider {
       // than requesting the supported accelerated tier.
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
       ...codexReasoningArgs(request.reasoningLevel),
+      ...codexImageArgs(attachmentScope),
       '-',
     ];
     const codexHome = getKoryphaiosCodexHome(account.profileDir);
@@ -556,16 +579,32 @@ export class CodexCliProvider implements Provider {
       HOME: codexHome,
       USERPROFILE: codexHome,
     });
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [codexHome]) : null;
+    const attachmentDirectories = attachmentScope.artifacts.map((artifact) => artifact.directory);
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [codexHome, ...attachmentDirectories])
+      : null;
     const wrapped = request.sandbox
-      ? wrapCommand(binary, args, { cwd, configDirs: [codexHome], policy: request.sandbox })
+      ? wrapCommand(binary, args, {
+          cwd,
+          configDirs: [codexHome],
+          readonlyConfigDirs: attachmentDirectories,
+          policy: request.sandbox,
+        })
       : { command: binary, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    const child = spawn(wrapped.command, wrapped.args, {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: jail?.env ?? baseEnv,
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(wrapped.command, wrapped.args, {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: jail?.env ?? baseEnv,
+        }),
+      [...attachmentScope.artifacts],
+      () => {
+        jail?.cleanup();
+        if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
+      },
+    );
     writePrivatePromptToStdin(child, prompt);
     let stderr = '';
     let stdoutBuffer = '';
@@ -583,6 +622,13 @@ export class CodexCliProvider implements Provider {
 
     child.stderr.on('data', (chunk: Buffer) => (stderr = appendPrivateDiagnostic(stderr, chunk)));
     const queue: ProviderEvent[] = [];
+    let resolveWaiter: (() => void) | null = null;
+    let exited = false;
+    let exitCode = 0;
+    const wake = () => {
+      resolveWaiter?.();
+      resolveWaiter = null;
+    };
     const consumeLine = (line: string) => {
       if (!line.trim()) return;
       try {
@@ -590,6 +636,7 @@ export class CodexCliProvider implements Provider {
         const translated = codexJsonEvents(event, allowedToolNames, account.id);
         queue.push(...translated.events);
         if (translated.completed) completed = true;
+        wake();
       } catch {
         // Codex's JSON mode is JSONL; ignore a malformed partial line.
         providerLog.debug(
@@ -607,13 +654,40 @@ export class CodexCliProvider implements Provider {
       } catch (error) {
         streamFrameFailure = error;
         child.kill('SIGTERM');
+        wake();
       }
     });
 
-    const exitCode = await new Promise<number>((resolve) => {
-      child.once('error', () => resolve(-1));
-      child.once('exit', (code) => resolve(code ?? 0));
+    child.once('error', () => {
+      exitCode = -1;
+      exited = true;
+      wake();
     });
+    child.once('close', (code) => {
+      exitCode = code ?? 0;
+      exited = true;
+      wake();
+    });
+
+    // Drain Codex's JSONL while the CLI is still running. Waiting for process
+    // exit here used to buffer every reasoning, tool, and answer event behind
+    // the misleading "Analyzing request..." row for the entire turn.
+    while (!exited || queue.length > 0) {
+      if (queue.length > 0) {
+        yield queue.shift()!;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        if (queue.length > 0 || exited) {
+          resolve();
+          return;
+        }
+        resolveWaiter = resolve;
+        // A stdout/exit callback can land between the first check and
+        // installing the waiter. Recheck to avoid waiting for a later event.
+        if (queue.length > 0 || exited) wake();
+      });
+    }
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
     if (streamFrameFailure) {

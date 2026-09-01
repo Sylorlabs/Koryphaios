@@ -26,6 +26,7 @@
   import Terminal from 'lucide-svelte/icons/terminal';
   import Users from 'lucide-svelte/icons/users';
   import MessageSquare from 'lucide-svelte/icons/message-square';
+  import Archive from 'lucide-svelte/icons/archive';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
   import Save from 'lucide-svelte/icons/save';
   import GripVertical from 'lucide-svelte/icons/grip-vertical';
@@ -33,6 +34,7 @@
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
+  import Download from 'lucide-svelte/icons/download';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Eye from 'lucide-svelte/icons/eye';
   import EyeOff from 'lucide-svelte/icons/eye-off';
@@ -40,6 +42,7 @@
   import ImageIcon from 'lucide-svelte/icons/image';
   import Plug from 'lucide-svelte/icons/plug';
   import Clock3 from 'lucide-svelte/icons/clock-3';
+  import House from 'lucide-svelte/icons/house';
   import MemoryEditor from './MemoryEditor.svelte';
   import AgentSettings from './AgentSettings.svelte';
   import ExperimentalSettings from './ExperimentalSettings.svelte';
@@ -68,7 +71,14 @@
   import KorySelect from './KorySelect.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import ImageSettings from './ImageSettings.svelte';
+  import WelcomeSettings from './WelcomeSettings.svelte';
   import McpServersSettings from './McpServersSettings.svelte';
+  import ArchivedChatsSettings from './ArchivedChatsSettings.svelte';
+  import CustomProviderIconEditor from './settings/CustomProviderIconEditor.svelte';
+  import type {
+    CustomProviderIconSelection,
+    CustomProviderIconShape,
+  } from './settings/custom-provider-icon';
   import { mcpServersStore } from '$lib/stores/mcp-servers.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
@@ -103,7 +113,9 @@
     agent: Bot,
     memory: Brain,
     notes: StickyNote,
+    archived: Archive,
     appearance: Palette,
+    welcome: House,
     shortcuts: Keyboard,
     voice: AudioLines,
     teams: Users,
@@ -156,6 +168,30 @@
   let hostPathsInitializedFor = $state<string | null>(projectStore.currentPath);
   let rotateKeyInput = $state<HTMLInputElement | null>(null);
   let visibleSecrets = $state<Record<string, boolean>>({});
+  let skillsHaveUnsavedChanges = $state(false);
+  let agentSettingsHaveUnsavedChanges = $state(false);
+  let showUnsavedEditsCloseConfirmation = $state(false);
+  let pendingSettingsCloseAction: (() => void) | null = null;
+
+  function finishSettingsClose() {
+    const action = pendingSettingsCloseAction;
+    pendingSettingsCloseAction = null;
+    onClose?.();
+    action?.();
+  }
+
+  function requestSettingsCloseWith(action: (() => void) | null = null) {
+    pendingSettingsCloseAction = action;
+    if (skillsHaveUnsavedChanges || agentSettingsHaveUnsavedChanges) {
+      showUnsavedEditsCloseConfirmation = true;
+      return;
+    }
+    finishSettingsClose();
+  }
+
+  function requestSettingsClose() {
+    requestSettingsCloseWith();
+  }
 
   // Apply a requested destination only as the drawer opens. This lets a
   // contextual shortcut (such as Goal settings) land on Advanced without
@@ -172,7 +208,10 @@
       // row of navigation under Settings.
       memoryStore.setActiveTab('settings');
       agentSettingsStore.setActiveTab('settings');
-      void tick().then(() => settingsSearchInput?.focus());
+      void tick().then(() => {
+        if (settingsSearchInput?.getClientRects().length) settingsSearchInput.focus();
+        else settingsDialog?.focus();
+      });
     } else if (!open && wasOpen) {
       const target = previouslyFocused;
       previouslyFocused = null;
@@ -191,6 +230,15 @@
       }
     };
     window.addEventListener('open-provider-account-settings', openProviderAccounts);
+    const trackUnsavedSkills = (event: Event) => {
+      skillsHaveUnsavedChanges = (event as CustomEvent<{ dirty?: boolean }>).detail?.dirty === true;
+    };
+    const trackUnsavedAgentSettings = (event: Event) => {
+      agentSettingsHaveUnsavedChanges =
+        (event as CustomEvent<{ dirty?: boolean }>).detail?.dirty === true;
+    };
+    window.addEventListener('koryphaios:skills-dirty', trackUnsavedSkills);
+    window.addEventListener('koryphaios:agent-settings-dirty', trackUnsavedAgentSettings);
     // Capture before the page-level shortcut handler. Otherwise assigning a
     // binding such as Ctrl+K can trigger the old global action before this
     // drawer has a chance to save the newly captured binding.
@@ -200,6 +248,8 @@
     window.addEventListener('keydown', captureShortcutAssignment, { capture: true });
     return () => {
       window.removeEventListener('open-provider-account-settings', openProviderAccounts);
+      window.removeEventListener('koryphaios:skills-dirty', trackUnsavedSkills);
+      window.removeEventListener('koryphaios:agent-settings-dirty', trackUnsavedAgentSettings);
       window.removeEventListener('keydown', captureShortcutAssignment, { capture: true });
     };
   });
@@ -248,7 +298,7 @@
       toastStore.error('Add at least one workspace path before hosting');
       return;
     }
-    if (await collaborationStore.hostSession(paths)) onClose?.();
+    if (await collaborationStore.hostSession(paths)) requestSettingsClose();
   }
 
   const NOTE_PERMISSION_PRESETS: Array<{
@@ -268,7 +318,9 @@
     block: 'Hide',
   };
   let loadedNotesProject: string | null = null;
-  let loadedAgentProject: string | null = null;
+  // `null` is a valid "personal skills only" project scope. Keep an explicit
+  // uninitialized sentinel so the first Agent open still loads that scope.
+  let loadedAgentProject: string | null | undefined = undefined;
 
   $effect(() => {
     const projectPath = projectStore.currentPath;
@@ -302,7 +354,7 @@
         pendingDeleteProvider
       )
         return;
-      onClose?.();
+      requestSettingsClose();
       return;
     }
     if (e.key !== 'Tab' || !settingsDialog?.contains(e.target as Node)) return;
@@ -335,6 +387,8 @@
     loadProvidersFromApi,
     loadAvailableProviders,
     loadDetectedClis,
+    loadAwsCredentialScan,
+    refreshAwsScanAndStatus,
     loadProviderAccounts,
     connectProvider,
     startBrowserAuthFlow,
@@ -347,6 +401,8 @@
     rotateProviderKey,
     addCustomProvider: addCustomProviderToStore,
     deleteCustomProvider: deleteCustomProviderFromStore,
+    saveCustomProviderIcon,
+    removeCustomProviderIcon,
     saveAccountProfileLabel,
     getOrderedFallbackAccounts,
     handleFallbackDndConsider,
@@ -390,8 +446,49 @@
     }
   });
 
-  function showTokenInput(_name: string, caps: ReturnType<typeof getProviderCaps>): boolean {
+  function showTokenInput(name: string, caps: ReturnType<typeof getProviderCaps>): boolean {
+    if (usesLocalCliConnection(name) || usesBrowserAuth(name)) return false;
     return caps.supportsAuthToken;
+  }
+
+  const isBedrock = (name: string): boolean => name === 'bedrock';
+
+  // ─── AWS system-credential banner (Bedrock) ─────────────────────────────
+  // The backend scans for credential *sources* on the machine (env vars,
+  // ~/.aws/credentials, ~/.aws/config) and reports only where they live.
+  // Users can Connect (use the machine's AWS login) or Ignore (dismiss).
+  let ignoredAwsScans = $state<Record<string, string>>({});
+
+  function awsBannerDismissed(name: string): boolean {
+    const scan = providersStore.awsCredentialScans[name];
+    if (!scan?.detected) return true;
+    return ignoredAwsScans[name] === scan.description;
+  }
+
+  function ignoreSystemCredentials(name: string): void {
+    const scan = providersStore.awsCredentialScans[name];
+    if (scan) ignoredAwsScans[name] = scan.description;
+  }
+
+  async function connectUsingSystemCredentials(name: string): Promise<void> {
+    await handleConnectProvider(name);
+  }
+
+  function bedrocksInputsVisible(name: string): boolean {
+    return isBedrock(name) && !usesLocalCliConnection(name) && !usesBrowserAuth(name);
+  }
+
+  $effect(() => {
+    if (!open) return;
+    if (activeTab === 'providers' && expandedProvider === 'bedrock') {
+      void refreshAwsScanAndStatus('bedrock');
+    }
+  });
+
+  function loadProviderSection() {
+    if (providersStore.availableProviderTypes.length === 0) void loadAvailableProviders();
+    void loadProvidersFromApi();
+    void loadDetectedClis();
   }
 
   function refreshProviderSection() {
@@ -410,7 +507,7 @@
     if (activeTab === 'providers') {
       if (!providersLoadAttempted) {
         providersLoadAttempted = true;
-        refreshProviderSection();
+        loadProviderSection();
       }
     } else {
       providersLoadAttempted = false;
@@ -445,12 +542,11 @@
   });
 
   let providerSearchQuery = $state('');
-  const clineSignInCommand = 'cline auth --provider cline --apikey <YOUR_KEY>';
   type ProviderCategory = 'all' | 'ready' | 'auth' | 'subscriptions' | 'api' | 'local' | 'custom';
   let providerCategory = $state<ProviderCategory>('all');
   const PROVIDER_CATEGORIES: Array<{ id: ProviderCategory; label: string }> = [
     { id: 'all', label: 'All' },
-    { id: 'ready', label: 'Configured' },
+    { id: 'ready', label: 'Connected' },
     { id: 'auth', label: 'Auth' },
     { id: 'subscriptions', label: 'CLI subscriptions' },
     { id: 'api', label: 'API' },
@@ -459,7 +555,6 @@
   ];
   const LOCAL_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
   const AUTH_PROVIDER_KEYS = new Set(['codex-auth']);
-  const CUSTOM_PROVIDER_KEYS = new Set(['custom']);
   // Categorization is based on the provider being used, not incidental CLI
   // detection. For example, installing `claude` must not reclassify the
   // direct `anthropic` API provider as a subscription.
@@ -481,7 +576,7 @@
     key: string;
   }): Exclude<ProviderCategory, 'all' | 'ready'> => {
     if (LOCAL_PROVIDER_KEYS.has(provider.key)) return 'local';
-    if (CUSTOM_PROVIDER_KEYS.has(provider.key)) return 'custom';
+    if (provider.key.startsWith('custom:')) return 'custom';
     if (AUTH_PROVIDER_KEYS.has(provider.key)) return 'auth';
     if (CLI_SUBSCRIPTION_PROVIDER_KEYS.has(provider.key)) {
       return 'subscriptions';
@@ -489,6 +584,8 @@
     return 'api';
   };
   const installedClis = $derived(providersStore.detectedClis.filter((c) => c.installed));
+  const installedCliFor = (providerKey: string) =>
+    providersStore.detectedClis.find((cli) => cli.provider === providerKey && cli.installed);
   // Detection is useful setup detail, but it duplicates the provider cards if
   // shown in the default catalog. Keep it with the CLI subscription filter,
   // the one place where the distinction between installed and connected is
@@ -502,7 +599,7 @@
       .filter((provider) => {
         const status = getProviderStatus(provider.key);
         if (providerCategory === 'ready') {
-          return Boolean(status?.credentialDetected ?? status?.authenticated);
+          return status?.connectionState === 'verified';
         }
         return providerCategory === 'all' || providerCategoryFor(provider) === providerCategory;
       })
@@ -572,14 +669,128 @@
   let expandedProvider = $state<string | null>(null);
   let showAddCustom = $state(false);
   let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
+  let showNewCustomIconEditor = $state(false);
+  let newCustomIconSelection = $state.raw<CustomProviderIconSelection | null>(null);
+  let customAddError = $state('');
+  let customCanSaveUnverified = $state(false);
+  let customRequiresManualModels = $state(false);
+  let customIconEditorTarget = $state<{ id: string; label: string } | null>(null);
+  let customIconDraft = $state.raw<CustomProviderIconSelection | null | undefined>(undefined);
+  let customIconSaving = $state(false);
+  let customIconDialog = $state<HTMLDivElement | null>(null);
+  let customIconPreviouslyFocused = $state<HTMLElement | null>(null);
+  let customIconEditorError = $state('');
   let copiedEndpoint = $state(false);
   let pendingDeleteProvider = $state<{ id: string; label: string } | null>(null);
 
-  async function addCustomProvider() {
-    const ok = await addCustomProviderToStore(customForm);
-    if (ok) {
-      customForm = { label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' };
+  function resetCustomProviderForm() {
+    customForm = { label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' };
+    showNewCustomIconEditor = false;
+    newCustomIconSelection = null;
+    customAddError = '';
+    customCanSaveUnverified = false;
+    customRequiresManualModels = false;
+  }
+
+  async function addCustomProvider(allowUnverified = false) {
+    customAddError = '';
+    customCanSaveUnverified = false;
+    customRequiresManualModels = false;
+    const result = await addCustomProviderToStore({ ...customForm, allowUnverified });
+    if (result.normalizedBaseUrl) customForm.baseUrl = result.normalizedBaseUrl;
+    if (result.ok) {
+      if (result.id && newCustomIconSelection?.blob) {
+        await saveCustomProviderIcon(result.id, newCustomIconSelection);
+      }
+      resetCustomProviderForm();
       showAddCustom = false;
+      return;
+    }
+    customAddError = result.error ?? 'Koryphaios could not add this provider.';
+    customCanSaveUnverified = result.canSaveUnverified === true;
+    customRequiresManualModels = result.requiresManualModels === true;
+  }
+
+  function openCustomIconEditor(id: string, label: string) {
+    customIconPreviouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    customIconEditorTarget = { id, label };
+    customIconDraft = undefined;
+    customIconEditorError = '';
+    void tick().then(() => customIconDialog?.focus());
+  }
+
+  function finishCustomIconEditorClose() {
+    const focusTarget = customIconPreviouslyFocused;
+    customIconEditorTarget = null;
+    customIconDraft = undefined;
+    customIconEditorError = '';
+    customIconPreviouslyFocused = null;
+    void tick().then(() => {
+      if (focusTarget?.isConnected) focusTarget.focus();
+      else settingsDialog?.focus();
+    });
+  }
+
+  function closeCustomIconEditor() {
+    if (customIconSaving) return;
+    finishCustomIconEditorClose();
+  }
+
+  function customIconDialogFocusableElements(): HTMLElement[] {
+    if (!customIconDialog) return [];
+    return [
+      ...customIconDialog.querySelectorAll<HTMLElement>(
+        'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.matches(':disabled') &&
+        !element.hasAttribute('hidden') &&
+        element.getAttribute('aria-hidden') !== 'true',
+    );
+  }
+
+  function handleCustomIconDialogKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCustomIconEditor();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = customIconDialogFocusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      customIconDialog?.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable.at(-1)!;
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === customIconDialog)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  async function persistCustomIconDraft() {
+    if (!customIconEditorTarget || customIconDraft === undefined) return;
+    customIconSaving = true;
+    try {
+      const ok =
+        customIconDraft === null
+          ? await removeCustomProviderIcon(customIconEditorTarget.id)
+          : await saveCustomProviderIcon(customIconEditorTarget.id, customIconDraft);
+      if (ok) {
+        finishCustomIconEditorClose();
+      }
+    } finally {
+      customIconSaving = false;
     }
   }
 
@@ -640,11 +851,10 @@
     const accounts = getProviderAccounts(status.name).filter(
       (account) => account.source === 'cli-autodetect',
     );
-    // A single CLI profile is the provider's normal connection, not an
-    // account-selection flow. Filtering it through fallback state can make
-    // its models disappear even though there is nothing to choose between.
     if (accounts.length < 2) return status;
-    const enabledAccounts = new Set(providersStore.fallbackOrders[status.name] ?? []);
+    const fallback = providersStore.fallbackOrders[status.name];
+    if (fallback === undefined) return status;
+    const enabledAccounts = new Set(fallback);
     const models = (status.allAvailableModels ?? []).filter((model: any) =>
       enabledAccounts.has(model.accountId),
     );
@@ -665,6 +875,19 @@
     selectorTarget = modelSelectorTarget(status);
     showModelSelector = true;
   }
+
+  $effect(() => {
+    if (!showModelSelector || !selectorTarget) return;
+    const latest = getProviderStatus(selectorTarget.name);
+    if (!latest) return;
+    const next = modelSelectorTarget(latest);
+    if (
+      (next.allAvailableModels?.length ?? 0) !== (selectorTarget.allAvailableModels?.length ?? 0) ||
+      (next.emptyMessage ?? '') !== (selectorTarget.emptyMessage ?? '')
+    ) {
+      selectorTarget = next;
+    }
+  });
 
   function openAccountManager(provider: string, account: { id: string; label: string }) {
     managingAccountProvider = provider;
@@ -763,6 +986,10 @@
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
     if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
     return String(n);
+  }
+
+  function formatUsdRate(n: number): string {
+    return n.toLocaleString(undefined, { maximumFractionDigits: 6 });
   }
 
   function subscriptionTrendKey(cli: { provider?: string; accountId?: string }) {
@@ -873,6 +1100,75 @@
     }
   });
 
+  let apiUsage = $state<{
+    entries: Array<{
+      id: string;
+      ts: number;
+      kind: string;
+      provider: string;
+      model: string;
+      estimatedCostUsd?: number;
+      detail?: string;
+    }>;
+    totals: {
+      totalCount: number;
+      byKind: Record<string, number>;
+      estimatedCostUsd?: number;
+    };
+  } | null>(null);
+  let apiUsageLoading = $state(false);
+  let apiUsageError = $state<string | null>(null);
+
+  async function loadApiUsage() {
+    apiUsageLoading = true;
+    apiUsageError = null;
+    try {
+      const res = await apiFetch(apiUrl('/api/usage?limit=25'));
+      const data = await parseJsonResponse(res);
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `Usage API returned ${res.status}`);
+      apiUsage = data.data;
+    } catch (e: unknown) {
+      apiUsageError = e instanceof Error ? e.message : String(e);
+    } finally {
+      apiUsageLoading = false;
+    }
+  }
+
+  async function exportUsageCsv() {
+    try {
+      const res = await apiFetch(apiUrl('/api/usage/export'));
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const anchor = document.createElement('a');
+      anchor.href = URL.createObjectURL(blob);
+      anchor.download = `koryphaios-api-usage-${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
+      // Defer revocation: older WKWebView builds cancel in-flight downloads
+      // when the URL is revoked synchronously.
+      setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
+    } catch (e: unknown) {
+      toastStore.error(e instanceof Error ? e.message : 'Could not export usage');
+    }
+  }
+
+  function formatApiUsageKind(kind: string): string {
+    if (kind === 'image') return 'Image';
+    if (kind === 'tts') return 'Speech';
+    if (kind === 'stt') return 'Transcribe';
+    return kind;
+  }
+
+  $effect(() => {
+    if (open && activeTab === 'billing' && !apiUsage && !apiUsageError && !apiUsageLoading) {
+      void loadApiUsage();
+    }
+  });
+
+  // Closing the drawer invalidates the panel so reopening shows fresh counts.
+  $effect(() => {
+    if (!open) apiUsage = null;
+  });
+
   onDestroy(() => {
     if (billingRefreshTimer) clearTimeout(billingRefreshTimer);
   });
@@ -916,7 +1212,7 @@
       <button
         type="button"
         class="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-        onclick={() => onClose?.()}
+        onclick={requestSettingsClose}
         aria-label="Close settings"
       >
         <X size={18} />
@@ -941,7 +1237,7 @@
               type="search"
               bind:value={settingsSearch}
               placeholder="Search settings"
-              class="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-9 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/35"
+              class="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-9 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
             />
             {#if settingsSearch}
               <button
@@ -1018,22 +1314,20 @@
 
       <!-- Content Area -->
       <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div
-          class="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-2.5"
-        >
-          <div class="min-w-0">
-            <h3 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">
-              {selectedSettingsEntry.label}
-            </h3>
-            <p class="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
-              {selectedSettingsEntry.description}
-            </p>
-          </div>
-          <span
-            class="shrink-0 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[9px] font-medium text-[var(--color-text-secondary)]"
-            >{selectedSettingsEntry.scope}</span
+        {#if activeTab !== 'mcp' && activeTab !== 'archived'}
+          <div
+            class="flex min-h-14 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-2.5"
           >
-        </div>
+            <div class="min-w-0">
+              <h3 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+                {selectedSettingsEntry.label}
+              </h3>
+              <p class="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
+                {selectedSettingsEntry.description}
+              </p>
+            </div>
+          </div>
+        {/if}
         <!-- Providers Tab -->
         <div
           class={activeTab === 'providers'
@@ -1122,11 +1416,14 @@
               </div>
               <div class="space-y-2.5">
                 {#each installedClis as cli (cli.id)}
+                  {@const cliProviderStatus = cli.provider
+                    ? getProviderStatus(cli.provider)
+                    : undefined}
                   <div class="flex items-start gap-3">
                     <span
                       class="mt-1.5 h-2 w-2 rounded-full flex-shrink-0"
-                      style="background: {cli.autoEnabled
-                        ? 'var(--color-warning)'
+                      style="background: {cliProviderStatus?.connectionState === 'verified'
+                        ? 'var(--color-success)'
                         : (cli.loginDetected ?? cli.loggedIn)
                           ? 'var(--color-warning)'
                           : 'var(--color-text-muted)'};"
@@ -1136,11 +1433,17 @@
                         <span class="text-sm font-medium text-[var(--color-text-primary)]"
                           >{cli.displayName}</span
                         >
-                        {#if cli.autoEnabled}
+                        {#if cliProviderStatus?.connectionState === 'verified'}
+                          <span
+                            class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                            style="background: var(--color-success-bg); color: var(--color-success);"
+                            >Connected · CLI verified</span
+                          >
+                        {:else if cli.autoEnabled}
                           <span
                             class="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
                             style="background: var(--color-warning-bg); color: var(--color-warning);"
-                            >Login material detected · enabled locally</span
+                            >Login detected · connection pending</span
                           >
                         {:else if cli.loginDetected ?? cli.loggedIn}
                           <span
@@ -1219,7 +1522,10 @@
             >
               <button
                 type="button"
-                onclick={() => (showAddCustom = false)}
+                onclick={() => {
+                  resetCustomProviderForm();
+                  showAddCustom = false;
+                }}
                 class="group flex w-full items-center justify-between text-left"
               >
                 <div class="flex items-center gap-2">
@@ -1237,8 +1543,10 @@
                 <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
                   Bring your own endpoint — works with any OpenAI-compatible API (vLLM, LiteLLM, LM
                   Studio, self-hosted gateways, OpenRouter-style services), plus Anthropic- and
-                  Gemini-compatible servers. Models are auto-fetched from <code>/models</code> when available,
-                  or list them explicitly below.
+                  Gemini-compatible servers. Koryphaios repairs common pasted endpoint paths, then
+                  checks <code>/models</code> before anything is saved. Catalog access does not claim
+                  that inference, entitlement, or quota works; the first real response establishes that.
+                  If discovery is unsupported, you can explicitly save with manual model IDs.
                 </p>
                 <div class="space-y-1">
                   <label
@@ -1295,7 +1603,9 @@
                     class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
                     for="custom-key"
                     >API key <span class="opacity-60 normal-case"
-                      >(optional — leave blank if not required)</span
+                      >{customForm.kind === 'gemini'
+                        ? '(required for Gemini-compatible)'
+                        : '(optional — leave blank if not required)'}</span
                     ></label
                   >
                   <div class="relative">
@@ -1335,13 +1645,70 @@
                     class="input w-full text-xs"
                   />
                 </div>
-                <button
-                  type="button"
-                  onclick={addCustomProvider}
-                  disabled={providersStore.addingCustom}
-                  class="btn btn-primary w-full text-xs py-2"
-                  >{providersStore.addingCustom ? 'Adding…' : 'Add provider'}</button
-                >
+                {#if showNewCustomIconEditor}
+                  <CustomProviderIconEditor
+                    id="new-custom-provider-icon"
+                    onchange={(selection) => (newCustomIconSelection = selection)}
+                    onerror={(message) => (customAddError = message)}
+                  />
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => (showNewCustomIconEditor = true)}
+                    class="flex w-full items-center justify-between rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left transition-colors hover:border-[var(--color-accent)]/50 hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
+                  >
+                    <span
+                      class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
+                    >
+                      <ImageIcon size={14} /> Add a custom icon
+                    </span>
+                    <span class="text-[10px] text-[var(--color-text-muted)]">Optional</span>
+                  </button>
+                {/if}
+
+                {#if customAddError}
+                  <div
+                    role="alert"
+                    class="flex items-start gap-2 rounded-xl border border-[var(--color-error)]/40 bg-[var(--color-error-bg)] px-3 py-2.5 text-xs leading-relaxed text-[var(--color-error)]"
+                  >
+                    <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+                    <div class="space-y-1">
+                      <p>{customAddError}</p>
+                      {#if customRequiresManualModels}
+                        <p class="text-[10px] opacity-85">
+                          Add at least one model ID above to enable the explicit unverified path.
+                        </p>
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+
+                <div class="space-y-2">
+                  <button
+                    type="button"
+                    onclick={() => addCustomProvider(false)}
+                    disabled={providersStore.addingCustom}
+                    class="btn btn-primary w-full text-xs py-2"
+                    >{providersStore.addingCustom
+                      ? 'Checking endpoint…'
+                      : 'Check catalog & add provider'}</button
+                  >
+                  {#if customCanSaveUnverified && customForm.models.trim()}
+                    <button
+                      type="button"
+                      onclick={() => addCustomProvider(true)}
+                      disabled={providersStore.addingCustom}
+                      class="btn btn-secondary w-full text-xs py-2"
+                      >Save unverified with manual models</button
+                    >
+                    <p
+                      class="text-center text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                    >
+                      Authentication failures cannot be bypassed. This option is only for endpoints
+                      that do not expose a model catalog.
+                    </p>
+                  {/if}
+                </div>
               </div>
             </section>
           {/if}
@@ -1380,6 +1747,7 @@
               {#each filteredProviderList as prov (prov.key)}
                 {@const status = getProviderStatus(prov.key)}
                 {@const caps = getProviderCaps(prov.key)}
+                {@const installedCli = installedCliFor(prov.key)}
                 {@const deployment = deploymentDescription(status?.deployment, prov.key)}
                 {@const badge = deploymentLabel(status?.deployment, prov.key)}
                 <div
@@ -1419,8 +1787,10 @@
                             Connection failed
                           {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
                             Catalog access detected · inference unverified
+                          {:else if installedCli}
+                            Found on system · not connected
                           {:else if status?.credentialDetected ?? status?.authenticated}
-                            Found on system · not yet connected
+                            Configuration saved · not connected
                           {:else if deployment}
                             {deployment}
                           {:else}
@@ -1446,13 +1816,29 @@
                           <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
                           Failed
                         </div>
-                      {:else if status?.credentialDetected ?? status?.authenticated}
+                      {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                        <div
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-[9px] font-bold"
+                          title="Model catalog access succeeded; inference is checked on first use"
+                        >
+                          <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
+                          Catalog
+                        </div>
+                      {:else if installedCli}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-[9px] font-bold"
-                          title="Found on this system but not yet connected to Koryphaios"
+                          title="CLI found on this system but not connected"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
                           Detected
+                        </div>
+                      {:else if status?.credentialDetected ?? status?.authenticated}
+                        <div
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-[9px] font-bold"
+                          title="Configuration is saved but has not been verified"
+                        >
+                          <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"></span>
+                          Configured
                         </div>
                       {:else}
                         <div
@@ -1483,6 +1869,38 @@
                           {badge}
                         </div>
                       {/if}
+                      {#if prov.key.startsWith('custom:')}
+                        {@const currentCustomIcon = providersStore.getCustomProviderIcon(prov.key)}
+                        <div
+                          class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
+                        >
+                          <div class="flex min-w-0 items-center gap-2.5">
+                            <div
+                              class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--color-surface-3)] p-1.5"
+                            >
+                              <ProviderIcon provider={prov.key} size={24} class="h-full w-full" />
+                            </div>
+                            <div class="min-w-0">
+                              <p class="text-[11px] font-semibold text-[var(--color-text-primary)]">
+                                Custom icon
+                              </p>
+                              <p class="truncate text-[10px] text-[var(--color-text-muted)]">
+                                {currentCustomIcon
+                                  ? 'Private uploaded image'
+                                  : 'Using the default provider mark'}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onclick={() =>
+                              openCustomIconEditor(prov.key, status?.label ?? prov.label)}
+                            class="btn btn-secondary shrink-0 px-3 py-1.5 text-[10px]"
+                          >
+                            {currentCustomIcon ? 'Edit icon' : 'Add icon'}
+                          </button>
+                        </div>
+                      {/if}
                       {#if status?.credentialDetected ?? status?.authenticated}
                         <div
                           class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 px-3 py-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
@@ -1500,8 +1918,8 @@
                             inference permission, model entitlement, quota, and request success are
                             still unverified.
                           {:else}
-                            Found on this system but not yet connected. This does not prove the credential,
-                            account, entitlement, quota, or provider endpoint is usable.
+                            Found on this system but not yet connected. This does not prove the
+                            credential, account, entitlement, quota, or provider endpoint is usable.
                           {/if}
                         </div>
                         <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1588,11 +2006,51 @@
                         {/if}
                       {:else}
                         <div class="space-y-2">
+                          {#if bedrocksInputsVisible(prov.key)}
+                            {@const awsScan = providersStore.awsCredentialScans[prov.key]}
+                            {#if awsScan?.detected && !awsBannerDismissed(prov.key)}
+                              <div
+                                class="rounded-lg border border-[var(--color-info)]/30 bg-[var(--color-info-bg)]/40 px-3 py-2.5"
+                              >
+                                <div
+                                  class="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--color-info)]"
+                                >
+                                  <Key size={12} />
+                                  AWS credentials detected on the system
+                                </div>
+                                <p
+                                  class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-secondary)]"
+                                >
+                                  Found via {awsScan.description}. Connect to use the machine's AWS
+                                  login for Bedrock, or enter credentials below to override it.
+                                </p>
+                                <div class="mt-2 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onclick={() => connectUsingSystemCredentials(prov.key)}
+                                    disabled={providersStore.saving === prov.key}
+                                    class="btn btn-primary flex-1 text-[10px] py-1.5"
+                                    >{providersStore.saving === prov.key
+                                      ? 'Checking…'
+                                      : 'Connect'}</button
+                                  >
+                                  <button
+                                    type="button"
+                                    onclick={() => ignoreSystemCredentials(prov.key)}
+                                    disabled={providersStore.saving === prov.key}
+                                    class="btn btn-secondary flex-1 text-[10px] py-1.5"
+                                    >Ignore</button
+                                  >
+                                </div>
+                              </div>
+                            {/if}
+                          {/if}
                           {#if caps.supportsApiKey}
                             <div class="flex items-center justify-between gap-3">
                               <label
                                 class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-                                for={`provider-key-${prov.key}`}>API Key</label
+                                for={`provider-key-${prov.key}`}
+                                >{isBedrock(prov.key) ? 'AWS Access Key ID' : 'API Key'}</label
                               >
                               {#if status?.credentialUrl}
                                 <a
@@ -1608,7 +2066,9 @@
                               <input
                                 id={`provider-key-${prov.key}`}
                                 type={secretInputType(`provider-key-${prov.key}`)}
-                                placeholder={prov.placeholder}
+                                placeholder={isBedrock(prov.key)
+                                  ? 'AKIA… (access key ID)'
+                                  : prov.placeholder}
                                 bind:value={providersStore.keyInputs[prov.key]}
                                 class="input w-full text-xs"
                                 style="padding-right: 2.75rem;"
@@ -1635,14 +2095,16 @@
                           {#if showTokenInput(prov.key, caps)}
                             <label
                               class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-                              for={`provider-token-${prov.key}`}>Auth Token</label
+                              for={`provider-token-${prov.key}`}
+                              >{isBedrock(prov.key) ? 'Secret Access Key' : 'Auth Token'}</label
                             >
                             <div class="relative">
                               <input
                                 id={`provider-token-${prov.key}`}
                                 type={secretInputType(`provider-token-${prov.key}`)}
-                                placeholder={providersStore.tokenPlaceholders[prov.key] ??
-                                  'Auth token'}
+                                placeholder={isBedrock(prov.key)
+                                  ? 'Secret access key'
+                                  : (providersStore.tokenPlaceholders[prov.key] ?? 'Auth token')}
                                 bind:value={providersStore.tokenInputs[prov.key]}
                                 class="input w-full pr-11 text-xs"
                                 onkeydown={(e) =>
@@ -1657,6 +2119,53 @@
                                   : 'Show auth token'}
                               >
                                 {#if visibleSecrets[`provider-token-${prov.key}`]}<EyeOff
+                                    size={15}
+                                  />{:else}<Eye size={15} />{/if}
+                              </button>
+                            </div>
+                          {/if}
+                          {#if isBedrock(prov.key)}
+                            <label
+                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
+                              for={`provider-aws-region-${prov.key}`}>AWS Region</label
+                            >
+                            <input
+                              id={`provider-aws-region-${prov.key}`}
+                              type="text"
+                              placeholder="e.g. us-east-1 (default)"
+                              bind:value={providersStore.awsRegionInputs[prov.key]}
+                              class="input w-full text-xs"
+                              onkeydown={(e) =>
+                                e.key === 'Enter' && handleConnectProvider(prov.key)}
+                            />
+                            <label
+                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
+                              for={`provider-aws-session-${prov.key}`}
+                              >Session Token
+                              <span class="normal-case opacity-70"
+                                >(optional, for temporary keys)</span
+                              ></label
+                            >
+                            <div class="relative">
+                              <input
+                                id={`provider-aws-session-${prov.key}`}
+                                type={secretInputType(`provider-aws-session-${prov.key}`)}
+                                placeholder="AWS session token"
+                                bind:value={providersStore.awsSessionTokenInputs[prov.key]}
+                                class="input w-full pr-11 text-xs"
+                                onkeydown={(e) =>
+                                  e.key === 'Enter' && handleConnectProvider(prov.key)}
+                              />
+                              <button
+                                type="button"
+                                class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
+                                onclick={() =>
+                                  toggleSecretVisibility(`provider-aws-session-${prov.key}`)}
+                                aria-label={visibleSecrets[`provider-aws-session-${prov.key}`]
+                                  ? 'Hide session token'
+                                  : 'Show session token'}
+                              >
+                                {#if visibleSecrets[`provider-aws-session-${prov.key}`]}<EyeOff
                                     size={15}
                                   />{:else}<Eye size={15} />{/if}
                               </button>
@@ -1788,23 +2297,9 @@
                               class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
                             >
                               {#if prov.key === 'cline'}
-                                This provider signs in via the Cline CLI. Run this in your terminal:
-                                <div class="mt-1.5 flex items-start gap-1.5">
-                                  <code
-                                    class="break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5"
-                                    >{clineSignInCommand}</code
-                                  >
-                                  <button
-                                    type="button"
-                                    class="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-1 text-[10px] hover:bg-[var(--color-surface-3)]"
-                                    onclick={() =>
-                                      copyToClipboard(clineSignInCommand, 'deviceCode')}
-                                  >
-                                    {providersStore.copiedDeviceCode === clineSignInCommand
-                                      ? 'Copied'
-                                      : 'Copy command'}
-                                  </button>
-                                </div>
+                                Cline owns its provider credentials and model selection. Configure
+                                them with the Cline CLI, then check the local CLI connection here.
+                                Koryphaios never asks for or stores a Cline provider token.
                               {:else}
                                 Runs through the provider CLI. Koryphaios detects local sign-in
                                 material and checks the CLI without storing a provider token.
@@ -1837,10 +2332,14 @@
                               disabled={providersStore.saving === prov.key}
                               class="btn btn-primary w-full text-xs py-2 shadow-lg shadow-[var(--color-accent)]/10"
                               >{providersStore.saving === prov.key
-                                ? 'Checking CLI...'
+                                ? usesLocalCliConnection(prov.key)
+                                  ? 'Checking CLI…'
+                                  : 'Connecting…'
                                 : usesLocalCliConnection(prov.key)
                                   ? getLocalCliConnectLabel(prov.key)
-                                  : 'Connect Provider'}</button
+                                  : caps.supportsApiKey
+                                    ? 'Connect with API Key'
+                                    : 'Connect Provider'}</button
                             >
                           {/if}
                           {#if prov.key.startsWith('custom:')}
@@ -1996,9 +2495,8 @@
                             {#if usesLocalCliConnection(prov.key)}
                               <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
                                 {#if prov.key === 'cline'}
-                                  Cline CLI manages login. If needed, sign in with <code
-                                    >{clineSignInCommand}</code
-                                  > and then use the check-login button above.
+                                  Cline CLI manages provider credentials and models. Configure Cline
+                                  there, then use the connection check above.
                                 {:else}
                                   This provider's accounts are managed by its CLI. Sign in there,
                                   then use the check-login button above.
@@ -2226,6 +2724,10 @@
           <AppearanceSettings bind:showColorPicker />
         </div>
 
+        <div class={activeTab === 'welcome' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+          <WelcomeSettings />
+        </div>
+
         <!-- Shortcuts Tab -->
         <div
           class={activeTab === 'shortcuts'
@@ -2309,13 +2811,133 @@
               type="button"
               class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] disabled:opacity-50"
               disabled={billingLoading}
-              onclick={() => loadBillingCredits(true)}
+              onclick={() => {
+                loadBillingCredits(true);
+                void loadApiUsage();
+              }}
               aria-label="Refresh billing data"
             >
               <RefreshCw size={14} class={billingLoading ? 'animate-spin' : ''} />
               {billingLoading ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
+          {#snippet apiUsagePanel()}
+            <div
+              class="p-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] space-y-4"
+            >
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <h4
+                    class="text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]"
+                  >
+                    Image &amp; voice API usage
+                  </h4>
+                  <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                    Estimated cost from this app's image and voice calls. Estimates only — not a
+                    bill. Entries older than 90 days are pruned.
+                  </p>
+                </div>
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                    onclick={() => void loadApiUsage()}
+                  >
+                    <RefreshCw size={12} class={apiUsageLoading ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)]"
+                    onclick={() => void exportUsageCsv()}
+                  >
+                    <Download size={12} /> CSV
+                  </button>
+                </div>
+              </div>
+              {#if apiUsageError}
+                <div
+                  class="p-3 rounded-xl border text-xs"
+                  style="border-color: var(--color-error); color: var(--color-error); background: var(--color-error-bg);"
+                >
+                  Usage data unavailable: {apiUsageError}
+                  <button type="button" class="ml-2 underline" onclick={() => void loadApiUsage()}
+                    >Retry</button
+                  >
+                </div>
+              {:else if apiUsage}
+                <div class="flex flex-wrap gap-4 text-xs">
+                  <span class="text-[var(--color-text-secondary)]">
+                    Total calls <span class="font-bold text-[var(--color-text-primary)]"
+                      >{apiUsage.totals.totalCount}</span
+                    >
+                  </span>
+                  <span class="text-[var(--color-text-secondary)]">
+                    Images <span class="font-bold text-[var(--color-text-primary)]"
+                      >{apiUsage.totals.byKind.image ?? 0}</span
+                    >
+                  </span>
+                  <span class="text-[var(--color-text-secondary)]">
+                    Speech <span class="font-bold text-[var(--color-text-primary)]"
+                      >{apiUsage.totals.byKind.tts ?? 0}</span
+                    >
+                  </span>
+                  <span class="text-[var(--color-text-secondary)]">
+                    Transcribe <span class="font-bold text-[var(--color-text-primary)]"
+                      >{apiUsage.totals.byKind.stt ?? 0}</span
+                    >
+                  </span>
+                  <span class="text-[var(--color-text-secondary)]">
+                    Estimated
+                    <span class="font-bold text-[var(--color-text-primary)]">
+                      {apiUsage.totals.estimatedCostUsd !== undefined
+                        ? `$${apiUsage.totals.estimatedCostUsd.toFixed(4)}`
+                        : '—'}
+                    </span>
+                  </span>
+                </div>
+                {#if apiUsage.entries.length > 0}
+                  <div
+                    class="divide-y divide-[var(--color-border)] rounded-xl border border-[var(--color-border)]"
+                  >
+                    {#each apiUsage.entries.slice(0, 10) as entry (entry.id)}
+                      <div class="flex items-center justify-between gap-3 px-3 py-2 text-[11px]">
+                        <div class="min-w-0">
+                          <span class="font-semibold text-[var(--color-text-primary)]"
+                            >{formatApiUsageKind(entry.kind)}</span
+                          >
+                          <span class="text-[var(--color-text-muted)]">
+                            · {entry.provider} · {entry.model}{entry.detail
+                              ? ` · ${entry.detail}`
+                              : ''}</span
+                          >
+                        </div>
+                        <div
+                          class="flex shrink-0 items-center gap-3 text-[var(--color-text-muted)]"
+                        >
+                          <span>{new Date(entry.ts).toLocaleString()}</span>
+                          <span
+                            class="w-14 text-right font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {entry.estimatedCostUsd !== undefined
+                              ? `$${entry.estimatedCostUsd.toFixed(4)}`
+                              : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <p class="text-[11px] text-[var(--color-text-muted)]">
+                    No image or voice API calls recorded yet.
+                  </p>
+                {/if}
+              {:else}
+                <div class="h-16 rounded-xl bg-[var(--color-surface-3)] animate-pulse"></div>
+              {/if}
+            </div>
+          {/snippet}
+          {@render apiUsagePanel()}
           {#if billingCredits?.refreshing}
             <div
               class="flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-xs text-[var(--color-text-secondary)]"
@@ -2451,11 +3073,24 @@
                           >
                         {/if}
                       </div>
-                      <span class="text-[10px] text-[var(--color-text-muted)]"
-                        >{cli.usageSource === 'codex-app-server'
-                          ? 'live Codex account data'
-                          : "from the CLI's own logs"}</span
+                      <div
+                        class="flex flex-col items-end gap-0.5 text-[10px] text-[var(--color-text-muted)]"
                       >
+                        <span
+                          >{cli.usageSource === 'codex-app-server'
+                            ? 'Tokens: live Codex account data'
+                            : cli.usageSource === 'kory-provider-events'
+                              ? 'Tokens: Freebuff request logs'
+                              : 'Tokens: local Koryphaios history'}</span
+                        >
+                        {#if cli.quotaSource === 'live-cli-account'}
+                          <span
+                            class="font-medium text-[var(--color-success)]"
+                            title="Current account quota from agy /usage; not estimated from local token history"
+                            >Limits: live Antigravity account</span
+                          >
+                        {/if}
+                      </div>
                     </div>
 
                     {#if cli.attribution === 'unavailable'}
@@ -2466,6 +3101,22 @@
                         profile at its own session directory to enable account-separated usage.
                       </div>
                     {:else}
+                      {#if cli.usagePrecision === 'input-context-only'}
+                        <div
+                          class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]"
+                        >
+                          {#if cli.provider === 'freebuff'}
+                            Freebuff reports the input context before each model request. Its
+                            current log does not expose upstream output-token usage, so these token
+                            totals and API-equivalent values are input-side only—not charges or
+                            invented output estimates.
+                          {:else}
+                            {cli.provider} exposes input-context usage without upstream output-token totals.
+                            Its OpenRouter equivalent is therefore input-side only—not an invented full-inference
+                            value.
+                          {/if}
+                        </div>
+                      {/if}
                       {#if cli.creditBalance != null}
                         <div
                           class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
@@ -2473,6 +3124,51 @@
                           <span class="text-[var(--color-text-secondary)]">Codex credits</span>
                           <span class="font-mono font-semibold text-[var(--color-text-primary)]"
                             >{cli.creditBalance}</span
+                          >
+                        </div>
+                      {/if}
+                      {#if cli.apiValueMinUsd !== undefined && cli.apiValueMaxUsd !== undefined}
+                        <div
+                          class="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
+                        >
+                          <span class="text-[var(--color-text-secondary)]"
+                            >OpenRouter {cli.apiValueCoverage === 'full' ? 'inference' : 'input'} value
+                            range · 30d</span
+                          >
+                          <div class="text-right">
+                            <div class="font-mono font-semibold text-[var(--color-text-primary)]">
+                              ${cli.apiValueMinUsd.toFixed(4)}–${cli.apiValueMaxUsd.toFixed(4)}
+                            </div>
+                            {#if (cli.apiValueCoverage === 'full' ? cli.apiFreshValueUsd : cli.apiFreshInputValueUsd) !== undefined}
+                              <div class="text-[9px] text-[var(--color-text-muted)]">
+                                fresh-rate value ${(cli.apiValueCoverage === 'full'
+                                  ? cli.apiFreshValueUsd
+                                  : cli.apiFreshInputValueUsd
+                                ).toFixed(4)}
+                              </div>
+                            {/if}
+                            {#if cli.apiCacheAdjustedValueUsd !== undefined}
+                              <div class="text-[9px] text-[var(--color-accent)]">
+                                observed cache reads ${cli.apiCacheAdjustedValueUsd.toFixed(4)}
+                              </div>
+                            {/if}
+                          </div>
+                        </div>
+                        <div class="px-1 text-[9px] text-[var(--color-text-muted)]">
+                          Comparison value from OpenRouter’s official catalog, not the CLI’s actual
+                          subscription charge. The range includes published cache-read, fresh-input,
+                          and cache-write scenarios when available.{#if cli.cacheAccounting === 'provider-reported'}
+                            The observed-cache figure applies the CLI’s reported cache-read tokens.{/if}
+                        </div>
+                      {:else if cli.apiValueUsd !== undefined}
+                        <div
+                          class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
+                        >
+                          <span class="text-[var(--color-text-secondary)]"
+                            >API-equivalent input value · 30d</span
+                          >
+                          <span class="font-mono font-semibold text-[var(--color-text-primary)]"
+                            >${cli.apiValueUsd.toFixed(4)}</span
                           >
                         </div>
                       {/if}
@@ -2642,22 +3338,153 @@
                                 <span class="font-mono text-[var(--color-text-secondary)] truncate"
                                   >{m.model}</span
                                 >
-                                <span class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3">
+                                <span
+                                  class="font-mono text-[var(--color-text-muted)] shrink-0 ml-3"
+                                >
                                   {formatTokens(m.tokensIn + m.tokensOut)} tokens
                                 </span>
                               </div>
                               {#if m.apiEquivalent || m.apiProvider}
-                                <div class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]">
+                                <div
+                                  class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
+                                >
                                   <span class="uppercase tracking-wider font-bold">API equiv</span>
                                   <span
                                     class="font-mono text-[var(--color-accent)]/80 truncate"
                                     title={m.apiEquivalent ?? m.apiProvider ?? ''}
                                   >
-                                    {m.apiProvider ? `${m.apiProvider}/` : ''}{m.apiEquivalent ?? '(unmapped)'}
+                                    {m.apiProvider ? `${m.apiProvider}/` : ''}{m.apiEquivalent ??
+                                      '(unmapped)'}
                                   </span>
                                   {#if m.apiEquivalent && m.apiEquivalent === m.model}
-                                    <span class="text-[var(--color-text-muted)] italic">(same)</span>
+                                    <span class="text-[var(--color-text-muted)] italic">(same)</span
+                                    >
                                   {/if}
+                                </div>
+                              {/if}
+                              {#if m.contextWindow || m.apiValueUsd !== undefined}
+                                <div
+                                  class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                >
+                                  {#if m.contextWindow}
+                                    <span
+                                      >Context
+                                      <span class="font-mono text-[var(--color-text-secondary)]"
+                                        >{formatTokens(m.contextWindow)}</span
+                                      ></span
+                                    >
+                                  {/if}
+                                  {#if m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
+                                    <span
+                                      >OpenRouter {m.apiValueCoverage === 'full'
+                                        ? 'inference'
+                                        : 'input'}
+                                      <span class="font-mono text-[var(--color-text-secondary)]"
+                                        >${m.apiValueMinUsd.toFixed(4)}–${m.apiValueMaxUsd.toFixed(
+                                          4,
+                                        )}</span
+                                      ></span
+                                    >
+                                  {:else if m.apiValueUsd !== undefined}
+                                    <span
+                                      >API input value
+                                      <span class="font-mono text-[var(--color-text-secondary)]"
+                                        >${m.apiValueUsd.toFixed(4)}</span
+                                      ></span
+                                    >
+                                  {/if}
+                                  {#if m.apiCacheAdjustedValueUsd !== undefined}
+                                    <span
+                                      >Observed cache
+                                      <span class="font-mono text-[var(--color-text-secondary)]"
+                                        >${m.apiCacheAdjustedValueUsd.toFixed(4)}</span
+                                      ></span
+                                    >
+                                  {/if}
+                                </div>
+                              {/if}
+                              {#if m.promptUsdPerMillion !== undefined}
+                                <div
+                                  class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                  title={m.pricingHasThresholds
+                                    ? 'OpenRouter publishes prompt-size pricing thresholds; Koryphaios applies them to each recorded request.'
+                                    : 'Official OpenRouter per-token pricing'}
+                                >
+                                  OpenRouter $/M: fresh
+                                  <span class="font-mono"
+                                    >${formatUsdRate(m.promptUsdPerMillion)}</span
+                                  >{#if m.completionUsdPerMillion !== undefined}, output
+                                    <span class="font-mono"
+                                      >${formatUsdRate(m.completionUsdPerMillion)}</span
+                                    >{/if}{#if m.cacheReadUsdPerMillion !== undefined}, cache read
+                                    <span class="font-mono"
+                                      >${formatUsdRate(m.cacheReadUsdPerMillion)}</span
+                                    >{/if}{#if m.cacheWriteUsdPerMillion !== undefined}, cache write
+                                    <span class="font-mono"
+                                      >${formatUsdRate(m.cacheWriteUsdPerMillion)}</span
+                                    >{/if}{#if m.pricingHasThresholds}
+                                    <span class="italic"> · size-tiered</span>{/if}
+                                </div>
+                              {/if}
+                            </div>
+                          {/each}
+                        </div>
+                      {/if}
+
+                      {#if cli.modelCatalog?.length}
+                        <div class="space-y-1.5">
+                          <div
+                            class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
+                          >
+                            Installed model context and OpenRouter rates
+                          </div>
+                          {#each cli.modelCatalog as model (model.model)}
+                            <div
+                              class="rounded-lg bg-[var(--color-surface-1)] px-2.5 py-1.5 text-[10px]"
+                            >
+                              <div class="flex items-center justify-between gap-3">
+                                <div class="min-w-0">
+                                  <div
+                                    class="truncate font-semibold text-[var(--color-text-secondary)]"
+                                  >
+                                    {model.name}
+                                  </div>
+                                  <div class="truncate font-mono text-[var(--color-text-muted)]">
+                                    {model.model}
+                                  </div>
+                                </div>
+                                <span
+                                  class="shrink-0 font-mono font-semibold text-[var(--color-text-primary)]"
+                                >
+                                  {model.contextWindow
+                                    ? `${formatTokens(model.contextWindow)} context`
+                                    : 'Not reported'}
+                                </span>
+                              </div>
+                              {#if model.promptUsdPerMillion !== undefined}
+                                <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
+                                  OpenRouter
+                                  {#if model.apiEquivalent && model.apiEquivalent !== model.model}
+                                    <span class="font-mono text-[var(--color-accent)]/80"
+                                      >{model.apiEquivalent}</span
+                                    > ·
+                                  {/if}
+                                  fresh
+                                  <span class="font-mono"
+                                    >${formatUsdRate(model.promptUsdPerMillion)}/M</span
+                                  >{#if model.completionUsdPerMillion !== undefined}, output
+                                    <span class="font-mono"
+                                      >${formatUsdRate(model.completionUsdPerMillion)}/M</span
+                                    >{/if}{#if model.cacheReadUsdPerMillion !== undefined}, cache
+                                    read
+                                    <span class="font-mono"
+                                      >${formatUsdRate(model.cacheReadUsdPerMillion)}/M</span
+                                    >{/if}{#if model.cacheWriteUsdPerMillion !== undefined}, cache
+                                    write
+                                    <span class="font-mono"
+                                      >${formatUsdRate(model.cacheWriteUsdPerMillion)}/M</span
+                                    >{/if}{#if model.pricingHasThresholds}
+                                    <span class="italic"> · size-tiered</span>{/if}
                                 </div>
                               {/if}
                             </div>
@@ -2696,8 +3523,9 @@
                         {account.email || account.label}
                       </div>
                       <div class="text-[10px] text-[var(--color-text-muted)]">
-                        {account.plan ? `${account.plan.toUpperCase()} plan · ` : ''}{account.connectionState ===
-                        'connected'
+                        {account.plan
+                          ? `${account.plan.toUpperCase()} plan · `
+                          : ''}{account.connectionState === 'connected'
                           ? 'Connected · indexing usage…'
                           : account.connectionState === 'failed'
                             ? 'Connection failed · indexing usage…'
@@ -2799,6 +3627,13 @@
           </div>
         {/if}
 
+        <!-- Archived chats Tab -->
+        {#if open && activeTab === 'archived'}
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <ArchivedChatsSettings />
+          </div>
+        {/if}
+
         <!-- Agent Tab -->
         <div
           class={activeTab === 'agent'
@@ -2806,6 +3641,7 @@
             : 'hidden'}
         >
           <AgentSettings
+            active={open && activeTab === 'agent'}
             focusPermissions={open &&
               activeTab === 'agent' &&
               initialAgentSection === 'permissions'}
@@ -2824,13 +3660,13 @@
         <!-- Teams Tab -->
         <div
           class={activeTab === 'teams'
-            ? 'flex-1 overflow-y-auto px-6 py-5 flex flex-col'
+            ? 'flex-1 overflow-y-auto px-6 py-8 sm:px-8 lg:px-12 lg:py-10 flex flex-col'
             : 'hidden'}
         >
-          <div class="flex-1 w-full max-w-7xl mx-auto py-10">
-            <div class="text-center mb-12">
+          <div class="mx-auto flex w-full max-w-7xl flex-1 flex-col pb-16">
+            <div class="mb-12 text-center lg:mb-14">
               <div
-                class="w-20 h-20 bg-[var(--color-accent)]/10 text-[var(--color-accent)] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-[var(--color-accent)]/5"
+                class="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-[var(--color-accent)]/10 text-[var(--color-accent)] shadow-xl shadow-[var(--color-accent)]/5"
               >
                 <Users size={40} />
               </div>
@@ -2844,7 +3680,7 @@
 
             {#if collaborationStore.activeCollab}
               <!-- ── ACTIVE SESSION ── -->
-              <div class="mx-auto max-w-4xl space-y-6">
+              <div class="mx-auto w-full max-w-5xl space-y-8">
                 <!-- Invite links -->
                 <div
                   class="relative rounded-3xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-2)] p-8 shadow-2xl"
@@ -3005,9 +3841,9 @@
               <!-- ── NOT HOSTING ── -->
               {#if collaborationStore.joinedSessions.length}
                 <div
-                  class="mx-auto mb-8 max-w-4xl rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6"
+                  class="mx-auto mb-10 w-full max-w-5xl rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 lg:p-8"
                 >
-                  <div class="mb-4">
+                  <div class="mb-5">
                     <h4 class="text-sm font-bold text-[var(--color-text-primary)]">
                       Team sessions
                     </h4>
@@ -3016,7 +3852,7 @@
                       or merges your local sessions.
                     </p>
                   </div>
-                  <div class="space-y-2">
+                  <div class="space-y-3">
                     {#each collaborationStore.joinedSessions as team (team.sessionId)}<div
                         class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
                       >
@@ -3043,25 +3879,25 @@
                   </div>
                 </div>
               {/if}
-              <div class="grid w-full max-w-4xl grid-cols-1 gap-6 mx-auto md:grid-cols-2">
+              <div class="mx-auto grid w-full max-w-5xl grid-cols-1 gap-8 md:grid-cols-2">
                 <div
-                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 text-center transition-all hover:border-[var(--color-accent)]/30"
+                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 text-center transition-all hover:border-[var(--color-accent)]/30 lg:p-8"
                 >
                   <div
-                    class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-success-bg)] text-[var(--color-success)]"
+                    class="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-success-bg)] text-[var(--color-success)]"
                   >
                     <Zap size={24} />
                   </div>
-                  <h4 class="mb-2 text-base font-bold">Team session</h4>
-                  <p class="mb-5 text-xs text-[var(--color-text-muted)]">
+                  <h4 class="mb-3 text-base font-bold">Team session</h4>
+                  <p class="mb-6 text-xs leading-5 text-[var(--color-text-muted)]">
                     Generate invite links for teammates to watch or co-pilot your active AI session
                     in real time.
                   </p>
 
                   <div
-                    class="mb-5 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left"
+                    class="mb-6 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 text-left"
                   >
-                    <div class="mb-3 flex items-center justify-between gap-3">
+                    <div class="mb-4 flex items-start justify-between gap-4">
                       <div>
                         <div class="text-xs font-bold text-[var(--color-text-primary)]">
                           Working in
@@ -3080,10 +3916,10 @@
                     </div>
 
                     {#if hostWorkspacePaths.length}
-                      <div class="space-y-2">
+                      <div class="space-y-3">
                         {#each hostWorkspacePaths as path, index (index)}
                           <div
-                            class="group flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2 transition-colors focus-within:border-[var(--color-accent)]/60"
+                            class="group flex min-h-11 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2.5 transition-colors focus-within:border-[var(--color-accent)]/60"
                           >
                             <FolderOpen
                               size={14}
@@ -3131,29 +3967,29 @@
                 </div>
 
                 <div
-                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 text-center transition-all hover:border-[var(--color-accent)]/30"
+                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 text-center transition-all hover:border-[var(--color-accent)]/30 lg:p-8"
                 >
                   <div
-                    class="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-info-bg)] text-[var(--color-info)]"
+                    class="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-info-bg)] text-[var(--color-info)]"
                   >
                     <Keyboard size={24} />
                   </div>
-                  <h4 class="mb-2 text-base font-bold">Connect to a team</h4>
-                  <p class="mb-5 text-xs text-[var(--color-text-muted)]">
+                  <h4 class="mb-3 text-base font-bold">Connect to a team</h4>
+                  <p class="mb-6 text-xs leading-5 text-[var(--color-text-muted)]">
                     Enter the host's eight-character code. The host's join policy decides whether
                     you are admitted automatically and which access profile you receive.
                   </p>
-                  <div class="space-y-3 text-left">
+                  <div class="mt-auto space-y-4 text-left">
                     <input
                       bind:value={teamGuestName}
                       placeholder="Your display name"
-                      class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm outline-none focus:border-[var(--color-accent)]"
+                      class="min-h-12 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm outline-none focus:border-[var(--color-accent)]"
                     />
                     <input
                       bind:value={teamJoinCode}
                       maxlength="8"
                       placeholder="JOIN CODE"
-                      class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center font-mono text-lg font-bold uppercase tracking-[0.2em] outline-none focus:border-[var(--color-accent)]"
+                      class="min-h-12 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center font-mono text-lg font-bold uppercase tracking-[0.2em] outline-none focus:border-[var(--color-accent)]"
                     />
                     <button
                       type="button"
@@ -3174,7 +4010,7 @@
 
             <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
                its own models-only invite link so it never grants session access. -->
-            <div class="mx-auto mt-8 w-full max-w-4xl border-t border-[var(--color-border)] pt-8">
+            <div class="mx-auto mt-12 w-full max-w-5xl border-t border-[var(--color-border)] pt-10">
               <ModelSharingPanel />
             </div>
           </div>
@@ -3497,8 +4333,9 @@
               class="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors border hover:bg-[var(--color-surface-3)]"
               style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary);"
               onclick={() => {
-                onClose?.();
-                window.dispatchEvent(new CustomEvent('open-notes-graph'));
+                requestSettingsCloseWith(() =>
+                  window.dispatchEvent(new CustomEvent('open-notes-graph')),
+                );
               }}
             >
               <StickyNote size={14} style="color: var(--color-accent);" />
@@ -3598,6 +4435,86 @@
   />
 {/if}
 
+{#if customIconEditorTarget}
+  {@const currentIcon = providersStore.getCustomProviderIcon(customIconEditorTarget.id)}
+  <div
+    class="fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-md"
+    role="presentation"
+    onclick={(event) => event.currentTarget === event.target && closeCustomIconEditor()}
+    onkeydown={(event) => event.key === 'Escape' && closeCustomIconEditor()}
+  >
+    <div
+      class="my-auto w-full max-w-md rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 shadow-2xl"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="custom-provider-icon-dialog-title"
+    >
+      <div class="mb-4 flex items-start justify-between gap-4">
+        <div>
+          <h3
+            id="custom-provider-icon-dialog-title"
+            class="text-base font-semibold text-[var(--color-text-primary)]"
+          >
+            {customIconEditorTarget.label} icon
+          </h3>
+          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+            Frame exactly what should appear throughout Koryphaios. The original image is never
+            stored.
+          </p>
+        </div>
+        <button
+          type="button"
+          onclick={closeCustomIconEditor}
+          disabled={customIconSaving}
+          class="rounded-lg p-2 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+          aria-label="Close custom icon editor"
+        >
+          <X size={17} />
+        </button>
+      </div>
+
+      <CustomProviderIconEditor
+        id={`custom-provider-icon-${customIconEditorTarget.id}`}
+        existingIconUrl={currentIcon?.url ?? null}
+        initialShape={(currentIcon?.shape ?? 'rounded-square') as CustomProviderIconShape}
+        disabled={customIconSaving}
+        onchange={(selection) => {
+          customIconDraft = selection;
+          customIconEditorError = '';
+        }}
+        onerror={(message) => (customIconEditorError = message)}
+      />
+
+      {#if customIconEditorError}
+        <div
+          role="alert"
+          class="mt-3 flex items-start gap-2 rounded-xl border border-[var(--color-error)]/40 bg-[var(--color-error-bg)] px-3 py-2.5 text-xs text-[var(--color-error)]"
+        >
+          <AlertTriangle size={14} class="mt-0.5 shrink-0" />
+          <span>{customIconEditorError}</span>
+        </div>
+      {/if}
+
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick={closeCustomIconEditor}
+          disabled={customIconSaving}
+          class="btn btn-secondary px-4 py-2 text-xs">Cancel</button
+        >
+        <button
+          type="button"
+          onclick={persistCustomIconDraft}
+          disabled={customIconSaving || customIconDraft === undefined}
+          class="btn btn-primary px-4 py-2 text-xs"
+        >
+          {customIconSaving ? 'Saving…' : customIconDraft === null ? 'Remove icon' : 'Save icon'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if pendingDeleteProvider}
   <ConfirmDialog
     open={true}
@@ -3677,6 +4594,31 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog
+  open={showUnsavedEditsCloseConfirmation}
+  title={skillsHaveUnsavedChanges
+    ? 'Discard unsaved skill edits?'
+    : 'Keep unsaved Agent settings edits?'}
+  message={skillsHaveUnsavedChanges
+    ? agentSettingsHaveUnsavedChanges
+      ? 'The Skills workspace has unsaved edits and Agent Preferences or Manager Notes have a local recovery draft. Closing now discards the in-memory skill edits; Agent editor drafts stay recoverable on this device.'
+      : 'The Skills workspace has unsaved edits, including any in-progress new skill. Closing Settings now discards those in-memory edits.'
+    : 'Agent Preferences or Manager Notes have unsaved edits. They are retained as a local recovery draft on this device and will be restored when you reopen Settings.'}
+  confirmLabel={skillsHaveUnsavedChanges
+    ? 'Discard skills and close'
+    : 'Keep recovery draft and close'}
+  variant="warning"
+  onCancel={() => {
+    showUnsavedEditsCloseConfirmation = false;
+    pendingSettingsCloseAction = null;
+  }}
+  onConfirm={() => {
+    showUnsavedEditsCloseConfirmation = false;
+    skillsHaveUnsavedChanges = false;
+    finishSettingsClose();
+  }}
+/>
 
 <style>
   .no-scrollbar::-webkit-scrollbar {

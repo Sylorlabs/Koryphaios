@@ -54,15 +54,11 @@ export function cliAccountCommandLabel(
 // suffixed sibling homes are intentionally included: users commonly isolate
 // work/personal subscriptions with wrappers such as CODEX_HOME=~/.codex2.
 //
-// freebuff and jules are deliberately NOT listed here even though
-// they have local credential files
-// (~/.config/manicode/credentials.json, ~/.jules/config.yaml). These providers
-// are fail-closed or approval-required in this build — adding them to
-// PROFILE_DEFINITIONS would make them appear in model pickers, account
-// selection, and the billing "Indexing usage…" loading state, which would
-// mislead users into thinking the provider is usable. Instead, billing
-// detects them via auth-utils detection functions and surfaces them with an
-// explicit "unavailable" attribution explaining why no usage is recorded.
+// Freebuff and Jules are deliberately not listed here because their profile
+// layouts do not follow this generic $HOME-prefix scheme. Freebuff accounts
+// are discovered by discoverFreebuffAccounts() under ~/.config/manicode* and
+// its PTY usage is surfaced from Kory-owned provider events; Jules remains an
+// approval-required provider detected through auth-utils.
 const PROFILE_DEFINITIONS: ProfileDefinition[] = [
   { provider: 'codex', command: 'codex', directoryPrefix: '.codex', authFiles: ['auth.json'] },
   {
@@ -108,6 +104,9 @@ const PROFILE_DEFINITIONS: ProfileDefinition[] = [
 ];
 
 function hasValidJson(path: string): boolean {
+  // Non-JSON credential formats (e.g. Devin's credentials.toml) are valid by
+  // existence — only JSON files can be malformed, so never warn about them.
+  if (!path.endsWith('.json')) return true;
   let size = 0;
   let modifiedAt = 0;
   try {

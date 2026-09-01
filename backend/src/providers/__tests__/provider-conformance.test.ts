@@ -53,6 +53,7 @@ const CLI_EXTERNAL = new Set<ProviderName>([
   'cursor',
   'devin',
   'cline',
+  'freebuff',
 ]);
 
 const OTHER_EXTERNAL = new Set<ProviderName>([
@@ -61,12 +62,12 @@ const OTHER_EXTERNAL = new Set<ProviderName>([
   'bedrock',
   // OpenCode Go chooses OpenAI vs Anthropic transport per live model metadata.
   'opencodego',
+  'codebuff',
 ]);
 
 const EXPLICITLY_UNAVAILABLE = new Set<ProviderName>([
   ...UNSUPPORTED_CHAT_PROVIDER_NAMES,
   'gitlab',
-  'freebuff',
   'jules',
 ]);
 

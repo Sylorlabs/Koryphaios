@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { isProviderCertified, isProviderRunnableByTier, providerSupport } from '@koryphaios/shared';
 import { PROVIDER_CONFIGS } from '../provider-configs';
-import { UNSUPPORTED_CHAT_PROVIDER_NAMES } from '../registry';
+import { DEDICATED_CAPABILITY_PROVIDER_NAMES, UNSUPPORTED_CHAT_PROVIDER_NAMES } from '../registry';
 
-const EXPLICITLY_BLOCKED = new Set([
-  ...UNSUPPORTED_CHAT_PROVIDER_NAMES,
+const EXPLICITLY_BLOCKED = new Set<string>([
+  ...[...UNSUPPORTED_CHAT_PROVIDER_NAMES].filter(
+    (name) => !DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name as never),
+  ),
   'gitlab',
-  'freebuff',
   'jules',
 ]);
 
@@ -32,6 +33,7 @@ describe('provider release support truth', () => {
       'devin',
       'grok',
       'antigravity',
+      'freebuff',
     ]) {
       expect(providerSupport(provider)).toMatchObject({
         tier: 'preview',

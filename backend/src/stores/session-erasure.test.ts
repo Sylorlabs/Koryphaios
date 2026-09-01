@@ -42,6 +42,16 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
     CREATE TABLE supervised_processes (id TEXT PRIMARY KEY, session_id TEXT NOT NULL);
     CREATE TABLE process_events (id INTEGER PRIMARY KEY, process_id TEXT NOT NULL);
     CREATE TABLE process_health_checks (process_id TEXT PRIMARY KEY);
+    CREATE TABLE session_run_continuations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL
+    );
+    CREATE TABLE session_run_handoffs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL);
+    CREATE TABLE session_run_continuation_processes (
+      continuation_id TEXT NOT NULL REFERENCES session_run_continuations(id) ON DELETE CASCADE,
+      process_id TEXT NOT NULL REFERENCES supervised_processes(id) ON DELETE RESTRICT,
+      PRIMARY KEY (continuation_id, process_id)
+    );
     CREATE TABLE collaboration_sessions (id TEXT PRIMARY KEY, base_session_id TEXT NOT NULL);
     CREATE TABLE session_participants (id TEXT PRIMARY KEY, session_id TEXT NOT NULL);
     CREATE TABLE persistent_sessions (id TEXT PRIMARY KEY);
@@ -65,8 +75,12 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
     'ordered_session_events',
     'replay_events',
     'routing_audit_log',
+    'session_feed_entries',
+    'session_feed_tombstones',
     'session_changes',
     'session_compactions',
+    'session_run_events',
+    'session_runs',
     'session_event_causes',
     'session_event_cursors',
     'session_tags',
@@ -77,6 +91,23 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
   ]) {
     sqlite.exec(`CREATE TABLE ${table} (id TEXT, session_id TEXT NOT NULL)`);
   }
+  sqlite.exec(`
+    CREATE TABLE session_turn_commands (
+      command_key TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      source_command_id TEXT NOT NULL,
+      input_hash TEXT NOT NULL,
+      user_message_id TEXT NOT NULL,
+      response_message_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      terminal_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      finished_at INTEGER
+    )
+  `);
   const credit = new Database(creditPath);
   openDatabases.push(credit);
   credit.exec(`
@@ -92,6 +123,11 @@ function seed(sqlite: Database, creditPath: string): void {
     INSERT INTO supervised_processes VALUES ('process-target', 'target'), ('process-keep', 'keep');
     INSERT INTO process_events VALUES (1, 'process-target'), (2, 'process-keep');
     INSERT INTO process_health_checks VALUES ('process-target'), ('process-keep');
+    INSERT INTO session_run_continuations VALUES
+      ('continuation-target', 'target'), ('continuation-keep', 'keep');
+    INSERT INTO session_run_handoffs VALUES ('handoff-target', 'target'), ('handoff-keep', 'keep');
+    INSERT INTO session_run_continuation_processes VALUES
+      ('continuation-target', 'process-target'), ('continuation-keep', 'process-keep');
     INSERT INTO collaboration_sessions VALUES ('collab-target', 'target'), ('collab-keep', 'keep');
     INSERT INTO session_participants VALUES ('participant-target', 'collab-target'), ('participant-keep', 'collab-keep');
     INSERT INTO persistent_sessions VALUES ('target'), ('keep');
@@ -114,8 +150,12 @@ function seed(sqlite: Database, creditPath: string): void {
     'ordered_session_events',
     'replay_events',
     'routing_audit_log',
+    'session_feed_entries',
+    'session_feed_tombstones',
     'session_changes',
     'session_compactions',
+    'session_run_events',
+    'session_runs',
     'session_event_causes',
     'session_event_cursors',
     'session_tags',
@@ -128,6 +168,15 @@ function seed(sqlite: Database, creditPath: string): void {
       .query(`INSERT INTO ${table} VALUES (?, ?), (?, ?)`)
       .run(`${table}-target`, 'target', `${table}-keep`, 'keep');
   }
+  sqlite.exec(`
+    INSERT INTO session_turn_commands VALUES
+      ('0000000000000000000000000000000000000000', 'target', 'goal', 'src-target', '${'a'.repeat(64)}',
+       'command-user-0000000000000000000000000000000000000000', 'command-response-0000000000000000000000000000000000000000',
+       'run-target', 'active', NULL, 10, 10, NULL),
+      ('1111111111111111111111111111111111111111', 'keep', 'goal', 'src-keep', '${'b'.repeat(64)}',
+       'command-user-1111111111111111111111111111111111111111', 'command-response-1111111111111111111111111111111111111111',
+       'run-keep', 'active', NULL, 20, 20, NULL)
+  `);
   const credit = new Database(creditPath);
   openDatabases.push(credit);
   credit
@@ -174,8 +223,14 @@ describe('atomic session erasure', () => {
       'ordered_session_events',
       'replay_events',
       'routing_audit_log',
+      'session_feed_entries',
+      'session_feed_tombstones',
       'session_changes',
       'session_compactions',
+      'session_run_events',
+      'session_run_continuations',
+      'session_run_handoffs',
+      'session_runs',
       'session_event_causes',
       'session_event_cursors',
       'session_tags',
@@ -195,6 +250,22 @@ describe('atomic session erasure', () => {
     expect(count(restarted, 'process_events', 'process_id = ?', 'process-target')).toBe(0);
     expect(count(restarted, 'process_events', 'process_id = ?', 'process-keep')).toBe(1);
     expect(count(restarted, 'process_health_checks', 'process_id = ?', 'process-target')).toBe(0);
+    expect(
+      count(
+        restarted,
+        'session_run_continuation_processes',
+        'process_id = ?',
+        'process-target',
+      ),
+    ).toBe(0);
+    expect(
+      count(
+        restarted,
+        'session_run_continuation_processes',
+        'process_id = ?',
+        'process-keep',
+      ),
+    ).toBe(1);
     expect(count(restarted, 'session_participants', 'session_id = ?', 'collab-target')).toBe(0);
     expect(count(restarted, 'session_participants', 'session_id = ?', 'collab-keep')).toBe(1);
     expect(count(restarted, 'goals', 'id = ?', 'goal-target')).toBe(0);
@@ -237,11 +308,14 @@ describe('atomic session erasure', () => {
     expect(report.deletedSessions).toBe(3);
     expect(count(sqlite, 'messages')).toBe(0);
     expect(count(sqlite, 'supervised_processes')).toBe(0);
+    expect(count(sqlite, 'session_run_continuation_processes')).toBe(0);
+    expect(count(sqlite, 'session_run_handoffs')).toBe(0);
     expect(count(sqlite, 'process_events')).toBe(0);
     expect(count(sqlite, 'session_participants')).toBe(0);
     expect(count(sqlite, 'collaboration_sessions')).toBe(0);
     expect(count(sqlite, 'persistent_sessions')).toBe(0);
     expect(count(sqlite, 'sessions')).toBe(0);
+    expect(count(sqlite, 'session_turn_commands')).toBe(0);
     expect(count(sqlite, 'audit_logs', "resource_type = 'credential'")).toBe(1);
     expect(count(sqlite, 'goals')).toBe(1);
     expect(sqlite.query('SELECT * FROM goals').get()).toMatchObject({

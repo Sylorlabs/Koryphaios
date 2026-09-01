@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { DevinCliBridge } from '../devin-bridge';
+import { DevinCliBridge, getDevinUserConfigDir } from '../devin-bridge';
 import { sandboxToScopes, roleToPermissionMode } from '../cli-bridge';
 import {
   ClaudeCodeCliBridge,
@@ -22,12 +22,14 @@ const readonlySandbox: SandboxPolicy = SANDBOX_PRESETS.readonly;
 const hardenedSandbox: SandboxPolicy = SANDBOX_PRESETS.hardened;
 const trustedSandbox: SandboxPolicy = SANDBOX_PRESETS.trusted;
 
-function makeCtx(overrides: Partial<{
-  sandbox: SandboxPolicy | undefined;
-  role: 'manager' | 'worker' | 'critic';
-  systemPrompt: string;
-  sessionId: string;
-}> = {}) {
+function makeCtx(
+  overrides: Partial<{
+    sandbox: SandboxPolicy | undefined;
+    role: 'manager' | 'worker' | 'critic';
+    systemPrompt: string;
+    sessionId: string;
+  }> = {},
+) {
   return {
     provider: 'devin' as const,
     role: overrides.role ?? 'manager',
@@ -195,6 +197,13 @@ describe('DevinCliBridge.buildAgentConfig', () => {
     expect(events.some((e) => e.type === 'thinking_delta')).toBe(true);
     expect(events.some((e) => e.type === 'tool_executed')).toBe(true);
     expect(events.some((e) => e.type === 'usage_update')).toBe(true);
+    expect(events.filter((e) => e.type === 'content_delta')).toEqual([
+      { type: 'content_delta', content: 'answer' },
+    ]);
+  });
+
+  test('uses the isolated XDG user config instead of a project config path', () => {
+    expect(getDevinUserConfigDir('/managed/devin/session')).toBe('/managed/devin/session/devin');
   });
 
   test('parseTrajectory handles malformed JSON gracefully', () => {

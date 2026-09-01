@@ -10,6 +10,7 @@
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';
+  import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
 
   type Stage = { id: string; label: string; description: string; requiresEvidence: boolean };
   type Definition = { id: string; name: string; description: string; autoStartSafe: boolean; stages: Stage[] };
@@ -25,6 +26,9 @@
   let task = $state('');
   let evidence = $state('');
   let loading = $state(false);
+  let hydratedDraftFor = $state<string | null>(null);
+  let openedFor = $state('');
+  let recoveredLocalDraft = $state(false);
   let selectedRun = $derived(runs.find((run) => run.status === 'running' || run.status === 'blocked'));
   let selectedDefinition = $derived(definitions.find((definition) => definition.id === selectedId));
 
@@ -44,7 +48,32 @@
     } finally { loading = false; }
   }
 
-  $effect(() => { if (open) { task = initialTask || task; void refresh(); } });
+  $effect(() => {
+    if (!open) {
+      openedFor = '';
+      return;
+    }
+    const scope = sessionId ?? '';
+    if (!scope) return;
+    const openKey = `${scope}:${initialTask}`;
+    if (openedFor === openKey) return;
+    openedFor = openKey;
+    if (hydratedDraftFor !== scope) {
+      const recovered = loadLocalFormDraft('workflow', scope);
+      hydratedDraftFor = scope;
+      recoveredLocalDraft = Boolean(recovered.task || recovered.evidence);
+      task = initialTask.trim() || recovered.task || '';
+      evidence = recovered.evidence || '';
+    } else if (initialTask.trim()) {
+      task = initialTask;
+    }
+    void refresh();
+  });
+  $effect(() => {
+    const scope = sessionId ?? '';
+    if (!scope || hydratedDraftFor !== scope) return;
+    saveLocalFormDraft('workflow', scope, { task, evidence });
+  });
   onMount(() => { if (open) void refresh(); });
 
   async function start() {
@@ -52,7 +81,9 @@
     const res = await apiFetch(apiUrl('/api/agent/workflows/start'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ workflowId: selectedId, sessionId, task: task.trim() }) });
     const data = await res.json();
     if (!res.ok || !data.ok) return toastStore.error(data.error ?? 'Unable to start workflow');
+    task = '';
     evidence = '';
+    recoveredLocalDraft = false;
     await refresh();
     onchange?.();
     toastStore.success('Workflow attached to this task');
@@ -87,11 +118,14 @@
 </script>
 
 {#if open}
-  <div class="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-3 sm:items-center" role="presentation" onclick={(event) => event.currentTarget === event.target && onclose()}>
-    <dialog open class="flex max-h-[min(720px,calc(100vh-1.5rem))] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-0 shadow-2xl" aria-label="Workflows">
+  <section
+    class="mx-4 flex max-h-[min(34rem,45dvh)] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-[var(--color-border)] bg-[var(--color-surface-1)] shadow-2xl"
+    data-testid="workflow-composer-panel"
+    aria-labelledby="workflow-panel-title"
+  >
       <header class="flex items-start gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-4">
         <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--color-accent)]/12 text-[var(--color-accent)]"><Workflow size={18} /></div>
-        <div class="min-w-0 flex-1"><h2 class="text-sm font-semibold text-[var(--color-text-primary)]">Task workflows</h2><p class="mt-0.5 text-xs text-[var(--color-text-muted)]">Reusable host-owned stages. They guide this task; they never create or complete a Goal.</p></div>
+        <div class="min-w-0 flex-1"><h2 id="workflow-panel-title" class="text-sm font-semibold text-[var(--color-text-primary)]">Task workflows</h2><p class="mt-0.5 text-xs text-[var(--color-text-muted)]">Reusable host-owned stages. They guide this task; they never create or complete a Goal.</p>{#if recoveredLocalDraft}<p class="mt-1 text-[11px] text-[var(--color-success)]">Recovered unsent task or evidence from this device.</p>{/if}</div>
         <button type="button" class="rounded-lg p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onclick={onclose} aria-label="Close workflows"><X size={16} /></button>
       </header>
       <div class="min-h-0 overflow-y-auto p-5">
@@ -127,6 +161,5 @@
           </div>
         {/if}
       </div>
-    </dialog>
-  </div>
+  </section>
 {/if}

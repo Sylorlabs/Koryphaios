@@ -16,6 +16,7 @@ export interface ResolvedPricing {
   inPerM: number;
   outPerM: number;
   cacheReadPerM?: number;
+  cacheWritePerM?: number;
   source: 'models.dev' | 'catalog';
 }
 
@@ -29,6 +30,7 @@ export const SUBSCRIPTION_PROVIDERS = new Set([
   'antigravity',
   'kilocode',
   'jules',
+  'freebuff',
 ]);
 
 export function resolvePricing(provider: string, model: string): ResolvedPricing | null {
@@ -45,11 +47,19 @@ export function computeCostUsd(
   model: string,
   tokensIn: number,
   tokensOut: number,
+  cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
 ): { costUsd: number; source: ResolvedPricing['source'] } | null {
   const p = resolvePricing(provider, model);
   if (!p) return null;
+  const cacheReadTokens = Math.max(0, cacheUsage?.cacheReadTokens ?? 0);
+  const cacheWriteTokens = Math.max(0, cacheUsage?.cacheWriteTokens ?? 0);
+  const freshInputTokens = Math.max(0, tokensIn - cacheReadTokens - cacheWriteTokens);
   return {
-    costUsd: (tokensIn / 1_000_000) * p.inPerM + (tokensOut / 1_000_000) * p.outPerM,
+    costUsd:
+      (freshInputTokens / 1_000_000) * p.inPerM +
+      (cacheReadTokens / 1_000_000) * (p.cacheReadPerM ?? p.inPerM) +
+      (cacheWriteTokens / 1_000_000) * (p.cacheWritePerM ?? p.inPerM) +
+      (tokensOut / 1_000_000) * p.outPerM,
     source: p.source,
   };
 }

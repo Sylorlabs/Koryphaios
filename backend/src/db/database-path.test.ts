@@ -21,6 +21,35 @@ describe('resolveDatabasePath', () => {
   ])('honors an explicit DATABASE_URL %s', (databaseUrl, expected) => {
     expect(resolveDatabasePath('/ignored', { DATABASE_URL: databaseUrl })).toBe(expected);
   });
+
+  test('fails closed when a test process has no isolated database', () => {
+    expect(() => resolveDatabasePath('/tmp/kory-runtime', { NODE_ENV: 'test' })).toThrow(
+      'Refusing to open the default Koryphaios database in a test process',
+    );
+  });
+
+  test('fails closed when a test process explicitly points at the live default database', () => {
+    const projectRoot = resolve('/tmp/kory-runtime');
+    const liveDatabase = join(projectRoot, 'data', 'koryphaios.db');
+
+    expect(() =>
+      resolveDatabasePath(projectRoot, {
+        NODE_ENV: 'test',
+        DATABASE_URL: `sqlite:${liveDatabase}`,
+      }),
+    ).toThrow('Refusing to open the live Koryphaios database in a test process');
+  });
+
+  test('allows a test process to use a dedicated database', () => {
+    const isolatedDatabase = resolve('/tmp/kory-tests/case.db');
+
+    expect(
+      resolveDatabasePath('/tmp/kory-runtime', {
+        NODE_ENV: 'test',
+        DATABASE_URL: `sqlite:${isolatedDatabase}`,
+      }),
+    ).toBe(isolatedDatabase);
+  });
 });
 
 describe('ensureDatabaseDirectory', () => {

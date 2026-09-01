@@ -13,9 +13,10 @@ function safeRecordUsage(
   provider: string,
   tokensIn: number,
   tokensOut: number,
+  cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
 ): void {
   try {
-    recordUsage(model, provider, tokensIn, tokensOut);
+    recordUsage(model, provider, tokensIn, tokensOut, undefined, cacheUsage);
   } catch (err: unknown) {
     serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'CreditAccountant not initialized for usage recording');
   }
@@ -75,11 +76,21 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
       const usageHeader = response.headers.get('x-anthropic-usage');
       if (usageHeader) {
         try {
-          const u = JSON.parse(usageHeader) as { input_tokens?: number; output_tokens?: number };
-          const in_ = Number(u?.input_tokens ?? 0);
+          const u = JSON.parse(usageHeader) as {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          };
+          const cacheRead = Number(u?.cache_read_input_tokens ?? 0);
+          const cacheWrite = Number(u?.cache_creation_input_tokens ?? 0);
+          const in_ = Number(u?.input_tokens ?? 0) + cacheRead + cacheWrite;
           const out_ = Number(u?.output_tokens ?? 0);
           if (in_ > 0 || out_ > 0) {
-            safeRecordUsage(model, 'anthropic', in_, out_);
+            safeRecordUsage(model, 'anthropic', in_, out_, {
+              cacheReadTokens: cacheRead,
+              cacheWriteTokens: cacheWrite,
+            });
           }
         } catch (err: unknown) {
           serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse Anthropic usage header');
@@ -97,7 +108,14 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
         try {
           const cloned = response.clone();
           const data = (await cloned.json()) as {
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
+            usage?: {
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              prompt_tokens_details?: {
+                cached_tokens?: number;
+                cache_write_tokens?: number;
+              };
+            };
             model?: string;
           };
           const usage = data?.usage;
@@ -106,7 +124,12 @@ export function createUsageInterceptingFetch(realFetch: FetchImpl): FetchImpl {
             const in_ = Number(usage.prompt_tokens ?? 0);
             const out_ = Number(usage.completion_tokens ?? 0);
             if (in_ > 0 || out_ > 0) {
-              safeRecordUsage(m, 'openai', in_, out_);
+              safeRecordUsage(m, 'openai', in_, out_, {
+                cacheReadTokens: Number(usage.prompt_tokens_details?.cached_tokens ?? 0),
+                cacheWriteTokens: Number(
+                  usage.prompt_tokens_details?.cache_write_tokens ?? 0,
+                ),
+              });
             }
           }
         } catch (err: unknown) {

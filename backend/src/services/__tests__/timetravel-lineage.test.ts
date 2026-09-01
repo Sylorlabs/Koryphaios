@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { db, initDb, messages, sessions } from '../../db';
 import { MessageStore, type SetConversationBoundaryOptions } from '../../stores/message-store';
 import { CheckpointStore } from '../../kory/checkpoint-store';
+import { ContextArchiveService } from '../../kory/context-archive';
 import { TimeTravelService } from '../timetravel';
 
 const temporaryRepositories: string[] = [];
@@ -57,6 +58,10 @@ interface Scenario {
   secondMessageId: string;
   firstHash: string;
   secondHash: string;
+  archiveRoot: string;
+  archive: ContextArchiveService;
+  firstArchiveId: string;
+  secondArchiveId: string;
 }
 
 async function createScenario(): Promise<Scenario> {
@@ -65,6 +70,9 @@ async function createScenario(): Promise<Scenario> {
   const sessionId = `timetravel-lineage-${suffix}`;
   const firstMessageId = `timetravel-first-${suffix}`;
   const secondMessageId = `timetravel-second-${suffix}`;
+  const archiveRoot = mkdtempSync(join(tmpdir(), 'kory-timetravel-archive-'));
+  temporaryRepositories.push(archiveRoot);
+  const archive = new ContextArchiveService(archiveRoot);
   temporarySessions.push(sessionId);
   await db.insert(sessions).values({
     id: sessionId,
@@ -75,7 +83,7 @@ async function createScenario(): Promise<Scenario> {
   });
 
   const store = new MessageStore();
-  const service = new TimeTravelService(repository, store);
+  const service = new TimeTravelService(repository, store, {}, archive);
   await store.add(sessionId, {
     id: firstMessageId,
     sessionId,
@@ -86,6 +94,12 @@ async function createScenario(): Promise<Scenario> {
     cost: 0.01,
     createdAt: Date.now(),
   });
+  const firstArchiveId = await archive.record(
+    sessionId,
+    'tool_result',
+    'write_file version-one',
+    'created version one',
+  );
   writeFileSync(join(repository, 'state.txt'), 'version one\n');
   const first = await service.checkpoint('Version one', {
     agentId: sessionId,
@@ -94,6 +108,7 @@ async function createScenario(): Promise<Scenario> {
     changedFiles: [{ path: 'state.txt', operation: 'create' }],
   });
   expect(first).toMatchObject({ success: true });
+  await Bun.sleep(2);
 
   await store.add(sessionId, {
     id: secondMessageId,
@@ -105,6 +120,12 @@ async function createScenario(): Promise<Scenario> {
     cost: 0.02,
     createdAt: Date.now() + 1,
   });
+  const secondArchiveId = await archive.record(
+    sessionId,
+    'tool_result',
+    'write_file version-two',
+    'created version two',
+  );
   writeFileSync(join(repository, 'state.txt'), 'version two\n');
   const second = await service.checkpoint('Version two', {
     agentId: sessionId,
@@ -121,6 +142,10 @@ async function createScenario(): Promise<Scenario> {
     secondMessageId,
     firstHash: first.hash!,
     secondHash: second.hash!,
+    archiveRoot,
+    archive,
+    firstArchiveId,
+    secondArchiveId,
   };
 }
 
@@ -134,9 +159,18 @@ class FailingBoundaryStore extends MessageStore {
   }
 }
 
+class FailingArchiveVisibility {
+  async setTimelineVisibilityBoundary(): Promise<never> {
+    throw new Error('injected archive visibility failure');
+  }
+}
+
 describe('TimeTravelService retained conversation integration', () => {
   test('code-only undo and redo preserve an explicitly empty conversation boundary', async () => {
     const repository = createRepository();
+    const archiveRoot = mkdtempSync(join(tmpdir(), 'kory-timetravel-code-only-archive-'));
+    temporaryRepositories.push(archiveRoot);
+    const archive = new ContextArchiveService(archiveRoot);
     const sessionId = `timetravel-empty-${Date.now()}-${Math.random()}`;
     temporarySessions.push(sessionId);
     await db.insert(sessions).values({
@@ -147,7 +181,7 @@ describe('TimeTravelService retained conversation integration', () => {
       updatedAt: new Date(),
     });
 
-    const service = new TimeTravelService(repository, new MessageStore());
+    const service = new TimeTravelService(repository, new MessageStore(), {}, archive);
     writeFileSync(join(repository, 'state.txt'), 'version one\n');
     const first = await service.checkpoint('Version one without messages', {
       agentId: sessionId,
@@ -162,28 +196,43 @@ describe('TimeTravelService retained conversation integration', () => {
     });
     expect(first.success).toBe(true);
     expect(second.success).toBe(true);
+    const archiveId = await archive.record(
+      sessionId,
+      'tool_result',
+      'bash code-only-checkpoint',
+      'still visible',
+      false,
+    );
 
-    expect((await service.undo(sessionId)).success).toBe(true);
+    const codeOnlyUndo = await service.undo(sessionId);
+    expect(codeOnlyUndo.success).toBe(true);
+    expect(codeOnlyUndo.conversationEffect).toBe('code-only');
     expect(readFileSync(join(repository, 'state.txt'), 'utf8')).toBe('version one\n');
     expect(await new MessageStore().getActiveBoundary(sessionId)).toMatchObject({
       messageId: null,
       contextRevision: 0,
     });
+    expect(await archive.getTimelineVisibilityBoundary(sessionId)).toBeUndefined();
+    expect((await archive.listRecent(sessionId)).map((entry) => entry.id)).toEqual([archiveId]);
 
-    const restarted = new TimeTravelService(repository, new MessageStore());
+    const restarted = new TimeTravelService(repository, new MessageStore(), {}, archive);
     expect((await restarted.redo(sessionId)).success).toBe(true);
     expect(readFileSync(join(repository, 'state.txt'), 'utf8')).toBe('version two\n');
     expect(await new MessageStore().getActiveBoundary(sessionId)).toMatchObject({
       messageId: null,
       contextRevision: 0,
     });
+    expect(await archive.getTimelineVisibilityBoundary(sessionId)).toBeUndefined();
+    expect((await archive.listRecent(sessionId)).map((entry) => entry.id)).toEqual([archiveId]);
   });
 
   test('undo and redo retain physical rows and survive a fresh store/service instance', async () => {
     const scenario = await createScenario();
     const firstRuntime = new TimeTravelService(scenario.repository, new MessageStore());
 
-    expect((await firstRuntime.undo(scenario.sessionId)).success).toBe(true);
+    const conversationUndo = await firstRuntime.undo(scenario.sessionId);
+    expect(conversationUndo.success).toBe(true);
+    expect(conversationUndo.conversationEffect).toBe('rewind');
     expect(readFileSync(join(scenario.repository, 'state.txt'), 'utf8')).toBe('version one\n');
     expect((await firstRuntime.getState(scenario.sessionId)).currentHash).toBe(scenario.firstHash);
     expect(
@@ -249,6 +298,47 @@ describe('TimeTravelService retained conversation integration', () => {
     );
   });
 
+  test('undo and redo move the durable archive visibility boundary without deleting tools', async () => {
+    const scenario = await createScenario();
+    const runtime = new TimeTravelService(
+      scenario.repository,
+      new MessageStore(),
+      {},
+      scenario.archive,
+    );
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, scenario.secondArchiveId]);
+
+    const undo = await runtime.undo(scenario.sessionId);
+    expect(undo).toMatchObject({ success: true, conversationEffect: 'rewind' });
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId]);
+
+    const newBranchId = await scenario.archive.record(
+      scenario.sessionId,
+      'tool_result',
+      'bash failed-new-branch',
+      'failed without an assistant response',
+      true,
+    );
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, newBranchId]);
+
+    const redo = await runtime.redo(scenario.sessionId);
+    expect(redo).toMatchObject({ success: true, conversationEffect: 'rewind' });
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, scenario.secondArchiveId]);
+
+    const restartedArchive = new ContextArchiveService(scenario.archiveRoot);
+    expect(
+      (await restartedArchive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, scenario.secondArchiveId]);
+  });
+
   test('a conversation-boundary failure compensates the workspace and durable cursor', async () => {
     const scenario = await createScenario();
     const failingRuntime = new TimeTravelService(scenario.repository, new FailingBoundaryStore());
@@ -269,6 +359,32 @@ describe('TimeTravelService retained conversation integration', () => {
         .from(messages)
         .where(eq(messages.sessionId, scenario.sessionId)),
     ).toHaveLength(2);
+  });
+
+  test('an archive visibility failure compensates conversation, workspace, and cursor', async () => {
+    const scenario = await createScenario();
+    const runtime = new TimeTravelService(
+      scenario.repository,
+      new MessageStore(),
+      {},
+      new FailingArchiveVisibility(),
+    );
+
+    const result = await runtime.undo(scenario.sessionId);
+
+    expect(result).toMatchObject({ success: false });
+    expect(result.message).toContain('workspace and cursor were restored');
+    expect(readFileSync(join(scenario.repository, 'state.txt'), 'utf8')).toBe('version two\n');
+    expect((await runtime.getState(scenario.sessionId)).currentHash).toBe(scenario.secondHash);
+    expect(await new MessageStore().getActiveBoundary(scenario.sessionId)).toMatchObject({
+      messageId: scenario.secondMessageId,
+    });
+    expect(
+      await scenario.archive.getTimelineVisibilityBoundary(scenario.sessionId),
+    ).toBeUndefined();
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, scenario.secondArchiveId]);
   });
 
   test('restart cancels a prepared-only recovery without overwriting a newer edit', async () => {
@@ -324,7 +440,7 @@ describe('TimeTravelService retained conversation integration', () => {
     expect(await checkpoints.getPendingRecoveryOperations(scenario.sessionId)).toHaveLength(0);
   });
 
-  test('restart acknowledges a recovery that committed both participants before cleanup', async () => {
+  test('restart heals archive visibility before acknowledging a committed recovery', async () => {
     const scenario = await createScenario();
     const checkpoints = new CheckpointStore(scenario.repository);
     const prepared = await checkpoints.prepareRecoveryOperation({
@@ -350,12 +466,35 @@ describe('TimeTravelService retained conversation integration', () => {
       expectedActiveMessageId: scenario.secondMessageId,
     });
 
-    const restarted = new TimeTravelService(scenario.repository, new MessageStore());
+    expect(
+      await scenario.archive.getTimelineVisibilityBoundary(scenario.sessionId),
+    ).toBeUndefined();
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId, scenario.secondArchiveId]);
+
+    const restarted = new TimeTravelService(
+      scenario.repository,
+      new MessageStore(),
+      {},
+      scenario.archive,
+    );
     expect((await restarted.getState(scenario.sessionId)).currentHash).toBe(scenario.firstHash);
     expect(readFileSync(join(scenario.repository, 'state.txt'), 'utf8')).toBe('version one\n');
     expect(await new MessageStore().getActiveBoundary(scenario.sessionId)).toMatchObject({
       messageId: scenario.firstMessageId,
     });
+    expect(
+      (await scenario.archive.listRecent(scenario.sessionId)).map((entry) => entry.id),
+    ).toEqual([scenario.firstArchiveId]);
+    expect(await scenario.archive.getTimelineVisibilityBoundary(scenario.sessionId)).toMatchObject({
+      throughCounter: 1,
+    });
+    expect(
+      (await new ContextArchiveService(scenario.archiveRoot).listRecent(scenario.sessionId)).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual([scenario.firstArchiveId]);
     expect(await checkpoints.getPendingRecoveryOperations(scenario.sessionId)).toHaveLength(0);
   });
 

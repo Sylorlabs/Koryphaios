@@ -17,7 +17,10 @@ let toasts = $state<Toast[]>([]);
 let idCounter = 0;
 
 // Track timers and remaining time per toast so we can pause/resume.
-const timers = new Map<string, { timeoutId: ReturnType<typeof setTimeout>; startedAt: number; remaining: number }>();
+const timers = new Map<
+  string,
+  { timeoutId: ReturnType<typeof setTimeout>; startedAt: number; remaining: number }
+>();
 
 function clearTimer(id: string) {
   const entry = timers.get(id);
@@ -33,7 +36,13 @@ function startTimer(id: string, duration: number) {
   timers.set(id, { timeoutId, startedAt: Date.now(), remaining: duration });
 }
 
-function add(type: ToastType, message: string, duration = 4000, onRetry?: () => void, actionLabel?: string) {
+function add(
+  type: ToastType,
+  message: string,
+  duration = 4000,
+  onRetry?: () => void,
+  actionLabel?: string,
+) {
   const id = `toast-${++idCounter}`;
   toasts = [...toasts, { id, type, message, duration, onRetry, actionLabel }];
   startTimer(id, duration);
@@ -79,12 +88,17 @@ export const toastStore = {
   get toasts() {
     return toasts;
   },
-  success: (msg: string) => add('success', msg),
+  success: (
+    msg: string,
+    options?: { duration?: number; action?: () => void; actionLabel?: string },
+  ) => add('success', msg, options?.duration ?? 4000, options?.action, options?.actionLabel),
   error: (msg: string, options?: { duration?: number; onRetry?: () => void }) =>
     add('error', msg, options?.duration ?? 6000, options?.onRetry),
   info: (msg: string) => add('info', msg),
-  warning: (msg: string, options?: { duration?: number; action?: () => void; actionLabel?: string }) =>
-    add('warning', msg, options?.duration ?? 8000, options?.action, options?.actionLabel),
+  warning: (
+    msg: string,
+    options?: { duration?: number; action?: () => void; actionLabel?: string },
+  ) => add('warning', msg, options?.duration ?? 8000, options?.action, options?.actionLabel),
   dismiss,
   dismissMany,
   clear,

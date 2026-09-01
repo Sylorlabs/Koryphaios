@@ -10,6 +10,7 @@ process.env.KORYPHAIOS_SKILLS_HOME = skillsHome;
 const { Elysia } = await import('elysia');
 const { buildLocalBearerToken } = await import('../../auth/local-route-auth');
 const { localAuth } = await import('../../auth/local-auth');
+const { listSkills } = await import('../../kory/skills');
 const { errorHandler } = await import('../../middleware/error-handling');
 const { agentSettingsRoutes } = await import('./agent-settings');
 
@@ -26,9 +27,9 @@ afterAll(() => {
   rmSync(skillsHome, { recursive: true, force: true });
 });
 
-function request(path: string, body: unknown): Request {
+function request(path: string, body: unknown, method = 'POST'): Request {
   return new Request(`http://localhost${path}`, {
-    method: 'POST',
+    method,
     headers: {
       authorization,
       'content-type': 'application/json',
@@ -39,6 +40,64 @@ function request(path: string, body: unknown): Request {
 }
 
 describe('agent settings skill routes', () => {
+  test('validates legacy and v2 native documents through one compatible endpoint', async () => {
+    const legacyResponse = await app.handle(
+      request('/api/agent/skills/validate', {
+        content: 'not a frontmatter skill',
+      }),
+    );
+    expect(legacyResponse.status).toBe(200);
+    const legacyPayload = (await legacyResponse.json()) as {
+      ok: boolean;
+      data: { valid: boolean };
+    };
+    expect(legacyPayload).toMatchObject({ ok: true, data: { valid: false } });
+
+    const nativeResponse = await app.handle(
+      request('/api/agent/skills/validate', {
+        document: {
+          kind: 'html',
+          extension: 'html',
+          renderer: 'html',
+          mediaType: 'text/html',
+        },
+        sourceContent: '<article><p>Inspect evidence and report exact gaps.</p></article>',
+        coreInstructions: 'Inspect evidence and report exact gaps.',
+      }),
+    );
+    expect(nativeResponse.status).toBe(200);
+    const nativePayload = (await nativeResponse.json()) as {
+      ok: boolean;
+      data: { valid: boolean; warnings: string[] };
+    };
+    expect(nativePayload.ok).toBe(true);
+    expect(nativePayload.data.valid).toBe(true);
+    expect(nativePayload.data.warnings.join(' ')).toContain('scriptless sandbox');
+  });
+
+  test('requires compare-and-swap identity for legacy draft saves', async () => {
+    const active = listSkills(projectRoot).find(
+      (skill) =>
+        skill.name === 'implementation' && skill.source === 'personal' && skill.state === 'active',
+    )!;
+    const path = '/api/agent/skills/implementation/draft';
+
+    const missingHash = await app.handle(
+      request(path, { source: 'personal', content: active.content }, 'PUT'),
+    );
+    expect(missingHash.status).toBe(400);
+
+    const staleHash = await app.handle(
+      request(
+        path,
+        { source: 'personal', content: active.content, expectedHash: '0'.repeat(64) },
+        'PUT',
+      ),
+    );
+    expect(staleHash.status).toBe(409);
+    expect(await staleHash.json()).toMatchObject({ ok: false, code: 'CONFLICT' });
+  });
+
   test('returns the live budget-preview shape consumed by the frontend', async () => {
     const response = await app.handle(
       request('/api/agent/skills/resolve', {
@@ -134,7 +193,7 @@ describe('agent settings skill routes', () => {
         requires: ['testing-engineering'],
         conflicts: ['documents-communication'],
         excludes: ['marketing only'],
-        targetMedia: ['native'],
+        targetMedia: ['head-mounted display'],
         depth: 1,
         contextBudget: 2600,
       }),
@@ -165,7 +224,7 @@ describe('agent settings skill routes', () => {
       requires: ['testing-engineering'],
       conflicts: ['documents-communication'],
       excludes: ['marketing only'],
-      targetMedia: ['native'],
+      targetMedia: ['head-mounted display'],
       depth: 1,
       contextBudget: 2600,
     });
@@ -226,6 +285,96 @@ describe('agent settings skill routes', () => {
       }),
     );
     expect(invalid.status).toBe(400);
+  });
+
+  test('creates a freeform draft through the skip-template API', async () => {
+    const response = await app.handle(
+      request('/api/agent/skills/freeform', {
+        source: 'project',
+        name: 'freeform-review',
+        description: 'Follow a user-authored review process.',
+        instructions:
+          'Read the supplied material, apply my criteria, and return the evidence I requested.',
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      ok: boolean;
+      data: { state: string; instructions: string; metadata: { activation: string[] } };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.data.state).toBe('draft');
+    expect(payload.data.instructions).toContain('apply my criteria');
+    expect(payload.data.metadata.activation).toEqual([]);
+  });
+
+  test('previews and confirms format conversion without mutating the active revision', async () => {
+    const listed = await app.handle(
+      new Request('http://localhost/api/agent/skills', {
+        headers: {
+          authorization,
+          'x-koryphaios-project': projectRoot,
+        },
+      }),
+    );
+    const skills = (await listed.json()) as {
+      data: Array<{ name: string; source: string; state: string; hash: string }>;
+    };
+    const active = skills.data.find(
+      (skill) =>
+        skill.name === 'implementation' && skill.source === 'personal' && skill.state === 'active',
+    )!;
+    const body = {
+      source: 'personal',
+      state: 'active',
+      expectedHash: active.hash,
+      document: {
+        kind: 'html',
+        extension: 'html',
+        renderer: 'html',
+        mediaType: 'text/html',
+      },
+    };
+    const dryRun = await app.handle(
+      request('/api/agent/skills/implementation/convert', { ...body, dryRun: true }),
+    );
+    expect(dryRun.status).toBe(200);
+    const preview = (await dryRun.json()) as {
+      data: { convertedContent: string; draft?: unknown; warnings: string[] };
+    };
+    expect(preview.data.convertedContent).toContain('<article><pre>');
+    expect(preview.data.draft).toBeUndefined();
+    expect(preview.data.warnings.length).toBeGreaterThan(0);
+
+    const confirmed = await app.handle(
+      request('/api/agent/skills/implementation/convert', { ...body, dryRun: false }),
+    );
+    expect(confirmed.status).toBe(200);
+    const converted = (await confirmed.json()) as {
+      data: { draft: { state: string; hash: string; document: { kind: string } } };
+    };
+    expect(converted.data.draft.state).toBe('draft');
+    expect(converted.data.draft.document.kind).toBe('html');
+
+    const staleTest = await app.handle(
+      request('/api/agent/skills/implementation/test', {
+        source: 'personal',
+        state: 'draft',
+        expectedHash: '0'.repeat(64),
+      }),
+    );
+    expect(staleTest.status).toBe(409);
+    expect(await staleTest.json()).toMatchObject({ ok: false, code: 'CONFLICT' });
+
+    const staleActivation = await app.handle(
+      request('/api/agent/skills/implementation/activate', {
+        source: 'personal',
+        expectedHash: '0'.repeat(64),
+      }),
+    );
+    expect(staleActivation.status).toBe(409);
+    expect(await staleActivation.json()).toMatchObject({ ok: false, code: 'CONFLICT' });
   });
 
   test('maps Elysia body-schema failures to a bounded client error', async () => {

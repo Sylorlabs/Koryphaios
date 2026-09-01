@@ -16,6 +16,7 @@ import type {
   ProviderStatusPayload,
   ChangeSummary,
   KorySessionChangesPayload,
+  KorySessionChangesResolvedPayload,
   AgentSpawnedPayload,
   AgentStatusPayload,
   AgentThreadMessagePayload,
@@ -24,7 +25,10 @@ import type {
   NotificationPayload,
   NativeCommandPayload,
   KoryAskUserPayload,
+  KoryAskUserResolvedPayload,
   CompactionProgressPayload,
+  SessionTimelineRewrittenPayload,
+  SessionActionableWaitsPayload,
 } from '@koryphaios/shared';
 import {
   isAgentBackgroundProcess,
@@ -42,7 +46,7 @@ import { toastStore } from './toast.svelte';
 import { providersStore, loadProvidersFromApi } from './providers.svelte';
 import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
-import { notesStore } from './notes.svelte';
+import { notesStore, type NotesRealtimeUpdate } from './notes.svelte';
 import { goalStore } from './goals.svelte';
 import { goalDisplayStore } from './goal-display.svelte';
 import { isDemoMode } from '$lib/demo-flags';
@@ -54,6 +58,12 @@ import {
   prepareAuthenticatedWebSocketUrl,
   redactWebSocketUrl,
 } from '$lib/utils/websocket-protocol';
+import { OrderedSessionEventIngress } from '$lib/utils/ordered-session-events';
+import {
+  isImmediateOrderedErrorDuplicate,
+  sequencedTerminalRunFailure,
+} from '$lib/utils/run-failure-feed';
+import { TimelineRewriteEpochGate } from '$lib/utils/timeline-rewrite-gate';
 
 export type { FeedEntry };
 export { feedStore } from './feed.svelte';
@@ -75,6 +85,10 @@ let pendingPermissions = $state<PermissionRequest[]>([]);
 // session that asked — not whichever chat happens to be open.
 let pendingQuestions = $state<Map<string, KoryAskUserPayload>>(new Map());
 let sessionChanges = $state<Map<string, ChangeSummary[]>>(new Map());
+// The displayed review body intentionally remains a simple ChangeSummary[];
+// retain its durable identity alongside it so an older resolution cannot clear
+// a newer review during replay/reconnect races.
+let sessionChangeReviewIds = $state<Map<string, string>>(new Map());
 export interface RewindPreview {
   sessionId: string;
   currentHash: string;
@@ -183,16 +197,53 @@ function orderedEventMetadata(msg: WSMessage): Record<string, unknown> {
   };
 }
 
+function addBackendErrorToSessionFeed(
+  msg: WSMessage,
+  errorText: string,
+  metadata: Record<string, unknown> & { sourceEvent: 'run.state' | 'system.error' },
+): void {
+  const sessionId = msg.sessionId;
+  if (!sessionId) return;
+  const isActive = sessionId === sessionStore.activeSessionId;
+  const orderedDuplicate = isImmediateOrderedErrorDuplicate(
+    feedStore.lastEntryForSession(sessionId),
+    msg,
+    errorText,
+  );
+  if (isActive) {
+    feedStore.removeAnalyzingThoughtEntries();
+    if (feedStore.isDuplicateError(errorText, msg.timestamp) || orderedDuplicate) {
+      return;
+    }
+    toastStore.error(errorText);
+  }
+  if (orderedDuplicate) return;
+  feedStore.addFeedEntryForSession(sessionId, {
+    timestamp: msg.timestamp,
+    type: 'error',
+    agentId: '',
+    agentName: '',
+    glowClass: '',
+    text: errorText,
+    metadata: {
+      ...orderedEventMetadata(msg),
+      ...metadata,
+      source: 'backend',
+      sessionId,
+    },
+  });
+}
+
+/** Apply durable session sequencing before any UI reducer sees an event. */
+function ingestRealtimeMessage(msg: WSMessage): void {
+  const result = orderedSessionIngress.ingestWithReplayRequest(msg);
+  for (const ordered of result.events) handleMessage(ordered);
+  if (result.replayFrom) requestSessionReplay(result.replayFrom);
+}
+
 // ─── Message Handler ───────────────────────────────────────────────────────
 
 function handleMessage(msg: WSMessage) {
-  const eventEpoch = msg.epoch;
-  const eventSequence = msg.sequence;
-  if (msg.sessionId && Number.isSafeInteger(eventEpoch) && Number.isSafeInteger(eventSequence)) {
-    const prior = realtimeCursors.get(msg.sessionId);
-    if (prior && prior.epoch === eventEpoch && eventSequence! <= prior.sequence) return;
-    realtimeCursors.set(msg.sessionId, { epoch: eventEpoch!, sequence: eventSequence! });
-  }
   const activeSessionId = sessionStore.activeSessionId;
   // Feed-affecting realtime events must carry an exact session identity.
   // Unscoped events are global control/catalog events only; treating them as
@@ -200,13 +251,63 @@ function handleMessage(msg: WSMessage) {
   const isForActiveSession = !!msg.sessionId && msg.sessionId === activeSessionId;
   const agents = agentStore.agents;
 
-  // Run-phase state is owned by runStateStore. applyEvent is the single
-  // reducer that handles suppression (stoppedByUser), watchdog resets, and
-  // phase transitions. It runs before the feed/agent handlers so the phase
-  // is current when they read it.
-  runStateStore.applyEvent(msg);
+  // Run-phase state is owned by runStateStore. Its acceptance result is
+  // authoritative: once a terminal or user-stop guard rejects late traffic,
+  // no feed, agent, or toast reducer may render that stale event.
+  if (!runStateStore.applyEvent(msg)) return;
 
   switch (msg.type) {
+    case 'session.timeline_rewritten': {
+      const p = msg.payload as SessionTimelineRewrittenPayload;
+      const eventEpoch = p?.eventEpoch;
+      // This control fact is valid only as sequence one of the epoch it opens.
+      // Reject malformed/unordered copies instead of clearing a live transcript.
+      if (
+        !msg.sessionId ||
+        p?.reason !== 'conversation_rewind' ||
+        !Number.isSafeInteger(eventEpoch) ||
+        eventEpoch !== msg.epoch ||
+        msg.sequence !== 1
+      ) {
+        break;
+      }
+      void applyTimelineRewrite(msg.sessionId, eventEpoch, {
+        adoptIngress: false,
+      });
+      break;
+    }
+
+    case 'run.state': {
+      const snapshot = (msg.payload as { snapshot?: { phase?: string } })?.snapshot;
+      // The durable run aggregate is authoritative after a reload. Keep
+      // worker cards inspectable, but terminalize any stale active cards that
+      // predate the replayed terminal snapshot so a renderer cannot show a
+      // spinner for work the backend has already closed.
+      if (
+        msg.sessionId &&
+        snapshot &&
+        (snapshot.phase === 'done' || snapshot.phase === 'error' || snapshot.phase === 'cancelled')
+      ) {
+        agentStore.terminalizeSessionSubAgents(
+          msg.sessionId,
+          snapshot.phase as 'done' | 'error' | 'cancelled',
+        );
+      }
+      const failure = sequencedTerminalRunFailure(msg, msg.sessionId ?? '');
+      // Only the ordered transition is transcript evidence. The server follows
+      // replay with an unsequenced current-state projection; rendering that too
+      // would duplicate the durable card on every reconnect.
+      if (failure) {
+        addBackendErrorToSessionFeed(msg, failure.reason, {
+          sourceEvent: 'run.state',
+          runId: failure.snapshot.runId,
+          runRevision: failure.snapshot.revision,
+          terminalReason: failure.reason,
+        });
+      }
+      break;
+    }
+
     case 'agent.spawned': {
       const p = msg.payload as AgentSpawnedPayload;
       agentStore.spawnAgent(p.agent, p.task, msg.sessionId ?? '');
@@ -222,7 +323,7 @@ function handleMessage(msg: WSMessage) {
           agentName: p.agent.name,
           glowClass: feedStore.resolveGlowClass(p.agent),
           text: `Worker spawned: ${p.agent.name} (${providerDisplayName(p.agent.provider)} · ${p.agent.model})`,
-          metadata: { domain: p.agent.domain },
+          metadata: { ...orderedEventMetadata(msg), domain: p.agent.domain },
         });
       }
       break;
@@ -240,6 +341,18 @@ function handleMessage(msg: WSMessage) {
         last.agentId === p.agentId &&
         last.text === p.entry.content.trim()
       ) {
+        // The streamed assistant row and this durable thread transcript row
+        // are the same visible evidence. Retain both stable identities so a
+        // later Hide/Delete survives either a websocket replay or a direct
+        // thread-history reload.
+        last.metadata = {
+          ...last.metadata,
+          ...orderedEventMetadata(msg),
+          sessionId,
+          sourceAgentId: p.agentId,
+          threadRole: p.entry.role,
+          threadEntryId: p.entry.id,
+        };
         break;
       }
       const agentName = agentStore.getAgentFeedLabel(p.agentId);
@@ -256,7 +369,13 @@ function handleMessage(msg: WSMessage) {
               ? 'glow-kory'
               : '',
         text: p.entry.content,
-        metadata: { sessionId, sourceAgentId: p.agentId, threadRole: role },
+        metadata: {
+          ...orderedEventMetadata(msg),
+          sessionId,
+          sourceAgentId: p.agentId,
+          threadRole: role,
+          threadEntryId: p.entry.id,
+        },
       });
       break;
     }
@@ -279,7 +398,12 @@ function handleMessage(msg: WSMessage) {
         if (p.status === 'thinking') feedStore.beginThinking(p.agentId, msg.timestamp);
         else feedStore.finalizeThinking(p.agentId, msg.timestamp);
       }
-      if (p.status === 'done' || p.status === 'idle' || p.status === 'waiting') {
+      // Historical terminal statuses are transcript evidence, not a new turn
+      // completion. The startup session loader already fetches message history;
+      // refetching once for every replayed prior turn races those requests
+      // against the ordered-event replay and can replace durable error/tool rows
+      // with message-only history.
+      if (!msg.replayed && (p.status === 'done' || p.status === 'idle' || p.status === 'waiting')) {
         const completedSessionId = msg.sessionId ?? agents.get(p.agentId)?.sessionId;
         if (
           p.agentId === 'kory-manager' &&
@@ -318,6 +442,7 @@ function handleMessage(msg: WSMessage) {
           agentName: '',
           glowClass: '',
           text: info.message === 'Session cancelled' ? 'Stopped by user.' : info.message,
+          metadata: orderedEventMetadata(msg),
         });
       }
       break;
@@ -337,9 +462,9 @@ function handleMessage(msg: WSMessage) {
       const p = msg.payload as { agentId?: string; error?: string };
       const isSubAgent = isSpawnedSubAgent(p.agentId);
       // Run-phase error transition is handled by applyEvent above.
-      if (isForActiveSession) {
-        feedStore.removeAnalyzingThoughtEntries();
-        feedStore.addFeedEntry({
+      if (msg.sessionId) {
+        if (isForActiveSession) feedStore.removeAnalyzingThoughtEntries();
+        feedStore.addFeedEntryForSession(msg.sessionId, {
           timestamp: msg.timestamp,
           type: 'error',
           agentId: isSubAgent ? p.agentId! : 'kory-manager',
@@ -347,6 +472,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: '',
           text: p.error ?? 'Unknown error',
           metadata: {
+            ...orderedEventMetadata(msg),
             source: 'agent',
             sessionId: msg.sessionId,
             ...(isSubAgent && { isSubAgent: true }),
@@ -473,6 +599,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: `Calling tool: ${p.toolCall.name}`,
           metadata: {
+            ...orderedEventMetadata(msg),
             toolCall: p.toolCall,
             sessionId: msg.sessionId,
             sourceProvider: p.sourceProvider,
@@ -519,6 +646,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: '',
           text,
           metadata: {
+            ...orderedEventMetadata(msg),
             toolResult: {
               callId: p.id,
               name: 'bash',
@@ -567,6 +695,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: feedStore.resolveGlowClass(agents.get(p.agentId)?.identity),
           text: resultText,
           metadata: {
+            ...orderedEventMetadata(msg),
             toolResult: p.toolResult,
             sessionId: msg.sessionId,
             sourceProvider: p.sourceProvider,
@@ -639,8 +768,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'kory.thought': {
       const p = msg.payload as KoryThoughtPayload;
-      if (msg.sessionId) agentStore.setManagerSessionId(msg.sessionId);
       if (isForActiveSession) {
+        if (msg.sessionId) agentStore.setManagerSessionId(msg.sessionId);
         koryThought = p.thought;
         koryPhase = p.phase;
         feedStore.removeAnalyzingThoughtEntries();
@@ -651,7 +780,7 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: 'glow-kory',
           text: p.thought,
-          metadata: { phase: p.phase },
+          metadata: { ...orderedEventMetadata(msg), phase: p.phase },
         });
       }
       break;
@@ -668,7 +797,12 @@ function handleMessage(msg: WSMessage) {
           agentName: 'Kory',
           glowClass: 'glow-kory',
           text: p.reasoning,
-          metadata: { domain: p.domain, model: p.selectedModel, provider: p.selectedProvider },
+          metadata: {
+            ...orderedEventMetadata(msg),
+            domain: p.domain,
+            model: p.selectedModel,
+            provider: p.selectedProvider,
+          },
         });
       }
       break;
@@ -691,6 +825,22 @@ function handleMessage(msg: WSMessage) {
       break;
     }
 
+    case 'kory.ask_user_resolved': {
+      const p = msg.payload as KoryAskUserResolvedPayload;
+      const sid = msg.sessionId;
+      if (!sid) break;
+      const current = pendingQuestions.get(sid);
+      // A durable terminal control can only clear the question it names. A
+      // legacy/no-id control means the server has authoritatively established
+      // that this session has no waiting question.
+      if (!p.questionId || !current?.questionId || current.questionId === p.questionId) {
+        const next = new Map(pendingQuestions);
+        next.delete(sid);
+        pendingQuestions = next;
+      }
+      break;
+    }
+
     case 'provider.status': {
       const p = msg.payload as ProviderStatusPayload;
       const newList = Array.isArray((p as { providers?: unknown }).providers)
@@ -705,7 +855,7 @@ function handleMessage(msg: WSMessage) {
     case 'compaction.completed':
     case 'compaction.failed': {
       const payload = msg.payload as CompactionProgressPayload;
-      feedStore.upsertCompaction(payload);
+      feedStore.upsertCompaction(payload, orderedEventMetadata(msg));
       // Run-phase transitions for compaction are handled by applyEvent above.
       if (msg.type === 'compaction.completed') {
         toastStore.success('Context compacted — the manager will start fresh on the next turn');
@@ -716,12 +866,15 @@ function handleMessage(msg: WSMessage) {
     }
 
     case 'notes.updated': {
-      const p = msg.payload as { action?: string; noteId?: string };
-      void notesStore.fetchNotes();
-      void notesStore.fetchGraph();
-      void notesStore.fetchFolderTree();
-      if (p.noteId && notesStore.currentNote?.id === p.noteId) {
-        void notesStore.fetchNote(p.noteId);
+      notesStore.handleRealtimeUpdate(msg.payload as NotesRealtimeUpdate);
+      break;
+    }
+
+    case 'workspace.updated': {
+      // Authoritative workspace snapshot — the main page reconciles it, which
+      // replaces the high-frequency workspace polling fallback.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kory-workspace-snapshot', { detail: msg.payload }));
       }
       break;
     }
@@ -763,6 +916,7 @@ function handleMessage(msg: WSMessage) {
           glowClass: '',
           text: p.text,
           metadata: {
+            ...orderedEventMetadata(msg),
             sourceProvider: p.provider,
             nativeCommand: p.command,
             rawCommand: p.rawCommand,
@@ -792,6 +946,27 @@ function handleMessage(msg: WSMessage) {
         const next = new Map(sessionChanges);
         next.set(msg.sessionId, p.changes);
         sessionChanges = next;
+        const reviewIds = new Map(sessionChangeReviewIds);
+        if (p.reviewId) reviewIds.set(msg.sessionId, p.reviewId);
+        else reviewIds.delete(msg.sessionId);
+        sessionChangeReviewIds = reviewIds;
+      }
+      break;
+    }
+
+    case 'session.changes_resolved': {
+      const p = msg.payload as KorySessionChangesResolvedPayload;
+      const sid = msg.sessionId;
+      if (!sid) break;
+      const currentReviewId = sessionChangeReviewIds.get(sid);
+      // Preserve a newer review when an old durable resolution is replayed.
+      if (!p.reviewId || !currentReviewId || currentReviewId === p.reviewId) {
+        const next = new Map(sessionChanges);
+        next.delete(sid);
+        sessionChanges = next;
+        const reviewIds = new Map(sessionChangeReviewIds);
+        reviewIds.delete(sid);
+        sessionChangeReviewIds = reviewIds;
       }
       break;
     }
@@ -801,6 +976,20 @@ function handleMessage(msg: WSMessage) {
         const next = new Map(sessionChanges);
         next.delete(msg.sessionId);
         sessionChanges = next;
+      }
+      if (msg.sessionId) {
+        const reviewIds = new Map(sessionChangeReviewIds);
+        reviewIds.delete(msg.sessionId);
+        sessionChangeReviewIds = reviewIds;
+      }
+      break;
+    }
+
+    case 'session.actionable_waits': {
+      const p = msg.payload as SessionActionableWaitsPayload;
+      const sessionIds = [...(p.questionSessionIds ?? []), ...(p.reviewSessionIds ?? [])];
+      for (const sessionId of new Set(sessionIds)) {
+        if (typeof sessionId === 'string' && sessionId) subscribeToSession(sessionId);
       }
       break;
     }
@@ -836,7 +1025,7 @@ function handleMessage(msg: WSMessage) {
             .slice(0, 3)
             .map((f) => f.path.split('/').pop())
             .join(', ')}${p.files.length > 3 ? ` and ${p.files.length - 3} more` : ''}`,
-          metadata: { contextFiles: p.files },
+          metadata: { ...orderedEventMetadata(msg), contextFiles: p.files },
         });
       }
       break;
@@ -844,21 +1033,8 @@ function handleMessage(msg: WSMessage) {
 
     case 'system.error': {
       const p = msg.payload as { error?: string };
-      if (!isForActiveSession) break;
-      feedStore.removeAnalyzingThoughtEntries();
       const errorText = p.error ?? 'Unknown system error';
-      if (!feedStore.isDuplicateError(errorText, msg.timestamp)) {
-        toastStore.error(errorText);
-        feedStore.addFeedEntry({
-          timestamp: msg.timestamp,
-          type: 'error',
-          agentId: '',
-          agentName: '',
-          glowClass: '',
-          text: errorText,
-          metadata: { source: 'backend', sessionId: msg.sessionId },
-        });
-      }
+      addBackendErrorToSessionFeed(msg, errorText, { sourceEvent: 'system.error' });
       break;
     }
 
@@ -877,7 +1053,7 @@ function handleMessage(msg: WSMessage) {
         agentName: '',
         glowClass: '',
         text,
-        metadata: { notificationType },
+          metadata: { ...orderedEventMetadata(msg), notificationType },
       });
       break;
     }
@@ -1005,6 +1181,21 @@ async function connectAuthenticated(url: string | undefined, generation: number)
       const activeSid = sessionStore.activeSessionId;
       if (activeSid) subscribedSessions.add(activeSid);
       for (const sid of subscribedSessions) subscribeToSession(sid);
+      // A fresh renderer otherwise knows only its active chat. Ask for the
+      // compact durable index of background chats waiting on the user, then
+      // subscribe to precisely those sessions so their ask/review controls
+      // are reconstructed without replaying every historical chat.
+      ws.send(
+        JSON.stringify({
+          type: 'session.actionable_waits.request',
+          timestamp: Date.now(),
+        }),
+      );
+      // Broadcasts missed while disconnected are unrecoverable (workspace
+      // events are ephemeral) — pull authoritative state once on reconnect.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kory-workspace-refresh'));
+      }
     };
 
     ws.onmessage = (event) => {
@@ -1033,7 +1224,7 @@ async function connectAuthenticated(url: string | undefined, generation: number)
           }
           return;
         }
-        handleMessage(parsed);
+        ingestRealtimeMessage(parsed);
       } catch (error) {
         if (!hasShownMalformedWsMessage) {
           hasShownMalformedWsMessage = true;
@@ -1061,6 +1252,7 @@ async function connectAuthenticated(url: string | undefined, generation: number)
       connectionStatus = 'disconnected';
       wsConnection = null;
       sentSessionSubscriptions.clear();
+      orderedSessionIngress.clearPending();
       if (!shouldReconnect || generation !== connectGeneration) return;
 
       const nextCandidate = nextWebSocketCandidateIndex(
@@ -1101,18 +1293,101 @@ function scheduleReconnect(url?: string) {
 // Sessions this client has subscribed to during this app run. Used to
 // restore server-side subscriptions after a reconnect.
 const subscribedSessions = new Set<string>();
-const realtimeCursors = new Map<string, { epoch: number; sequence: number }>();
+const orderedSessionIngress = new OrderedSessionEventIngress<WSMessage>();
+const timelineRewriteGate = new TimelineRewriteEpochGate();
+const timelineRewriteRefreshes = new Map<string, { epoch: number; completion: Promise<void> }>();
 // Tracks what was actually sent on the current socket. This is distinct from
 // subscribedSessions, which is the desired set restored after reconnects.
 const sentSessionSubscriptions = new Set<string>();
+
+/** Recover a dropped ordered event without cycling the socket. The backend's
+ * subscribe handler is idempotent and replays every durable row after this
+ * last-applied cursor, including the terminal event currently held in ingress. */
+function requestSessionReplay(cursor: {
+  sessionId: string;
+  epoch: number;
+  sequence: number;
+}): void {
+  if (wsConnection?.readyState !== WebSocket.OPEN) return;
+  wsConnection.send(
+    JSON.stringify({
+      type: 'subscribe_session',
+      sessionId: cursor.sessionId,
+      timestamp: Date.now(),
+      epoch: cursor.epoch,
+      sequence: cursor.sequence,
+    }),
+  );
+}
+
+function adoptRewrittenSessionEpoch(sessionId: string, epoch: number): void {
+  orderedSessionIngress.resetSessionToEpoch(sessionId, epoch);
+  subscribedSessions.add(sessionId);
+  sentSessionSubscriptions.delete(sessionId);
+  subscribeToSession(sessionId);
+}
+
+/** Apply a durable timeline rewrite once per session epoch. The WS control row
+ * normally wins the race; the initiating HTTP response is a fallback when the
+ * socket is disconnected and otherwise awaits the same history refresh. */
+function applyTimelineRewrite(
+  sessionId: string,
+  epoch: number,
+  options: { adoptIngress: boolean },
+): Promise<void> {
+  const lease = timelineRewriteGate.adopt(sessionId, epoch);
+  if (!lease) return Promise.resolve();
+  if (!lease.accepted) {
+    return lease.epoch === epoch
+      ? (timelineRewriteRefreshes.get(sessionId)?.completion ?? Promise.resolve())
+      : Promise.resolve();
+  }
+
+  const rewriteGeneration = feedStore.resetSessionFeed(sessionId);
+  if (options.adoptIngress) adoptRewrittenSessionEpoch(sessionId, epoch);
+
+  const completion = (async () => {
+    if (sessionId !== sessionStore.activeSessionId) return;
+    // Never trust a load that began before the epoch control row. It may have
+    // captured the discarded branch; resetSessionFeed invalidated its
+    // generation, and this is the one authoritative post-rewrite refresh.
+    try {
+      const messages = await sessionStore.fetchMessages(sessionId, lease.signal);
+      if (lease.signal.aborted || !timelineRewriteGate.isCurrent(sessionId, epoch)) return;
+      await loadSessionMessages(sessionId, messages, {
+        generation: rewriteGeneration,
+        signal: lease.signal,
+      });
+    } catch (error) {
+      if (lease.signal.aborted) return;
+      feedStore.finishSessionLoad(sessionId);
+      const detail = error instanceof Error ? error.message : 'Unknown history refresh failure';
+      console.error('Failed to reload rewritten session history:', error);
+      if (sessionId === sessionStore.activeSessionId) {
+        toastStore.error(
+          `Session rewound, but its refreshed history could not be loaded: ${detail}`,
+        );
+        feedStore.addClientError(`Rewritten chat history failed to load: ${detail}`);
+      }
+    }
+  })();
+  timelineRewriteRefreshes.set(sessionId, { epoch, completion });
+  return completion;
+}
 
 function subscribeToSession(sessionId: string) {
   if (!sessionId) return;
   subscribedSessions.add(sessionId);
   if (wsConnection?.readyState !== WebSocket.OPEN) return;
+  // WebSocket open and Svelte's queued session activation can race during a
+  // full app relaunch. Replaying into the active session before its feed owns
+  // that session writes durable rows into the previous/empty feed, and the
+  // subsequent activation clears them. Keep the desired subscription queued;
+  // useSessionSync calls this again immediately after activateSessionFeed.
+  if (sessionId === sessionStore.activeSessionId && !feedStore.ownsFeed(sessionId)) return;
   if (sentSessionSubscriptions.has(sessionId)) return;
   sentSessionSubscriptions.add(sessionId);
-  const cursor = realtimeCursors.get(sessionId);
+  const cursor = orderedSessionIngress.getCursor(sessionId);
   wsConnection.send(
     JSON.stringify({
       type: 'subscribe_session',
@@ -1129,7 +1404,9 @@ function subscribeToSession(sessionId: string) {
 function unsubscribeFromSession(sessionId: string) {
   subscribedSessions.delete(sessionId);
   sentSessionSubscriptions.delete(sessionId);
-  realtimeCursors.delete(sessionId);
+  orderedSessionIngress.resetSession(sessionId);
+  timelineRewriteGate.clearSession(sessionId);
+  timelineRewriteRefreshes.delete(sessionId);
 }
 
 function disconnect() {
@@ -1146,6 +1423,7 @@ function disconnect() {
   }
   for (const timer of fileEditTimers.values()) clearTimeout(timer);
   fileEditTimers.clear();
+  orderedSessionIngress.clearPending();
   const connection = wsConnection;
   wsConnection = null;
   connection?.close();
@@ -1155,71 +1433,90 @@ function disconnect() {
 
 export { loadProvidersFromApi };
 
-function sendMessage(
+async function sendMessage(
   sessionId: string,
   content: string,
   model?: string,
   reasoningLevel?: string,
   attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
   fastMode?: boolean,
-) {
-  feedStore.addUserMessage(sessionId, content, attachments);
+  imageInputMode: 'reject' | 'omit' = 'reject',
+): Promise<boolean> {
+  const optimisticEntryId = feedStore.addUserMessage(sessionId, content, attachments);
   runStateStore.startRun(sessionId);
   detectedContext = [];
-  void apiFetch(apiUrl('/api/messages'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel, attachments, fastMode }),
-  })
-    .then(async (res) => {
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
-      if (!res.ok || data?.ok === false) {
-        throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
-      }
-      // Refresh the session list so the sidebar's message count updates
-      // immediately after the user's message is persisted.
-      void sessionStore.fetchSessions();
-    })
-    .catch((error) => {
-      if (import.meta.env.DEV) console.warn('Failed to send message', error);
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : 'Message send failed. Check your connection and retry.';
-      toastStore.error(message);
-      feedStore.addClientError(message);
-      runStateStore.markUserStopped(sessionId);
+  try {
+    const res = await apiFetch(apiUrl('/api/messages'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId,
+        content,
+        model,
+        reasoningLevel,
+        attachments,
+        fastMode,
+        imageInputMode,
+      }),
     });
+    const data = await parseJsonResponse<{
+      ok?: boolean;
+      error?: string;
+      data?: { messageId?: string };
+    }>(res);
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
+    }
+    if (optimisticEntryId && typeof data?.data?.messageId === 'string') {
+      feedStore.bindMessageIdentity(sessionId, optimisticEntryId, data.data.messageId);
+    }
+    // Refresh the session list so the sidebar's message count updates
+    // immediately after the user's message is persisted.
+    void sessionStore.fetchSessions();
+    return true;
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn('Failed to send message', error);
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Message send failed. Check your connection and retry.';
+    toastStore.error(message);
+    if (optimisticEntryId) feedStore.removeEntries(new Set([optimisticEntryId]));
+    feedStore.addClientError(message);
+    runStateStore.markUserStopped(sessionId);
+    return false;
+  }
 }
 
-function sendAgentMessage(
+async function sendAgentMessage(
   sessionId: string,
   agentId: string,
   content: string,
   model?: string,
   reasoningLevel?: string,
-) {
-  if (!sessionId || !agentId || !content.trim()) return;
-  void apiFetch(apiUrl(`/api/agent/${agentId}/message`), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
-  })
-    .then(async (res) => {
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
-      if (!res.ok || data?.ok === false) {
-        throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
-      }
-    })
-    .catch((error) => {
-      if (import.meta.env.DEV) console.warn('Failed to send agent message', error);
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : 'Agent message send failed. Check your connection and retry.';
-      toastStore.error(message);
-      feedStore.addClientError(message);
+): Promise<boolean> {
+  if (!sessionId || !agentId || !content.trim()) return false;
+  try {
+    const res = await apiFetch(apiUrl(`/api/agent/${agentId}/message`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, content, model, reasoningLevel }),
     });
+    const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+    if (!res.ok || data?.ok === false) {
+      throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
+    }
+    return true;
+  } catch (error) {
+    if (import.meta.env.DEV) console.warn('Failed to send agent message', error);
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : 'Agent message send failed. Check your connection and retry.';
+    toastStore.error(message);
+    feedStore.addClientError(message);
+    return false;
+  }
 }
 
 function respondToPermission(id: string, approved: boolean) {
@@ -1280,6 +1577,9 @@ function respondToChanges(sessionId: string, accepted: boolean) {
   }
   sessionChanges.delete(sessionId);
   sessionChanges = new Map(sessionChanges);
+  const reviewIds = new Map(sessionChangeReviewIds);
+  reviewIds.delete(sessionId);
+  sessionChangeReviewIds = reviewIds;
 }
 
 function setDemoSessionChanges(sessionId: string, changes: ChangeSummary[]) {
@@ -1287,6 +1587,11 @@ function setDemoSessionChanges(sessionId: string, changes: ChangeSummary[]) {
   if (changes.length) next.set(sessionId, changes);
   else next.delete(sessionId);
   sessionChanges = next;
+  if (!changes.length) {
+    const reviewIds = new Map(sessionChangeReviewIds);
+    reviewIds.delete(sessionId);
+    sessionChangeReviewIds = reviewIds;
+  }
 }
 
 function clearFeed() {
@@ -1388,12 +1693,24 @@ async function confirmRewind() {
         confirmed: true,
       }),
     });
-    const data = await parseJsonResponse<{ ok?: boolean; message?: string }>(res);
+    const data = await parseJsonResponse<{ ok?: boolean; message?: string; eventEpoch?: number }>(
+      res,
+    );
     if (!data.ok) throw new Error(data.message ?? 'Rewind failed');
     rewindPreview = null;
     toastStore.success('Session rewound successfully');
-    const messages = await sessionStore.fetchMessages(sessionId);
-    await loadSessionMessages(sessionId, messages);
+    if (Number.isSafeInteger(data.eventEpoch)) {
+      // The durable WS control row usually arrives first. Epoch gating makes
+      // this HTTP result an idempotent fallback instead of a second clear/load.
+      await applyTimelineRewrite(sessionId, Number(data.eventEpoch), {
+        adoptIngress: true,
+      });
+    } else {
+      // Code-only checkpoints deliberately retain the current transcript, but
+      // preserve the existing history refresh behavior.
+      const messages = await sessionStore.fetchMessages(sessionId);
+      await loadSessionMessages(sessionId, messages);
+    }
     window.dispatchEvent(new CustomEvent('kory:rewind-applied', { detail: { sessionId } }));
   } catch (err) {
     toastStore.error(err instanceof Error ? err.message : 'Rewind failed');
@@ -1527,7 +1844,11 @@ export const wsStore = {
   getAgentThreadFeed: agentStore.getAgentThreadFeed,
   removeEntries: feedStore.removeEntries,
   setEntryVisibility: feedStore.setEntryVisibility,
+  setUserEntryVisibility: feedStore.setUserEntryVisibility,
   finalizeThinking: feedStore.finalizeThinking,
+  beginManagerContextPreview: agentStore.beginManagerContextPreview,
+  applyManagerContextPreview: agentStore.applyManagerContextPreview,
+  clearManagerContextPreview: agentStore.clearManagerContextPreview,
   setManagerContextWindow: agentStore.setManagerContextWindow,
   respondToPermission,
   subscribeToSession,

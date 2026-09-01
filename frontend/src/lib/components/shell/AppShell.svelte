@@ -1,12 +1,11 @@
 <script lang="ts">
-  import type { Snippet } from 'svelte';
+  import type { Component, Snippet } from 'svelte';
   import { onMount } from 'svelte';
   import ChevronLeft from 'lucide-svelte/icons/chevron-left';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
-  import NotesPanel from '$lib/components/NotesPanel.svelte';
 
   let {
     showSidebar = true,
@@ -52,6 +51,9 @@
   // content, so collapse it to the thin rail automatically (users still reach it
   // via the rail's "show" button). Desktop behaviour is unchanged.
   let isNarrow = $state(false);
+  let NotesPanelComponent = $state<Component | null>(null);
+  let notesPanelLoading = $state(false);
+  let notesPanelLoadError = $state<string | null>(null);
   let mobileClosed = $state(true); // on phones the sidebar starts closed (as an overlay)
   function updateNarrow() {
     const narrow = typeof window !== 'undefined' && window.innerWidth < 700;
@@ -63,10 +65,8 @@
     window.addEventListener('resize', updateNarrow);
     return () => window.removeEventListener('resize', updateNarrow);
   });
-  // Desktop: in-flow sidebar. Narrow: a dismissible overlay opened from the rail.
   let desktopSidebar = $derived(showSidebar && !isNarrow);
   let mobileSidebar = $derived(isNarrow && !mobileClosed);
-  let sidebarVisible = $derived(desktopSidebar || mobileSidebar);
   function hideSidebar() {
     if (isNarrow) mobileClosed = true;
     else onHideSidebar?.();
@@ -75,6 +75,23 @@
     if (isNarrow) mobileClosed = false;
     else onShowSidebar?.();
   }
+
+  async function loadNotesPanel(): Promise<void> {
+    if (NotesPanelComponent || notesPanelLoading) return;
+    notesPanelLoading = true;
+    notesPanelLoadError = null;
+    try {
+      NotesPanelComponent = (await import('$lib/components/NotesPanel.svelte')).default;
+    } catch (error) {
+      notesPanelLoadError = error instanceof Error ? error.message : 'Notes failed to load';
+    } finally {
+      notesPanelLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (showNotes) void loadNotesPanel();
+  });
 </script>
 
 <div
@@ -82,19 +99,14 @@
   style="background: var(--color-surface-0);"
 >
   {#if mobileSidebar}
-    <!-- Tap-outside backdrop for the phone sidebar overlay -->
     <button
       type="button"
       class="fixed inset-0 z-40 bg-black/50"
       aria-label="Close sidebar"
       onclick={() => (mobileClosed = true)}
     ></button>
-  {/if}
-  {#if sidebarVisible}
     <nav
-      class="{mobileSidebar
-        ? 'fixed inset-y-0 left-0 z-50 shadow-2xl'
-        : 'shrink-0'} border-r flex min-h-0 flex-col"
+      class="fixed inset-y-0 left-0 z-50 shadow-2xl border-r flex min-h-0 flex-col"
       data-testid="session-sidebar"
       style="
         width: var(--sidebar-width);
@@ -184,7 +196,104 @@
         </div>
       </div>
     </nav>
-  {:else if !zenMode}
+  {/if}
+  <!-- Desktop sidebar: persistent mount, width transition avoids remount jank -->
+  <nav
+    class="hidden md:flex shrink-0 border-r flex-col overflow-hidden transition-[width,opacity] duration-150 ease-out will-change-[width]"
+    data-testid="session-sidebar"
+    style="
+      width: {desktopSidebar ? 'var(--sidebar-width)' : '0px'};
+      min-width: {desktopSidebar ? 'var(--sidebar-min-width)' : '0px'};
+      max-width: {desktopSidebar ? 'var(--sidebar-max-width)' : '0px'};
+      opacity: {desktopSidebar ? '1' : '0'};
+      border-color: var(--color-border);
+      background: var(--color-surface-1);
+      pointer-events: {desktopSidebar ? 'auto' : 'none'};
+    "
+    aria-hidden={!desktopSidebar}
+    aria-label="Session navigation"
+    inert={!desktopSidebar}
+  >
+    <div
+      class="sidebar-header flex items-center justify-between px-4 border-b shrink-0"
+      style="height: var(--header-height); border-color: var(--color-border);"
+      data-tauri-drag-region
+      onmousedown={startDragging}
+      role="presentation"
+    >
+      <div class="flex items-center gap-3 min-w-0 pointer-events-none">
+        <img
+          src="/logo-64.png"
+          alt="Koryphaios"
+          class="rounded-lg shrink-0"
+          style="width: var(--size-8); height: var(--size-8);"
+        />
+        <div class="flex flex-col justify-center min-w-0">
+          <h1
+            class="flex items-center gap-1.5 text-sm font-semibold leading-tight"
+            style="color: var(--color-text-primary);"
+          >
+            Koryphaios
+            <span
+              class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
+              style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
+              title="Koryphaios is in beta — expect rapid changes">Beta</span
+            >
+          </h1>
+          <p
+            class="leading-tight"
+            style="font-size: var(--text-xs); color: var(--color-text-muted);"
+          >
+            Agent workspace
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        class="sidebar-header-button rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+        style="padding: var(--space-2); color: var(--color-text-muted);"
+        onclick={hideSidebar}
+        title="Hide sidebar"
+        aria-label="Hide sidebar"
+      >
+        <ChevronLeft size={14} />
+      </button>
+    </div>
+
+    <div class="flex-1 min-h-0 overflow-hidden">
+      <SessionSidebar currentSessionId={activeSessionId ?? undefined} />
+    </div>
+
+    <div
+      class="px-4 py-3 border-t flex items-center justify-between shrink-0"
+      style="border-color: var(--color-border); background: var(--color-surface-2);"
+    >
+      <div class="flex items-center gap-2">
+        <div
+          class="rounded-full {connectionDot}"
+          style="width: var(--size-2); height: var(--size-2);"
+        ></div>
+        <span
+          class="leading-none"
+          style="font-size: var(--text-xs); color: var(--color-text-muted);"
+          title={connectionStatusLabel}
+        >
+          {connectionStatusLabel}
+        </span>
+      </div>
+      <div class="flex items-center gap-1">
+        {#if connectedProviders > 0}
+          <span
+            class="px-1.5 py-0.5 rounded leading-none"
+            style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
+          >
+            {connectedProviders} providers
+          </span>
+        {/if}
+      </div>
+    </div>
+  </nav>
+  {#if !desktopSidebar && !isNarrow && !zenMode}
     <div
       class="shrink-0 border-r flex min-h-0 flex-col items-center"
       style="width: var(--sidebar-width-collapsed); border-color: var(--color-border); background: var(--color-surface-1);"
@@ -245,7 +354,27 @@
             </button>
           </div>
           <div class="flex-1 min-h-0">
-            <NotesPanel />
+            {#if NotesPanelComponent}
+              <NotesPanelComponent />
+            {:else if notesPanelLoadError}
+              <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <p class="text-sm" style="color: var(--color-error);">{notesPanelLoadError}</p>
+                <button
+                  type="button"
+                  class="rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+                  style="border-color: var(--color-border); color: var(--color-text-primary);"
+                  onclick={() => void loadNotesPanel()}>Retry loading Notes</button
+                >
+              </div>
+            {:else}
+              <div
+                class="flex h-full items-center justify-center gap-2 text-xs"
+                style="color: var(--color-text-muted);"
+                role="status"
+              >
+                <StickyNote size={14} /> Loading Notes…
+              </div>
+            {/if}
           </div>
         </div>
       {/if}

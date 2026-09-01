@@ -56,6 +56,7 @@ describe('Custom (bring-your-own) provider', () => {
       baseUrl: 'https://my-endpoint.example/v1',
       apiKey: 'sk-test',
       models: ['my-model-a', 'my-model-b'],
+      catalogDetected: true,
     });
     expect(res.success).toBe(true);
     const provider = registry.get('custom:my-llm');
@@ -71,6 +72,9 @@ describe('Custom (bring-your-own) provider', () => {
     expect(status!.supportsApiKey).toBe(true); // shows an API-key box
     expect(status!.requiresBaseUrl).toBe(true); // shows a base-URL box
     expect(status!.enabled).toBe(true);
+    expect(status!.connectionState).toBe('detected');
+    expect(status!.verificationScope).toBe('catalog');
+    expect(status!.authenticated).toBe(false);
   });
 
   it('lists declared models merged with live /models discovery', () => {
@@ -90,6 +94,26 @@ describe('Custom (bring-your-own) provider', () => {
     });
     expect(res.success).toBe(true);
     expect(registry.get('custom:keyless')?.isAvailable()).toBe(true);
+  });
+
+  it('preserves custom metadata and icon ownership when credentials change', async () => {
+    const icon = {
+      assetId: '123e4567-e89b-42d3-a456-426614174000',
+      revision: 'a'.repeat(64),
+      shape: 'circle' as const,
+    };
+    expect(registry.setCustomProviderIcon('custom:my-llm', icon).success).toBe(true);
+
+    const result = await registry.setCredentials('custom:my-llm', { apiKey: 'sk-replacement' });
+    expect(result.success).toBe(true);
+    expect(registry.getConfigs()['custom:my-llm']).toMatchObject({
+      custom: true,
+      kind: 'openai',
+      label: 'My LLM',
+      models: ['my-model-a', 'my-model-b'],
+      customIcon: icon,
+      apiKey: 'sk-replacement',
+    });
   });
 
   it('rejects a custom provider with no base URL', () => {

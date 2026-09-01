@@ -27,6 +27,8 @@ const { billingRoutes } = await import('../routes/v1/billing');
 const { processRoutes } = await import('../routes/v1/processes');
 const { voiceRoutes } = await import('../routes/v1/voice');
 const { imageRoutes } = await import('../routes/v1/images');
+const { usageRoutes } = await import('../routes/v1/usage');
+const { feedRoutes } = await import('../routes/v1/feed');
 const { errorHandler } = await import('../middleware/error-handling');
 
 const app = new Elysia()
@@ -46,6 +48,7 @@ const app = new Elysia()
   .post('/api/debug/log-error', () => ({ ok: true }))
   .onError(errorHandler)
   .use(sessionRoutes)
+  .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
   .use(collaborationRoutes)
@@ -59,7 +62,8 @@ const app = new Elysia()
   .use(billingRoutes)
   .use(processRoutes)
   .use(voiceRoutes)
-  .use(imageRoutes);
+  .use(imageRoutes)
+  .use(usageRoutes);
 
 afterAll(() => {
   if (apiSurfaceDatabaseDir) {
@@ -75,13 +79,27 @@ type RouteCheck = {
 
 const protectedRoutes: RouteCheck[] = [
   { method: 'GET', path: '/api/sessions' },
+  { method: 'GET', path: '/api/sessions/archived' },
   { method: 'POST', path: '/api/sessions', body: { title: 'Test Session' } },
   { method: 'GET', path: '/api/sessions/s1' },
   { method: 'PATCH', path: '/api/sessions/s1', body: { title: 'Renamed' } },
+  { method: 'POST', path: '/api/sessions/s1/archive' },
+  { method: 'POST', path: '/api/sessions/s1/restore' },
   { method: 'DELETE', path: '/api/sessions' },
   { method: 'DELETE', path: '/api/sessions/s1' },
   { method: 'GET', path: '/api/sessions/s1/processes' },
   { method: 'POST', path: '/api/sessions/s1/cancel' },
+  { method: 'GET', path: '/api/sessions/s1/feed' },
+  {
+    method: 'POST',
+    path: '/api/sessions/s1/feed/client-errors',
+    body: { id: 'client-error-1', text: 'Renderer could not load prior history.' },
+  },
+  {
+    method: 'PUT',
+    path: '/api/sessions/s1/feed/visibility',
+    body: { targets: ['event:1:2:2'], visibility: 'hidden' },
+  },
   { method: 'GET', path: '/api/messages/s1' },
   { method: 'POST', path: '/api/messages', body: { sessionId: 's1', content: 'Hello' } },
   { method: 'GET', path: '/api/providers' },
@@ -99,6 +117,7 @@ const protectedRoutes: RouteCheck[] = [
   { method: 'POST', path: '/api/providers/openai/accounts/account-1/activate' },
   { method: 'DELETE', path: '/api/providers/openai/accounts/account-1' },
   { method: 'DELETE', path: '/api/providers/openai' },
+  { method: 'GET', path: '/api/collab/active?baseSessionId=s1' },
   { method: 'POST', path: '/api/collab/s1/start', body: { ownerId: 'local-user' } },
   {
     method: 'POST',
@@ -203,15 +222,24 @@ const protectedRoutes: RouteCheck[] = [
     body: { sessionId: 's1', estimatedCostCents: 1 },
   },
   { method: 'GET', path: '/api/billing/credits' },
+  { method: 'GET', path: '/api/usage?limit=10' },
+  { method: 'GET', path: '/api/usage/daily' },
+  { method: 'GET', path: '/api/usage/export' },
   { method: 'GET', path: '/api/voice/settings' },
   { method: 'PUT', path: '/api/voice/settings', body: {} },
   { method: 'GET', path: '/api/voice/providers' },
-  { method: 'GET', path: '/api/voice/packs' },
-  { method: 'POST', path: '/api/voice/packs/moonshine-tiny-en-int8/download' },
   { method: 'POST', path: '/api/voice/transcribe', body: { audioBase64: 'dGVzdA==' } },
   { method: 'POST', path: '/api/voice/synthesize', body: { text: 'Hello' } },
   { method: 'GET', path: '/api/images/providers' },
   { method: 'POST', path: '/api/images/generate', body: { prompt: 'A test image' } },
+  {
+    method: 'POST',
+    path: '/api/images/edit',
+    body: { prompt: 'A test image', imageBase64: 'aW1hZ2U=' },
+  },
+  { method: 'GET', path: '/api/images/history' },
+  { method: 'GET', path: '/api/images/history/img-1' },
+  { method: 'DELETE', path: '/api/images/history/img-1' },
   { method: 'GET', path: '/api/processes?includeInactive=true&limit=100' },
   {
     method: 'POST',

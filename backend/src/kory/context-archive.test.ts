@@ -39,6 +39,85 @@ describe('ContextArchiveService history pruning', () => {
     }
   });
 
+  it('moves a reversible timeline boundary while keeping new-branch failures visible', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kory-context-timeline-'));
+    try {
+      const archive = new ContextArchiveService(root);
+      const retainedId = await archive.record(
+        'session',
+        'tool_result',
+        'read_file retained',
+        'retained output',
+        false,
+      );
+      const cutoffTimestamp = Date.now();
+      while (Date.now() <= cutoffTimestamp) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      const abandonedId = await archive.record(
+        'session',
+        'tool_result',
+        'bash abandoned-failure',
+        'failed after the checkpoint',
+        true,
+      );
+      const abandonedTimestamp = (await archive.get('session', abandonedId))!.ts;
+
+      // Default is unbounded: an ordinary failed turn with no later assistant
+      // checkpoint remains visible until an actual conversation rewind occurs.
+      expect((await archive.listRecent('session', 10)).map((entry) => entry.id)).toEqual([
+        retainedId,
+        abandonedId,
+      ]);
+
+      const boundary = await archive.setTimelineVisibilityBoundary('session', cutoffTimestamp);
+      expect(boundary.throughCounter).toBe(1);
+      expect((await archive.listRecent('session', 10)).map((entry) => entry.id)).toEqual([
+        retainedId,
+      ]);
+      expect(await archive.get('session', abandonedId)).toBeUndefined();
+      expect(await archive.search('session', 'abandoned-failure')).toEqual([]);
+
+      while (Date.now() <= abandonedTimestamp) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      const newBranchId = await archive.record(
+        'session',
+        'tool_result',
+        'bash new-branch-failure',
+        'new branch failed without an assistant response',
+        true,
+      );
+      expect((await archive.listRecent('session', 10)).map((entry) => entry.id)).toEqual([
+        retainedId,
+        newBranchId,
+      ]);
+      expect((await archive.get('session', newBranchId))?.id).toBe(newBranchId);
+      expect(
+        (await archive.search('session', 'new-branch-failure')).map((entry) => entry.id),
+      ).toEqual([newBranchId]);
+
+      const restarted = new ContextArchiveService(root);
+      expect(await restarted.getTimelineVisibilityBoundary('session')).toEqual(boundary);
+      expect((await restarted.listRecent('session', 10)).map((entry) => entry.id)).toEqual([
+        retainedId,
+        newBranchId,
+      ]);
+
+      // Redo to the later checkpoint re-includes its old tool result and hides
+      // the now-abandoned branch created after the rewind.
+      await restarted.setTimelineVisibilityBoundary('session', abandonedTimestamp);
+      expect((await restarted.listRecent('session', 10)).map((entry) => entry.id)).toEqual([
+        retainedId,
+        abandonedId,
+      ]);
+      expect((await restarted.get('session', abandonedId))?.id).toBe(abandonedId);
+      expect(await restarted.get('session', newBranchId)).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('persists only a bounded redacted preview with truthful metadata across restart', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kory-context-large-'));
     try {
@@ -73,6 +152,40 @@ describe('ContextArchiveService history pruning', () => {
     }
   });
 
+  it('persists tool failure state across restart without inventing it for legacy rows', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kory-context-tool-error-'));
+    try {
+      const archive = new ContextArchiveService(root);
+      const failedId = await archive.record(
+        'session',
+        'tool_result',
+        'bash failing-command',
+        'command failed',
+        true,
+      );
+      const succeededId = await archive.record(
+        'session',
+        'tool_result',
+        'bash successful-command',
+        'command succeeded',
+        false,
+      );
+
+      const restarted = new ContextArchiveService(root);
+      expect((await restarted.get('session', failedId))?.isError).toBe(true);
+      expect((await restarted.get('session', succeededId))?.isError).toBe(false);
+
+      const persisted = await readFile(
+        join(root, '.koryphaios', 'sessions', 'session', 'context-archive.jsonl'),
+        'utf8',
+      );
+      expect(persisted).toContain('"isError":true');
+      expect(persisted).toContain('"isError":false');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('heals legacy directory and file modes without rewriting existing content', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kory-context-mode-'));
     try {
@@ -102,6 +215,7 @@ describe('ContextArchiveService history pruning', () => {
       const entry = await new ContextArchiveService(root).get('session', 'cx_0');
 
       expect(entry?.content).toBe('existing content remains byte-for-byte intact');
+      expect(entry?.isError).toBeUndefined();
       expect(await readFile(file, 'utf8')).toBe(original);
       await expectPrivateMode(join(root, '.koryphaios'), 0o700);
       await expectPrivateMode(join(root, '.koryphaios', 'sessions'), 0o700);
@@ -199,6 +313,12 @@ describe('ContextArchiveService history pruning', () => {
           redacted: false,
         }),
       );
+      const timelineVisibility = {
+        cutoffTimestamp: 599,
+        throughCounter: 599,
+        updatedAt: 777,
+      };
+      rows.push(JSON.stringify({ type: 'timeline_visibility', boundary: timelineVisibility }));
       await writeFile(file, `${rows.join('\n')}\n`);
 
       const archive = new ContextArchiveService(root);
@@ -217,10 +337,12 @@ describe('ContextArchiveService history pruning', () => {
         maxBytes: CONTEXT_ARCHIVE_LIMITS.durableBytes,
       });
       expect(after.split('\n')[0]).toContain('"type":"retention"');
+      expect(await archive.getTimelineVisibilityBoundary('session')).toEqual(timelineVisibility);
       expect((await restarted.listRecent('session', 1_000)).map((entry) => entry.id)).toEqual(
         recent.map((entry) => entry.id),
       );
       expect(await restarted.getRetention('session')).toEqual(retention);
+      expect(await restarted.getTimelineVisibilityBoundary('session')).toEqual(timelineVisibility);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

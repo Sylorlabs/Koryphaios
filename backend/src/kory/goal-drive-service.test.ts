@@ -29,6 +29,7 @@ interface HarnessOptions {
   root?: string;
   workingDirectory?: string | null;
   sessionMissing?: boolean;
+  sessionArchived?: boolean;
   changes?: Array<{ path: string; operation: 'create' | 'edit' | 'delete' }>;
   checkpointStoreFactory?: GoalDriveServiceOptions['checkpointStoreFactory'];
   acquireSessionMutationBarrier?: GoalDriveServiceOptions['acquireSessionMutationBarrier'];
@@ -222,16 +223,23 @@ function harness(options: HarnessOptions = {}) {
   const verifiedEvidence: string[] = [];
   const kory = {
     isSessionRunning: () => sessionRunning,
+    hasActiveSessionExecution: () => sessionRunning,
     async cancelSessionWorkers() {
       cancelCount += 1;
       await options.onCancel?.();
     },
     getRecordedSessionChanges: () => options.changes ?? [],
-    async processTask() {
+    async submitSessionTurn() {
       turns += 1;
       if (options.processTask) {
         await options.processTask({ goal, turn: turns });
-        return;
+        return {
+          sessionId: 'session',
+          runId: `run-${turns}`,
+          status: 'completed' as const,
+          phase: 'done' as const,
+          reason: 'test completed',
+        };
       }
       const running = goal.checklist.find((item) => item.status === 'running')!;
       if (options.workflow && running.id === 'one') {
@@ -246,7 +254,13 @@ function harness(options: HarnessOptions = {}) {
         for (const stage of getWorkflowDefinition('design-quality')!.stages) {
           workflow = advanceWorkflow(root, workflow.id, { evidence: `${stage.id} proof` });
         }
-        return;
+        return {
+          sessionId: 'session',
+          runId: `run-${turns}`,
+          status: 'completed' as const,
+          phase: 'done' as const,
+          reason: 'test workflow completed',
+        };
       }
       await store.addActivity(
         goal.id,
@@ -254,6 +268,13 @@ function harness(options: HarnessOptions = {}) {
         `${running.id}|verified artifact ${running.id}`,
         'session',
       );
+      return {
+        sessionId: 'session',
+        runId: `run-${turns}`,
+        status: 'completed' as const,
+        phase: 'done' as const,
+        reason: 'test completed',
+      };
     },
     async verifyGoalItem(
       _sessionId: string,
@@ -280,6 +301,14 @@ function harness(options: HarnessOptions = {}) {
     {
       get: async () =>
         options.sessionMissing
+          ? undefined
+          : {
+              id: 'session',
+              workingDirectory:
+                options.workingDirectory === undefined ? root : options.workingDirectory,
+            },
+      getActive: async () =>
+        options.sessionMissing || options.sessionArchived
           ? undefined
           : {
               id: 'session',
@@ -735,6 +764,24 @@ describe('durable Goal Mode driver', () => {
       }),
     ).rejects.toThrow('scoped to its project');
     expect(wrong.turns).toBe(0);
+  });
+
+  test('refuses to start or resume Goal Mode in an archived chat', async () => {
+    const archived = harness({ sessionArchived: true });
+    const execution = {
+      sessionId: 'session',
+      provider: 'openai',
+      model: 'openai:test',
+    };
+    await expect(archived.driver.start('goal', execution)).rejects.toThrow(
+      'Recover the archived execution chat',
+    );
+
+    archived.goal = { ...archived.goal, status: 'paused', execution };
+    await expect(archived.driver.resume('goal')).rejects.toThrow(
+      'Recover the archived execution chat',
+    );
+    expect(archived.turns).toBe(0);
   });
 
   test('promotes completed linked workflow evidence through the Goal critic gate', async () => {

@@ -11,6 +11,7 @@ export {
 
 export { GoogleProvider } from './google';
 export { CopilotProvider } from './copilot';
+export { ChatbaseProvider } from './chatbase';
 
 export { withTimeoutSignal } from './utils';
 export * from './types';

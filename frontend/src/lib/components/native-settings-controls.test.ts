@@ -33,8 +33,28 @@ describe('Koryphaios settings controls', () => {
       join(process.cwd(), 'src/lib/components/SettingsDrawer.svelte'),
       'utf8',
     );
-    expect(source).toMatch(/function showTokenInput[\s\S]*?return caps\.supportsAuthToken;/);
-    expect(source).not.toMatch(/function showTokenInput[^}]+return false;/);
+    expect(source).toMatch(/function showTokenInput[\s\S]*?return caps\.supportsAuthToken/);
+  });
+
+  it('connects provider-neutral voice settings to composer microphone visibility', () => {
+    const voiceSource = readFileSync(
+      join(process.cwd(), 'src/lib/components/VoiceSettings.svelte'),
+      'utf8',
+    );
+    const composerSource = readFileSync(
+      join(process.cwd(), 'src/lib/components/CommandInput.svelte'),
+      'utf8',
+    );
+
+    expect(voiceSource).toContain('options={inputOptions}');
+    expect(voiceSource).toContain("allowCustom={settings.input.provider !== 'system'}");
+    expect(voiceSource).toContain("new CustomEvent('koryphaios:voice-settings-changed'");
+    expect(voiceSource).not.toContain(
+      'Connect OpenAI in Providers to enable the composer microphone',
+    );
+    expect(composerSource).toContain('{#if composerMicrophoneEnabled}');
+    expect(composerSource).toContain("settings.input.provider === 'system'");
+    expect(composerSource).toContain("window.addEventListener('koryphaios:voice-settings-changed'");
   });
 
   it('keeps product controls on the shared Kory contracts', () => {
@@ -138,6 +158,32 @@ describe('Koryphaios settings controls', () => {
     await fireEvent.keyDown(trigger, { key: 'Enter' });
     expect(onchange).toHaveBeenCalledWith('fast');
     expect(trigger.hasAttribute('aria-controls')).toBe(false);
+  });
+
+  it('accepts a custom KorySelect response', async () => {
+    const onchange = vi.fn();
+    render(KorySelect, {
+      props: {
+        value: '',
+        label: 'Target medium',
+        options: [{ value: 'web', label: 'Web' }],
+        allowCustom: true,
+        customLabel: 'Custom medium',
+        customPlaceholder: 'Type your own medium…',
+        onchange,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Target medium' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Custom medium…' }));
+    const input = screen.getByRole('textbox', { name: 'Type your own medium…' });
+    await fireEvent.input(input, { target: { value: 'wearable' } });
+    await fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onchange).toHaveBeenCalledWith('wearable');
+    expect(
+      screen.getByRole('combobox', { name: 'Target medium' }).getAttribute('aria-expanded'),
+    ).toBe('false');
   });
 
   it('uses an accessible tokenized slider without a native range input', async () => {

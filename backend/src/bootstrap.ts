@@ -69,6 +69,8 @@ import { SANDBOX_PRESETS } from '@koryphaios/shared';
 import { cliResearchBoundary, hasResearchCitation } from './providers/cli-research';
 import { initEnforcedSpendCapsTable } from './security/spend-caps-enforced';
 import { recoverInterruptedSessionErasures } from './services/session-erasure-service';
+import { SessionRunStore } from './runs/session-run-store';
+import { SessionRunCoordinator } from './runs/session-run-coordinator';
 
 export async function bootstrap(): Promise<AppContext> {
   // Load environment and validate
@@ -160,6 +162,28 @@ export async function bootstrap(): Promise<AppContext> {
   const goals = new GoalStore();
   const timeTravel = new TimeTravelService(PROJECT_ROOT, messages);
 
+  // The WebSocket manager is a projection sink, not the lifecycle owner.
+  // Initialize it before Kory so SessionRun can commit transitions to its
+  // transactional outbox and publish/recover them through one boundary.
+  const wsManager = new WSManager();
+  initWSBroker(wsManager);
+  const runs = new SessionRunCoordinator(new SessionRunStore(), (sessionId, message) =>
+    wsManager.broadcastToSession(sessionId, message),
+  );
+  await runs.drainOutbox();
+  const orphanedWaits = await runs.recoverOrphanedWaits();
+  if (orphanedWaits > 0) {
+    serverLog.error(
+      { count: orphanedWaits },
+      'Failed closed orphaned authoritative session-run waits',
+    );
+  }
+  const interruptedRuns = await runs.recoverInterruptedRuns();
+  if (interruptedRuns > 0) {
+    serverLog.warn({ count: interruptedRuns }, 'Recovered interrupted authoritative session runs');
+  }
+  runs.startOutboxPump();
+
   const kory = new KoryManager(
     providers,
     tools,
@@ -169,11 +193,10 @@ export async function bootstrap(): Promise<AppContext> {
     messages,
     tasks,
     timeTravel,
+    runs,
   );
   applyModeIntegration(kory);
 
-  const wsManager = new WSManager();
-  initWSBroker(wsManager);
   const goalDriver = new GoalDriveService(goals, sessions, kory, wsManager);
 
   const context: AppContext = {
@@ -189,6 +212,7 @@ export async function bootstrap(): Promise<AppContext> {
     kory,
     wsManager,
     timeTravel,
+    runs,
   };
 
   setContext(context);
@@ -196,6 +220,22 @@ export async function bootstrap(): Promise<AppContext> {
   // broker and AppContext exist so restart-recovery terminal events can be
   // surfaced and drained without racing bootstrap dependencies.
   await processSupervisor.initialize();
+  const recoveredProcessWaits = await kory.recoverDurableProcessWaits();
+  if (
+    recoveredProcessWaits.queued > 0 ||
+    recoveredProcessWaits.preserved > 0 ||
+    recoveredProcessWaits.cancelled > 0 ||
+    recoveredProcessWaits.failed > 0
+  ) {
+    serverLog.info(recoveredProcessWaits, 'Reconciled durable background-process waits');
+  }
+  const recoveredQuestionHandoffs = await kory.recoverDurableQuestionHandoffs();
+  if (recoveredQuestionHandoffs.requeued > 0 || recoveredQuestionHandoffs.queued > 0) {
+    serverLog.info(
+      recoveredQuestionHandoffs,
+      'Reconciled durable answered-question handoffs',
+    );
+  }
   await goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
   return context;

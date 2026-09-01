@@ -8,6 +8,11 @@ export interface Session {
   id: string;
   userId?: string;
   title: string;
+  /** Nullable durable archive marker. Archived chats retain their complete
+   * history and can be restored; permanent deletion is a separate operation. */
+  archivedAt?: number;
+  /** Convenience projection derived from archivedAt. */
+  status?: 'active' | 'archived';
   parentSessionId?: string;
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
@@ -30,12 +35,7 @@ export type SessionStatus = 'active' | 'archived' | 'deleted';
 
 /** Per-session runtime state machine states. */
 export type SessionRuntimeState =
-  | 'idle'
-  | 'processing'
-  | 'compacting'
-  | 'waiting'
-  | 'error'
-  | 'paused';
+  'idle' | 'processing' | 'compacting' | 'waiting' | 'error' | 'paused';
 
 export interface JulesSessionLink {
   sessionId: string;

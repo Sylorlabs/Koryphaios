@@ -102,6 +102,7 @@ export interface CliAttachmentScope {
  * abrupt parent-process crashes. */
 export function createCliAttachmentScope(): CliAttachmentScope {
   const artifacts: PrivateCliArtifact[] = [];
+  const pathsByContent = new Map<string, string>();
   let cleaned = false;
 
   const materializeImage = (
@@ -112,12 +113,23 @@ export function createCliAttachmentScope(): CliAttachmentScope {
     try {
       const bytes = Buffer.from(imageData, 'base64');
       if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) return null;
+      // History replay can legitimately contain the same screenshot in more
+      // than one context block. Keep one private artifact per distinct image
+      // for this turn so a native CLI never receives duplicate image inputs.
+      const key = createHash('sha256')
+        .update(bytes)
+        .update('\0')
+        .update(mimeType ?? '')
+        .digest('hex');
+      const existing = pathsByContent.get(key);
+      if (existing) return existing;
       const artifact = createPrivateCliBinaryArtifact(
         'attachment',
         bytes,
         extensionForMime(mimeType),
       );
       artifacts.push(artifact);
+      pathsByContent.set(key, artifact.path);
       return artifact.path;
     } catch {
       return null;
@@ -155,6 +167,7 @@ export function createCliAttachmentScope(): CliAttachmentScope {
       if (cleaned) return;
       cleaned = true;
       for (const artifact of artifacts) artifact.cleanup();
+      pathsByContent.clear();
     },
   };
 }

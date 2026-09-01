@@ -56,6 +56,7 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number,
   attribution?: { accountId?: string; sessionId?: string },
+  cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
 ): void {
   if (!model.trim() || !provider.trim() || (tokensIn <= 0 && tokensOut <= 0)) return;
   // Real prices: models.dev live catalog → static ModelDef catalog. Unpriced
@@ -63,7 +64,7 @@ export function recordUsage(
   // Subscription/auth harness usage is real usage but not metered API spend.
   const priced = SUBSCRIPTION_PROVIDERS.has(provider)
     ? null
-    : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
+    : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0, cacheUsage);
   const costUsd = priced?.costUsd ?? 0;
   dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd, attribution);
   markCreditUsage();

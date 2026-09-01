@@ -723,6 +723,28 @@ describe('authoritative process lifecycle contract', () => {
     });
   });
 
+  test('checkpoints live output before a backend relaunch can lose it', async () => {
+    const instance = fresh();
+    await instance.initialize();
+    const process = await instance.startAgentBackgroundProcess({
+      name: 'live-snapshot-command',
+      command: "printf 'live-checkpoint'; sleep 3",
+      sessionId: 'live-snapshot-session',
+      restartPolicy: 'never',
+    });
+
+    const deadline = Date.now() + 2_500;
+    let persisted = await database.getProcessById(process.id);
+    while (!persisted?.stdoutSnapshot?.includes('live-checkpoint') && Date.now() < deadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      persisted = await database.getProcessById(process.id);
+    }
+
+    expect(persisted?.status).toBe('running');
+    expect(persisted?.stdoutSnapshot).toContain('live-checkpoint');
+    await instance.killProcess(process.id, 'SIGKILL');
+  });
+
   test('redacts and bounds command, output, and event evidence before persistence', async () => {
     const instance = fresh();
     await instance.initialize();

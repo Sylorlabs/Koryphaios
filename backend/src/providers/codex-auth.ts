@@ -2,9 +2,12 @@ import { spawn } from 'node:child_process';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { whichBinary } from './cli-detection';
 import { getManagedCodexAppServer, type CodexAppServerModel } from './codex-app-server';
+import {
+  readCodexModelsCacheFromProfile,
+  enrichCodexModelsWithCliCache,
+} from './codex-models-cache';
 import type {
   Provider,
-  ProviderContentBlock,
   ProviderEvent,
   ProviderMessage,
   StreamRequest,
@@ -18,31 +21,30 @@ import {
 } from './provider-diagnostics';
 import {
   assertPrivateValuesAbsentFromArgv,
+  spawnWithPrivateArtifactCleanup,
   writePrivatePromptToStdin,
 } from './private-cli-transport';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
+import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
+import { codexImageArgs, codexReasoningArgs } from './codex-cli';
 
 const CODEX_TIMEOUT_MS = 300_000;
 /** A non-secret Koryphaios configuration marker; the app-server owns OAuth tokens. */
 export const CODEX_MANAGED_AUTH_MARKER = 'codex-managed-chatgpt';
 
-function flatten(content: string | ProviderContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((block) => block.type === 'text' && typeof block.text === 'string')
-    .map((block) => block.text as string)
-    .join('\n');
-}
-
-function prompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
+export function buildCodexAuthPrompt(
+  systemPrompt: string | undefined,
+  messages: ProviderMessage[],
+  attachments: Pick<CliAttachmentScope, 'renderContent'>,
+): string {
   return [
     systemPrompt?.trim(),
     'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer.',
     ...messages
       .filter((message) => message.role !== 'system')
       .map((message) => {
-        const text = flatten(message.content).trim();
+        const text = attachments.renderContent(message.content).trim();
         if (!text) return '';
         const label =
           message.role === 'assistant'
@@ -115,9 +117,16 @@ export class CodexAuthProvider implements Provider {
       this.models = [];
       return;
     }
-    this.models = (await server.listModels())
+    const discovered = (await server.listModels())
       .map(modelDefinition)
       .filter((model): model is ModelDef => !!model);
+    // The Codex app-server's `model/list` JSON-RPC response omits the context
+    // window on purpose; the running CLI's own on-disk cache
+    // (`<CODEX_HOME>/models_cache.json`) is the authoritative source. Read it
+    // synchronously and stamp the real context limit + max-output tokens onto
+    // each model — the same enrichment the CLI-backed `codex` provider uses.
+    const cliCache = readCodexModelsCacheFromProfile(getKoryphaiosCodexHome());
+    this.models = enrichCodexModelsWithCliCache(discovered, cliCache);
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -141,7 +150,12 @@ export class CodexAuthProvider implements Provider {
       yield { type: 'error', error: 'Codex CLI (codex) was not found on PATH.' };
       return;
     }
-    const privatePrompt = prompt(request.systemPrompt, request.messages);
+    const attachmentScope = createCliAttachmentScope();
+    const privatePrompt = buildCodexAuthPrompt(
+      request.systemPrompt,
+      request.messages,
+      attachmentScope,
+    );
     const args = [
       '--ask-for-approval',
       'never',
@@ -156,27 +170,37 @@ export class CodexAuthProvider implements Provider {
       '--model',
       request.model,
       ...(request.fastMode ? ['--config', 'service_tier="fast"'] : []),
-      ...(request.reasoningLevel
-        ? ['--config', `model_reasoning_effort=${JSON.stringify(request.reasoningLevel)}`]
-        : []),
+      ...codexReasoningArgs(request.reasoningLevel),
+      ...codexImageArgs(attachmentScope),
       '-',
     ];
     assertPrivateValuesAbsentFromArgv(args, [privatePrompt, request.systemPrompt]);
-    const child = spawn(binary, args, {
-      cwd: request.workingDirectory?.trim() || process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: buildProviderCliEnv('codex', {
-        CODEX_HOME: getKoryphaiosCodexHome(),
-        HOME: getKoryphaiosCodexHome(),
-        USERPROFILE: getKoryphaiosCodexHome(),
-      }),
-    });
+    const child = spawnWithPrivateArtifactCleanup(
+      () =>
+        spawn(binary, args, {
+          cwd: request.workingDirectory?.trim() || process.cwd(),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: buildProviderCliEnv('codex', {
+            CODEX_HOME: getKoryphaiosCodexHome(),
+            HOME: getKoryphaiosCodexHome(),
+            USERPROFILE: getKoryphaiosCodexHome(),
+          }),
+        }),
+      [...attachmentScope.artifacts],
+    );
     writePrivatePromptToStdin(child, privatePrompt);
     let stderr = '';
     let buffer = '';
     let completed = false;
     let streamFrameFailure: unknown;
     const events: ProviderEvent[] = [];
+    let resolveWaiter: (() => void) | null = null;
+    let exited = false;
+    let exitCode = 0;
+    const wake = () => {
+      resolveWaiter?.();
+      resolveWaiter = null;
+    };
     const consume = (line: string) => {
       if (!line.trim()) return;
       try {
@@ -194,9 +218,14 @@ export class CodexAuthProvider implements Provider {
               type: 'usage_update',
               tokensIn: usage.input_tokens as number | undefined,
               tokensOut: usage.output_tokens as number | undefined,
+              tokensCacheRead:
+                typeof usage.cached_input_tokens === 'number'
+                  ? usage.cached_input_tokens
+                  : undefined,
             });
           }
         }
+        wake();
       } catch (err: unknown) {
         providerLog.debug(
           safeProviderDiagnostic(this.name, 'stdout', err),
@@ -216,16 +245,41 @@ export class CodexAuthProvider implements Provider {
       } catch (error) {
         streamFrameFailure = error;
         child.kill('SIGTERM');
+        wake();
       }
     });
     const onAbort = () => child.kill('SIGTERM');
     request.signal?.addEventListener('abort', onAbort, { once: true });
     const timeout = setTimeout(() => child.kill('SIGTERM'), CODEX_TIMEOUT_MS);
     timeout.unref?.();
-    const exitCode = await new Promise<number>((resolve) => {
-      child.once('error', () => resolve(-1));
-      child.once('exit', (code) => resolve(code ?? 0));
+    child.once('error', () => {
+      exitCode = -1;
+      exited = true;
+      wake();
     });
+    child.once('close', (code) => {
+      exitCode = code ?? 0;
+      exited = true;
+      wake();
+    });
+
+    // The managed-auth path uses the same Codex JSONL protocol as the CLI
+    // provider. Stream the safe reasoning summary and answer as frames arrive
+    // rather than retroactively flushing them after process exit.
+    while (!exited || events.length > 0) {
+      if (events.length > 0) {
+        yield events.shift()!;
+        continue;
+      }
+      await new Promise<void>((resolve) => {
+        if (events.length > 0 || exited) {
+          resolve();
+          return;
+        }
+        resolveWaiter = resolve;
+        if (events.length > 0 || exited) wake();
+      });
+    }
     clearTimeout(timeout);
     request.signal?.removeEventListener('abort', onAbort);
     if (streamFrameFailure) {

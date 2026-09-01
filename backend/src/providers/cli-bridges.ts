@@ -66,6 +66,30 @@ export const KORY_DIRECT_TOOL_HARNESS_NOTE =
   'request; do not invent kory__ aliases or use unsupplied native tools. Never spawn or delegate ' +
   'to native subagents; use a supplied Koryphaios delegation tool only when your role exposes it.';
 
+// ─── Legacy Codebuff SDK harness note ──────────────────────────────────────
+// Retained while the old adapter is still present for migration tests. The
+// active Freebuff provider is freebuff-cli.ts and uses the real TUI + MCP.
+export const FREEBUFF_HARNESS_NOTE =
+  'You are running inside the Koryphaios orchestrator via the Codebuff SDK. ' +
+  'Koryphaios owns ALL filesystem and command tool execution — your native ' +
+  'tools (write_file, str_replace, apply_patch, run_terminal_command, ' +
+  'list_directory, glob, code_search, read_files) are intercepted and routed ' +
+  "through Koryphaios's permission, sandbox, and approval system. Use them " +
+  'normally; they will be gated automatically. Your native web tools ' +
+  '(web_search, read_url) remain available for research. Never spawn ' +
+  'subagents or delegate to other agents yourself; ask the user to delegate ' +
+  'via Koryphaios if you need a worker agent.';
+
+export const FREEBUFF_PTY_HARNESS_NOTE =
+  'You are the real Freebuff CLI running inside a Koryphaios-owned disposable transport ' +
+  'workspace. The project-local "kory" MCP server exposes the authoritative, role-scoped ' +
+  'Koryphaios tools. Use those kory MCP tools for every read, search, edit, command, note, ' +
+  'or orchestration action that should affect the user\'s actual Koryphaios session. Your ' +
+  'native Freebuff tools still exist, but they can see and modify only this disposable ' +
+  'workspace and are not authority for the real project. Never claim a native-only action ' +
+  'changed the user\'s project. Finish the requested work in this turn and return a concise ' +
+  'user-facing answer.';
+
 // ─── Shared kory tool whitelist ────────────────────────────────────────────
 // Derive provider allowlists from the bridge catalog instead of maintaining a
 // second copy that can drift from MCP ListTools role filtering.
@@ -756,6 +780,80 @@ export class KimiCodeCliBridge extends ManagedCliBridge implements CliBridge {
   }
 }
 
+// ─── Freebuff (real TUI + project-local MCP) bridge ────────────────────────
+
+export class FreebuffCliBridge extends ManagedCliBridge implements CliBridge {
+  readonly provider: ProviderName = 'freebuff' as const;
+  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'legacy';
+
+  getCapabilities(): CliCapabilities {
+    return {
+      ...EMPTY_CLI_CAPABILITIES,
+      supportsAgentConfig: false,
+      supportsSandbox: true,
+      supportsExport: true,
+      supportsPermissionMode: false,
+      supportsAcp: false,
+      supportsMcp: true,
+      supportsRules: true,
+      supportsSkills: false,
+      supportsHooks: false,
+      version: null,
+      probedAt: 0,
+    };
+  }
+
+  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
+    return sandboxToScopes(ctx.sandbox, ctx.role);
+  }
+
+  buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
+    const allowedTools = koryToolWhitelistForRole(ctx.role);
+    return {
+      systemInstructions: [ctx.systemPrompt?.trim() ?? '', FREEBUFF_PTY_HARNESS_NOTE].filter(
+        Boolean,
+      ),
+      allowedTools,
+      permissions: this.buildPermissionScopes(ctx),
+      extensions: koryProvenanceExtensions(ctx),
+    };
+  }
+
+  serializeAgentConfig(_config: CliAgentConfig): string {
+    return '{}';
+  }
+
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    return null;
+  }
+
+  serializeHooks(_hooks: CliHookConfig[]): string {
+    return '{}';
+  }
+
+  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    const server = buildKoryMcpServerConfig(ctx, 'freebuff');
+    return server ? [server] : null;
+  }
+
+  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
+    return [
+      {
+        path: 'knowledge.md',
+        content: `# Koryphaios managed Freebuff session\n\n${ctx.systemPrompt.trim()}\n\n${FREEBUFF_PTY_HARNESS_NOTE}\n`,
+      },
+    ];
+  }
+
+  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
+    return null;
+  }
+
+  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
+    return { trajectory: { steps: [] }, events: [] };
+  }
+}
+
 // ─── Bridge registry ───────────────────────────────────────────────────────
 
 const bridgeRegistry = new Map<ProviderName, CliBridge>();
@@ -789,6 +887,9 @@ export function getCliBridge(provider: ProviderName): CliBridge | null {
       break;
     case 'kimicode':
       bridge = new KimiCodeCliBridge();
+      break;
+    case 'freebuff':
+      bridge = new FreebuffCliBridge();
       break;
     default:
       return null;

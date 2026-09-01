@@ -3,7 +3,9 @@ export type SettingsTab =
   | 'agent'
   | 'memory'
   | 'notes'
+  | 'archived'
   | 'appearance'
+  | 'welcome'
   | 'shortcuts'
   | 'voice'
   | 'teams'
@@ -64,6 +66,23 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     keywords: ['essay', 'knowledge', 'wikilink', 'graph', 'budget', 'agent permissions'],
   },
   {
+    id: 'archived',
+    label: 'Archived chats',
+    description: 'Restore, rename, or permanently delete chats removed from the sidebar.',
+    scope: 'This app',
+    group: 'Workspace',
+    keywords: [
+      'archive',
+      'archived',
+      'chat history',
+      'conversation',
+      'restore',
+      'recover',
+      'rename',
+      'delete',
+    ],
+  },
+  {
     id: 'mcp',
     label: 'MCP servers',
     description: 'Pluggable Model Context Protocol tool servers and connection status.',
@@ -86,6 +105,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     scope: 'This device',
     group: 'Experience',
     keywords: ['theme', 'color', 'font', 'contrast', 'dark', 'light'],
+  },
+  {
+    id: 'welcome',
+    label: 'Home screen',
+    description: 'Starting suggestions, pro tips, workflow guidance, and dismissed panels.',
+    scope: 'This device',
+    group: 'Experience',
+    keywords: ['welcome', 'home', 'suggestions', 'tips', 'workflow', 'dismiss', 'empty feed'],
   },
   {
     id: 'shortcuts',

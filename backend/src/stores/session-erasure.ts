@@ -7,8 +7,14 @@ const DIRECT_SESSION_TABLES = [
   'ordered_session_events',
   'replay_events',
   'routing_audit_log',
+  'session_feed_entries',
+  'session_feed_tombstones',
   'session_changes',
   'session_compactions',
+  'session_run_events',
+  'session_run_continuations',
+  'session_run_handoffs',
+  'session_runs',
   'session_event_causes',
   'session_event_cursors',
   'session_tags',
@@ -16,6 +22,7 @@ const DIRECT_SESSION_TABLES = [
   'spend_cap_pauses',
   'tasks',
   'user_inputs',
+  'session_turn_commands',
 ] as const;
 
 const SPECIAL_SESSION_TABLES = new Set([
@@ -23,6 +30,7 @@ const SPECIAL_SESSION_TABLES = new Set([
   'goals',
   'session_participants',
   'supervised_processes',
+  'session_run_continuation_processes',
 ]);
 
 export type SessionErasureScope =
@@ -59,7 +67,14 @@ function tableColumns(sqlite: Database, table: string, database = 'main'): strin
 const LINK_COLUMN_POLICIES = new Map<string, ReadonlySet<string>>([
   ['base_session_id', new Set(['collaboration_sessions'])],
   ['linked_session_ids', new Set(['goals'])],
-  ['process_id', new Set(['process_events', 'process_health_checks'])],
+  [
+    'process_id',
+    new Set([
+      'process_events',
+      'process_health_checks',
+      'session_run_continuation_processes',
+    ]),
+  ],
 ]);
 
 function assertTableColumns(
@@ -114,6 +129,23 @@ function assertKnownSessionSchema(sqlite: Database): void {
   assertTableColumns(sqlite, 'supervised_processes', ['id', 'session_id']);
   assertTableColumns(sqlite, 'process_events', ['process_id']);
   assertTableColumns(sqlite, 'process_health_checks', ['process_id']);
+  assertTableColumns(sqlite, 'session_run_continuation_processes', [
+    'continuation_id',
+    'process_id',
+  ]);
+  assertTableColumns(sqlite, 'session_turn_commands', [
+    'command_key',
+    'session_id',
+    'source',
+    'source_command_id',
+    'input_hash',
+    'user_message_id',
+    'response_message_id',
+    'run_id',
+    'status',
+    'created_at',
+    'updated_at',
+  ]);
   assertTableColumns(sqlite, 'audit_logs', ['resource_type', 'resource_id']);
   assertTableColumns(sqlite, 'audit_log_archive', ['resource_type', 'resource_id']);
 }
@@ -198,6 +230,13 @@ function eraseProcesses(
           readIds(sqlite, 'supervised_processes', 'id', 'session_id = ?', [sessionId]),
         );
   for (const processId of processIds) {
+    recordDelete(
+      report,
+      sqlite,
+      'session_run_continuation_processes',
+      'DELETE FROM session_run_continuation_processes WHERE process_id = ?',
+      [processId],
+    );
     recordDelete(report, sqlite, 'process_events', 'DELETE FROM process_events WHERE process_id = ?', [
       processId,
     ]);
@@ -544,7 +583,11 @@ function assertNoRemnants(
     }
   }
   for (const processId of processIds) {
-    for (const table of ['process_events', 'process_health_checks']) {
+    for (const table of [
+      'process_events',
+      'process_health_checks',
+      'session_run_continuation_processes',
+    ]) {
       if (
         tableExists(sqlite, table) &&
         remaining(`SELECT COUNT(*) AS count FROM ${table} WHERE process_id = ?`, [processId]) > 0
@@ -597,11 +640,20 @@ export function eraseSessionDataTransaction(
               readIds(sqlite, 'collaboration_sessions', 'id', 'base_session_id = ?', [sessionId]),
             );
 
+      // Continuations own normalized process references with a RESTRICT edge
+      // to supervised_processes. Remove the session-owned continuation graph
+      // before deleting process rows; bridge rows cascade with it. Corrupt
+      // cross-session process references are removed explicitly by
+      // eraseProcesses so privacy erasure cannot be blocked by stale metadata.
+      deleteDirectRows(sqlite, report, 'session_run_continuations', sessionIds);
       eraseProcesses(sqlite, report, sessionIds);
       eraseCollaborations(sqlite, report, sessionIds);
       eraseGoalLinks(sqlite, report, sessionIds);
       eraseAuditRows(sqlite, report, sessionIds);
-      for (const table of DIRECT_SESSION_TABLES) deleteDirectRows(sqlite, report, table, sessionIds);
+      for (const table of DIRECT_SESSION_TABLES) {
+        if (table === 'session_run_continuations') continue;
+        deleteDirectRows(sqlite, report, table, sessionIds);
+      }
 
       if (tableExists(sqlite, 'persistent_sessions')) {
         if (sessionIds === null) {

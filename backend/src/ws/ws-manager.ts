@@ -34,6 +34,9 @@ const TERMINAL_EVENT_TYPES = new Set<string>([
   'agent.error',
   'process.exited',
   'system.error',
+  'session.timeline_rewritten',
+  'session.changes_resolved',
+  'kory.ask_user_resolved',
 ]);
 
 const TERMINAL_AGENT_STATUSES = new Set<string>(['done', 'error', 'idle']);
@@ -45,6 +48,12 @@ const TERMINAL_AGENT_STATUSES = new Set<string>(['done', 'error', 'idle']);
  */
 function isTerminalEvent(message: WSMessage): boolean {
   if (TERMINAL_EVENT_TYPES.has(message.type)) return true;
+  if (message.type === 'run.state') {
+    // Every aggregate revision is critical. If an older active snapshot is
+    // delivered after a newer terminal one, the renderer rejects it by
+    // revision; dropping the only current snapshot would be worse.
+    return true;
+  }
   if (message.type === 'agent.status') {
     const status = (message.payload as { status?: string }).status;
     return !!status && TERMINAL_AGENT_STATUSES.has(status);
@@ -167,10 +176,16 @@ export class WSManager {
     }
   }
 
+  /**
+   * Replays a session in sequence order. `replayFilter` may suppress stale
+   * operational projections when a durable current-state lookup proves they
+   * are no longer actionable; the cursor still advances across skipped rows.
+   */
   subscribeClientToSession(
     clientId: string,
     sessionId: string,
     cursor?: { epoch?: number; sequence?: number },
+    replayFilter?: (event: WSMessage) => boolean,
   ) {
     const client = this.clients.get(clientId);
     if (!client) return;
@@ -194,7 +209,9 @@ export class WSManager {
       if (events.length === 0) break;
       for (const event of events) {
         if (client.ws.readyState !== 1) return;
-        client.ws.send(JSON.stringify({ ...event, replayed: true } satisfies WSMessage));
+        if (!replayFilter || replayFilter(event)) {
+          client.ws.send(JSON.stringify({ ...event, replayed: true } satisfies WSMessage));
+        }
         after = event.sequence ?? after;
       }
     }
@@ -261,6 +278,27 @@ export class WSManager {
   broadcastToSession(sessionId: string, message: WSMessage) {
     if (this.erasedSessions.has(sessionId)) return;
     const ordered = this.persist({ ...message, sessionId });
+    this.deliverPersistedToSession(sessionId, ordered);
+  }
+
+  /** Atomically begin a rewritten ordered-event epoch and publish its durable
+   * sequence-one control row to every subscriber. Old queued terminal rows
+   * belong to the discarded branch and must not be retried ahead of it. */
+  rewriteSessionTimeline(sessionId: string): { epoch: number; latestSequence: number } {
+    if (this.erasedSessions.has(sessionId)) {
+      throw new Error(`Cannot rewrite erased session ${sessionId}`);
+    }
+    const ordered = getOrderedEventLog().rewriteTimeline(sessionId);
+    for (const client of this.clients.values()) {
+      client.pendingTerminalEvents = client.pendingTerminalEvents.filter(
+        (event) => event.sessionId !== sessionId,
+      );
+    }
+    this.deliverPersistedToSession(sessionId, ordered);
+    return { epoch: ordered.epoch!, latestSequence: ordered.sequence! };
+  }
+
+  private deliverPersistedToSession(sessionId: string, ordered: WSMessage): void {
     const data = JSON.stringify(ordered);
     let targetCount = 0;
 
@@ -279,6 +317,13 @@ export class WSManager {
   broadcastEphemeral(message: WSMessage): void {
     const data = JSON.stringify(message);
     for (const [, client] of this.clients) this.deliverToClient(client, message, data);
+  }
+
+  /** Send a current projection to one subscriber without adding replay history. */
+  sendToClientEphemeral(clientId: string, message: WSMessage): boolean {
+    const client = this.clients.get(clientId);
+    if (!client) return false;
+    return this.deliverToClient(client, message, JSON.stringify(message));
   }
 
   /** Drop subscriptions and queued payloads, then reject stale post-delete events. */

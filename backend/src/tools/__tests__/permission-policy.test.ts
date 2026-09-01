@@ -25,6 +25,7 @@ describe('permission preset policy', () => {
     const plan = resolveToolPermissionPolicy(DEFAULT_AGENT_SETTINGS, 'plan');
     expect(decideToolPermission(plan, 'read_file').action).toBe('allow');
     expect(decideToolPermission(plan, 'write_file').action).toBe('deny');
+    expect(decideToolPermission(plan, 'record_work_note').action).toBe('deny');
     expect(decideToolPermission(plan, 'bash').action).toBe('deny');
   });
 
@@ -32,7 +33,10 @@ describe('permission preset policy', () => {
     const yolo = policy('yolo', { autonomyLimitsEnabled: true, approvalThresholdLines: 1 });
     expect(decideToolPermission(yolo, 'delete_file').action).toBe('allow');
     expect(decideToolPermission(yolo, 'bash').action).toBe('allow');
-    expect(decideToolPermission(yolo, 'write_file', { fileCount: 10, linesChanged: 1000 }).action).toBe('allow');
+    expect(decideToolPermission(yolo, 'record_work_note').action).toBe('allow');
+    expect(
+      decideToolPermission(yolo, 'write_file', { fileCount: 10, linesChanged: 1000 }).action,
+    ).toBe('allow');
   });
 
   it('makes Guarded allow every file edit and ask only for risky non-edit actions', () => {
@@ -42,9 +46,14 @@ describe('permission preset policy', () => {
       approvalThresholdLines: 20,
     });
     expect(decideToolPermission(guarded, 'read_file').action).toBe('allow');
-    expect(decideToolPermission(guarded, 'write_file', { fileCount: 1, linesChanged: 10 }).action).toBe('allow');
-    expect(decideToolPermission(guarded, 'write_file', { fileCount: 10, linesChanged: 3000 }).action).toBe('allow');
+    expect(
+      decideToolPermission(guarded, 'write_file', { fileCount: 1, linesChanged: 10 }).action,
+    ).toBe('allow');
+    expect(
+      decideToolPermission(guarded, 'write_file', { fileCount: 10, linesChanged: 3000 }).action,
+    ).toBe('allow');
     expect(decideToolPermission(guarded, 'delete_file').action).toBe('ask');
+    expect(decideToolPermission(guarded, 'record_work_note').action).toBe('allow');
   });
 
   it('makes Accept Edits allow reads and edits while asking for other actions', () => {
@@ -53,13 +62,20 @@ describe('permission preset policy', () => {
     expect(decideToolPermission(edits, 'edit_file').action).toBe('allow');
     expect(decideToolPermission(edits, 'bash').action).toBe('ask');
     expect(decideToolPermission(edits, 'delegate_to_worker').action).toBe('ask');
+    expect(decideToolPermission(edits, 'record_work_note').action).toBe('ask');
   });
 
-  it('makes Ask require approval for each tool action', () => {
+  it('makes Ask auto-allow reads and require approval only for writes', () => {
     const ask = policy('ask');
-    expect(decideToolPermission(ask, 'read_file').action).toBe('ask');
+    expect(decideToolPermission(ask, 'read_file').action).toBe('allow');
+    expect(decideToolPermission(ask, 'grep').action).toBe('allow');
+    expect(decideToolPermission(ask, 'web_search').action).toBe('allow');
+    expect(decideToolPermission(ask, 'list_notes').action).toBe('allow');
+    expect(decideToolPermission(ask, 'read_note').action).toBe('allow');
     expect(decideToolPermission(ask, 'write_file').action).toBe('ask');
+    expect(decideToolPermission(ask, 'edit_file').action).toBe('ask');
     expect(decideToolPermission(ask, 'bash').action).toBe('ask');
+    expect(decideToolPermission(ask, 'record_work_note').action).toBe('ask');
     expect(decideToolPermission(ask, 'ask_user').action).toBe('allow');
   });
 
@@ -155,12 +171,18 @@ describe('resolveSandboxOptions', () => {
   });
 
   it('always mode sandboxes even the direct manager path', () => {
-    const settings = { ...DEFAULT_AGENT_SETTINGS, sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const } };
+    const settings = {
+      ...DEFAULT_AGENT_SETTINGS,
+      sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const },
+    };
     expect(resolveSandboxOptions(settings, false).isSandboxed).toBe(true);
   });
 
   it('off mode disables the sandbox regardless of natural state', () => {
-    const settings = { ...DEFAULT_AGENT_SETTINGS, sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'off' as const } };
+    const settings = {
+      ...DEFAULT_AGENT_SETTINGS,
+      sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'off' as const },
+    };
     expect(resolveSandboxOptions(settings, true).isSandboxed).toBe(false);
   });
 
@@ -257,14 +279,30 @@ describe('sub-agent approval integration with ToolRegistry', () => {
     description: 'Delete a file (risky tool)',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
     category: 'file-edit',
-    run: async (_ctx, call) => ({ callId: call.id, name: 'delete_file', output: 'ran', isError: false, durationMs: 0 }),
+    run: async (_ctx, call) => ({
+      callId: call.id,
+      name: 'delete_file',
+      output: 'ran',
+      isError: false,
+      durationMs: 0,
+    }),
   };
   const editTool: Tool = {
     name: 'write_file',
     description: 'Write a file (file-edit tool, not risky)',
-    parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] },
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
+      required: ['path', 'content'],
+    },
     category: 'file-edit',
-    run: async (_ctx, call) => ({ callId: call.id, name: 'write_file', output: 'ran', isError: false, durationMs: 0 }),
+    run: async (_ctx, call) => ({
+      callId: call.id,
+      name: 'write_file',
+      output: 'ran',
+      isError: false,
+      durationMs: 0,
+    }),
   };
   const registry = new ToolRegistry();
   registry.register(riskyTool);
@@ -386,9 +424,7 @@ describe('sub-agent approval integration with ToolRegistry', () => {
 });
 
 describe('tool allowlist and blocklist', () => {
-  function policyWith(
-    overrides: Partial<typeof DEFAULT_AGENT_SETTINGS> = {},
-  ) {
+  function policyWith(overrides: Partial<typeof DEFAULT_AGENT_SETTINGS> = {}) {
     return resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, ...overrides });
   }
 
@@ -459,7 +495,11 @@ describe('tool allowlist and blocklist', () => {
   });
 
   it('resolveToolPermissionPolicy defaults to empty arrays when unset', () => {
-    const p = resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, toolAllowlist: undefined as unknown as string[], toolBlocklist: undefined as unknown as string[] });
+    const p = resolveToolPermissionPolicy({
+      ...DEFAULT_AGENT_SETTINGS,
+      toolAllowlist: undefined as unknown as string[],
+      toolBlocklist: undefined as unknown as string[],
+    });
     expect(p.toolAllowlist).toEqual([]);
     expect(p.toolBlocklist).toEqual([]);
   });
@@ -471,14 +511,18 @@ describe('tool allowlist/blocklist integration with ToolRegistry', () => {
     description: 'Delete a file',
     parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
     category: 'file-edit',
-    run: async (_ctx, call) => ({ callId: call.id, name: 'delete_file', output: 'ran', isError: false, durationMs: 0 }),
+    run: async (_ctx, call) => ({
+      callId: call.id,
+      name: 'delete_file',
+      output: 'ran',
+      isError: false,
+      durationMs: 0,
+    }),
   };
   const registry = new ToolRegistry();
   registry.register(testTool);
 
-  function ctxWith(
-    overrides: Partial<typeof DEFAULT_AGENT_SETTINGS> = {},
-  ): ToolContext {
+  function ctxWith(overrides: Partial<typeof DEFAULT_AGENT_SETTINGS> = {}): ToolContext {
     const settings = { ...DEFAULT_AGENT_SETTINGS, ...overrides };
     return {
       sessionId: 'allowlist-test',

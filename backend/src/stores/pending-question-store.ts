@@ -1,5 +1,5 @@
 import type { KoryAskUserPayload } from '@koryphaios/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 import { db, userInputs } from '../db';
 import { serverLog } from '../logger';
@@ -36,6 +36,7 @@ export async function createPendingQuestion(
     id,
     sessionId,
     inputData: JSON.stringify({ kind: 'question', status: 'pending', payload: durablePayload }),
+    status: 'pending',
     createdAt: new Date(),
   });
   return durablePayload;
@@ -50,9 +51,40 @@ export async function getPendingQuestion(sessionId: string): Promise<KoryAskUser
     .limit(50);
   for (const row of rows) {
     const record = parse(row.inputData);
-    if (record?.status === 'pending') return record.payload;
+    if (record?.status === 'pending' && (row.status === null || row.status === 'pending')) {
+      return record.payload;
+    }
   }
   return null;
+}
+
+/**
+ * Compact startup projection for background waits.  It deliberately exposes
+ * session ids only; the question text remains scoped to a normal session
+ * subscription after the caller has selected that chat.
+ */
+export async function listPendingQuestionSessionIds(limit = 200): Promise<string[]> {
+  const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit)));
+  const rows = await db
+    .select({ sessionId: userInputs.sessionId, inputData: userInputs.inputData, status: userInputs.status })
+    .from(userInputs)
+    .where(or(eq(userInputs.status, 'pending'), isNull(userInputs.status)))
+    .orderBy(desc(userInputs.createdAt))
+    .limit(safeLimit);
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const record = parse(row.inputData);
+    if (
+      record?.status === 'pending' &&
+      (row.status === null || row.status === 'pending') &&
+      !seen.has(row.sessionId)
+    ) {
+      seen.add(row.sessionId);
+      ids.push(row.sessionId);
+    }
+  }
+  return ids;
 }
 
 export async function answerPendingQuestion(
@@ -70,10 +102,11 @@ export async function answerPendingQuestion(
   for (const row of rows) {
     if (questionId && row.id !== questionId) continue;
     const record = parse(row.inputData);
-    if (record?.status !== 'pending') continue;
+    if (record?.status !== 'pending' || (row.status !== null && row.status !== 'pending')) continue;
     await db
       .update(userInputs)
       .set({
+        status,
         inputData: JSON.stringify({
           ...record,
           status,

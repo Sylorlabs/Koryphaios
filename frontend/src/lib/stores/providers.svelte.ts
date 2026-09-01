@@ -13,6 +13,16 @@ import type { ProviderInfo } from '@koryphaios/shared';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { toastStore } from './toast.svelte';
+import {
+  clearRecoverableDeviceAuthFlow,
+  loadRecoverableDeviceAuthFlows,
+  saveRecoverableDeviceAuthFlow,
+  type DeviceAuthProvider,
+} from './device-auth-recovery';
+import type {
+  CustomProviderIconSelection,
+  CustomProviderIconShape,
+} from '$lib/components/settings/custom-provider-icon';
 
 // ============================================================================
 // Types
@@ -121,6 +131,22 @@ export type SyncProviderUiResult = {
   modelCount: number;
 };
 
+export type AddCustomProviderResult = {
+  ok: boolean;
+  id?: string;
+  catalogDetected?: boolean;
+  error?: string;
+  canSaveUnverified?: boolean;
+  requiresManualModels?: boolean;
+  normalizedBaseUrl?: string;
+};
+
+type CachedCustomProviderIcon = {
+  url: string;
+  revision: string;
+  shape: CustomProviderIconShape;
+};
+
 export const browserAuthProviders = new Set([
   'copilot',
   'codex-auth',
@@ -153,6 +179,7 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   google: 'Google',
   aistudio: 'Google AI Studio',
   xai: 'xAI',
+  codebuff: 'Codebuff API',
   openrouter: 'OpenRouter',
   tokenrouter: 'TokenRouter',
   groq: 'Groq',
@@ -279,6 +306,8 @@ function createProvidersStore() {
   let copiedDeviceCode = $state<string | null>(null);
   let copiedDeviceUrl = $state<string | null>(null);
   let addingCustom = $state(false);
+  let customProviderIcons = $state<Record<string, CachedCustomProviderIcon | undefined>>({});
+  const customProviderIconLoads = new Map<string, Promise<void>>();
   let accountManagerRequest = $state<{
     provider: string;
     account: StoredProviderAccount | SavedAccountSummary;
@@ -300,6 +329,7 @@ function createProvidersStore() {
 
   let codexDeviceAuth = $state<DeviceAuthInfo | null>(null);
   let codexAuthPollTimer: ReturnType<typeof setTimeout> | null = null;
+  let deviceAuthRecoveryResumed = false;
 
   // ─── Helpers ───────────────────────────────────────────────────────────
 
@@ -395,6 +425,83 @@ function createProvidersStore() {
 
   function setProviderStatusList(list: ProviderInfo[]): void {
     statusList = Array.isArray(list) ? list : [];
+    void syncCustomProviderIcons(statusList);
+  }
+
+  function getCustomProviderIcon(name: string): CachedCustomProviderIcon | undefined {
+    return customProviderIcons[name];
+  }
+
+  function revokeCustomProviderIcon(name: string): void {
+    const cached = customProviderIcons[name];
+    if (cached) URL.revokeObjectURL(cached.url);
+    const next = { ...customProviderIcons };
+    delete next[name];
+    customProviderIcons = next;
+  }
+
+  async function loadCustomProviderIcon(status: ProviderInfo): Promise<void> {
+    const metadata = status.customIcon;
+    if (!metadata) {
+      revokeCustomProviderIcon(status.name);
+      return;
+    }
+    const current = customProviderIcons[status.name];
+    if (current?.revision === metadata.revision) return;
+    const inflight = customProviderIconLoads.get(status.name);
+    if (inflight) {
+      await inflight;
+      const latestStatus = statusList.find((candidate) => candidate.name === status.name);
+      if (
+        latestStatus?.customIcon?.revision === metadata.revision &&
+        customProviderIcons[status.name]?.revision !== metadata.revision
+      ) {
+        return loadCustomProviderIcon(latestStatus);
+      }
+      return;
+    }
+
+    const load = (async () => {
+      try {
+        const response = await apiFetch(
+          apiUrl(`/api/providers/custom/${encodeURIComponent(status.name)}/icon`),
+        );
+        if (!response.ok) return;
+        const blob = await response.blob();
+        if (blob.type !== 'image/png') return;
+        const latest = statusList.find((candidate) => candidate.name === status.name)?.customIcon;
+        if (!latest || latest.revision !== metadata.revision) return;
+        const url = URL.createObjectURL(blob);
+        const previous = customProviderIcons[status.name];
+        customProviderIcons = {
+          ...customProviderIcons,
+          [status.name]: { url, revision: metadata.revision, shape: metadata.shape },
+        };
+        if (previous) URL.revokeObjectURL(previous.url);
+      } catch (error: unknown) {
+        if (import.meta.env.DEV) {
+          console.debug(
+            'Failed to load custom provider icon:',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      } finally {
+        customProviderIconLoads.delete(status.name);
+      }
+    })();
+    customProviderIconLoads.set(status.name, load);
+    return load;
+  }
+
+  async function syncCustomProviderIcons(list: ProviderInfo[]): Promise<void> {
+    if (!browser) return;
+    const activeNames = new Set(
+      list.filter((status) => status.customIcon).map((status) => String(status.name)),
+    );
+    for (const name of Object.keys(customProviderIcons)) {
+      if (!activeNames.has(name)) revokeCustomProviderIcon(name);
+    }
+    await Promise.all(list.filter((status) => status.customIcon).map(loadCustomProviderIcon));
   }
 
   async function openAuthUrl(url: string): Promise<void> {
@@ -460,6 +567,7 @@ function createProvidersStore() {
       if (json?.ok !== true || !Array.isArray(list)) return false;
       if (revision !== providerStatusLoadRevision) return false;
       statusList = list;
+      void syncCustomProviderIcons(list);
       if (!cliAccountNoticeShown) {
         cliAccountNoticeShown = true;
         void loadCliAccountAmbiguity();
@@ -472,11 +580,19 @@ function createProvidersStore() {
       const first = await loadOnce(refreshModels);
       if (!first) return false;
 
+      // Device codes are intentionally kept only for this browser session. Once
+      // provider status is available after a renderer reload, restore a still
+      // valid code and resume its existing poll endpoint. This never restores
+      // credentials; successful polls still receive those only from the
+      // backend/provider.
+      resumeDeviceAuthFlows();
+
       if (options.forceRefreshModels) {
         // Refresh is async in providers, so we allow one extra short polling cycle
-        // to capture the freshly discovered model catalog on startup and settings open.
+        // to capture the freshly discovered model catalog. The second read must
+        // not force another network refresh or credential verification.
         await new Promise((resolve) => setTimeout(resolve, 700));
-        return await loadOnce('1');
+        return await loadOnce('0');
       }
 
       return true;
@@ -653,10 +769,77 @@ function createProvidersStore() {
     }
   }
 
+  function clearPersistedDeviceAuth(provider: DeviceAuthProvider): void {
+    clearRecoverableDeviceAuthFlow(provider);
+  }
+
+  function isDeviceAuthProvider(name: string): name is DeviceAuthProvider {
+    return name === 'copilot' || name === 'kimicode' || name === 'codex-auth';
+  }
+
+  function clearDeviceAuthForProvider(name: DeviceAuthProvider): void {
+    clearPersistedDeviceAuth(name);
+    if (name === 'copilot') {
+      clearCopilotPollTimer();
+      copilotDeviceAuth = null;
+      browserAuthPending.copilot = false;
+      return;
+    }
+    if (name === 'kimicode') {
+      clearKimiCodePollTimer();
+      kimicodeDeviceAuth = null;
+      browserAuthPending.kimicode = false;
+      return;
+    }
+    clearCodexAuthPollTimer();
+    codexDeviceAuth = null;
+    browserAuthPending['codex-auth'] = false;
+  }
+
+  function resumeDeviceAuthFlows(): void {
+    if (!browser || deviceAuthRecoveryResumed) return;
+    deviceAuthRecoveryResumed = true;
+
+    const flows = loadRecoverableDeviceAuthFlows();
+    const copilot = flows.copilot;
+    if (copilot && !copilotDeviceAuth) {
+      copilotDeviceAuth = copilot;
+      copilotAuthStatus = 'pending';
+      copilotAuthMessage = 'Resuming GitHub Copilot sign-in.';
+      browserAuthPending.copilot = true;
+      browserAuthMessages.copilot = `${copilotAuthMessage}${deviceAuthCountdown(copilot.expiresAt)}`;
+      void pollCopilotAuth(copilot.deviceCode, copilot.intervalMs);
+    }
+
+    const kimicode = flows.kimicode;
+    if (kimicode && !kimicodeDeviceAuth) {
+      kimicodeDeviceAuth = kimicode;
+      kimicodeAuthStatus = 'pending';
+      kimicodeAuthMessage = 'Resuming Kimi Code sign-in.';
+      browserAuthPending.kimicode = true;
+      browserAuthMessages.kimicode = `${kimicodeAuthMessage}${deviceAuthCountdown(kimicode.expiresAt)}`;
+      void pollKimiCodeAuth(kimicode.deviceCode, kimicode.intervalMs);
+    }
+
+    const codex = flows['codex-auth'];
+    if (codex && !codexDeviceAuth) {
+      codexDeviceAuth = codex;
+      browserAuthPending['codex-auth'] = true;
+      browserAuthMessages['codex-auth'] =
+        `Resuming ChatGPT approval.${deviceAuthCountdown(codex.expiresAt)}`;
+      void pollCodexAuth();
+    }
+  }
+
   function destroy(): void {
     clearCopilotPollTimer();
     clearKimiCodePollTimer();
     clearCodexAuthPollTimer();
+    for (const icon of Object.values(customProviderIcons)) {
+      if (icon) URL.revokeObjectURL(icon.url);
+    }
+    customProviderIcons = {};
+    customProviderIconLoads.clear();
   }
 
   // Device codes are short-lived. Every poll tick checks the deadline so an
@@ -676,6 +859,7 @@ function createProvidersStore() {
       browserAuthMessages['codex-auth'] = AUTH_EXPIRED_MESSAGE;
       browserAuthPending['codex-auth'] = false;
       codexDeviceAuth = null;
+      clearPersistedDeviceAuth('codex-auth');
       return;
     }
     try {
@@ -684,6 +868,7 @@ function createProvidersStore() {
         browserAuthPending['codex-auth'] = false;
         browserAuthMessages['codex-auth'] = 'OpenAI Codex connected';
         codexDeviceAuth = null;
+        clearPersistedDeviceAuth('codex-auth');
         toastStore.success('OpenAI Codex connected');
         return;
       }
@@ -691,12 +876,14 @@ function createProvidersStore() {
         `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
     } catch (err: unknown) {
-      // Retain the code and retry; a transient status refresh must not lose the login.
       console.debug(
-        'Codex auth poll failed, will retry:',
+        'Codex auth poll failed:',
         err instanceof Error ? err.message : String(err),
       );
-      codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
+      browserAuthMessages['codex-auth'] = 'OpenAI Codex sign-in failed — click Auth to try again.';
+      browserAuthPending['codex-auth'] = false;
+      codexDeviceAuth = null;
+      clearPersistedDeviceAuth('codex-auth');
     }
   }
 
@@ -708,6 +895,7 @@ function createProvidersStore() {
       browserAuthMessages.copilot = copilotAuthMessage;
       browserAuthPending.copilot = false;
       copilotDeviceAuth = null;
+      clearPersistedDeviceAuth('copilot');
       return;
     }
     try {
@@ -732,6 +920,8 @@ function createProvidersStore() {
         copilotAuthMessage = data.error ?? 'Copilot sign-in failed';
         browserAuthMessages.copilot = copilotAuthMessage;
         browserAuthPending.copilot = false;
+        copilotDeviceAuth = null;
+        clearPersistedDeviceAuth('copilot');
         return;
       }
 
@@ -742,6 +932,7 @@ function createProvidersStore() {
         browserAuthMessages.copilot = copilotAuthMessage;
         browserAuthPending.copilot = false;
         copilotDeviceAuth = null;
+        clearPersistedDeviceAuth('copilot');
         await syncProviderUi('copilot', {
           openModelSelector: true,
           successMessage: 'GitHub Copilot connected',
@@ -755,6 +946,8 @@ function createProvidersStore() {
         copilotAuthMessage = data.data?.errorDescription ?? pollError;
         browserAuthMessages.copilot = copilotAuthMessage;
         browserAuthPending.copilot = false;
+        copilotDeviceAuth = null;
+        clearPersistedDeviceAuth('copilot');
         return;
       }
 
@@ -770,6 +963,8 @@ function createProvidersStore() {
       copilotAuthMessage = message;
       browserAuthMessages.copilot = copilotAuthMessage;
       browserAuthPending.copilot = false;
+      copilotDeviceAuth = null;
+      clearPersistedDeviceAuth('copilot');
     }
   }
 
@@ -781,6 +976,7 @@ function createProvidersStore() {
       browserAuthMessages.kimicode = kimicodeAuthMessage;
       browserAuthPending.kimicode = false;
       kimicodeDeviceAuth = null;
+      clearPersistedDeviceAuth('kimicode');
       return;
     }
     try {
@@ -804,6 +1000,8 @@ function createProvidersStore() {
         kimicodeAuthMessage = data.error ?? 'Kimi Code sign-in failed';
         browserAuthMessages.kimicode = kimicodeAuthMessage;
         browserAuthPending.kimicode = false;
+        kimicodeDeviceAuth = null;
+        clearPersistedDeviceAuth('kimicode');
         return;
       }
 
@@ -814,6 +1012,7 @@ function createProvidersStore() {
         browserAuthMessages.kimicode = kimicodeAuthMessage;
         browserAuthPending.kimicode = false;
         kimicodeDeviceAuth = null;
+        clearPersistedDeviceAuth('kimicode');
         await syncProviderUi('kimicode', {
           openModelSelector: true,
           successMessage: 'Kimi Code connected',
@@ -827,6 +1026,8 @@ function createProvidersStore() {
         kimicodeAuthMessage = data.data?.errorDescription ?? pollError;
         browserAuthMessages.kimicode = kimicodeAuthMessage;
         browserAuthPending.kimicode = false;
+        kimicodeDeviceAuth = null;
+        clearPersistedDeviceAuth('kimicode');
         return;
       }
 
@@ -842,6 +1043,8 @@ function createProvidersStore() {
       kimicodeAuthMessage = message;
       browserAuthMessages.kimicode = kimicodeAuthMessage;
       browserAuthPending.kimicode = false;
+      kimicodeDeviceAuth = null;
+      clearPersistedDeviceAuth('kimicode');
     }
   }
 
@@ -1148,6 +1351,7 @@ function createProvidersStore() {
 
       if (data.data.status === 'connected' || data.data.status === 'detected') {
         const detectedOnly = data.data.status === 'detected';
+        if (isDeviceAuthProvider(name)) clearDeviceAuthForProvider(name);
         browserAuthPending[name] = false;
         browserAuthMessages[name] = data.data.message ?? '';
         const sync = await syncProviderUi(name, {
@@ -1179,7 +1383,9 @@ function createProvidersStore() {
         data.data.userCode &&
         data.data.verificationUri
       ) {
+        clearCopilotPollTimer();
         copilotDeviceAuth = {
+          deviceAuthId: data.data.deviceAuthId,
           deviceCode: data.data.deviceCode,
           userCode: data.data.userCode,
           verificationUri: data.data.verificationUri,
@@ -1190,6 +1396,7 @@ function createProvidersStore() {
         copilotAuthStatus = 'pending';
         copilotAuthMessage = 'Approve GitHub Copilot in the browser to finish connecting.';
         browserAuthMessages[name] = copilotAuthMessage;
+        saveRecoverableDeviceAuthFlow('copilot', copilotDeviceAuth);
         void pollCopilotAuth(copilotDeviceAuth.deviceCode, copilotDeviceAuth.intervalMs);
       } else if (
         name === 'kimicode' &&
@@ -1197,7 +1404,9 @@ function createProvidersStore() {
         data.data.userCode &&
         data.data.verificationUri
       ) {
+        clearKimiCodePollTimer();
         kimicodeDeviceAuth = {
+          deviceAuthId: data.data.deviceAuthId,
           deviceCode: data.data.deviceCode,
           userCode: data.data.userCode,
           verificationUri: data.data.verificationUri,
@@ -1208,6 +1417,7 @@ function createProvidersStore() {
         kimicodeAuthStatus = 'pending';
         kimicodeAuthMessage = 'Approve Kimi Code in the browser to finish connecting.';
         browserAuthMessages[name] = kimicodeAuthMessage;
+        saveRecoverableDeviceAuthFlow('kimicode', kimicodeDeviceAuth);
         void pollKimiCodeAuth(kimicodeDeviceAuth.deviceCode, kimicodeDeviceAuth.intervalMs);
       } else if (
         name === 'codex-auth' &&
@@ -1215,7 +1425,9 @@ function createProvidersStore() {
         data.data.userCode &&
         data.data.verificationUri
       ) {
+        clearCodexAuthPollTimer();
         codexDeviceAuth = {
+          deviceAuthId: data.data.deviceAuthId,
           deviceCode: data.data.deviceCode,
           userCode: data.data.userCode,
           verificationUri: data.data.verificationUri,
@@ -1225,6 +1437,7 @@ function createProvidersStore() {
         };
         browserAuthMessages[name] =
           'Enter the displayed code in ChatGPT. Koryphaios connects automatically after approval.';
+        saveRecoverableDeviceAuthFlow('codex-auth', codexDeviceAuth);
         void pollCodexAuth();
       } else {
         toastStore.info(data.data.message ?? 'Finish sign-in in the browser, then confirm here.');
@@ -1253,6 +1466,7 @@ function createProvidersStore() {
 
       browserAuthPending[name] = false;
       browserAuthMessages[name] = '';
+      if (isDeviceAuthProvider(name)) clearDeviceAuthForProvider(name);
       await loadProvidersFromApi();
       const status = getProviderStatus(name);
       if (status?.connectionState === 'verified') {
@@ -1282,6 +1496,7 @@ function createProvidersStore() {
       const res = await apiFetch(apiUrl(`/api/providers/${name}`), { method: 'DELETE' });
       const data = await parseJsonResponse<{ ok?: boolean }>(res);
       if (data.ok) {
+        if (isDeviceAuthProvider(name)) clearDeviceAuthForProvider(name);
         await loadProvidersFromApi();
         toastStore.info(`${getProviderDisplayLabel(name)} disconnected`);
       }
@@ -1469,16 +1684,17 @@ function createProvidersStore() {
     baseUrl: string;
     apiKey: string;
     models: string;
-  }): Promise<boolean> {
+    allowUnverified?: boolean;
+  }): Promise<AddCustomProviderResult> {
     const label = form.label.trim();
     const baseUrl = form.baseUrl.trim();
     if (!label) {
       toastStore.error('Enter a display name');
-      return false;
+      return { ok: false, error: 'Enter a display name' };
     }
     if (!baseUrl) {
       toastStore.error('Enter the base URL');
-      return false;
+      return { ok: false, error: 'Enter the base URL' };
     }
     addingCustom = true;
     try {
@@ -1495,23 +1711,105 @@ function createProvidersStore() {
           baseUrl,
           apiKey: form.apiKey.trim() || undefined,
           models: models.length ? models : undefined,
+          allowUnverified: form.allowUnverified === true,
         }),
       });
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        canSaveUnverified?: boolean;
+        requiresManualModels?: boolean;
+        normalizedBaseUrl?: string;
+        data?: { id?: string; catalogDetected?: boolean; normalizedBaseUrl?: string };
+      }>(res);
       if (data?.ok) {
-        toastStore.success(`Custom provider "${label}" added ✓`);
+        toastStore.success(
+          data.data?.catalogDetected
+            ? `Catalog access confirmed — ${label} was added; inference verifies on first use`
+            : `${label} saved with manual models; connection is still unverified`,
+        );
         await loadAvailableProviders();
         await loadProvidersFromApi();
-        return true;
+        return {
+          ok: true,
+          id: data.data?.id,
+          catalogDetected: data.data?.catalogDetected,
+          normalizedBaseUrl: data.data?.normalizedBaseUrl,
+        };
       }
-      toastStore.error(data?.error ?? 'Failed to add custom provider');
-      return false;
+      return {
+        ok: false,
+        error: data?.error ?? 'Failed to add custom provider',
+        canSaveUnverified: data?.canSaveUnverified,
+        requiresManualModels: data?.requiresManualModels,
+        normalizedBaseUrl: data?.normalizedBaseUrl,
+      };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Network error';
-      toastStore.error(message);
-      return false;
+      return { ok: false, error: message };
     } finally {
       addingCustom = false;
+    }
+  }
+
+  async function saveCustomProviderIcon(
+    id: string,
+    selection: CustomProviderIconSelection,
+  ): Promise<boolean> {
+    try {
+      let blob = selection.blob;
+      if (!blob) {
+        const cached = customProviderIcons[id];
+        if (!cached) {
+          toastStore.error('The current icon is not loaded yet. Try again in a moment.');
+          return false;
+        }
+        blob = await fetch(cached.url).then((response) => response.blob());
+      }
+      const uploadBlob = blob;
+      if (!uploadBlob) return false;
+      const form = new FormData();
+      form.append('icon', uploadBlob, 'provider-icon.png');
+      form.append('shape', selection.shape);
+      const response = await apiFetch(
+        apiUrl(`/api/providers/custom/${encodeURIComponent(id)}/icon`),
+        { method: 'PUT', body: form },
+      );
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'The custom icon could not be saved');
+        return false;
+      }
+      revokeCustomProviderIcon(id);
+      await loadProvidersFromApi();
+      toastStore.success('Custom provider icon saved');
+      return true;
+    } catch (error: unknown) {
+      toastStore.error(error instanceof Error ? error.message : 'The custom icon could not be saved');
+      return false;
+    }
+  }
+
+  async function removeCustomProviderIcon(id: string): Promise<boolean> {
+    try {
+      const response = await apiFetch(
+        apiUrl(`/api/providers/custom/${encodeURIComponent(id)}/icon`),
+        { method: 'DELETE' },
+      );
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
+      if (!data.ok) {
+        toastStore.error(data.error ?? 'The custom icon could not be removed');
+        return false;
+      }
+      revokeCustomProviderIcon(id);
+      await loadProvidersFromApi();
+      toastStore.info('Custom provider icon removed');
+      return true;
+    } catch (error: unknown) {
+      toastStore.error(
+        error instanceof Error ? error.message : 'The custom icon could not be removed',
+      );
+      return false;
     }
   }
 
@@ -1704,6 +2002,9 @@ function createProvidersStore() {
     get addingCustom() {
       return addingCustom;
     },
+    get customProviderIcons() {
+      return customProviderIcons;
+    },
     get accountManagerRequest() {
       return accountManagerRequest;
     },
@@ -1743,6 +2044,7 @@ function createProvidersStore() {
     getLocalCliConnectLabel,
     getProviderCaps,
     getProviderStatus,
+    getCustomProviderIcon,
     getProviderAccounts,
     setProviderStatusList,
     loadProvidersFromApi,
@@ -1770,6 +2072,8 @@ function createProvidersStore() {
     deleteProviderAccount,
     addCustomProvider,
     deleteCustomProvider,
+    saveCustomProviderIcon,
+    removeCustomProviderIcon,
     copyToClipboard,
     clearAccountManagerRequest,
     clearModelSelectorRequest,

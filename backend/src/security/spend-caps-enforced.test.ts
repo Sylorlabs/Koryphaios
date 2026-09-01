@@ -71,4 +71,21 @@ describe('enforced spend-cap contract', () => {
     expect(findSpendCapViolation(caps, emptySnapshot, 0)).toBeNull();
     expect(findSpendCapViolation(caps, emptySnapshot, 1)?.capType).toBe('per_request');
   });
+
+  it('blocks a request whose estimate would cross a cumulative cap', () => {
+    const caps = {
+      ...DEFAULT_ENFORCED_CAPS,
+      perRequestCents: 0,
+      sessionHourlyCents: 200,
+      sessionDailyCents: 0,
+      globalHourlyCents: 0,
+      globalDailyCents: 0,
+    };
+    const violation = findSpendCapViolation(caps, { ...emptySnapshot, sessionHourCents: 199 }, 5);
+    expect(violation).toMatchObject({
+      capType: 'session_hourly',
+      currentSpend: 204,
+      limit: 200,
+    });
+  });
 });

@@ -15,7 +15,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { TextDecoder } from 'node:util';
 import type { TaskContract, TaskKind } from './prompts';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from './professional-skill-definitions';
 import { skillPlaybook } from './skill-playbooks';
@@ -24,6 +25,16 @@ import { PROJECT_ROOT } from '../runtime/paths';
 
 export type SkillSource = 'personal' | 'project';
 export type SkillState = 'active' | 'draft';
+export type SkillFormatKind = 'markdown' | 'text' | 'html' | 'custom';
+export type SkillRenderer = 'markdown' | 'plain' | 'html';
+
+export interface SkillDocumentSpec {
+  kind: SkillFormatKind;
+  /** Normalized native extension without a leading dot. */
+  extension: string;
+  renderer: SkillRenderer;
+  mediaType: string;
+}
 
 export interface KorySkillMetadata {
   version: string;
@@ -55,6 +66,12 @@ export interface SkillRevision {
   source: SkillSource;
   state: SkillState;
   path: string;
+  storageVersion: 1 | 2;
+  document: SkillDocumentSpec;
+  /** Native file contents. For v1 this is the complete frontmatter document. */
+  sourceContent: string;
+  /** Format-neutral operating contract used for compact/minimal prompt loading. */
+  coreInstructions: string;
   content: string;
   instructions: string;
   metadata: KorySkillMetadata;
@@ -67,6 +84,23 @@ export interface SkillRevision {
   };
   /** True when a newer bundled version exists and the local copy has user edits. */
   bundledUpdateAvailable?: boolean;
+}
+
+interface SkillRevisionSidecar {
+  storageVersion: 2;
+  name: string;
+  description: string;
+  document: SkillDocumentSpec;
+  sourceHash: string;
+  coreInstructions: string;
+  metadata: KorySkillMetadata;
+}
+
+export class SkillRevisionConflictError extends Error {
+  constructor(name: string) {
+    super(`Skill ${name} changed outside this editor; reload it and recover your draft`);
+    this.name = 'SkillRevisionConflictError';
+  }
 }
 
 export interface SkillValidationResult {
@@ -179,6 +213,101 @@ export const INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES = new Map<string, string>([
 ]);
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+const LEGACY_MARKDOWN_DOCUMENT: SkillDocumentSpec = {
+  kind: 'markdown',
+  extension: 'md',
+  renderer: 'markdown',
+  mediaType: 'text/markdown',
+};
+const RESERVED_SKILL_EXTENSIONS = new Set(['kory', 'json', 'kory.json']);
+
+export function normalizeSkillDocumentSpec(input: SkillDocumentSpec): SkillDocumentSpec {
+  if (!['markdown', 'text', 'html', 'custom'].includes(input?.kind)) {
+    throw new Error('Skill format kind must be markdown, text, html, or custom');
+  }
+  const extension = input.extension.trim().toLowerCase().replace(/^\.+/, '');
+  if (!/^[a-z0-9](?:[a-z0-9_-]{0,15}[a-z0-9])?$/.test(extension)) {
+    throw new Error(
+      'Skill extension must use 1 to 17 lowercase letters, digits, underscores, or hyphens',
+    );
+  }
+  if (RESERVED_SKILL_EXTENSIONS.has(extension)) {
+    throw new Error('Skill extension is reserved for Koryphaios metadata');
+  }
+  const expected: Partial<
+    Record<SkillFormatKind, Pick<SkillDocumentSpec, 'extension' | 'renderer' | 'mediaType'>>
+  > = {
+    markdown: { extension: 'md', renderer: 'markdown', mediaType: 'text/markdown' },
+    text: { extension: 'txt', renderer: 'plain', mediaType: 'text/plain' },
+    html: { extension: 'html', renderer: 'html', mediaType: 'text/html' },
+  };
+  const fixed = expected[input.kind];
+  if (fixed) return { kind: input.kind, ...fixed };
+  if (!['markdown', 'plain', 'html'].includes(input.renderer)) {
+    throw new Error('Custom skill renderer must be markdown, plain, or html');
+  }
+  if (!/^text\/[a-z0-9.+-]+$/.test(input.mediaType)) {
+    throw new Error('Custom skill media type must be a text/* media type');
+  }
+  return { kind: 'custom', extension, renderer: input.renderer, mediaType: input.mediaType };
+}
+
+function validateNativeSkillSource(sourceContent: string): string[] {
+  const errors: string[] = [];
+  if (!sourceContent.trim()) errors.push('Skill instructions are required');
+  if (sourceContent.length > 50_000) errors.push('Skill source must be at most 50000 characters');
+  if (sourceContent.includes('\0')) errors.push('Skill source cannot contain NUL bytes');
+  const sample = sourceContent;
+  const controlCount = [...sample].filter((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 && !['\n', '\r', '\t'].includes(char);
+  }).length;
+  if (controlCount > 0) {
+    errors.push('Skill source appears to contain binary data');
+  }
+  return errors;
+}
+
+/** Validate a v2 native document without writing it to disk. */
+export function validateSkillDocument(
+  input: Pick<SkillRevisionSidecar, 'document' | 'coreInstructions'> & {
+    sourceContent: string;
+  },
+): SkillValidationResult {
+  const errors: string[] = [];
+  let document: SkillDocumentSpec | null = null;
+  try {
+    document = normalizeSkillDocumentSpec(input.document);
+  } catch (error: unknown) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+  errors.push(...validateNativeSkillSource(input.sourceContent));
+  if (!input.coreInstructions.trim()) errors.push('coreInstructions is required');
+  if (input.coreInstructions.length > 50_000) {
+    errors.push('coreInstructions must be at most 50000 characters');
+  }
+
+  const ignoredAuthorityClaims = AUTHORITY_KEYS.filter((key) =>
+    new RegExp(`^\\s*${key}:`, 'mi').test(input.sourceContent),
+  );
+  const warnings = ignoredAuthorityClaims.length
+    ? [`Ignored authority claims: ${ignoredAuthorityClaims.join(', ')}`]
+    : [];
+  if (document?.renderer === 'html') {
+    warnings.push('HTML is instruction content and is rendered only in a scriptless sandbox.');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors: [...new Set(errors)],
+    warnings,
+    ignoredAuthorityClaims,
+  };
+}
+
+function stableRevisionHash(sidecarContent: string, sourceContent: string): string {
+  return sha256(`${sidecarContent}\n${sourceContent}`);
+}
 const AUTHORITY_KEYS = ['allowed-tools', 'scripts', 'binaries', 'network', 'network-requirements'];
 const TRIGGER_STOP_WORDS = new Set([
   'and',
@@ -1238,11 +1367,140 @@ export function personalRoot(): string {
   return process.env.KORYPHAIOS_SKILLS_HOME || join(homedir(), '.koryphaios', 'skills');
 }
 
-function atomicWrite(path: string, content: string): void {
+function atomicWrite(path: string, content: string | Uint8Array): void {
   mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, content, 'utf8');
-  renameSync(temporary, path);
+  const temporary = `${path}.${process.pid}-${randomUUID()}.tmp`;
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(temporary, 'wx', 0o600);
+    writeFileSync(descriptor, content);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+    renameSync(temporary, path);
+  } finally {
+    if (descriptor !== null) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Preserve the original publication error.
+      }
+    }
+    if (existsSync(temporary)) {
+      try {
+        unlinkSync(temporary);
+      } catch {
+        // Preserve the original publication error.
+      }
+    }
+  }
+}
+
+interface FileSnapshot {
+  existed: boolean;
+  content: Uint8Array;
+}
+
+function snapshotFile(path: string): FileSnapshot {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`${basename(path)} must be a regular non-symlink file`);
+    }
+    return { existed: true, content: readFileSync(path) };
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+      return { existed: false, content: new Uint8Array() };
+    }
+    throw error;
+  }
+}
+
+function restoreFile(path: string, snapshot: FileSnapshot): void {
+  if (snapshot.existed) {
+    atomicWrite(path, snapshot.content);
+  } else if (existsSync(path)) {
+    unlinkSync(path);
+  }
+}
+
+/** Publish a native source and sidecar as one recoverable application-level transaction. */
+function atomicWritePair(
+  firstPath: string,
+  firstContent: string,
+  secondPath: string,
+  secondContent: string,
+): void {
+  const firstSnapshot = snapshotFile(firstPath);
+  const secondSnapshot = snapshotFile(secondPath);
+  try {
+    atomicWrite(firstPath, firstContent);
+    atomicWrite(secondPath, secondContent);
+  } catch (error: unknown) {
+    const rollbackErrors: string[] = [];
+    for (const [path, snapshot] of [
+      [secondPath, secondSnapshot],
+      [firstPath, firstSnapshot],
+    ] as const) {
+      try {
+        restoreFile(path, snapshot);
+      } catch (rollbackError: unknown) {
+        rollbackErrors.push(
+          `${path}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
+    }
+    if (rollbackErrors.length) {
+      throw new AggregateError(
+        [error instanceof Error ? error : new Error(String(error))],
+        `Skill revision publication failed and rollback was incomplete: ${rollbackErrors.join('; ')}`,
+      );
+    }
+    throw error;
+  }
+}
+
+function withSkillRevisionLock<T>(directory: string, name: string, operation: () => T): T {
+  mkdirSync(directory, { recursive: true });
+  const lockPath = join(directory, '.kory-revision.lock');
+  try {
+    const stat = lstatSync(lockPath);
+    if (stat.isFile() && !stat.isSymbolicLink() && Date.now() - stat.mtimeMs > 5 * 60_000) {
+      unlinkSync(lockPath);
+    }
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') throw error;
+  }
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(lockPath, 'wx', 0o600);
+    writeFileSync(descriptor, `${process.pid}\n`, 'utf8');
+    fsyncSync(descriptor);
+    return operation();
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') {
+      throw new SkillRevisionConflictError(name);
+    }
+    throw error;
+  } finally {
+    if (descriptor !== null) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Preserve the operation result or error.
+      }
+      try {
+        unlinkSync(lockPath);
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+          serverLog.warn(
+            { lockPath, err: error instanceof Error ? error.message : String(error) },
+            'Could not remove skill revision lock',
+          );
+        }
+      }
+    }
+  }
 }
 
 const NEW_DRAFT_TEMP_PREFIX = 'DRAFT.create-';
@@ -1528,6 +1786,10 @@ function revisionFromContent(
     source,
     state,
     path,
+    storageVersion: 1,
+    document: LEGACY_MARKDOWN_DOCUMENT,
+    sourceContent: content,
+    coreInstructions: match?.[2]?.trim() ?? '',
     content,
     instructions: match?.[2]?.trim() ?? '',
     hash: sha256(content),
@@ -1566,15 +1828,327 @@ function readRevision(path: string, source: SkillSource, state: SkillState): Ski
   return revisionFromContent(path, readFileSync(path, 'utf8'), source, state);
 }
 
+function sidecarPath(directory: string, state: SkillState): string {
+  return join(directory, `${state === 'active' ? 'SKILL' : 'DRAFT'}.kory.json`);
+}
+
+function emptySkillMetadata(): KorySkillMetadata {
+  return {
+    version: '',
+    baseVersion: '',
+    baseHash: '',
+    broader: [],
+    facets: [],
+    depth: 0,
+    requires: [],
+    conflicts: [],
+    activation: [],
+    excludes: [],
+    domains: [],
+    targetMedia: [],
+    shouldTrigger: [],
+    shouldNotTrigger: [],
+    evidence: [],
+    contextBudget: 0,
+    sourceScope: 'local-only',
+  };
+}
+
+function invalidV2Revision(
+  directory: string,
+  source: SkillSource,
+  state: SkillState,
+  metadataPath: string,
+  metadataContent: string,
+  message: string,
+): SkillRevision {
+  return {
+    name: basename(directory),
+    description: '',
+    source,
+    state,
+    path: metadataPath,
+    storageVersion: 2,
+    document: LEGACY_MARKDOWN_DOCUMENT,
+    sourceContent: '',
+    coreInstructions: '',
+    content: '',
+    instructions: '',
+    metadata: emptySkillMetadata(),
+    hash: stableRevisionHash(metadataContent, ''),
+    validation: {
+      valid: false,
+      errors: [message],
+      warnings: [],
+      ignoredAuthorityClaims: [],
+    },
+  };
+}
+
+function readRegularUtf8(path: string): { content: string; error?: string } {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      return { content: '', error: `${basename(path)} must be a regular non-symlink file` };
+    }
+    const bytes = readFileSync(path);
+    try {
+      return { content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) };
+    } catch {
+      return { content: '', error: `${basename(path)} must contain valid UTF-8 text` };
+    }
+  } catch (error: unknown) {
+    return {
+      content: '',
+      error:
+        (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT'
+          ? `${basename(path)} is missing`
+          : error instanceof Error
+            ? error.message
+            : String(error),
+    };
+  }
+}
+
+function safeV2Metadata(input: unknown, errors: string[]): KorySkillMetadata {
+  const record =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : null;
+  if (!record) errors.push('metadata must be an object');
+  const value = record ?? {};
+  const text = (key: string): string => {
+    const item = value[key];
+    if (typeof item === 'string') return item;
+    errors.push(`metadata.${key} must be a string`);
+    return '';
+  };
+  const stringList = (key: string): string[] => {
+    const item = value[key];
+    if (!Array.isArray(item) || item.some((entry) => typeof entry !== 'string')) {
+      errors.push(`metadata.${key} must be an array of strings`);
+      return Array.isArray(item)
+        ? item.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+    }
+    return item;
+  };
+  const version = text('version');
+  const baseVersion = text('baseVersion');
+  const baseHash = text('baseHash');
+  const broader = stringList('broader');
+  const facets = stringList('facets');
+  const requires = stringList('requires');
+  const conflicts = stringList('conflicts');
+  const activation = stringList('activation');
+  const excludes = stringList('excludes');
+  const domains = stringList('domains');
+  const targetMedia = stringList('targetMedia');
+  const shouldTrigger = stringList('shouldTrigger');
+  const shouldNotTrigger = stringList('shouldNotTrigger');
+  const evidence = stringList('evidence');
+  const depth = value.depth;
+  const contextBudget = value.contextBudget;
+  if (!Number.isInteger(depth) || (depth as number) < 0 || (depth as number) > 32) {
+    errors.push('metadata.depth must be an integer from 0 to 32');
+  }
+  if (
+    !Number.isInteger(contextBudget) ||
+    (contextBudget as number) < 100 ||
+    (contextBudget as number) > 20_000
+  ) {
+    errors.push('contextBudget must be an integer from 100 to 20000');
+  }
+  if (value.sourceScope !== 'local-only') errors.push('sourceScope must be local-only');
+  if (!version || !baseVersion || !baseHash) {
+    errors.push('metadata version, baseVersion, and baseHash are required');
+  }
+  const parent = value.parent;
+  if (parent !== undefined && typeof parent !== 'string') {
+    errors.push('metadata.parent must be a string when present');
+  }
+  return {
+    version,
+    baseVersion,
+    baseHash,
+    parent: typeof parent === 'string' ? parent : broader[0],
+    broader,
+    facets,
+    depth: Number.isInteger(depth) ? (depth as number) : 0,
+    requires,
+    conflicts,
+    activation,
+    excludes,
+    domains,
+    targetMedia,
+    shouldTrigger,
+    shouldNotTrigger,
+    evidence,
+    contextBudget: Number.isInteger(contextBudget) ? (contextBudget as number) : 0,
+    sourceScope: 'local-only',
+  };
+}
+
+function revisionFromV2(
+  directory: string,
+  source: SkillSource,
+  state: SkillState,
+): SkillRevision | null {
+  const metadataPath = sidecarPath(directory, state);
+  try {
+    lstatSync(metadataPath);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null;
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      '',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  const metadataFile = readRegularUtf8(metadataPath);
+  if (metadataFile.error) {
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      metadataFile.content,
+      metadataFile.error,
+    );
+  }
+  let sidecar: SkillRevisionSidecar;
+  try {
+    sidecar = JSON.parse(metadataFile.content) as SkillRevisionSidecar;
+  } catch (error: unknown) {
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      metadataFile.content,
+      `Invalid v2 metadata JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!sidecar || typeof sidecar !== 'object' || Array.isArray(sidecar)) {
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      metadataFile.content,
+      'Skill metadata sidecar must contain an object',
+    );
+  }
+  if (sidecar.storageVersion !== 2) {
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      metadataFile.content,
+      'Skill metadata sidecar must declare storageVersion 2',
+    );
+  }
+  let document: SkillDocumentSpec;
+  try {
+    document = normalizeSkillDocumentSpec(sidecar.document);
+  } catch (error: unknown) {
+    return invalidV2Revision(
+      directory,
+      source,
+      state,
+      metadataPath,
+      metadataFile.content,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  const errors: string[] = [];
+  if (
+    sidecar.document.kind !== document.kind ||
+    sidecar.document.extension !== document.extension ||
+    sidecar.document.renderer !== document.renderer ||
+    sidecar.document.mediaType !== document.mediaType
+  ) {
+    errors.push('Persisted skill document descriptor must use its canonical format tuple');
+  }
+  const nativePath = join(
+    directory,
+    `${state === 'active' ? 'SKILL' : 'DRAFT'}.${document.extension}`,
+  );
+  const nativeFile = readRegularUtf8(nativePath);
+  const sourceContent = nativeFile.content;
+  if (nativeFile.error) errors.push(nativeFile.error);
+  errors.push(...validateNativeSkillSource(sourceContent));
+  if (sidecar.sourceHash !== sha256(sourceContent)) {
+    errors.push('Native skill source hash does not match its metadata sidecar');
+  }
+  const coreInstructions =
+    typeof sidecar.coreInstructions === 'string' ? sidecar.coreInstructions : '';
+  if (!coreInstructions.trim()) errors.push('coreInstructions is required');
+  if (coreInstructions.length > 50_000) {
+    errors.push('coreInstructions must be at most 50000 characters');
+  }
+  const name = typeof sidecar.name === 'string' ? sidecar.name : '';
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name)) {
+    errors.push('name must use 1 to 64 lowercase letters, digits, or hyphens');
+  }
+  if (name !== basename(directory)) {
+    errors.push('Skill metadata name must match its directory name');
+  }
+  const description = typeof sidecar.description === 'string' ? sidecar.description : '';
+  if (description.length < 12 || description.length > 1024 || /[\r\n]/.test(description)) {
+    errors.push('description must be 12 to 1024 characters');
+  }
+  const metadata = safeV2Metadata(sidecar.metadata, errors);
+  const ignoredAuthorityClaims = AUTHORITY_KEYS.filter((key) =>
+    new RegExp(`^\\s*${key}:`, 'mi').test(sourceContent),
+  );
+  const warnings = ignoredAuthorityClaims.length
+    ? [`Ignored authority claims: ${ignoredAuthorityClaims.join(', ')}`]
+    : [];
+  const bundledContent =
+    source === 'personal' && state === 'active' && name ? getBundledSkillContent(name) : null;
+  return {
+    name: name || basename(directory),
+    description,
+    source,
+    state,
+    path: nativePath,
+    storageVersion: 2,
+    document,
+    sourceContent,
+    coreInstructions,
+    content: sourceContent,
+    instructions: sourceContent.trim(),
+    metadata,
+    hash: stableRevisionHash(metadataFile.content, sourceContent),
+    validation: {
+      valid: errors.length === 0,
+      errors: [...new Set(errors)],
+      warnings,
+      ignoredAuthorityClaims,
+    },
+    bundledUpdateAvailable:
+      errors.length === 0 && bundledContent
+        ? metadata.baseHash !== contentFingerprint(bundledContent)
+        : false,
+  };
+}
+
 function scan(root: string, source: SkillSource): SkillRevision[] {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const directory = join(root, entry.name);
+      const activeV2 = revisionFromV2(directory, source, 'active');
+      const draftV2 = revisionFromV2(directory, source, 'draft');
       return [
-        readRevision(join(directory, 'SKILL.md'), source, 'active'),
-        readRevision(join(directory, 'DRAFT.md'), source, 'draft'),
+        activeV2 ?? readRevision(join(directory, 'SKILL.md'), source, 'active'),
+        draftV2 ?? readRevision(join(directory, 'DRAFT.md'), source, 'draft'),
       ].filter((item): item is SkillRevision => Boolean(item));
     });
 }
@@ -1592,15 +2166,144 @@ export function saveSkillDraft(
   source: SkillSource,
   name: string,
   content: string,
+  expectedHash: string,
 ): SkillRevision {
   if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(name)) {
     throw new Error('Invalid skill name');
   }
   const root =
     source === 'personal' ? personalRoot() : join(resolve(projectRoot), '.koryphaios', 'skills');
-  const path = join(root, name, 'DRAFT.md');
-  atomicWrite(path, content);
-  return readRevision(path, source, 'draft')!;
+  const directory = join(root, name);
+  return withSkillRevisionLock(directory, name, () => {
+    const revisions = listSkills(projectRoot).filter(
+      (skill) => skill.name === name && skill.source === source,
+    );
+    const current =
+      revisions.find((skill) => skill.state === 'draft') ??
+      revisions.find((skill) => skill.state === 'active');
+    if (!current || !expectedHash || expectedHash !== current.hash) {
+      throw new SkillRevisionConflictError(name);
+    }
+    const path = join(directory, 'DRAFT.md');
+    atomicWrite(path, content);
+    return readRevision(path, source, 'draft')!;
+  });
+}
+
+export interface SaveSkillDocumentDraftInput {
+  document: SkillDocumentSpec;
+  sourceContent: string;
+  coreInstructions: string;
+  expectedHash: string;
+}
+
+function writeV2Revision(
+  directory: string,
+  state: SkillState,
+  sidecar: Omit<SkillRevisionSidecar, 'storageVersion' | 'sourceHash'>,
+  sourceContent: string,
+  noReplace = false,
+  publicationSource: SkillSource = 'project',
+): void {
+  const document = normalizeSkillDocumentSpec(sidecar.document);
+  const errors = validateNativeSkillSource(sourceContent);
+  if (errors.length) throw new Error(errors.join('; '));
+  if (!sidecar.coreInstructions.trim()) throw new Error('coreInstructions is required');
+  if (sidecar.coreInstructions.length > 50_000) {
+    throw new Error('coreInstructions must be at most 50000 characters');
+  }
+  const complete: SkillRevisionSidecar = {
+    ...sidecar,
+    storageVersion: 2,
+    document,
+    sourceHash: sha256(sourceContent),
+  };
+  const stem = state === 'active' ? 'SKILL' : 'DRAFT';
+  const nativePath = join(directory, `${stem}.${document.extension}`);
+  const metadataPath = join(directory, `${stem}.kory.json`);
+  const serialized = `${JSON.stringify(complete, null, 2)}\n`;
+  if (!noReplace) {
+    atomicWritePair(nativePath, sourceContent, metadataPath, serialized);
+    return;
+  }
+  const nativeSnapshot = snapshotFile(nativePath);
+  let published = false;
+  try {
+    publishNewSkillDraft(metadataPath, serialized, sidecar.name, publicationSource);
+    published = true;
+    atomicWrite(nativePath, sourceContent);
+  } catch (error: unknown) {
+    const rollbackErrors: string[] = [];
+    if (published && existsSync(metadataPath)) {
+      try {
+        unlinkSync(metadataPath);
+      } catch (rollbackError: unknown) {
+        rollbackErrors.push(
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        );
+      }
+    }
+    try {
+      restoreFile(nativePath, nativeSnapshot);
+    } catch (rollbackError: unknown) {
+      rollbackErrors.push(
+        rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+      );
+    }
+    if (rollbackErrors.length) {
+      throw new AggregateError(
+        [error instanceof Error ? error : new Error(String(error))],
+        `New skill publication failed and rollback was incomplete: ${rollbackErrors.join('; ')}`,
+      );
+    }
+    throw error;
+  }
+}
+
+export function saveSkillDocumentDraft(
+  projectRoot: string,
+  source: SkillSource,
+  name: string,
+  input: SaveSkillDocumentDraftInput,
+): SkillRevision {
+  const root =
+    source === 'personal' ? personalRoot() : join(resolve(projectRoot), '.koryphaios', 'skills');
+  const directory = join(root, name);
+  return withSkillRevisionLock(directory, name, () => {
+    const revisions = listSkills(projectRoot).filter(
+      (skill) => skill.name === name && skill.source === source,
+    );
+    const current =
+      revisions.find((skill) => skill.state === 'draft') ??
+      revisions.find((skill) => skill.state === 'active');
+    if (!current) throw new Error('Skill revision not found');
+    if (!input.expectedHash || input.expectedHash !== current.hash) {
+      throw new SkillRevisionConflictError(name);
+    }
+    const previousDraft = revisions.find((skill) => skill.state === 'draft');
+    const oldDraftPath = previousDraft?.path;
+    const document = normalizeSkillDocumentSpec(input.document);
+    writeV2Revision(
+      directory,
+      'draft',
+      {
+        name: current.name,
+        description: current.description,
+        document,
+        coreInstructions: input.coreInstructions.trim(),
+        metadata: current.metadata,
+      },
+      input.sourceContent,
+    );
+    if (
+      oldDraftPath &&
+      oldDraftPath !== join(directory, `DRAFT.${document.extension}`) &&
+      existsSync(oldDraftPath)
+    ) {
+      unlinkSync(oldDraftPath);
+    }
+    return revisionFromV2(directory, source, 'draft')!;
+  });
 }
 
 export interface CreateSkillDraftInput {
@@ -1621,6 +2324,9 @@ export interface CreateSkillDraftInput {
   targetMedia?: string[];
   depth?: number;
   contextBudget?: number;
+  document?: SkillDocumentSpec;
+  sourceContent?: string;
+  coreInstructions?: string;
 }
 
 export interface CreateFreeformSkillDraftInput {
@@ -1655,7 +2361,12 @@ export function createFreeformSkillDraft(
       ? personalRoot()
       : join(resolve(projectRoot), '.koryphaios', 'skills');
   const directory = join(root, input.name);
-  if (existsSync(join(directory, 'SKILL.md')) || existsSync(join(directory, 'DRAFT.md'))) {
+  if (
+    existsSync(join(directory, 'SKILL.md')) ||
+    existsSync(join(directory, 'DRAFT.md')) ||
+    existsSync(sidecarPath(directory, 'active')) ||
+    existsSync(sidecarPath(directory, 'draft'))
+  ) {
     throw new SkillDraftConflictError(input.name, input.source);
   }
   const initial = `---\nname: ${input.name}\ndescription: ${JSON.stringify(description)}\nmetadata:\n  koryphaios:\n    version: 0.1.0\n    baseVersion: 0.1.0\n    baseHash: __BASE_HASH__\n    parent: \n    broader: []\n    facets: []\n    depth: 0\n    requires: []\n    conflicts: []\n    activation: []\n    excludes: []\n    domains: []\n    targetMedia: ["any"]\n    shouldTrigger: []\n    shouldNotTrigger: []\n    evidence: []\n    contextBudget: 4000\n    sourceScope: local-only\n---\n# ${input.name}\n\n${instructions}\n`;
@@ -1679,7 +2390,9 @@ export function createSkillDraft(projectRoot: string, input: CreateSkillDraftInp
   const sameScopeDirectory = join(root, input.name);
   if (
     existsSync(join(sameScopeDirectory, 'SKILL.md')) ||
-    existsSync(join(sameScopeDirectory, 'DRAFT.md'))
+    existsSync(join(sameScopeDirectory, 'DRAFT.md')) ||
+    existsSync(sidecarPath(sameScopeDirectory, 'active')) ||
+    existsSync(sidecarPath(sameScopeDirectory, 'draft'))
   ) {
     throw new SkillDraftConflictError(input.name, input.source);
   }
@@ -1793,6 +2506,32 @@ export function createSkillDraft(projectRoot: string, input: CreateSkillDraftInp
   // boundary across simultaneous Koryphaios processes.
   if (existsSync(join(sameScopeDirectory, 'SKILL.md'))) {
     throw new SkillDraftConflictError(input.name, input.source);
+  }
+  if (input.document) {
+    const document = normalizeSkillDocumentSpec(input.document);
+    const sourceContent = input.sourceContent ?? input.instructions;
+    const coreInstructions = (input.coreInstructions ?? input.instructions).trim();
+    if (
+      existsSync(sameScopeDirectory) &&
+      readdirSync(sameScopeDirectory, { withFileTypes: true }).some((entry) => entry.isFile())
+    ) {
+      throw new SkillDraftConflictError(input.name, input.source);
+    }
+    writeV2Revision(
+      sameScopeDirectory,
+      'draft',
+      {
+        name: input.name,
+        description,
+        document,
+        coreInstructions,
+        metadata: virtualDraft.metadata,
+      },
+      sourceContent,
+      true,
+      input.source,
+    );
+    return revisionFromV2(sameScopeDirectory, input.source, 'draft')!;
   }
   const draftPath = join(sameScopeDirectory, 'DRAFT.md');
   publishNewSkillDraft(draftPath, content, input.name, input.source);
@@ -2153,14 +2892,21 @@ export function activateSkill(
   projectRoot: string,
   source: SkillSource,
   name: string,
+  expectedHash?: string,
 ): SkillRevision {
   const root =
     source === 'personal' ? personalRoot() : join(resolve(projectRoot), '.koryphaios', 'skills');
   const directory = join(root, name);
-  const draftPath = join(directory, 'DRAFT.md');
-  const activePath = join(directory, 'SKILL.md');
-  const draft = readRevision(draftPath, source, 'draft');
+  const draft =
+    listSkills(projectRoot).find(
+      (skill) => skill.name === name && skill.source === source && skill.state === 'draft',
+    ) ??
+    revisionFromV2(directory, source, 'draft') ??
+    readRevision(join(directory, 'DRAFT.md'), source, 'draft');
   if (!draft) throw new Error('Draft not found');
+  if (expectedHash && draft.hash !== expectedHash) {
+    throw new SkillRevisionConflictError(name);
+  }
   if (!draft.validation.valid) throw new Error(draft.validation.errors.join('; '));
   if (draft.name !== name) throw new Error('Skill frontmatter name must match its directory name');
   const tests = testSkill(draft);
@@ -2177,6 +2923,95 @@ export function activateSkill(
   if (hierarchyErrors.length > 0) {
     throw new Error(`Skill hierarchy is invalid: ${hierarchyErrors.join('; ')}`);
   }
+  if (draft.storageVersion === 2) {
+    return withSkillRevisionLock(directory, name, () => {
+      const lockedDraft = revisionFromV2(directory, source, 'draft');
+      if (!lockedDraft || lockedDraft.hash !== draft.hash) {
+        throw new SkillRevisionConflictError(name);
+      }
+      const previousActive = listSkills(projectRoot).find(
+        (skill) => skill.name === name && skill.source === source && skill.state === 'active',
+      );
+      const draftPath = draft.path;
+      const draftSidecarPath = sidecarPath(directory, 'draft');
+      const retiredSuffix = `activated-${draft.hash.slice(0, 12)}-${Date.now()}-${process.pid}`;
+      const retiredPath = join(directory, `DRAFT.${retiredSuffix}.${draft.document.extension}`);
+      const retiredSidecarPath = join(directory, `DRAFT.${retiredSuffix}.kory.json`);
+      let nativeRetired = false;
+      let sidecarRetired = false;
+      try {
+        renameSync(draftPath, retiredPath);
+        nativeRetired = true;
+        renameSync(draftSidecarPath, retiredSidecarPath);
+        sidecarRetired = true;
+        const retiredSidecar = readFileSync(retiredSidecarPath, 'utf8');
+        if (stableRevisionHash(retiredSidecar, readFileSync(retiredPath, 'utf8')) !== draft.hash) {
+          throw new Error('Draft changed during activation; no active revision was published');
+        }
+        writeV2Revision(
+          directory,
+          'active',
+          {
+            name: draft.name,
+            description: draft.description,
+            document: draft.document,
+            coreInstructions: draft.coreInstructions,
+            metadata: draft.metadata,
+          },
+          draft.sourceContent,
+        );
+      } catch (error: unknown) {
+        const rollbackErrors: string[] = [];
+        if (sidecarRetired && existsSync(retiredSidecarPath) && !existsSync(draftSidecarPath)) {
+          try {
+            renameSync(retiredSidecarPath, draftSidecarPath);
+          } catch (rollbackError: unknown) {
+            rollbackErrors.push(
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+            );
+          }
+        }
+        if (nativeRetired && existsSync(retiredPath) && !existsSync(draftPath)) {
+          try {
+            renameSync(retiredPath, draftPath);
+          } catch (rollbackError: unknown) {
+            rollbackErrors.push(
+              rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+            );
+          }
+        }
+        if (rollbackErrors.length) {
+          throw new AggregateError(
+            [error instanceof Error ? error : new Error(String(error))],
+            `Skill activation failed and draft rollback was incomplete: ${rollbackErrors.join('; ')}`,
+          );
+        }
+        throw error;
+      }
+      const active = revisionFromV2(directory, source, 'active')!;
+      if (
+        previousActive?.path &&
+        previousActive.path !== active.path &&
+        existsSync(previousActive.path)
+      ) {
+        try {
+          const stat = lstatSync(previousActive.path);
+          if (stat.isFile() && !stat.isSymbolicLink()) unlinkSync(previousActive.path);
+        } catch (error: unknown) {
+          serverLog.warn(
+            {
+              path: previousActive.path,
+              err: error instanceof Error ? error.message : String(error),
+            },
+            'Activated native skill but could not remove its superseded active source',
+          );
+        }
+      }
+      return active;
+    });
+  }
+  const draftPath = join(directory, 'DRAFT.md');
+  const activePath = join(directory, 'SKILL.md');
   // Retire exactly the revision that passed validation before publishing it.
   // Atomic rename prevents a same-path editor from being silently deleted; if
   // a divergent DRAFT.md appears afterwards, it remains untouched.
@@ -2206,6 +3041,31 @@ function representationInstructions(
   skill: SkillRevision,
   representation: SkillRepresentation,
 ): string {
+  if (skill.storageVersion === 2) {
+    const boundaries = [
+      skill.metadata.requires.length
+        ? `Required skills: ${skill.metadata.requires.join(', ')}`
+        : '',
+      skill.metadata.excludes.length
+        ? `Do not activate for: ${skill.metadata.excludes.join('; ')}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const evidence = skill.metadata.evidence.slice(0, representation === 'minimal' ? 3 : 6);
+    if (representation === 'full') {
+      return [skill.sourceContent, boundaries, `Completion evidence: ${evidence.join('; ')}`]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    return [
+      `Mandatory operating contract (format-neutral core):\n${skill.coreInstructions}`,
+      boundaries,
+      `Completion evidence: ${evidence.join('; ') || 'Task-specific proof'}`,
+    ]
+      .filter(Boolean)
+      .join(representation === 'compact' ? '\n\n' : '\n');
+  }
   const instructions = withoutSkillTitle(skill.instructions);
   const bundledPlaybook = skillPlaybook(skill.name).trim();
   const [corePart, ...professionalParts] = instructions.split(/\n##\s+Professional practice\b/);
@@ -2686,16 +3546,99 @@ export function resolveSkills(
   };
 }
 
+export interface SkillConversionPreview {
+  sourceDocument: SkillDocumentSpec;
+  targetDocument: SkillDocumentSpec;
+  sourceContent: string;
+  convertedContent: string;
+  coreInstructions: string;
+  warnings: string[];
+  lossy: boolean;
+  draft?: SkillRevision;
+}
+
+function escapeHtmlSource(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+export function convertSkillRevision(
+  projectRoot: string,
+  source: SkillSource,
+  name: string,
+  state: SkillState,
+  targetInput: SkillDocumentSpec,
+  dryRun: boolean,
+  expectedHash: string,
+): SkillConversionPreview {
+  const revision = listSkills(projectRoot).find(
+    (skill) => skill.name === name && skill.source === source && skill.state === state,
+  );
+  if (!revision) throw new Error('Skill revision not found');
+  if (!expectedHash || revision.hash !== expectedHash) throw new SkillRevisionConflictError(name);
+  const targetDocument = normalizeSkillDocumentSpec(targetInput);
+  const nativeSource =
+    revision.storageVersion === 1 ? revision.instructions : revision.sourceContent;
+  const warnings: string[] = [];
+  let convertedContent = nativeSource;
+  let lossy = false;
+  if (targetDocument.renderer === 'html' && revision.document.renderer !== 'html') {
+    convertedContent = `<article><pre>${escapeHtmlSource(nativeSource)}</pre></article>\n`;
+    warnings.push(
+      'The original source is preserved as escaped text in HTML; review the preview before activation.',
+    );
+  } else if (targetDocument.renderer === 'markdown' && revision.document.renderer === 'html') {
+    convertedContent = `\`\`\`html\n${nativeSource}\n\`\`\`\n`;
+    warnings.push('HTML is preserved as a locked raw-source block in Markdown visual mode.');
+  } else if (targetDocument.renderer === 'plain' && revision.document.renderer !== 'plain') {
+    warnings.push(
+      'Plain rendering shows markup characters literally; the exact source is preserved.',
+    );
+  }
+  if (targetDocument.kind === 'custom') {
+    warnings.push(
+      `Custom .${targetDocument.extension} files remain local instruction content only.`,
+    );
+  }
+  const preview: SkillConversionPreview = {
+    sourceDocument: revision.document,
+    targetDocument,
+    sourceContent: nativeSource,
+    convertedContent,
+    coreInstructions: revision.coreInstructions || revision.instructions,
+    warnings,
+    lossy,
+  };
+  if (!dryRun) {
+    preview.draft = saveSkillDocumentDraft(projectRoot, source, name, {
+      document: targetDocument,
+      sourceContent: convertedContent,
+      coreInstructions: preview.coreInstructions,
+      expectedHash,
+    });
+  }
+  return preview;
+}
+
 export function compareSkillRevisions(
   active: SkillRevision,
   draft: SkillRevision,
-): { activeHash: string; draftHash: string; changed: boolean; active: string; draft: string } {
+): {
+  activeHash: string;
+  draftHash: string;
+  changed: boolean;
+  active: string;
+  draft: string;
+  activeDocument: SkillDocumentSpec;
+  draftDocument: SkillDocumentSpec;
+} {
   return {
     activeHash: active.hash,
     draftHash: draft.hash,
     changed: active.hash !== draft.hash,
     active: active.content,
     draft: draft.content,
+    activeDocument: active.document,
+    draftDocument: draft.document,
   };
 }
 
@@ -2711,10 +3654,14 @@ export function compareBundledSkill(name: string): {
   changed: boolean;
   local: string;
   bundled: string;
+  localDocument: SkillDocumentSpec;
+  bundledDocument: SkillDocumentSpec;
 } | null {
-  const localPath = join(personalRoot(), name, 'SKILL.md');
-  if (!existsSync(localPath)) return null;
-  const localContent = readFileSync(localPath, 'utf8');
+  const local = scan(personalRoot(), 'personal').find(
+    (skill) => skill.name === name && skill.state === 'active',
+  );
+  if (!local) return null;
+  const localContent = local.sourceContent;
   const bundledContent = getBundledSkillContent(name);
   if (!bundledContent) return null;
   return {
@@ -2723,6 +3670,8 @@ export function compareBundledSkill(name: string): {
     changed: sha256(localContent) !== sha256(bundledContent),
     local: localContent,
     bundled: bundledContent,
+    localDocument: local.document,
+    bundledDocument: LEGACY_MARKDOWN_DOCUMENT,
   };
 }
 
@@ -2746,29 +3695,76 @@ export function applyDefaultUpdate(
   projectRoot: string,
   name: string,
   choice: DefaultUpdateChoice,
+  expectedHash?: string,
 ): SkillRevision {
   if (INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.has(name)) {
     throw new Error(
       `Bundled resource ${name} is preserved for reference but is unavailable as a Koryphaios runtime skill`,
     );
   }
-  const path = join(personalRoot(), name, 'SKILL.md');
-  const local = readRevision(path, 'personal', 'active');
+  const directory = join(personalRoot(), name);
+  const path = join(directory, 'SKILL.md');
+  return withSkillRevisionLock(directory, name, () => {
+    const local = scan(personalRoot(), 'personal').find(
+      (skill) => skill.name === name && skill.state === 'active',
+    );
+    if (expectedHash && (!local || local.hash !== expectedHash)) {
+      throw new SkillRevisionConflictError(name);
+    }
+    if (
+      choice === 'merge' &&
+      scan(personalRoot(), 'personal').some(
+        (skill) => skill.name === name && skill.state === 'draft',
+      )
+    ) {
+      throw new SkillDraftConflictError(name, 'personal');
+    }
 
-  const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
-  const bundled = definition ? template(definition) : null;
-  if (!bundled) throw new Error('Bundled default not found');
+    const definition = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
+    const bundled = definition ? template(definition) : null;
+    if (!bundled) throw new Error('Bundled default not found');
 
-  if (!local || choice === 'replace') {
-    atomicWrite(path, bundled);
-  } else if (choice === 'merge') {
-    const merged = `${bundled.trim()}\n\n## Preserved local additions\n\n${local.instructions}\n`;
-    atomicWrite(join(personalRoot(), name, 'DRAFT.md'), merged);
-    return readRevision(join(personalRoot(), name, 'DRAFT.md'), 'personal', 'draft')!;
-  }
-  // keep-local: do nothing, return the existing revision
-  // merge-with-agent: handled by the route handler which has provider access
-  return readRevision(path, 'personal', 'active')!;
+    if (!local || choice === 'replace') {
+      atomicWrite(path, bundled);
+      if (local?.storageVersion === 2) {
+        const metadataPath = sidecarPath(directory, 'active');
+        if (existsSync(metadataPath)) unlinkSync(metadataPath);
+        if (local.path !== path && existsSync(local.path)) unlinkSync(local.path);
+      }
+      const replaced = readRevision(path, 'personal', 'active');
+      if (!replaced) throw new Error('Bundled replacement could not be reloaded');
+      return replaced;
+    } else if (choice === 'merge') {
+      if (local.storageVersion === 2) {
+        const bundledRevision = revisionFromContent(path, bundled, 'personal', 'active');
+        const addition = withoutSkillTitle(bundledRevision.instructions);
+        const mergedSource =
+          local.document.renderer === 'html'
+            ? `${local.sourceContent.trim()}\n<section><h2>Bundled update for review</h2><pre>${escapeHtmlSource(addition)}</pre></section>\n`
+            : `${local.sourceContent.trim()}\n\n${local.document.renderer === 'markdown' ? '## Bundled update for review\n\n' : 'Bundled update for review\n\n'}${addition}\n`;
+        writeV2Revision(
+          directory,
+          'draft',
+          {
+            name: local.name,
+            description: local.description,
+            document: local.document,
+            coreInstructions: `${local.coreInstructions.trim()}\n\n${addition}`,
+            metadata: local.metadata,
+          },
+          mergedSource,
+        );
+        return revisionFromV2(directory, 'personal', 'draft')!;
+      }
+      const merged = `${bundled.trim()}\n\n## Preserved local additions\n\n${local.instructions}\n`;
+      atomicWrite(join(personalRoot(), name, 'DRAFT.md'), merged);
+      return readRevision(join(personalRoot(), name, 'DRAFT.md'), 'personal', 'draft')!;
+    }
+    // keep-local: do nothing, return the existing revision
+    // merge-with-agent: handled by the route handler which has provider access
+    if (!local) throw new Error('Local skill not found');
+    return local;
+  });
 }
 
 /**
@@ -2781,10 +3777,43 @@ export function applyDefaultUpdate(
  * @param mergedContent The LLM-produced merged content
  * @returns The draft revision
  */
-export function saveAgentMergedSkillDraft(name: string, mergedContent: string): SkillRevision {
-  const draftPath = join(personalRoot(), name, 'DRAFT.md');
-  atomicWrite(draftPath, mergedContent);
-  return readRevision(draftPath, 'personal', 'draft')!;
+export function saveAgentMergedSkillDraft(
+  name: string,
+  mergedContent: string,
+  coreInstructions?: string,
+  expectedHash?: string,
+): SkillRevision {
+  const directory = join(personalRoot(), name);
+  return withSkillRevisionLock(directory, name, () => {
+    const local = scan(personalRoot(), 'personal').find(
+      (skill) => skill.name === name && skill.state === 'active',
+    );
+    if (expectedHash && (!local || local.hash !== expectedHash)) {
+      throw new SkillRevisionConflictError(name);
+    }
+    const existingDraft = scan(personalRoot(), 'personal').find(
+      (skill) => skill.name === name && skill.state === 'draft',
+    );
+    if (existingDraft) throw new SkillDraftConflictError(name, 'personal');
+    if (local?.storageVersion === 2) {
+      writeV2Revision(
+        directory,
+        'draft',
+        {
+          name: local.name,
+          description: local.description,
+          document: local.document,
+          coreInstructions: coreInstructions?.trim() || local.coreInstructions,
+          metadata: local.metadata,
+        },
+        mergedContent,
+      );
+      return revisionFromV2(directory, 'personal', 'draft')!;
+    }
+    const draftPath = join(directory, 'DRAFT.md');
+    atomicWrite(draftPath, mergedContent);
+    return readRevision(draftPath, 'personal', 'draft')!;
+  });
 }
 
 /** Get the bundled SKILL.md content for a skill (file-based or TypeScript-defined). */

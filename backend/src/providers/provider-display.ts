@@ -167,7 +167,15 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/codebuff.svg',
     deployment: 'local',
     description:
-      'Codebuff-backed. Koryphaios calls the official @codebuff/sdk against the Codebuff backend, using the credentials your local `freebuff login` already wrote to ~/.config/manicode/credentials.json. Koryphaios owns tool execution through its permission system (via the SDK\u2019s overrideTools hook). It never asks for or stores a Freebuff token directly.',
+      'Runs the real Freebuff TUI in a tmux PTY. Native tools are confined to a disposable bubblewrap checkout; the real project is available through Koryphaios\u2019s authenticated MCP tool bridge. Login remains owned by `freebuff login`.',
+  },
+  codebuff: {
+    label: 'Codebuff API',
+    iconPath: '/provider-icons/lobehub/codebuff.svg',
+    deployment: 'api',
+    credentialUrl: 'https://www.codebuff.com/api-keys',
+    description:
+      'Official @codebuff/sdk provider using your Codebuff API key and the documented Codebuff base agent. SDK filesystem and terminal tools route through Koryphaios permissions.',
   },
   kilocode: {
     label: 'Kilo Code',
@@ -191,6 +199,14 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     deployment: 'api',
     description:
       'Poe API gateway. Paste an API key from poe.com/api_key; Koryphaios sends it only to https://api.poe.com/v1.',
+  },
+  chatbase: {
+    label: 'Chatbase',
+    iconPath: '/provider-icons/chatbase-color.svg',
+    deployment: 'api',
+    credentialUrl: 'https://www.chatbase.co/dashboard',
+    description:
+      'Chatbase agent API. Connect with your Chatbase API key to interact with your custom trained knowledge-base agents.',
   },
 };
 

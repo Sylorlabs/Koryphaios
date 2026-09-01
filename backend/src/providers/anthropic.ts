@@ -17,6 +17,7 @@ import { providerLog } from '../logger';
 import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
 import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import { resolvePromptCacheSegments } from './prompt-cache';
 
 export class AnthropicProvider implements Provider {
   readonly name: ProviderName;
@@ -38,16 +39,34 @@ export class AnthropicProvider implements Provider {
 
   /** Build the underlying client. Overridden by BedrockProvider to use AnthropicBedrock (SigV4). */
   protected makeClient(): Anthropic {
+    const hasCredential = !!(this.config.apiKey || this.config.authToken);
+    const defaultHeaders: Record<string, string | null> = { ...(this.config.headers ?? {}) };
+    if (!hasCredential && this.config.custom) {
+      defaultHeaders['x-api-key'] = null;
+      defaultHeaders.Authorization = null;
+    }
     return new Anthropic({
-      apiKey: this.config.apiKey,
+      // An Anthropic auth token is a Bearer credential. Supplying the custom
+      // keyless placeholder alongside it makes the SDK prefer x-api-key and
+      // turns a successful Bearer catalog probe into a runtime 401.
+      apiKey:
+        this.config.apiKey ||
+        (!this.config.authToken && this.config.custom ? 'placeholder' : undefined),
       authToken: this.config.authToken,
       baseURL: this.config.baseUrl || undefined,
+      defaultHeaders,
       fetch: createUsageInterceptingFetch(globalThis.fetch),
     });
   }
 
   isAvailable(): boolean {
-    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available =
+      !this.config.disabled &&
+      !!(
+        this.config.apiKey ||
+        this.config.authToken ||
+        (this.config.custom && this.config.baseUrl)
+      );
     if (available && !isModelListCacheFresh(this.lastFetch)) {
       this.refreshModelsInBackground([]);
     }
@@ -97,6 +116,7 @@ export class AnthropicProvider implements Provider {
         }
         this.lastFetch = Date.now();
       } catch (err) {
+        this.lastFetch = Date.now();
         providerLog.debug(
           { provider: this.name, err: err instanceof Error ? err.message : String(err) },
           'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
@@ -140,21 +160,47 @@ export class AnthropicProvider implements Provider {
       });
     }
 
-    const tools = request.tools?.map((t) => ({
+    const nativePromptCaching =
+      !this.config.custom && (this.name === 'anthropic' || this.name === 'bedrock');
+    const cacheSegments = resolvePromptCacheSegments(request);
+    const tools = request.tools?.map((t, index, all) => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+      ...(nativePromptCaching && index === all.length - 1
+        ? { cache_control: { type: 'ephemeral' as const } }
+        : {}),
     }));
+
+    const system =
+      nativePromptCaching && cacheSegments.valid
+        ? [
+            {
+              type: 'text' as const,
+              text: cacheSegments.stable,
+              cache_control: { type: 'ephemeral' as const },
+            },
+            ...(cacheSegments.dynamic
+              ? [{ type: 'text' as const, text: cacheSegments.dynamic }]
+              : []),
+          ]
+        : request.systemPrompt;
 
     const params: Anthropic.MessageCreateParamsStreaming = {
       // Use the catalog's apiModelId (dated Anthropic id, or the Bedrock model id) when known.
       model: resolveModel(request.model)?.apiModelId ?? request.model,
       max_tokens: request.maxTokens ?? 16_384,
-      system: request.systemPrompt,
+      system: system as Anthropic.MessageCreateParamsStreaming['system'],
       messages,
       stream: true,
       ...(tools?.length && { tools }),
     };
+    if (nativePromptCaching) {
+      // Automatic caching advances a rolling conversation breakpoint while
+      // the explicit system marker preserves the cross-task workspace layer.
+      // The older installed SDK does not type the current top-level control.
+      (params as unknown as Record<string, unknown>).cache_control = { type: 'ephemeral' };
+    }
 
     // Extended thinking: Opus 4.6 & Sonnet 4.6 use adaptive + output_config.effort (Anthropic API);
     // Haiku 4.5 and others use thinking.type "enabled" + budget_tokens.
@@ -305,23 +351,39 @@ export class AnthropicProvider implements Provider {
 
           case 'message_start': {
             const usage = event.message.usage;
+            const cacheRead =
+              ((usage as unknown as Record<string, unknown>).cache_read_input_tokens as
+                number | undefined) ?? 0;
+            const cacheWrite =
+              ((usage as unknown as Record<string, unknown>).cache_creation_input_tokens as
+                number | undefined) ?? 0;
             yield {
               type: 'usage_update',
               tokensIn: usage.input_tokens,
               tokensOut: usage.output_tokens,
               // Anthropic's input_tokens EXCLUDES cached prompt tokens — report
               // cache reads + writes separately so context occupancy is real.
-              tokensCache:
-                (((usage as unknown as Record<string, unknown>).cache_read_input_tokens as
-                  number | undefined) ?? 0) +
-                (((usage as unknown as Record<string, unknown>).cache_creation_input_tokens as
-                  number | undefined) ?? 0),
+              tokensCache: cacheRead + cacheWrite,
+              tokensCacheRead: cacheRead,
+              tokensCacheWrite: cacheWrite,
             };
             break;
           }
         }
       }
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+        providerLog.error(
+          { ...diagnostic, model: request.model },
+          'Anthropic provider stream timed out',
+        );
+        yield {
+          type: 'error',
+          error: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
+        };
+        return;
+      }
       if (err instanceof Error && err.name === 'AbortError') return;
 
       const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);

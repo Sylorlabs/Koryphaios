@@ -44,4 +44,21 @@ describe('public error detail boundaries', () => {
     });
     expect(body).not.toHaveProperty('details');
   });
+
+  test('returns only bounded draft concurrency revisions without draft content', () => {
+    const { body, set } = invoke(
+      new ConflictError('Draft changed', {
+        expectedDraftRevision: 2,
+        currentDraftRevision: 3,
+        submittedContent: 'never return this private draft',
+      }),
+    );
+
+    expect(set.status).toBe(409);
+    expect(body).toMatchObject({
+      ok: false,
+      details: { expectedDraftRevision: 2, currentDraftRevision: 3 },
+    });
+    expect(JSON.stringify(body)).not.toContain('private draft');
+  });
 });

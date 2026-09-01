@@ -1,3 +1,9 @@
+// These tests construct a real ProviderRegistry to test remote provider
+// registration and file-edit semantics. CLI auto-detection probes all
+// installed agent CLIs (claude, codex, grok, etc.) which can take 4-6s and
+// push the 5s test timeout. Disable it — these tests don't need CLIs.
+process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';

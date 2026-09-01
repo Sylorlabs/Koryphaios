@@ -2,6 +2,7 @@ import { sessionStore } from '$lib/stores/sessions.svelte';
 import { wsStore } from '$lib/stores/websocket.svelte';
 import { toastStore } from '$lib/stores/toast.svelte';
 import { invoke } from '@tauri-apps/api/core';
+import { loadRecentProjectBriefs, saveRecentProjectBriefs } from './recent-projects-storage';
 
 export type RecentProject = {
   id: string;
@@ -105,14 +106,14 @@ export function buildNewProjectTemplate(): string {
 }
 
 export function parseRecentProjects(): RecentProject[] {
-  // Durable project history comes from backend sessions; filesystem folders
-  // are enumerated live and are never restored from browser storage.
-  return [];
+  return loadRecentProjectBriefs();
 }
 
-export function persistRecentProjects(_projects: RecentProject[]): void {
-  // Intentionally in-memory. Session history is the durable recent-project
-  // source and workspace folder lists always come from the filesystem.
+export function persistRecentProjects(projects: RecentProject[]): void {
+  // Only portable text briefs are restored. Never persist a folder path as
+  // navigation authority; opening a filesystem project remains an explicit,
+  // current-path validation step.
+  saveRecentProjectBriefs(projects);
 }
 
 /** Check whether a filesystem path exists via the Tauri `path_exists` command.

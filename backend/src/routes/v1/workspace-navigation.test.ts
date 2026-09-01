@@ -77,6 +77,54 @@ describe('workspace navigation routes', () => {
     expect((await app.handle(request('/api/workspace/state', {}, false))).status).toBe(401);
   });
 
+  test('broadcasts workspace.updated on mutations', async () => {
+    const { setContext } = await import('../../context');
+    const broadcasts: Array<{ type: string; payload: unknown }> = [];
+    setContext({
+      wsManager: {
+        broadcast: (message: { type: string; payload: unknown }) => {
+          broadcasts.push(message);
+        },
+      },
+    } as never);
+    try {
+      await app.handle(
+        request('/api/workspace/open', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ root: workspaceRoot }),
+        }),
+      );
+      await app.handle(
+        request('/api/workspace/select', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ path: join(workspaceRoot, 'alpha') }),
+        }),
+      );
+      await app.handle(request('/api/workspace/deselect', { method: 'POST' }));
+      await app.handle(request('/api/workspace/acknowledge-unavailable', { method: 'POST' }));
+      await app.handle(request('/api/workspace/state', { method: 'DELETE' }));
+
+      const updates = broadcasts.filter((message) => message.type === 'workspace.updated');
+      expect(updates.length).toBe(5);
+      const selected = updates[1]?.payload as {
+        selectedProject: string | null;
+        workspaceRoot: string | null;
+        seq: number;
+      };
+      expect(selected.workspaceRoot).toBe(canonicalWorkspaceRoot);
+      expect(selected.selectedProject).toBe(canonical(join(workspaceRoot, 'alpha')));
+      // Sequence advances monotonically across every mutation broadcast.
+      const seqs = updates.map((message) => (message.payload as { seq: number }).seq);
+      for (let index = 1; index < seqs.length; index++) {
+        expect(seqs[index]!).toBeGreaterThan(seqs[index - 1]!);
+      }
+    } finally {
+      setContext({} as never);
+    }
+  });
+
   test('returns current filesystem folders and retains missing-path recovery until acknowledged', async () => {
     const opened = await app.handle(
       request('/api/workspace/open', {

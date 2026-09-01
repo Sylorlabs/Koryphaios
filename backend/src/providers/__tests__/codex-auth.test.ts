@@ -1,4 +1,6 @@
 import { afterAll, describe, expect, it, mock, setDefaultTimeout } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { createCliAttachmentScope } from '../cli-attachments';
 
 // Codex auth tests involve provider instantiation that can be slow under
 // parallel test load.
@@ -9,7 +11,14 @@ const account = mock(async () => ({
   account: { type: 'chatgpt', planType: 'pro' },
   requiresOpenaiAuth: true,
 }));
-const listModels = mock(async () => [{ model: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol', isDefault: true }]);
+const listModels = mock(async () => [
+  {
+    model: 'gpt-5.6-sol',
+    displayName: 'GPT-5.6 Sol',
+    isDefault: true,
+    inputModalities: ['text', 'image'],
+  },
+]);
 
 // A successful browser callback reaches setCredentials before a provider
 // instance exists. This mock proves the registry validates that path directly
@@ -19,7 +28,7 @@ mock.module('../codex-app-server', () => ({
 }));
 
 const { ProviderRegistry } = await import('../registry');
-const { CODEX_MANAGED_AUTH_MARKER } = await import('../codex-auth');
+const { CODEX_MANAGED_AUTH_MARKER, buildCodexAuthPrompt } = await import('../codex-auth');
 
 function config(): KoryphaiosConfig {
   return {
@@ -53,6 +62,35 @@ describe('OpenAI Codex managed ChatGPT auth', () => {
     expect(account).toHaveBeenCalledWith(true);
     expect(registry.get('codex-auth')?.isAvailable()).toBe(true);
     expect(registry.get('codex-auth')?.listModels().map((model) => model.apiModelId)).toEqual(['gpt-5.6-sol']);
+    expect(registry.get('codex-auth')?.listModels()[0]?.supportsAttachments).toBe(true);
+  });
+
+  it('keeps screenshot bytes out of the managed-auth prompt while materializing a private input', () => {
+    const scope = createCliAttachmentScope();
+    const imageData = Buffer.from('managed-auth-screenshot').toString('base64');
+    let imagePath = '';
+    try {
+      const prompt = buildCodexAuthPrompt(
+        '',
+        [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Inspect this screen.' },
+              { type: 'image', imageData, imageMimeType: 'image/png' },
+            ],
+          },
+        ],
+        scope,
+      );
+      imagePath = scope.artifacts[0]!.path;
+      expect(prompt).toContain(imagePath);
+      expect(prompt).not.toContain(imageData);
+      expect(existsSync(imagePath)).toBe(true);
+    } finally {
+      scope.cleanup();
+    }
+    expect(existsSync(imagePath)).toBe(false);
   });
 });
 

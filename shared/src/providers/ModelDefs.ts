@@ -72,6 +72,8 @@ export interface ProviderConfig {
   selectedModels?: string[];
   /** Whether to skip the model selection dialog in the future. */
   hideModelSelector?: boolean;
+  lastVerifiedAt?: number;
+  lastVerificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
   /** Ordered list of saved account IDs for automatic fallback on failure. */
   fallbackOrder?: string[];
   /** Whether automatic fallback between selected account profiles is enabled. */
@@ -83,6 +85,10 @@ export interface ProviderConfig {
    * prevents a base model id from being presented as an inference target.
    */
   deployment?: string;
+  /** Bedrock: explicit AWS region (falls back to AWS_REGION / us-east-1). */
+  awsRegion?: string;
+  /** Bedrock: optional STS session token paired with apiKey/authToken. */
+  awsSessionToken?: string;
 
   // ─── Custom (user-defined / bring-your-own) provider fields ───────────────
   /** True when this is a user-defined custom provider (not a built-in). */
@@ -94,6 +100,16 @@ export interface ProviderConfig {
   /** Explicitly declared model IDs for a custom provider (used when the endpoint has
    *  no /models discovery, or to seed the catalog before the live fetch completes). */
   models?: string[];
+  /** Opaque reference to a normalized provider badge stored outside project config. */
+  customIcon?: CustomProviderIconConfig;
+}
+
+export type CustomProviderIconShape = 'rounded-square' | 'circle';
+
+export interface CustomProviderIconConfig {
+  assetId: string;
+  revision: string;
+  shape: CustomProviderIconShape;
 }
 
 export interface ProviderStatus {

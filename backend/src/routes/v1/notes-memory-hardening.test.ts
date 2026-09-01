@@ -128,6 +128,214 @@ describe('Notes and Memory route hardening', () => {
       }),
     );
     expect(currentDelete.status).toBe(200);
+    const deletedBody = (await currentDelete.json()) as {
+      data: { id: string; revision: number; trashedAt: string };
+    };
+    expect(deletedBody.data).toMatchObject({
+      id: createdBody.data.id,
+      revision: updateBody.data.revision + 1,
+    });
+    expect(deletedBody.data.trashedAt).toBeTypeOf('string');
+
+    const trash = await app.handle(request('/api/notes/trash'));
+    expect(trash.status).toBe(200);
+    expect(
+      ((await trash.json()) as { data: Array<{ id: string }> }).data.map(({ id }) => id),
+    ).toContain(createdBody.data.id);
+
+    const history = await app.handle(request(`/api/notes/${createdBody.data.id}/revisions`));
+    expect(history.status).toBe(200);
+    expect(
+      ((await history.json()) as { data: Array<{ operation: string }> }).data.map(
+        ({ operation }) => operation,
+      ),
+    ).toEqual(['trash', 'update', 'create']);
+
+    const restore = await app.handle(
+      request(`/api/notes/${createdBody.data.id}/restore`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: deletedBody.data.revision }),
+      }),
+    );
+    expect(restore.status).toBe(200);
+    expect((await restore.json()) as Record<string, unknown>).toMatchObject({
+      ok: true,
+      data: { id: createdBody.data.id, content: 'second' },
+    });
+  });
+
+  test('exports the authenticated project as a deterministic tar archive', async () => {
+    const response = await app.handle(request('/api/notes/export'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-tar');
+    expect(response.headers.get('content-disposition')).toContain('koryphaios-');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    expect(bytes.length).toBe(Number(response.headers.get('content-length')));
+    expect(bytes.includes(Buffer.from('manifest.json'))).toBe(true);
+    expect(bytes.includes(Buffer.from('koryphaios-notes-vault'))).toBe(true);
+  });
+
+  test('keeps typed properties, saved Bases, and durable draft revisions aligned at the route', async () => {
+    const createdResponse = await app.handle(
+      request('/api/notes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Workspace contracts', content: '# Body' }),
+      }),
+    );
+    const created = (await createdResponse.json()) as {
+      data: { id: string; revision: number };
+    };
+
+    const invalidProperty = await app.handle(
+      request(`/api/notes/${created.data.id}/properties`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: created.data.revision,
+          patches: [{ op: 'set', key: 'bad:key', type: 'text', value: 'unsafe' }],
+        }),
+      }),
+    );
+    expect(invalidProperty.status).toBe(400);
+    expect((await invalidProperty.json()) as Record<string, unknown>).toMatchObject({
+      ok: false,
+      code: 'VALIDATION_ERROR',
+    });
+
+    const emptyPatch = await app.handle(
+      request(`/api/notes/${created.data.id}/properties`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: created.data.revision, patches: [] }),
+      }),
+    );
+    expect(emptyPatch.status).toBe(400);
+
+    const propertySave = await app.handle(
+      request(`/api/notes/${created.data.id}/properties`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: created.data.revision,
+          patches: [{ op: 'set', key: 'status', type: 'text', value: 'ready' }],
+        }),
+      }),
+    );
+    expect(propertySave.status).toBe(200);
+    const propertyBody = (await propertySave.json()) as {
+      data: { note: { revision: number }; properties: { properties: unknown[] } };
+    };
+    expect(propertyBody.data.properties.properties).toEqual([
+      { key: 'status', type: 'text', value: 'ready' },
+    ]);
+
+    const snapshot = {
+      title: 'Workspace contracts draft',
+      content: '# Unsaved branch',
+      folderPath: '/',
+      tags: [],
+      pinned: false,
+      includeInContext: false,
+      format: 'markdown',
+    };
+    const draftCreate = await app.handle(
+      request('/api/notes/drafts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          noteId: created.data.id,
+          baseRevision: propertyBody.data.note.revision,
+          ...snapshot,
+        }),
+      }),
+    );
+    expect(draftCreate.status).toBe(200);
+    const draft = (await draftCreate.json()) as {
+      data: { id: string; draftRevision: number; createdAt: string; updatedAt: string };
+    };
+    expect(draft.data).toMatchObject({ draftRevision: 1 });
+    expect(draft.data.createdAt).toBeTypeOf('string');
+
+    const draftUpdate = await app.handle(
+      request(`/api/notes/drafts/${draft.data.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedDraftRevision: 1, ...snapshot, content: '# Newer branch' }),
+      }),
+    );
+    expect(draftUpdate.status).toBe(200);
+    expect((await draftUpdate.json()) as Record<string, unknown>).toMatchObject({
+      data: { draftRevision: 2 },
+    });
+
+    const staleDiscard = await app.handle(
+      request(`/api/notes/drafts/${draft.data.id}/discard`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedDraftRevision: 1 }),
+      }),
+    );
+    expect(staleDiscard.status).toBe(409);
+    expect((await staleDiscard.json()) as Record<string, unknown>).toMatchObject({
+      details: { expectedDraftRevision: 1, currentDraftRevision: 2 },
+    });
+
+    const invalidBase = await app.handle(
+      request('/api/notes/bases', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Invalid tags sort',
+          definition: {
+            version: 1,
+            sort: [{ field: { source: 'system', field: 'tags' }, direction: 'asc' }],
+            view: { kind: 'table', fields: [{ source: 'system', field: 'title' }] },
+          },
+        }),
+      }),
+    );
+    expect(invalidBase.status).toBe(400);
+
+    const baseCreate = await app.handle(
+      request('/api/notes/bases', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Recoverable view',
+          definition: {
+            version: 1,
+            sort: [],
+            view: { kind: 'table', fields: [{ source: 'system', field: 'title' }] },
+          },
+        }),
+      }),
+    );
+    expect(baseCreate.status).toBe(200);
+    const base = (await baseCreate.json()) as { data: { id: string; revision: number } };
+    const baseTrash = await app.handle(
+      request(`/api/notes/bases/${base.data.id}?expectedRevision=${base.data.revision}`, {
+        method: 'DELETE',
+      }),
+    );
+    expect(baseTrash.status).toBe(200);
+    const trashedBase = (await baseTrash.json()) as {
+      data: { revision: number; trashedAt: string };
+    };
+    expect(trashedBase.data.trashedAt).toBeTypeOf('string');
+
+    const baseRestore = await app.handle(
+      request(`/api/notes/bases/${base.data.id}/restore`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: trashedBase.data.revision }),
+      }),
+    );
+    expect(baseRestore.status).toBe(200);
+    expect((await baseRestore.json()) as Record<string, unknown>).toMatchObject({
+      data: { id: base.data.id, revision: trashedBase.data.revision + 1 },
+    });
   });
 
   test('binds attachment deletion to its owning note and rejects non-file form fields', async () => {

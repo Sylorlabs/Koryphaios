@@ -2,7 +2,14 @@
 // Domain: WebSocket connection lifecycle and message processing
 // Extracted from server.ts lines 1258-1322
 
-import type { WSMessage } from '@koryphaios/shared';
+import type {
+  KoryAskUserPayload,
+  KoryAskUserResolvedPayload,
+  KorySessionChangesPayload,
+  KorySessionChangesResolvedPayload,
+  SessionActionableWaitsPayload,
+  WSMessage,
+} from '@koryphaios/shared';
 import type { ServerWebSocket } from 'bun';
 import type { WSManager } from '../ws/ws-manager';
 import type { ISessionStore } from '../stores/session-store';
@@ -10,7 +17,15 @@ import type { KoryManager } from '../kory/manager';
 import type { ProviderRegistry } from '../providers';
 import { validateSessionId } from '../security';
 import { serverLog } from '../logger';
-import { getPendingQuestion } from '../stores/pending-question-store';
+import {
+  getPendingQuestion,
+  listPendingQuestionSessionIds,
+} from '../stores/pending-question-store';
+import {
+  getPendingSessionReview,
+  listPendingSessionReviewSessionIds,
+} from '../stores/session-review-store';
+import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +39,43 @@ export interface WebSocketHandlerDependencies {
   sessions: ISessionStore;
   kory: KoryManager;
   providers: ProviderRegistry;
+  runs: SessionRunCoordinator;
+}
+
+function isCurrentQuestion(
+  run: ReturnType<SessionRunCoordinator['get']>,
+  pending: KoryAskUserPayload | null,
+): pending is KoryAskUserPayload {
+  return !!(
+    pending &&
+    (!run || (run.phase === 'waiting_user' && run.continuationId === pending.questionId))
+  );
+}
+
+/**
+ * Old operational events remain useful transcript evidence, but they must not
+ * re-open an answered question or already-resolved review on fresh hydration.
+ * The post-subscription projection below closes the narrow race where state
+ * changes between this initial lookup and subscription registration.
+ */
+function isCurrentActionableReplay(
+  event: WSMessage,
+  questionId: string | undefined,
+  reviewId: string | undefined,
+): boolean {
+  if (event.type === 'kory.ask_user') {
+    return (
+      !!questionId &&
+      (event.payload as Partial<KoryAskUserPayload>).questionId === questionId
+    );
+  }
+  if (event.type === 'session.changes') {
+    return (
+      !!reviewId &&
+      (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId
+    );
+  }
+  return true;
 }
 
 // ─── WebSocket Handler Functions ─────────────────────────────────────────────────
@@ -80,7 +132,7 @@ export async function handleWSMessage(
   const messageBytes = Buffer.byteLength(message);
   let messageType: string | undefined;
   try {
-    const { wsManager, sessions, kory } = deps;
+    const { wsManager, sessions, kory, runs } = deps;
     const msg = JSON.parse(String(message));
     messageType =
       typeof msg?.type === 'string' && /^[a-zA-Z0-9._:-]{1,64}$/.test(msg.type)
@@ -102,20 +154,73 @@ export async function handleWSMessage(
       case 'subscribe_session': {
         const sessionId = msg.sessionId;
         if (sessionId && validateSessionId(sessionId) && (await sessions.get(sessionId))) {
+          const initialRun = runs.get(sessionId);
+          const [initialPending, initialReview] = await Promise.all([
+            getPendingQuestion(sessionId),
+            getPendingSessionReview(sessionId),
+          ]);
           wsManager.subscribeClientToSession(ws.data.id, sessionId, {
             epoch: Number.isSafeInteger(msg.epoch) ? msg.epoch : undefined,
             sequence: Number.isSafeInteger(msg.sequence) ? msg.sequence : undefined,
-          });
-          const pending = await getPendingQuestion(sessionId);
-          if (pending) {
-            ws.send(
-              JSON.stringify({
-                type: 'kory.ask_user',
-                sessionId,
-                payload: pending,
-                timestamp: Date.now(),
-              } satisfies WSMessage),
-            );
+          }, (event) =>
+            isCurrentActionableReplay(
+              event,
+              isCurrentQuestion(initialRun, initialPending) ? initialPending.questionId : undefined,
+              initialReview?.reviewId,
+            ));
+
+          // Re-read after subscription. If a question/review changed during
+          // the initial projection lookup, this current snapshot wins over the
+          // filtered replay without forcing a renderer to subscribe to every
+          // historical session.
+          const run = runs.get(sessionId);
+          if (run) {
+            wsManager.sendToClientEphemeral(ws.data.id, {
+              type: 'run.state',
+              sessionId,
+              payload: { snapshot: run, transition: null },
+              timestamp: Date.now(),
+            });
+          }
+          const [pending, review] = await Promise.all([
+            getPendingQuestion(sessionId),
+            getPendingSessionReview(sessionId),
+          ]);
+          if (isCurrentQuestion(run, pending)) {
+            wsManager.sendToClientEphemeral(ws.data.id, {
+              type: 'kory.ask_user',
+              sessionId,
+              payload: pending,
+              timestamp: Date.now(),
+            });
+          } else {
+            const resolved: KoryAskUserResolvedPayload = { status: 'not_pending' };
+            wsManager.sendToClientEphemeral(ws.data.id, {
+              type: 'kory.ask_user_resolved',
+              sessionId,
+              payload: resolved,
+              timestamp: Date.now(),
+            });
+          }
+          if (review) {
+            const payload: KorySessionChangesPayload = {
+              changes: review.changes,
+              reviewId: review.reviewId,
+            };
+            wsManager.sendToClientEphemeral(ws.data.id, {
+              type: 'session.changes',
+              sessionId,
+              payload,
+              timestamp: Date.now(),
+            });
+          } else {
+            const resolved: KorySessionChangesResolvedPayload = { status: 'not_pending' };
+            wsManager.sendToClientEphemeral(ws.data.id, {
+              type: 'session.changes_resolved',
+              sessionId,
+              payload: resolved,
+              timestamp: Date.now(),
+            });
           }
           serverLog.debug({ clientId: ws.data.id, sessionId }, 'Client subscribed to session');
         }
@@ -154,6 +259,23 @@ export async function handleWSMessage(
           );
         }
         break;
+
+      case 'session.actionable_waits.request': {
+        const [questionSessionIds, reviewSessionIds] = await Promise.all([
+          listPendingQuestionSessionIds(),
+          listPendingSessionReviewSessionIds(),
+        ]);
+        const payload: SessionActionableWaitsPayload = {
+          questionSessionIds,
+          reviewSessionIds,
+        };
+        wsManager.sendToClientEphemeral(ws.data.id, {
+          type: 'session.actionable_waits',
+          payload,
+          timestamp: Date.now(),
+        });
+        break;
+      }
 
       case 'toggle_yolo':
         kory.setYoloMode(!!msg.enabled);

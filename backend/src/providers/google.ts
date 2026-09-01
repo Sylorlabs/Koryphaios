@@ -2,20 +2,11 @@
 // Uses Google's GenAI SDK for direct API access.
 // Model list is refreshed from the Gemini API when available; static list is fallback only.
 
-import type { ProviderConfig, ModelDef } from '@koryphaios/shared';
-import {
-  type Provider,
-  type ProviderEvent,
-  type StreamRequest,
-  resolveModel,
-} from './types';
+import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
+import { type Provider, type ProviderEvent, type StreamRequest, resolveModel } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
 import { withRetry } from './utils';
-import {
-  isModelListCacheFresh,
-  mergeModelLists,
-  modelFromRemoteId,
-} from './model-list-cache';
+import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
 import { applyModelsDevMetadata, warmModelsDevCache } from './models-dev';
 import { providerLog } from '../logger';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
@@ -59,7 +50,10 @@ export function formatGoogleProviderError(err: unknown, modelId: string, provide
     message = parsed?.error?.message ?? raw;
   } catch (err: unknown) {
     // Not JSON — use the raw message. Expected for non-JSON error strings.
-    providerLog.debug({ err: err instanceof Error ? err.message : String(err), modelId }, 'Google error string is not JSON, using raw message');
+    providerLog.debug(
+      { err: err instanceof Error ? err.message : String(err), modelId },
+      'Google error string is not JSON, using raw message',
+    );
   }
 
   const isVertex = provider === 'vertexai';
@@ -80,11 +74,16 @@ export class GoogleProvider implements Provider {
   // 'aistudio' is the AI Studio brand of the same Gemini (generativelanguage)
   // API — behaves exactly like 'google', just a distinct, unambiguous
   // API-key-only provider entry so users never hit the gcloud OAuth path.
-  readonly name: 'google' | 'vertexai' | 'aistudio';
+  readonly name: ProviderName;
 
   constructor(readonly config: ProviderConfig) {
-    this.name =
-      config.name === 'vertexai' ? 'vertexai' : config.name === 'aistudio' ? 'aistudio' : 'google';
+    this.name = config.custom
+      ? config.name
+      : config.name === 'vertexai'
+        ? 'vertexai'
+        : config.name === 'aistudio'
+          ? 'aistudio'
+          : 'google';
   }
 
   /** True for the Gemini AI Studio API (generativelanguage), false for Vertex. */
@@ -93,7 +92,10 @@ export class GoogleProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    const available = !this.config.disabled && !!this.config.apiKey;
+    const customCredential = this.config.apiKey || this.config.authToken;
+    const available =
+      !this.config.disabled &&
+      !!(this.config.custom ? this.config.baseUrl && customCredential : this.config.apiKey);
     if (available && this.isAiStudio && !isModelListCacheFresh(this.lastFetch)) {
       this.refreshModelsInBackground([]);
     }
@@ -122,18 +124,25 @@ export class GoogleProvider implements Provider {
 
   async refreshModels(force?: boolean, fallback: ModelDef[] = []): Promise<void> {
     if (this.fetchInProgress && !force) return;
-    const apiKey = this.config.apiKey;
-    if (!apiKey) return;
+    const apiKey = this.config.apiKey || (this.config.custom ? this.config.authToken : undefined);
+    if (!apiKey && !this.config.custom) return;
 
     this.fetchInProgress = true;
-    const url = `${GEMINI_V1BETA_BASE}/models?key=${encodeURIComponent(apiKey)}`;
+    const customBase = this.config.custom ? this.config.baseUrl?.replace(/\/+$/, '') : undefined;
+    const url = customBase
+      ? `${customBase}/models`
+      : `${GEMINI_V1BETA_BASE}/models?key=${encodeURIComponent(apiKey!)}`;
+    const headers = new Headers(this.config.headers ?? {});
+    if (customBase && apiKey) headers.set('x-goog-api-key', apiKey);
 
     try {
       // Await models.dev so enrichment data is available when discovery completes.
       await warmModelsDevCache();
-      const body = await withRetry(() =>
-        fetch(url).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.statusText)))),
-      ) as {
+      const body = (await withRetry(() =>
+        fetch(url, { headers }).then((r) =>
+          r.ok ? r.json() : Promise.reject(new Error(r.statusText)),
+        ),
+      )) as {
         models?: Array<{
           name?: string;
           displayName?: string;
@@ -161,7 +170,9 @@ export class GoogleProvider implements Provider {
           ...(m.inputTokenLimit ? { contextWindow: m.inputTokenLimit, contextVerified: true } : {}),
           ...(m.outputTokenLimit ? { maxOutputTokens: m.outputTokenLimit } : {}),
           ...(m.thinking ? { canReason: true } : {}),
-          ...(m.supportedThinkingLevels?.length ? { reasoningLevels: m.supportedThinkingLevels } : {}),
+          ...(m.supportedThinkingLevels?.length
+            ? { reasoningLevels: m.supportedThinkingLevels }
+            : {}),
           ...(typeof m.temperature === 'number' ? { temperature: m.temperature } : {}),
           ...(typeof m.maxTemperature === 'number' ? { maxTemperature: m.maxTemperature } : {}),
         };
@@ -179,6 +190,7 @@ export class GoogleProvider implements Provider {
       }
       this.lastFetch = Date.now();
     } catch (err) {
+      this.lastFetch = Date.now();
       providerLog.debug(
         { provider: this.name, err: err instanceof Error ? err.message : String(err) },
         'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
@@ -191,14 +203,16 @@ export class GoogleProvider implements Provider {
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     const { GoogleGenAI } = await import('@google/genai');
 
-    const apiKey = this.config.apiKey;
+    const apiKey = this.config.apiKey || (this.config.custom ? this.config.authToken : undefined);
     if (!apiKey) {
       yield {
         type: 'error',
         error:
           this.name === 'vertexai'
             ? 'Vertex AI requires an explicit API key (set GOOGLE_VERTEX_AI_API_KEY)'
-            : 'No API key available',
+            : this.config.custom
+              ? 'Gemini-compatible custom providers require an API key'
+              : 'No API key available',
       };
       return;
     }
@@ -221,16 +235,17 @@ export class GoogleProvider implements Provider {
         : { apiKey };
 
     if (this.config.baseUrl) {
-      clientOptions.baseUrl = this.config.baseUrl;
+      clientOptions.httpOptions = {
+        baseUrl: this.config.baseUrl,
+        headers: { ...(this.config.headers ?? {}) },
+      };
     }
 
     const client = new GoogleGenAI(clientOptions as ConstructorParameters<typeof GoogleGenAI>[0]);
 
     // Gemini content parts: either text or inlineData (image). The SDK's
     // Part type is a strict union; we build a compatible shape explicitly.
-    type GeminiPart =
-      | { text: string }
-      | { inlineData: { mimeType: string; data: string } };
+    type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
     const contents = request.messages
       .filter((m) => m.role !== 'system')
@@ -238,8 +253,15 @@ export class GoogleProvider implements Provider {
         role: m.role === 'assistant' ? 'model' : 'user',
         parts:
           typeof m.content === 'string'
-            ? [{ text: m.content }] satisfies GeminiPart[]
-            : (m.content as Array<{ type: string; text?: string; imageData?: string; imageMimeType?: string }>)
+            ? ([{ text: m.content }] satisfies GeminiPart[])
+            : (
+                m.content as Array<{
+                  type: string;
+                  text?: string;
+                  imageData?: string;
+                  imageMimeType?: string;
+                }>
+              )
                 .map((b): GeminiPart | null => {
                   if (b.type === 'text') return { text: b.text ?? '' };
                   // Gemini is vision-capable — pass images as inlineData so the
@@ -299,8 +321,9 @@ export class GoogleProvider implements Provider {
         // Gemini-compatible custom endpoints may reject inlineData images.
         // Degrade gracefully: swap them for a text note and retry once.
         const hasImages = contents.some((m) =>
-          m.parts.some((p): p is { inlineData: { mimeType: string; data: string } } =>
-            'inlineData' in p && p.inlineData !== undefined,
+          m.parts.some(
+            (p): p is { inlineData: { mimeType: string; data: string } } =>
+              'inlineData' in p && p.inlineData !== undefined,
           ),
         );
         const msg = err instanceof Error ? err.message : String(err);
@@ -308,7 +331,9 @@ export class GoogleProvider implements Provider {
           for (const m of contents) {
             m.parts = m.parts.map((p): GeminiPart =>
               'inlineData' in p
-                ? { text: '[image attachment omitted — the selected model does not support image input]' }
+                ? {
+                    text: '[image attachment omitted — the selected model does not support image input]',
+                  }
                 : p,
             );
           }
@@ -331,12 +356,17 @@ export class GoogleProvider implements Provider {
             type: 'usage_update',
             tokensIn: meta.promptTokenCount ?? 0,
             tokensOut: (meta.candidatesTokenCount ?? 0) + (meta.thoughtsTokenCount ?? 0),
+            // Gemini includes cache hits inside promptTokenCount.
+            tokensCacheRead: meta.cachedContentTokenCount,
           };
         }
         const candidate = chunk.candidates?.[0];
         if (!candidate?.content?.parts) continue;
         for (const part of candidate.content.parts) {
-          if (part.text) yield { type: 'content_delta', content: part.text };
+          if (!part.text) continue;
+          const isThought = (part as { thought?: boolean }).thought === true;
+          if (isThought) yield { type: 'thinking_delta', thinking: part.text };
+          else yield { type: 'content_delta', content: part.text };
         }
         if (candidate.finishReason) yield { type: 'complete', finishReason: 'end_turn' };
       }

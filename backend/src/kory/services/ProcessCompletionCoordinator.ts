@@ -35,13 +35,49 @@ export class ProcessCompletionCoordinator {
     ) {
       return;
     }
+    this.enqueueAccepted(event);
+  }
+
+  /**
+   * Rebuild a terminal batch from durable process rows after restart.
+   *
+   * The authoritative waiting continuation proves these exact ids belong to
+   * this run. Cancellation/restart terminals remain excluded and are
+   * reconciled as terminal run outcomes by the manager. The wake path rehydrates the entire
+   * continuation again before resuming, preventing a partial callback batch
+   * from producing an incomplete provider summary.
+   */
+  enqueueRecoveredBatch(events: readonly ProcessLifecycleEvent[]): number {
+    const first = events[0];
+    if (!first?.sessionId || this.waking.has(first.sessionId)) return 0;
+    let accepted = 0;
+    for (const event of events) {
+      if (
+        event.sessionId !== first.sessionId ||
+        event.type !== 'exited' ||
+        event.willRestart ||
+        event.terminalReason === 'session-cancelled' ||
+        event.terminalReason === 'killed-for-restart' ||
+        !isAgentBackgroundProcess(event)
+      ) {
+        continue;
+      }
+      accepted += this.enqueueAccepted(event) ? 1 : 0;
+    }
+    return accepted;
+  }
+
+  private enqueueAccepted(event: ProcessLifecycleEvent): boolean {
+    if (!event.sessionId || this.cancelled.has(event.sessionId)) return false;
     // A new authoritative terminal event is a concrete state change and may
     // retry a previously failed wake batch.
     this.failed.delete(event.sessionId);
     const events = this.pending.get(event.sessionId) ?? [];
+    if (events.some((candidate) => candidate.id === event.id)) return false;
     events.push(event);
     this.pending.set(event.sessionId, events);
     this.scheduleDrain(event.sessionId);
+    return true;
   }
 
   notifySessionIdle(sessionId: string): void {

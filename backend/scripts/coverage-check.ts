@@ -17,18 +17,22 @@ const envFunctions = process.env.COVERAGE_FUNCTIONS_THRESHOLD;
 const lineThreshold = envLines ? Number(envLines) : LINE_COVERAGE_THRESHOLD;
 const functionThreshold = envFunctions ? Number(envFunctions) : FUNCTION_COVERAGE_THRESHOLD;
 
-const testEnv = {
-  ...process.env,
-  SESSION_TOKEN_SECRET: process.env.SESSION_TOKEN_SECRET ?? 'test_only_not_for_production_aaaaaaaaaa',
-  NODE_ENV: 'test',
-};
-
-const proc = Bun.spawn(['bun', 'test', '--coverage', '--coverage-reporter=text'], {
-  cwd: import.meta.dir.replace('/scripts', ''),
-  stdout: 'pipe',
-  stderr: 'pipe',
-  env: testEnv,
-});
+const proc = Bun.spawn(
+  [
+    'bun',
+    'run',
+    '../scripts/test-backend-isolated.ts',
+    '--single-process',
+    '--coverage',
+    '--coverage-reporter=text',
+  ],
+  {
+    cwd: import.meta.dir.replace('/scripts', ''),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: process.env,
+  },
+);
 
 const stdout = await new Response(proc.stdout).text();
 const stderr = await new Response(proc.stderr).text();
@@ -62,7 +66,9 @@ if (functionCoverage < functionThreshold) {
   failures.push(`function coverage ${functionCoverage}% < threshold ${functionThreshold}%`);
 }
 
-console.log(`Coverage: lines=${lineCoverage}% (threshold ${lineThreshold}%), functions=${functionCoverage}% (threshold ${functionThreshold}%)`);
+console.log(
+  `Coverage: lines=${lineCoverage}% (threshold ${lineThreshold}%), functions=${functionCoverage}% (threshold ${functionThreshold}%)`,
+);
 
 if (failed) {
   console.error('coverage-check FAILED: ' + failures.join('; '));

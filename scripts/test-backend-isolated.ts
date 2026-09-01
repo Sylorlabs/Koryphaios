@@ -6,6 +6,8 @@
  * state from a previous file cannot leak into the next one (notes aliases and
  * FTS rows made this especially visible). Keeping the databases in one
  * temporary directory also lets SQLite create its WAL/SHM sidecars safely.
+ * Watch and aggregate-coverage commands use --single-process, but still run
+ * against one disposable database instead of the application database.
  *
  * Replaces the bash-only `test-backend-isolated.sh` so `bun run test:core`
  * works on macOS, Windows, and Linux without requiring bash.
@@ -102,7 +104,36 @@ function gatherTestFiles(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+function runBackendTests(
+  env: Record<string, string | undefined>,
+  databaseUrl: string,
+  testArguments: string[],
+  testTargets: string[],
+) {
+  return spawnSync(
+    process.execPath,
+    [
+      '--no-env-file',
+      'test',
+      '--timeout',
+      String(BACKEND_TEST_TIMEOUT_MS),
+      '--preload',
+      './backend/src/__tests__/setup-db.ts',
+      ...testArguments,
+      ...testTargets,
+    ],
+    {
+      cwd: PROJECT_ROOT,
+      env: { ...env, DATABASE_URL: databaseUrl },
+      stdio: 'inherit',
+    },
+  );
+}
+
 function main() {
+  const runnerArguments = process.argv.slice(2);
+  const singleProcess = runnerArguments.includes('--single-process');
+  const testArguments = runnerArguments.filter((argument) => argument !== '--single-process');
   const testDbDir = mkdtempSync(join(tmpdir(), 'kory-test-'));
   const testHome = join(testDbDir, 'home');
   mkdirSync(join(testHome, 'tmp'), { recursive: true });
@@ -111,6 +142,19 @@ function main() {
   let exitCode = 0;
 
   try {
+    if (singleProcess) {
+      console.log('Testing backend in one process with a disposable database');
+      const result = runBackendTests(
+        env,
+        `sqlite:${join(testDbDir, 'db', 'suite.db')}`,
+        testArguments,
+        [BACKEND_DIR],
+      );
+      exitCode = result.status ?? 1;
+      process.exitCode = exitCode;
+      return;
+    }
+
     const searchRoots = [
       join(BACKEND_DIR, '__tests__'),
       join(BACKEND_DIR, 'src'),
@@ -136,23 +180,7 @@ function main() {
       console.log(`Testing ${display}`);
       const dbUrl = `sqlite:${join(testDbDir, 'db', `${testIndex}.db`)}`;
 
-      const result = spawnSync(
-        process.execPath,
-        [
-          '--no-env-file',
-          'test',
-          '--timeout',
-          String(BACKEND_TEST_TIMEOUT_MS),
-          '--preload',
-          './backend/src/__tests__/setup-db.ts',
-          testFile,
-        ],
-        {
-          cwd: PROJECT_ROOT,
-          env: { ...env, DATABASE_URL: dbUrl },
-          stdio: 'inherit',
-        },
-      );
+      const result = runBackendTests(env, dbUrl, testArguments, [testFile]);
 
       if (result.status !== 0) {
         exitCode = result.status ?? 1;

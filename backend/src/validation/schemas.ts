@@ -28,6 +28,7 @@ export const ProviderNameSchema = z
     'bedrock',
     'vertexai',
     'local',
+    'chatbase',
     'deepseek',
     'togetherai',
     'cerebras',
@@ -120,6 +121,7 @@ export const SendMessageRequestSchema = z.object({
   model: z.string().optional(),
   reasoningLevel: z.string().optional(),
   fastMode: z.boolean().optional(),
+  imageInputMode: z.enum(['reject', 'omit']).optional(),
   attachments: z
     .array(
       z.object({
@@ -140,6 +142,10 @@ export const SetProviderCredentialsRequestSchema = z.object({
   apiKey: z.string().max(500).optional(),
   authToken: z.string().max(1000).optional(),
   baseUrl: z.string().url().max(500).optional(),
+  /** Bedrock: explicit AWS region (optional; falls back to env/default). */
+  awsRegion: z.string().max(64).optional(),
+  /** Bedrock: optional STS session token for temporary credentials. */
+  awsSessionToken: z.string().max(500).optional(),
   selectedModels: z.array(z.string()).optional(),
   hideModelSelector: z.boolean().optional(),
   authMode: z.enum(['api_key', 'codex', 'cli', 'claude_code']).optional(),

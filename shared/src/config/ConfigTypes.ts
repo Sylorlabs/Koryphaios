@@ -84,6 +84,8 @@ export interface AgentSettings {
   localWebSearch?: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
   multiSourceResearch?: boolean;
+  /** Context-window percentage at which automatic compaction triggers. */
+  autoCompactThreshold?: number;
   /** Timestamp of last update for synchronization */
   updatedAt?: number;
 }

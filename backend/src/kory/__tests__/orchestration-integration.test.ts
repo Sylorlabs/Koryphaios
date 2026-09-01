@@ -1,6 +1,11 @@
 // Integration tests for Kory orchestration
 // Tests the manager/worker/critic pipeline with real tool execution
 
+// Disable CLI auto-detection — these tests verify the Kory orchestration
+// pipeline with mocked providers, not real CLI harnesses. CLI probing adds
+// 4-6s that pushes the 5s test timeout.
+process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+
 import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from 'bun:test';
 import { KoryManager } from '../manager';
 import { ProviderRegistry } from '../../providers';

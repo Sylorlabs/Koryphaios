@@ -226,10 +226,14 @@ export function canAutoEnable(provider: ProviderName): boolean {
           discoverCliAccounts().some((account) => account.provider === 'kimicode'))
       );
     case 'freebuff':
-      // Freebuff uses @codebuff/sdk (no CLI subprocess). The SDK reads
-      // credentials from ~/.config/manicode/credentials.json directly, so
-      // the binary is NOT required — a login from `freebuff login` is enough.
-      return detectFreebuffCLILogin();
+      // The active adapter drives the real TUI through tmux and makes
+      // bubblewrap mandatory because Freebuff cannot disable native tools.
+      return (
+        detectFreebuffCLILogin() &&
+        !!whichBinary('freebuff') &&
+        !!whichBinary('tmux') &&
+        !!whichBinary('bwrap')
+      );
     default:
       return false;
   }
@@ -411,15 +415,14 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://kimi.com/docs/cli',
   });
 
-  // ── Freebuff: SDK-based provider. The @codebuff/sdk reads credentials
-  // from ~/.config/manicode/credentials.json directly (no CLI subprocess). ──
+  // ── Freebuff: real TUI driven through a sandboxed tmux PTY. ──
   const freebuffLogin = detectFreebuffCLILogin();
   const freebuff = mk('freebuff', 'Freebuff CLI', ['freebuff'], 'freebuff', {
     loggedIn: freebuffLogin,
     authSource: freebuffLogin ? '~/.config/manicode/credentials.json' : null,
     autoEnabled: canAutoEnable('freebuff'),
     workingNote:
-      'Codebuff login material detected. Koryphaios drives the @codebuff/sdk directly against the Codebuff backend; tool execution is owned by Koryphaios (via the SDK overrideTools hook). No Freebuff token is collected or stored by Koryphaios.',
+      'Freebuff login material detected. Koryphaios drives the real TUI through tmux, confines native tools with bubblewrap, and exposes the real session through its authenticated MCP bridge. Runtime account access is verified only by an actual turn.',
     loggedOutNote: 'No Freebuff login material detected — run "freebuff login", then reconnect.',
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });

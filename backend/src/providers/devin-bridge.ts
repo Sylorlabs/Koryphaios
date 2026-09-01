@@ -5,10 +5,10 @@
 //   - --agent-config (declarative per-turn config: system_instructions,
 //     allowed_tools, permissions, extensions)
 //   - --export ATIF trajectory parsing (reasoning + tools + usage + resolved model)
-//   - .devin/hooks.v1.json (lifecycle hook bridge — Phase 3)
-//   - .devin/config.json mcpServers (MCP tool bridge — Phase 4; agent-config
+//   - XDG devin/config.json hooks (lifecycle hook bridge — Phase 3)
+//   - XDG devin/mcp_config.json (MCP tool bridge — Phase 4; agent-config
 //     mcp_servers is rejected by the strict parser for stdio, see D3)
-//   - AGENTS.md / .devin/skills (rules & skills mirroring — Phase 6)
+//   - XDG devin/AGENTS.md and devin/skills (rules & skills mirroring — Phase 6)
 //
 // The legacy stdout + export path in devin.ts stays the fallback when
 // --agent-config is unsupported (older Devins).
@@ -231,16 +231,15 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     return buildKoryCliMcpConfig(ctx, 'devin');
   }
 
-  /** Write MCP servers to the per-session .devin/config.json (the shape the
-   *  CLI accepts — agent-config mcp_servers is rejected for stdio, see D3). */
+  /** Write MCP servers to the isolated XDG user config used by the child. */
   writeMcpConfig(servers: CliMcpServerConfig[], homeDir: string): void {
     if (!servers.length) return;
-    const configPath = join(homeDir, '.devin', 'config.json');
+    const configPath = join(getDevinUserConfigDir(homeDir), 'mcp_config.json');
     const mcpServers: Record<string, unknown> = {};
     for (const s of servers) {
       mcpServers[s.name] =
         s.transport === 'stdio'
-          ? { command: s.command, args: s.args, env: s.env ?? {}, transport: 'stdio' }
+          ? { command: s.command, args: s.args, env: s.env ?? {} }
           : { url: s.url, transport: s.transport };
     }
     let existing: Record<string, unknown> = {};
@@ -249,7 +248,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
         existing = JSON.parse(require('node:fs').readFileSync(configPath, 'utf8'));
       } catch {
         /* overwrite */
-        providerLog.debug({}, 'Devin bridge: existing config parse failed — will overwrite');
+        providerLog.debug({}, 'Devin bridge: existing MCP config parse failed — will overwrite');
       }
     }
     existing.mcpServers = {
@@ -260,16 +259,33 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     writeManagedCliFile(configPath, JSON.stringify(existing, null, 2), { encoding: 'utf8' });
   }
 
+  writeHooksConfig(hooks: CliHookConfig[], homeDir: string): void {
+    if (!hooks.length) return;
+    const configPath = join(getDevinUserConfigDir(homeDir), 'config.json');
+    let existing: Record<string, unknown> = {};
+    if (existsSync(configPath)) {
+      try {
+        existing = JSON.parse(require('node:fs').readFileSync(configPath, 'utf8'));
+      } catch {
+        /* overwrite */
+        providerLog.debug({}, 'Devin bridge: existing user config parse failed — will overwrite');
+      }
+    }
+    existing.hooks = JSON.parse(this.serializeHooks(hooks));
+    ensureManagedCliDirectory(dirname(configPath));
+    writeManagedCliFile(configPath, JSON.stringify(existing, null, 2), { encoding: 'utf8' });
+  }
+
   buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
     if (!this.cached?.supportsRules) return null;
     // Phase 6: mirror Kory's compiled skill instructions as an AGENTS.md in
     // the per-session devin home. The project root AGENTS.md is left to the
     // user (D4).
-    const homeDir = getKoryphaiosDevinHome(ctx.sessionId);
+    const configDir = getDevinUserConfigDir(getKoryphaiosDevinHome(ctx.sessionId));
     return [
       {
-        path: join(homeDir, 'AGENTS.md'),
-        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
+        path: join(configDir, 'AGENTS.md'),
+        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt?.trim() ?? ''}\n`,
       },
     ];
   }
@@ -282,10 +298,12 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     try {
       // Lazy import to avoid a circular dependency at module load time.
       const { listSkills } = require('../kory/skills');
-      const homeDir = getKoryphaiosDevinHome(ctx.sessionId);
-      const skills = listSkills(ctx.workingDirectory).filter((s: SkillRevision) => s.state === 'active');
+      const configDir = getDevinUserConfigDir(getKoryphaiosDevinHome(ctx.sessionId));
+      const skills = listSkills(ctx.workingDirectory).filter(
+        (s: SkillRevision) => s.state === 'active',
+      );
       return skills.map((skill: SkillRevision) => ({
-        path: join(homeDir, '.devin', 'skills', skill.name, 'SKILL.md'),
+        path: join(configDir, 'skills', skill.name, 'SKILL.md'),
         // SkillRevision carries `instructions` (rendered full-text) and
         // `content` (raw SKILL.md source). Prefer the rendered instructions;
         // fall back to raw content if instructions are empty.
@@ -366,6 +384,9 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
         toolOutput: (call.output ?? '').slice(0, 8_000),
       });
     }
+    if (step.message?.trim()) {
+      events.push({ type: 'content_delta', content: step.message });
+    }
   }
   const m = t.finalMetrics;
   if (m && (m.promptTokens || m.completionTokens)) {
@@ -373,6 +394,7 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
       type: 'usage_update',
       tokensIn: m.promptTokens ?? 0,
       tokensOut: m.completionTokens ?? 0,
+      tokensCacheRead: m.cachedTokens,
     });
   }
   return events;
@@ -381,6 +403,10 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
 // ─── Session-isolated Devin home ───────────────────────────────────────────
 
 let cachedDevinHome: string | null = null;
+
+export function getDevinUserConfigDir(homeDir: string): string {
+  return join(homeDir, 'devin');
+}
 
 /** A Koryphaios-owned, per-session devin home so our headless runs never
  *  commingle with the user's interactive `devin` sessions. Credentials are

@@ -17,8 +17,9 @@ import {
   type RecoveryOperation,
 } from '../kory/checkpoint-store';
 import { GitManager } from '../kory/git-manager';
+import { getContextArchive, type ContextArchiveService } from '../kory/context-archive';
 import { serverLog } from '../logger';
-import type { IMessageStore } from '../stores/message-store';
+import type { ConversationBoundaryReceipt, IMessageStore } from '../stores/message-store';
 import { resolve } from 'node:path';
 
 export interface TimeTravelState {
@@ -47,12 +48,21 @@ export interface TimeTravelOptions {
   costThreshold?: number;
 }
 
+export interface TimeTravelResult {
+  success: boolean;
+  message: string;
+  newHash?: string;
+  /** Whether the retained conversation boundary changed, not just workspace files. */
+  conversationEffect?: 'rewind' | 'code-only';
+}
+
 export class TimeTravelService {
   private shadowLogger: CheckpointStore;
   private gitManager: GitManager;
   private messageStore: IMessageStore;
   private options: Required<TimeTravelOptions>;
   private readonly workingDirectory: string;
+  private readonly contextArchive?: Pick<ContextArchiveService, 'setTimelineVisibilityBoundary'>;
   private readonly projectServices = new Map<string, TimeTravelService>();
   private readonly recoveryReconciliations = new Map<string, Promise<void>>();
 
@@ -60,11 +70,13 @@ export class TimeTravelService {
     workingDirectory: string,
     messageStore: IMessageStore,
     options: TimeTravelOptions = {},
+    contextArchive?: Pick<ContextArchiveService, 'setTimelineVisibilityBoundary'>,
   ) {
     this.workingDirectory = resolve(workingDirectory);
     this.shadowLogger = new CheckpointStore(this.workingDirectory);
     this.gitManager = new GitManager(this.workingDirectory);
     this.messageStore = messageStore;
+    this.contextArchive = contextArchive;
     this.options = {
       timelineLimit: options.timelineLimit ?? 50,
       autoCheckpoint: options.autoCheckpoint ?? true,
@@ -79,7 +91,12 @@ export class TimeTravelService {
     if (project === this.workingDirectory) return this;
     const existing = this.projectServices.get(project);
     if (existing) return existing;
-    const service = new TimeTravelService(project, this.messageStore, this.options);
+    const service = new TimeTravelService(
+      project,
+      this.messageStore,
+      this.options,
+      this.contextArchive,
+    );
     this.projectServices.set(project, service);
     return service;
   }
@@ -156,7 +173,7 @@ export class TimeTravelService {
    *
    * This finds the next ghost commit in the timeline and recovers to it.
    */
-  async undo(sessionId: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+  async undo(sessionId: string): Promise<TimeTravelResult> {
     await this.ensureRecoveryReconciled(sessionId);
     const currentHash = await this.shadowLogger.getCursor(sessionId);
     if (!currentHash) {
@@ -180,7 +197,7 @@ export class TimeTravelService {
    *
    * This finds the previous ghost commit in the timeline and recovers to it.
    */
-  async redo(sessionId: string): Promise<{ success: boolean; message: string; newHash?: string }> {
+  async redo(sessionId: string): Promise<TimeTravelResult> {
     await this.ensureRecoveryReconciled(sessionId);
     const currentHash = await this.shadowLogger.getCursor(sessionId);
     if (!currentHash) {
@@ -209,7 +226,7 @@ export class TimeTravelService {
     ghostHash: string,
     sessionId: string,
     expectedCurrentHash?: string | null,
-  ): Promise<{ success: boolean; message: string; newHash?: string }> {
+  ): Promise<TimeTravelResult> {
     try {
       await this.ensureRecoveryReconciled(sessionId);
     } catch (error) {
@@ -262,15 +279,46 @@ export class TimeTravelService {
       // Those remain truthful code-only recoveries instead of claiming that a
       // conversation was rewound when no durable message can be selected.
       if (ghost.metadata?.messageId) {
+        let boundaryReceipt: ConversationBoundaryReceipt | undefined;
         try {
-          await this.messageStore.setActiveBoundary(sessionId, ghost.metadata.messageId, {
-            expectedActiveMessageId: conversationBefore.messageId,
-          });
+          boundaryReceipt = await this.messageStore.setActiveBoundary(
+            sessionId,
+            ghost.metadata.messageId,
+            {
+              expectedActiveMessageId: conversationBefore.messageId,
+            },
+          );
+          const archive = this.contextArchive ?? getContextArchive();
+          await archive?.setTimelineVisibilityBoundary(
+            sessionId,
+            ghost.metadata.timestamp ?? ghost.date.getTime(),
+          );
         } catch (err) {
-          serverLog.error({ err, sessionId }, 'Failed to move retained conversation boundary');
-          const workspaceRollback = result.receipt
-            ? await this.shadowLogger.rollbackRecovery(result.receipt)
-            : { success: false, message: 'Recovery receipt was unavailable' };
+          serverLog.error(
+            { err, sessionId },
+            'Failed to move retained conversation and archive visibility boundaries',
+          );
+          let conversationRestored = true;
+          if (boundaryReceipt) {
+            try {
+              await this.messageStore.restoreActiveBoundary(boundaryReceipt);
+            } catch (restoreError) {
+              conversationRestored = false;
+              serverLog.error(
+                { err: restoreError, sessionId },
+                'Failed to compensate retained conversation boundary',
+              );
+            }
+          }
+          const workspaceRollback =
+            conversationRestored && result.receipt
+              ? await this.shadowLogger.rollbackRecovery(result.receipt)
+              : {
+                  success: false,
+                  message: conversationRestored
+                    ? 'Recovery receipt was unavailable'
+                    : 'Conversation compensation failed; recovery journal retained',
+                };
           if (workspaceRollback.success) {
             const cleaned = await this.shadowLogger.completeRecoveryOperation(
               sessionId,
@@ -292,7 +340,7 @@ export class TimeTravelService {
         }
         serverLog.info(
           { sessionId, messageId: ghost.metadata.messageId },
-          'Retained conversation boundary moved after rewind',
+          'Retained conversation and archive visibility boundaries moved after rewind',
         );
       }
 
@@ -313,6 +361,7 @@ export class TimeTravelService {
           ? `Traveled to: ${ghost.message.slice(0, 50)}`
           : `Workspace traveled to: ${ghost.message.slice(0, 50)} (conversation unchanged)`,
         newHash: ghostHash,
+        conversationEffect: ghost.metadata?.messageId ? 'rewind' : 'code-only',
       };
     }
     try {
@@ -452,6 +501,26 @@ export class TimeTravelService {
             `Recovery ${operation.id} reached its target but ${change.path} changed afterward`,
           );
         }
+      }
+      // The workspace and SQLite boundary may both have committed immediately
+      // before a crash, while the archive projection did not. Heal that third
+      // participant before deleting the recovery journal so reload cannot
+      // expose tool results from beyond the retained conversation checkpoint.
+      if (
+        operation.targetMessageId !== null &&
+        operation.targetMessageId !== operation.previousMessageId
+      ) {
+        const ghost = await this.shadowLogger.getGhostCommit(operation.targetHash);
+        if (!ghost || ghost.metadata?.messageId !== operation.targetMessageId) {
+          throw new Error(
+            `Recovery ${operation.id} cannot verify its archive visibility checkpoint`,
+          );
+        }
+        const archive = this.contextArchive ?? getContextArchive();
+        await archive?.setTimelineVisibilityBoundary(
+          sessionId,
+          ghost.metadata.timestamp ?? ghost.date.getTime(),
+        );
       }
       const completed = await this.shadowLogger.completeRecoveryOperation(sessionId, operation.id);
       if (!completed.success) throw new Error(completed.message);

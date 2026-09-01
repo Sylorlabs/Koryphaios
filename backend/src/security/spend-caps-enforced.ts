@@ -10,6 +10,7 @@ import { serverLog } from '../logger';
 import { getContext } from '../context';
 import { ValidationError } from '../errors/types';
 import { eq, and, desc, gte, sql } from 'drizzle-orm';
+import { recordedImageUsageCostUsd } from '../billing/api-usage-ledger';
 
 export interface EnforcedSpendCap {
   enabled: boolean;
@@ -131,25 +132,25 @@ export function findSpendCapViolation(
     },
     {
       capType: 'session_hourly',
-      currentSpend: snapshot.sessionHourCents,
+      currentSpend: snapshot.sessionHourCents + estimatedCostCents,
       limit: caps.sessionHourlyCents,
       label: 'Session hourly spend',
     },
     {
       capType: 'session_daily',
-      currentSpend: snapshot.sessionDayCents,
+      currentSpend: snapshot.sessionDayCents + estimatedCostCents,
       limit: caps.sessionDailyCents,
       label: 'Session daily spend',
     },
     {
       capType: 'global_hourly',
-      currentSpend: snapshot.globalHourCents,
+      currentSpend: snapshot.globalHourCents + estimatedCostCents,
       limit: caps.globalHourlyCents,
       label: 'App hourly spend',
     },
     {
       capType: 'global_daily',
-      currentSpend: snapshot.globalDayCents,
+      currentSpend: snapshot.globalDayCents + estimatedCostCents,
       limit: caps.globalDailyCents,
       label: 'App daily spend',
     },
@@ -373,10 +374,21 @@ async function recordedCostCents(sessionId: string | undefined, since: Date): Pr
   const predicates = [gte(messages.createdAt, since)];
   if (sessionId) predicates.push(eq(messages.sessionId, sessionId));
   const [row] = await db
-    .select({ totalCostUsd: sql<number>`COALESCE(SUM(${messages.cost}), 0)` })
+    .select({
+      // Chat images deliberately write their estimate to both the message
+      // (for session/sidebar accounting) and api_usage (for provider usage).
+      // A shared stable id links those rows, so caps count the API ledger row
+      // once and exclude only its matching message cost.
+      totalCostUsd: sql<number>`COALESCE(SUM(
+        CASE WHEN EXISTS (
+          SELECT 1 FROM api_usage
+          WHERE api_usage.id = ${messages.id} AND api_usage.kind = 'image'
+        ) THEN 0 ELSE ${messages.cost} END
+      ), 0)`,
+    })
     .from(messages)
     .where(and(...predicates));
-  const dollars = Number(row?.totalCostUsd ?? 0);
+  const dollars = Number(row?.totalCostUsd ?? 0) + recordedImageUsageCostUsd(sessionId, since);
   if (!Number.isFinite(dollars) || dollars < 0) {
     throw new Error('Recorded spend is invalid');
   }
@@ -384,61 +396,151 @@ async function recordedCostCents(sessionId: string | undefined, since: Date): Pr
 }
 
 export async function getSpendWindowSnapshot(
-  sessionId: string,
+  sessionId: string | undefined,
   now = Date.now(),
 ): Promise<SpendWindowSnapshot> {
   const hourStart = new Date(now - 60 * 60 * 1000);
   const dayStart = new Date(now - 24 * 60 * 60 * 1000);
   const [sessionHourCents, sessionDayCents, globalHourCents, globalDayCents] = await Promise.all([
-    recordedCostCents(sessionId, hourStart),
-    recordedCostCents(sessionId, dayStart),
+    sessionId ? recordedCostCents(sessionId, hourStart) : 0,
+    sessionId ? recordedCostCents(sessionId, dayStart) : 0,
     recordedCostCents(undefined, hourStart),
     recordedCostCents(undefined, dayStart),
   ]);
   return { sessionHourCents, sessionDayCents, globalHourCents, globalDayCents };
 }
 
-export async function checkAndEnforceCaps(
-  sessionId: string,
-  estimatedCostCents: number = 0,
-): Promise<{ canProceed: boolean; reason?: string; paused?: boolean }> {
-  try {
-    const caps = await getEnforcedCaps();
-    if (!caps.enabled) return { canProceed: true };
-    if (pausedSessions.has(sessionId)) {
-      const record = pausedSessions.get(sessionId)!;
-      return {
-        canProceed: false,
-        reason: `This session is paused by a spend limit: ${record.reason}. Resume it from Settings > Safety limits after reviewing the recorded usage.`,
-        paused: true,
-      };
-    }
+type SpendGateResult = { canProceed: boolean; reason?: string; paused?: boolean };
 
-    const snapshot = await getSpendWindowSnapshot(sessionId);
-    const violation = findSpendCapViolation(caps, snapshot, estimatedCostCents);
-    if (!violation) return { canProceed: true };
-    if (caps.action === 'warn') {
-      return { canProceed: true, reason: violation.reason };
-    }
-    if (caps.action === 'pause') {
-      await pauseSession(
-        sessionId,
-        violation.reason,
-        violation.capType,
-        violation.currentSpend,
-        violation.limit,
-      );
-      return { canProceed: false, reason: violation.reason, paused: true };
-    }
-    return { canProceed: false, reason: violation.reason, paused: false };
-  } catch (error) {
-    serverLog.error({ error, sessionId }, 'Could not verify spend limits');
+const pendingSpendBySession = new Map<string, number>();
+let pendingGlobalSpendCents = 0;
+let spendGateTail: Promise<void> = Promise.resolve();
+
+async function withSpendGateLock<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = spendGateTail;
+  let unlock!: () => void;
+  spendGateTail = new Promise<void>((resolve) => {
+    unlock = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    unlock();
+  }
+}
+
+async function evaluateSpendCaps(
+  sessionId: string | undefined,
+  estimatedCostCents: number,
+): Promise<SpendGateResult> {
+  const caps = await getEnforcedCaps();
+  if (!caps.enabled) return { canProceed: true };
+  if (sessionId && pausedSessions.has(sessionId)) {
+    const record = pausedSessions.get(sessionId)!;
     return {
       canProceed: false,
-      reason:
-        'Koryphaios could not verify the configured spend limits, so no provider request was started. Check the local database and retry.',
-      paused: false,
+      reason: `This session is paused by a spend limit: ${record.reason}. Resume it from Settings > Safety limits after reviewing the recorded usage.`,
+      paused: true,
     };
+  }
+
+  // Snapshot reservations before the database read. A finishing request may
+  // commit its ledger row and release while these awaits are in flight; using
+  // the pre-read pending value is conservative and cannot create a gap where
+  // neither the reservation nor its newly committed row is counted. At the
+  // handoff instant this may conservatively count both, which can delay one
+  // request but cannot permit an overspend.
+  const pendingSession = sessionId ? (pendingSpendBySession.get(sessionId) ?? 0) : 0;
+  const pendingGlobal = pendingGlobalSpendCents;
+  const recorded = await getSpendWindowSnapshot(sessionId);
+  const snapshot: SpendWindowSnapshot = {
+    sessionHourCents: recorded.sessionHourCents + pendingSession,
+    sessionDayCents: recorded.sessionDayCents + pendingSession,
+    globalHourCents: recorded.globalHourCents + pendingGlobal,
+    globalDayCents: recorded.globalDayCents + pendingGlobal,
+  };
+  const violation = findSpendCapViolation(caps, snapshot, estimatedCostCents);
+  if (!violation) return { canProceed: true };
+  if (caps.action === 'warn') return { canProceed: true, reason: violation.reason };
+  if (caps.action === 'pause' && sessionId) {
+    await pauseSession(
+      sessionId,
+      violation.reason,
+      violation.capType,
+      violation.currentSpend,
+      violation.limit,
+    );
+    return { canProceed: false, reason: violation.reason, paused: true };
+  }
+  return { canProceed: false, reason: violation.reason, paused: false };
+}
+
+function verificationFailure(sessionId: string | undefined, error: unknown): SpendGateResult {
+  serverLog.error({ error, sessionId }, 'Could not verify spend limits');
+  return {
+    canProceed: false,
+    reason:
+      'Koryphaios could not verify the configured spend limits, so no provider request was started. Check the local database and retry.',
+    paused: false,
+  };
+}
+
+export async function checkAndEnforceCaps(
+  sessionId: string | undefined,
+  estimatedCostCents: number = 0,
+): Promise<SpendGateResult> {
+  try {
+    return await withSpendGateLock(() => evaluateSpendCaps(sessionId, estimatedCostCents));
+  } catch (error) {
+    return verificationFailure(sessionId, error);
+  }
+}
+
+export interface SpendCapacityReservation extends SpendGateResult {
+  release(): void;
+}
+
+/**
+ * Atomically preflight and reserve a known provider estimate. This closes the
+ * check-then-charge race between concurrent image requests in this process.
+ * Release immediately after the durable usage row is committed (or on error).
+ */
+export async function reserveSpendCapacity(
+  sessionId: string | undefined,
+  estimatedCostCents: number = 0,
+): Promise<SpendCapacityReservation> {
+  try {
+    return await withSpendGateLock(async () => {
+      const gate = await evaluateSpendCaps(sessionId, estimatedCostCents);
+      if (!gate.canProceed || estimatedCostCents <= 0) return { ...gate, release: () => {} };
+      pendingGlobalSpendCents += estimatedCostCents;
+      if (sessionId) {
+        pendingSpendBySession.set(
+          sessionId,
+          (pendingSpendBySession.get(sessionId) ?? 0) + estimatedCostCents,
+        );
+      }
+      let released = false;
+      return {
+        ...gate,
+        release: () => {
+          if (released) return;
+          released = true;
+          pendingGlobalSpendCents = Math.max(0, pendingGlobalSpendCents - estimatedCostCents);
+          if (sessionId) {
+            const remaining = Math.max(
+              0,
+              (pendingSpendBySession.get(sessionId) ?? 0) - estimatedCostCents,
+            );
+            if (remaining === 0) pendingSpendBySession.delete(sessionId);
+            else pendingSpendBySession.set(sessionId, remaining);
+          }
+        },
+      };
+    });
+  } catch (error) {
+    return { ...verificationFailure(sessionId, error), release: () => {} };
   }
 }
 

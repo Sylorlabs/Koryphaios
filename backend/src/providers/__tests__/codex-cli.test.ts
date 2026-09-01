@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { codexJsonEvents, codexReasoningArgs, extractKoryToolEnvelope } from '../codex-cli';
+import { existsSync } from 'node:fs';
+import {
+  buildCodexPrompt,
+  codexImageArgs,
+  codexJsonEvents,
+  codexReasoningArgs,
+  extractKoryToolEnvelope,
+} from '../codex-cli';
+import { createCliAttachmentScope } from '../cli-attachments';
 import { supportsKoryControlPlaneTools } from '../provider-harness';
 
 describe('Codex CLI Kory control-plane bridge', () => {
@@ -68,5 +76,64 @@ describe('Codex CLI Kory control-plane bridge', () => {
 
   it('does not pretend private reasoning is visible when reasoning is disabled', () => {
     expect(codexReasoningArgs('none')).toEqual(['--config', 'model_reasoning_effort="none"']);
+  });
+
+  it('reports cached Codex input as included explanatory metadata', () => {
+    const translated = codexJsonEvents(
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: 211_700, cached_input_tokens: 199_200, output_tokens: 900 },
+      },
+      [],
+    );
+
+    expect(translated.events).toContainEqual({
+      type: 'usage_update',
+      tokensIn: 211_700,
+      tokensOut: 900,
+      tokensCacheRead: 199_200,
+      accountId: undefined,
+    });
+  });
+
+  it('passes an attached screenshot to Codex through its native private image argument', () => {
+    const scope = createCliAttachmentScope();
+    const imageData = Buffer.from('not-in-argv-or-prompt-as-base64').toString('base64');
+    let imagePath = '';
+    try {
+      const prompt = buildCodexPrompt(
+        'Inspect the supplied screenshot.',
+        [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'What controls are visible?' },
+              { type: 'image', imageData, imageMimeType: 'image/png' },
+            ],
+          },
+        ],
+        [],
+        'manager',
+        scope,
+      );
+
+      const args = codexImageArgs(scope);
+      expect(args).toHaveLength(2);
+      expect(args[0]).toBe('--image');
+      imagePath = args[1]!;
+      expect(existsSync(imagePath)).toBe(true);
+      expect(prompt).toContain(imagePath);
+      expect(prompt).not.toContain(imageData);
+
+      // Rehydrated history containing the same image does not create a second
+      // native input flag for the same bytes.
+      scope.renderContent([
+        { type: 'image', imageData, imageMimeType: 'image/png' },
+      ]);
+      expect(scope.artifacts).toHaveLength(1);
+    } finally {
+      scope.cleanup();
+    }
+    expect(existsSync(imagePath)).toBe(false);
   });
 });

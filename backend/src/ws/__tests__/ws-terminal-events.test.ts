@@ -52,6 +52,44 @@ function createOverloadedSocket(
 }
 
 describe('WSManager terminal-event delivery and backpressure', () => {
+  test('authoritative run revisions are queued even when non-terminal', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sent: string[] = [];
+    const socket = createOverloadedSocket(sent, { value: BACKPRESSURE_THRESHOLD + 1 });
+    manager.add(socket);
+    manager.broadcast({
+      type: 'run.state',
+      timestamp: 1,
+      sessionId: 'session-1',
+      payload: {
+        snapshot: {
+          sessionId: 'session-1',
+          runId: 'run-1',
+          revision: 1,
+          phase: 'analyzing',
+          status: 'active',
+          waitingReason: '',
+          activeAgentIds: ['kory-manager'],
+          startedAt: 1,
+          updatedAt: 1,
+          finishedAt: null,
+          terminalReason: null,
+        },
+        transition: null,
+      },
+    });
+
+    const client = (manager as any).clients.get('client-1');
+    expect(sent).toEqual([]);
+    expect(client.pendingTerminalEvents).toHaveLength(1);
+    expect(client.pendingTerminalEvents[0].type).toBe('run.state');
+  });
+
   test('terminal events are queued when client is overloaded', () => {
     const { sqlite, log } = createLog();
     databases.push(sqlite);
@@ -323,5 +361,39 @@ describe('WSManager terminal-event delivery and backpressure', () => {
     expect(sent).toEqual([]);
     const client = (manager as any).clients.get('client-1');
     expect(client.pendingTerminalEvents).toHaveLength(0);
+  });
+
+  test('timeline rewrites replace queued old-epoch terminals and are retried as critical', () => {
+    const { sqlite, log } = createLog();
+    databases.push(sqlite);
+    setOrderedEventLogForTests(log);
+    const manager = new WSManager();
+    managers.push(manager);
+
+    const sent: string[] = [];
+    const bufferedAmount = { value: BACKPRESSURE_THRESHOLD + 1 };
+    const socket = createOverloadedSocket(sent, bufferedAmount);
+    manager.add(socket);
+    manager.subscribeClientToSession('client-1', 'session-1');
+    manager.broadcastToSession('session-1', {
+      type: 'system.error',
+      timestamp: 1,
+      payload: { error: 'discarded failure' },
+    });
+
+    manager.rewriteSessionTimeline('session-1');
+
+    const client = (manager as any).clients.get('client-1');
+    expect(client.pendingTerminalEvents).toHaveLength(1);
+    expect(client.pendingTerminalEvents[0]).toMatchObject({
+      type: 'session.timeline_rewritten',
+      epoch: 2,
+      sequence: 1,
+    });
+    bufferedAmount.value = 0;
+    (manager as any).retryTerminalEvents('client-1', client);
+    expect(sent.map((value) => JSON.parse(value))).toEqual([
+      expect.objectContaining({ type: 'session.timeline_rewritten', epoch: 2, sequence: 1 }),
+    ]);
   });
 });

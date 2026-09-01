@@ -149,6 +149,8 @@ export const READ_ONLY_TOOLS = new Set([
   'render_note',
   'get_note_backlinks',
   'get_note_graph_summary',
+  'get_note_properties',
+  'query_note_base',
   'detect-errors',
   'analyze-error',
   'suggest-fixes',
@@ -175,16 +177,20 @@ export function resolveToolPermissionPolicy(
   settings: AgentSettings,
   interactionMode: 'act' | 'plan' = 'act',
 ): ToolPermissionPolicy {
+  const mode = (interactionMode === 'plan' ? 'plan' : settings.permissionMode) as PermissionMode;
+  const tierEntry = settings.toolPermissionsByTier?.[mode as string];
+  const fallbackAllow = settings.toolAllowlist ?? [];
+  const fallbackBlock = settings.toolBlocklist ?? [];
   return {
-    mode: (interactionMode === 'plan' ? 'plan' : settings.permissionMode) as PermissionMode,
+    mode,
     autoRunTools: settings.autoRunTools !== false,
     autoApplySafeFixes: settings.autoApplySafeFixes === true,
     confirmRiskyActions: settings.confirmRuleViolations !== false,
     autonomyLimitsEnabled: settings.autonomyLimitsEnabled === true,
     approvalThresholdFiles: settings.approvalThresholdFiles,
     approvalThresholdLines: settings.approvalThresholdLines,
-    toolAllowlist: settings.toolAllowlist ?? [],
-    toolBlocklist: settings.toolBlocklist ?? [],
+    toolAllowlist: tierEntry?.allow ?? fallbackAllow,
+    toolBlocklist: tierEntry?.block ?? fallbackBlock,
   };
 }
 
@@ -235,7 +241,9 @@ export function decideToolPermission(
       : { action: 'ask', reason: 'Sub-agent user mode requires approval for mutating actions' };
   }
   if (policy.mode === 'ask') {
-    return { action: 'ask', reason: 'Ask mode requires approval for every tool action' };
+    return readOnly
+      ? { action: 'allow', reason: 'Read-only action in Ask mode' }
+      : { action: 'ask', reason: 'Ask mode requires approval for mutating actions' };
   }
   if (policy.mode === 'edits') {
     return readOnly || fileEdit

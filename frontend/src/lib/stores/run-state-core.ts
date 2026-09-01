@@ -14,17 +14,25 @@
 // linger). The engine reports timer requests via callbacks so the reactive
 // layer can wire them to real setTimeout / clearTimeout.
 
-import type { WSMessage, AgentStatus, AgentHeartbeatPayload } from '@koryphaios/shared';
+import type {
+  WSMessage,
+  AgentStatus,
+  AgentHeartbeatPayload,
+  SessionRunStatePayload,
+} from '@koryphaios/shared';
 
 export type RunPhase =
   | 'idle'
+  | 'analyzing'
   | 'thinking'
   | 'streaming'
   | 'tool_calling'
+  | 'compacting'
   | 'waiting_terminal' // parked on a background shell
   | 'waiting_user' // asked the user a question
   | 'done'
-  | 'error';
+  | 'error'
+  | 'cancelled';
 
 export interface ButtonState {
   /** The single mode the composer button should render. */
@@ -47,6 +55,11 @@ export interface SessionRunState {
   /** Agent IDs currently in a non-terminal, non-waiting status for this
    *  session. When this empties, the run is over. */
   activeAgents: Set<string>;
+  /** Once true, only `run.state` may mutate lifecycle state. */
+  authoritative?: boolean;
+  runId?: string | null;
+  revision?: number;
+  terminalReason?: string | null;
 }
 
 // ─── Phase predicates ───────────────────────────────────────────────────────
@@ -54,9 +67,11 @@ export interface SessionRunState {
 /** Phases that count as "alive" — the button shows Stop. */
 export function isActivePhase(phase: RunPhase): boolean {
   return (
+    phase === 'analyzing' ||
     phase === 'thinking' ||
     phase === 'streaming' ||
-    phase === 'tool_calling'
+    phase === 'tool_calling' ||
+    phase === 'compacting'
   );
 }
 
@@ -71,7 +86,7 @@ export function isWaitingPhase(phase: RunPhase): boolean {
  *  stream event after idle means the watchdog was a false positive and the
  *  run is actually still alive). */
 export function isTerminalPhase(phase: RunPhase): boolean {
-  return phase === 'done' || phase === 'error';
+  return phase === 'done' || phase === 'error' || phase === 'cancelled';
 }
 
 /** Event types that carry active content and could resurrect a dead run if
@@ -106,8 +121,7 @@ function isResurrectingEvent(msg: WSMessage): boolean {
   if (msg.type === 'agent.status') {
     const p = msg.payload as { status?: AgentStatus };
     return (
-      !!p.status &&
-      (ACTIVE_AGENT_STATUSES.has(p.status) || WAITING_AGENT_STATUSES.has(p.status))
+      !!p.status && (ACTIVE_AGENT_STATUSES.has(p.status) || WAITING_AGENT_STATUSES.has(p.status))
     );
   }
   return false;
@@ -142,12 +156,16 @@ export const TERMINAL_AGENT_STATUSES = new Set<AgentStatus>(['done', 'idle', 'er
  *  status vocabulary. */
 export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
   switch (phase) {
+    case 'analyzing':
+      return 'analyzing';
     case 'thinking':
       return 'thinking';
     case 'streaming':
       return 'streaming';
     case 'tool_calling':
       return 'tool_calling';
+    case 'compacting':
+      return 'compacting';
     case 'waiting_terminal':
       return 'waiting';
     case 'waiting_user':
@@ -156,6 +174,8 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
       return 'done';
     case 'error':
       return 'error';
+    case 'cancelled':
+      return 'done';
     default:
       return 'idle';
   }
@@ -167,9 +187,9 @@ export function phaseToAgentStatus(phase: RunPhase): AgentStatus {
  * class, aria-label) — they can no longer drift apart.
  *
  *   stop     — a run is alive; click cancels it.
- *   waiting  — parked on something external AND the composer is empty;
- *              click cancels the wait. If the user typed text, we flip to
- *              send so they can steer while Kory is parked.
+ *   waiting  — parked on something external; click cancels the wait. Typed
+ *              text remains in the composer but cannot bypass durable wait
+ *              ownership as a second turn.
  *   send     — nothing running, message ready to go.
  *   disabled — nothing running and nothing to send.
  */
@@ -180,9 +200,7 @@ export function deriveButtonState(
 ): ButtonState {
   if (isActivePhase(phase)) return { mode: 'stop', waitingReason: '', phase };
   if (isWaitingPhase(phase)) {
-    return canSend
-      ? { mode: 'send', waitingReason, phase }
-      : { mode: 'waiting', waitingReason, phase };
+    return { mode: 'waiting', waitingReason, phase };
   }
   return canSend
     ? { mode: 'send', waitingReason: '', phase }
@@ -213,6 +231,14 @@ function isSuppressedStatus(status: AgentStatus): boolean {
   return !TERMINAL_AGENT_STATUSES.has(status) && !WAITING_AGENT_STATUSES.has(status);
 }
 
+/** A replay is durable historical evidence, not a late live callback. It must
+ * still reach the feed after a reconnect even if the local run state has
+ * already reached a terminal phase. The reducer deliberately leaves its state
+ * unchanged; returning true only permits downstream historical rendering. */
+function permitHistoricalReplay(msg: WSMessage): boolean {
+  return msg.replayed === true;
+}
+
 // ─── Engine ─────────────────────────────────────────────────────────────────
 
 export interface RunStateTimers {
@@ -230,7 +256,9 @@ export interface RunStateTimers {
 }
 
 export interface RunStateEngine {
-  applyEvent: (msg: WSMessage) => void;
+  /** True when downstream UI reducers may consume the event. False means the
+   * run-state guard rejected stale post-terminal or post-stop traffic. */
+  applyEvent: (msg: WSMessage) => boolean;
   startRun: (sessionId: string) => void;
   markUserStopped: (sessionId: string) => void;
   markAgentStopped: (sessionId: string, agentId: string) => void;
@@ -323,18 +351,52 @@ export function createRunStateEngine(
     commit();
   }
 
-  function applyEvent(msg: WSMessage): void {
+  function applyEvent(msg: WSMessage): boolean {
     const sid = msg.sessionId;
-    if (!sid) return;
+    // Global control messages have no run-state ownership, so they remain
+    // available to their downstream handlers.
+    if (!sid) return true;
     const states = getStates();
     const s = states.get(sid);
 
+    if (msg.type === 'run.state') {
+      const { snapshot } = msg.payload as SessionRunStatePayload;
+      if (!snapshot || snapshot.sessionId !== sid) return false;
+      if (s?.authoritative && (s.revision ?? -1) > snapshot.revision) {
+        return permitHistoricalReplay(msg);
+      }
+      const target = s ?? ensureState(sid);
+      target.authoritative = true;
+      target.runId = snapshot.runId;
+      target.revision = snapshot.revision;
+      target.terminalReason = snapshot.terminalReason;
+      target.phase = snapshot.phase;
+      target.waitingReason = snapshot.waitingReason;
+      target.stoppedByUser = snapshot.phase === 'cancelled';
+      target.lastActivityAt = snapshot.updatedAt;
+      target.activeAgents = new Set(snapshot.activeAgentIds);
+      // The durable aggregate owns liveness. A client timer may improve legacy
+      // behavior, but it may never contradict a server-owned revision.
+      timers.clearWatchdog(sid);
+      timers.clearDoneLinger(sid);
+      commit();
+      return true;
+    }
+
+    // Compatibility events still feed transcript/agent reducers, but after a
+    // canonical snapshot they cannot mutate the run lifecycle.
+    if (s?.authoritative) return true;
+
     // Suppression: after user stop, drop buffered non-terminal events.
-    if (s?.stoppedByUser && SUPPRESSED_WHEN_STOPPED.has(msg.type)) return;
+    if (s?.stoppedByUser && SUPPRESSED_WHEN_STOPPED.has(msg.type)) {
+      return permitHistoricalReplay(msg);
+    }
 
     // Terminal-phase guard: stale resurrecting events after done/error must
     // not resurrect the run. idle (after done-linger) can still be resurrected.
-    if (s && isTerminalPhase(s.phase) && isResurrectingEvent(msg)) return;
+    if (s && isTerminalPhase(s.phase) && isResurrectingEvent(msg)) {
+      return permitHistoricalReplay(msg);
+    }
 
     // Any event for an active session is evidence of life — reset the watchdog.
     if (s && isActivePhase(s.phase)) {
@@ -344,44 +406,54 @@ export function createRunStateEngine(
 
     switch (msg.type) {
       case 'agent.heartbeat': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         // A heartbeat while done/error is stale — the terminal event was
         // already received. Drop it; do NOT resurrect. A heartbeat while
         // idle means the done-linger fired but the run is still alive.
-        if (isTerminalPhase(s.phase)) return;
+        if (isTerminalPhase(s.phase)) return permitHistoricalReplay(msg);
         const p = msg.payload as AgentHeartbeatPayload;
         addActiveAgent(sid, p.agentId);
-        if (s.phase === 'idle') {
-          setPhase(sid, 'streaming');
-        }
+        // Heartbeats carry the backend's latest real phase. Mirroring it keeps
+        // quiet provider waits honest instead of inventing "streaming" merely
+        // because the process is alive.
+        if (p.phase === 'analyzing') setPhase(sid, 'analyzing');
+        else if (p.phase === 'thinking') setPhase(sid, 'thinking');
+        else if (p.phase === 'tool_calling') setPhase(sid, 'tool_calling');
+        else if (p.phase === 'streaming') setPhase(sid, 'streaming');
+        else if (s.phase === 'idle') setPhase(sid, 'streaming');
         break;
       }
 
       case 'stream.delta':
       case 'stream.file_delta':
       case 'stream.file_complete': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         addActiveAgent(sid, (msg.payload as { agentId: string }).agentId);
         setPhase(sid, 'streaming');
         break;
       }
 
       case 'stream.thinking': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         addActiveAgent(sid, (msg.payload as { agentId: string }).agentId);
         setPhase(sid, 'thinking');
         break;
       }
 
       case 'stream.tool_call': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         addActiveAgent(sid, (msg.payload as { agentId: string }).agentId);
         setPhase(sid, 'tool_calling');
         break;
       }
 
       case 'stream.tool_result': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         // Tool returned — back to streaming (the agent is composing the next
         // chunk). Keep the agent active; just advance the phase.
         setPhase(sid, 'streaming');
@@ -403,7 +475,7 @@ export function createRunStateEngine(
 
       case 'agent.status': {
         const p = msg.payload as { agentId: string; status: AgentStatus };
-        if (s?.stoppedByUser && isSuppressedStatus(p.status)) return;
+        if (s?.stoppedByUser && isSuppressedStatus(p.status)) return permitHistoricalReplay(msg);
 
         if (TERMINAL_AGENT_STATUSES.has(p.status)) {
           removeActiveAgent(sid, p.agentId);
@@ -416,7 +488,8 @@ export function createRunStateEngine(
           );
         } else if (ACTIVE_AGENT_STATUSES.has(p.status)) {
           addActiveAgent(sid, p.agentId);
-          if (p.status === 'thinking') setPhase(sid, 'thinking');
+          if (p.status === 'analyzing') setPhase(sid, 'analyzing');
+          else if (p.status === 'thinking') setPhase(sid, 'thinking');
           else if (p.status === 'tool_calling') setPhase(sid, 'tool_calling');
           else if (p.status === 'streaming') setPhase(sid, 'streaming');
         }
@@ -444,7 +517,8 @@ export function createRunStateEngine(
       }
 
       case 'kory.ask_user': {
-        if (!s || s.stoppedByUser) return;
+        if (!s) return true;
+        if (s.stoppedByUser) return permitHistoricalReplay(msg);
         setPhase(sid, 'waiting_user', 'your answer');
         break;
       }
@@ -475,14 +549,18 @@ export function createRunStateEngine(
       default:
         break;
     }
+    return true;
   }
 
   function startRun(sessionId: string): void {
     const s = ensureState(sessionId);
     s.stoppedByUser = false;
     s.activeAgents.add('kory-manager');
-    s.phase = 'streaming';
+    // Sending proves only that Koryphaios is preparing a request. Do not show
+    // streaming or thinking until a backend/provider event proves that phase.
+    s.phase = 'analyzing';
     s.waitingReason = '';
+    s.terminalReason = null;
     s.lastActivityAt = Date.now();
     timers.armWatchdog(sessionId);
     commit();
@@ -551,10 +629,7 @@ export function createRunStateEngine(
     return getStates().get(sessionId)?.waitingReason ?? '';
   }
 
-  function getButtonState(
-    sessionId: string | null | undefined,
-    canSend: boolean,
-  ): ButtonState {
+  function getButtonState(sessionId: string | null | undefined, canSend: boolean): ButtonState {
     const phase = getPhase(sessionId);
     const reason = getWaitingReason(sessionId);
     return deriveButtonState(phase, canSend, reason);

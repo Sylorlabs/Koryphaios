@@ -206,12 +206,6 @@
                 style="color: var(--color-text-primary);"
                 onclick={() => action('open_workspace')}>Open Workspace...</button
               >
-              <button
-                type="button"
-                class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
-                style="color: var(--color-text-secondary);"
-                onclick={() => action('open_project_file')}>Import Project File...</button
-              >
               <div class="h-px my-1" style="background: var(--color-border);"></div>
               <div
                 class="px-2.5 py-1.5 text-[10px] uppercase tracking-wider"

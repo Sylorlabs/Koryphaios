@@ -1165,6 +1165,8 @@ export class ClaudeCodeProvider implements Provider {
             // Cached prompt tokens (read + written) still occupy the context
             // window — without them the context bar reads near-zero.
             tokensCache: (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+            tokensCacheRead: u.cache_read_input_tokens,
+            tokensCacheWrite: u.cache_creation_input_tokens,
           };
         }
         return;
@@ -1216,6 +1218,8 @@ export class ClaudeCodeProvider implements Provider {
             tokensCache:
               (envelope.usage.cache_read_input_tokens ?? 0) +
               (envelope.usage.cache_creation_input_tokens ?? 0),
+            tokensCacheRead: envelope.usage.cache_read_input_tokens,
+            tokensCacheWrite: envelope.usage.cache_creation_input_tokens,
           };
         }
         if (envelope.is_error) {

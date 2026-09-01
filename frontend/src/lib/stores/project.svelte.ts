@@ -1,3 +1,5 @@
+import { loadSessionScope, saveSessionScope } from './navigation-preferences';
+
 export type SessionScope = 'project' | 'all';
 
 export interface WorkspaceProjectEntry {
@@ -13,6 +15,8 @@ export interface WorkspaceNavigationSnapshot {
   revision: string;
   unavailableWorkspace: string | null;
   unavailableProject: string | null;
+  /** Monotonic write sequence from the backend — stale snapshots are discarded. */
+  seq?: number;
 }
 
 export interface WorkspaceReconciliation {
@@ -27,7 +31,10 @@ let workspaceProjects = $state<WorkspaceProjectEntry[]>([]);
 let workspaceRoot = $state<string | null>(null);
 let unavailablePath = $state<string | null>(null);
 let revision = $state('');
-let scope = $state<SessionScope>('project');
+// This is a preference only, not workspace navigation. The selected project
+// still comes exclusively from an authenticated backend snapshot.
+let scope = $state<SessionScope>(loadSessionScope());
+let lastAppliedSeq = 0;
 
 export function projectDisplayName(path: string | null | undefined): string {
   if (!path) return '';
@@ -89,6 +96,16 @@ export const projectStore = {
     if (currentPath === path) currentPath = null;
   },
   reconcile(snapshot: WorkspaceNavigationSnapshot): WorkspaceReconciliation {
+    // Discard stale snapshots: a slow HTTP response must never regress state
+    // that a newer WebSocket broadcast already applied.
+    if (typeof snapshot.seq === 'number' && snapshot.seq < lastAppliedSeq) {
+      return {
+        projectBecameUnavailable: null,
+        workspaceBecameUnavailable: null,
+        changed: false,
+      };
+    }
+    if (typeof snapshot.seq === 'number') lastAppliedSeq = snapshot.seq;
     const previousRoot = workspaceRoot;
     const previousProject = currentPath;
     const previousUnavailablePath = unavailablePath;
@@ -137,8 +154,10 @@ export const projectStore = {
     workspaceRoot = null;
     unavailablePath = null;
     revision = '';
+    lastAppliedSeq = 0;
   },
   setScope(next: SessionScope) {
     scope = next;
+    saveSessionScope(next);
   },
 };

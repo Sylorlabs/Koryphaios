@@ -3,6 +3,7 @@
   import { useNow } from '$lib/utils/now-signal.svelte';
   import Send from 'lucide-svelte/icons/send';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
+  import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import Sparkles from 'lucide-svelte/icons/sparkles';
   import Square from 'lucide-svelte/icons/square';
   import Users from 'lucide-svelte/icons/users';
@@ -28,9 +29,17 @@
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { buildReasoningConfigFromLevels } from '@koryphaios/shared';
+  import { buildReasoningConfigFromLevels, type VoiceSettings, type GoalScope } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
+  import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
+  import {
+    modelHasVerifiedImageInput,
+    needsImageInputChoice,
+    readRememberedImageInputMode,
+    rememberImageInputMode,
+    type ImageInputMode,
+  } from '$lib/utils/image-input-fallback';
   import {
     getModelConfigurationWarning,
     isEnabledModelSelection,
@@ -45,7 +54,16 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
-  import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
+  import { formatGoalRuntime, isActiveGoal, type GoalActionRequest } from '$lib/utils/goal-actions';
+  import {
+    clearComposerDraft,
+    loadComposerDraft,
+    saveComposerDraft,
+    type ComposerDraftAttachment,
+  } from '$lib/stores/composer-drafts';
+  import { loadComposerPreference, saveComposerPreference } from '$lib/stores/composer-preferences';
+  import KorySelect from './KorySelect.svelte';
+  import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
 
   export type Attachment = {
     type: 'image' | 'file';
@@ -61,12 +79,13 @@
       reasoningLevel?: string,
       attachments?: Attachment[],
       fastMode?: boolean,
-    ) => void;
+      imageInputMode?: ImageInputMode,
+    ) => Promise<boolean> | boolean;
     onExecuteCommand?: (command: string) => Promise<boolean> | boolean;
     /** When true, show Stop instead of Send; clicking stops manager and workers for the session. */
     isRunning?: boolean;
     /** Kory is parked — waiting on a background terminal or your answer. The
-     *  button shows a distinct Waiting state; sending is still allowed. */
+     *  owned wait must be answered or cancelled before another turn starts. */
     isWaiting?: boolean;
     /** What Kory is waiting on, e.g. "background terminal: dev-server". */
     waitingReason?: string;
@@ -95,6 +114,10 @@
     onInteractionModeChange?: (mode: 'act' | 'plan') => void;
     planReady?: boolean;
     onApprovePlan?: () => void;
+    /** Opaque session id used only to scope local unsent-draft recovery. */
+    draftKey?: string;
+    /** Parent-side deferred send succeeded; clear the retained composer draft. */
+    clearDraftRequest?: number;
   }
 
   let {
@@ -122,10 +145,13 @@
     onInteractionModeChange,
     planReady = false,
     onApprovePlan,
+    draftKey = 'welcome',
+    clearDraftRequest = 0,
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
   let modelSearchQuery = $state('');
+  let expandedProviders = $state<Set<string>>(new Set());
   const MODEL_STORAGE_KEY = 'koryphaios-selected-model';
   let _storedModel =
     typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
@@ -139,14 +165,117 @@
   if (!selectedModel && _storedModel) selectedModel = _storedModel;
   let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
+  let modelSelectionGeneration = 0;
+  let imageAdmissionPending = $state(false);
   let attachments = $state<Attachment[]>([]);
+  let hydratedDraftKey = $state<string | null>(null);
+  let lastClearDraftRequest = $state<number | undefined>(undefined);
+  let omittedAttachmentNames = $state<string[]>([]);
+
+  function currentDraftKey(): string {
+    return draftKey.trim() || 'welcome';
+  }
+
+  function sameNames(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+
+  function clearCurrentDraft() {
+    value = '';
+    attachments = [];
+    omittedAttachmentNames = [];
+    clearComposerDraft(currentDraftKey());
+    resizeToMin();
+  }
+
+  // One composer instance survives chat switching. Persist the outgoing draft
+  // before loading the next *session-scoped* draft so work cannot bleed from
+  // one chat into another or disappear during a renderer relaunch.
+  $effect(() => {
+    const nextKey = currentDraftKey();
+    if (hydratedDraftKey === nextKey) return;
+    if (hydratedDraftKey !== null) {
+      saveComposerDraft(
+        hydratedDraftKey,
+        value,
+        attachments as ComposerDraftAttachment[],
+        omittedAttachmentNames,
+      );
+    }
+    const recovered = loadComposerDraft(nextKey);
+    hydratedDraftKey = nextKey;
+    value = recovered.text;
+    attachments = recovered.attachments as Attachment[];
+    omittedAttachmentNames = recovered.omittedAttachmentNames;
+  });
+
+  $effect(() => {
+    const key = currentDraftKey();
+    if (hydratedDraftKey !== key) return;
+    const persisted = saveComposerDraft(
+      key,
+      value,
+      attachments as ComposerDraftAttachment[],
+      omittedAttachmentNames,
+    );
+    if (!sameNames(omittedAttachmentNames, persisted.omittedAttachmentNames)) {
+      omittedAttachmentNames = persisted.omittedAttachmentNames;
+    }
+  });
+
+  $effect(() => {
+    if (lastClearDraftRequest === undefined) {
+      lastClearDraftRequest = clearDraftRequest;
+      return;
+    }
+    if (clearDraftRequest === lastClearDraftRequest) return;
+    lastClearDraftRequest = clearDraftRequest;
+    clearCurrentDraft();
+  });
+  let modelPickerVisionOnly = $state(false);
+  let contextImagePreview = $state<{
+    sessionId: string;
+    imageCount: number;
+  } | null>(null);
+  // Non-persistent choices made while switching models authorize exactly the
+  // next send. The separate "Don't ask again" choice is the only durable one.
+  let oneShotImageOmitConsents = $state<Set<string>>(new Set());
+  let imageFallbackWarning = $state<{
+    mode: 'model-switch' | 'send';
+    targetValue: string;
+    targetLabel: string;
+    imageCount: number;
+    historicalImageCount?: number;
+    message?: string;
+  } | null>(null);
   let previewAttachment = $state<Attachment | null>(null);
   let previewDialogRef = $state<HTMLDivElement>();
   let previewTriggerRef: HTMLButtonElement | null = null;
   let isReadingClipboard = $state(false);
+  type BrowserSpeechRecognition = {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+    onresult:
+      | ((event: {
+          resultIndex: number;
+          results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+        }) => void)
+      | null;
+    onerror: ((event: { error: string }) => void) | null;
+    onend: (() => void) | null;
+  };
+  type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
   let isRecording = $state(false);
   let isTranscribing = $state(false);
   let activeRecorder: MediaRecorder | null = null;
+  let activeSpeechRecognition: BrowserSpeechRecognition | null = null;
+  let voiceSettings = $state<VoiceSettings | null>(null);
+  let composerMicrophoneEnabled = $derived(voiceSettings?.voiceModeEnabled === true);
   const pendingAttachmentReads = new Set<Promise<void>>();
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
@@ -162,6 +291,91 @@
       (goal) => isActiveGoal(goal) && goal.execution?.sessionId === sessionStore.activeSessionId,
     ),
   );
+
+  // ─── Goal composer (lives above the chat, not in the sidebar) ───────────────
+  const goalScopeOptions = [
+    { value: 'workspace', label: 'Workspace', description: 'Available from every chat' },
+    { value: 'project', label: 'Project', description: 'Restricted to this project' },
+    { value: 'session', label: 'This chat', description: 'Restricted to the active chat' },
+  ];
+  let showGoalComposer = $state(false);
+  let goalObjective = $state('');
+  let goalScope = $state<GoalScope>('workspace');
+  let goalError = $state('');
+  let goalDraftHydratedFor = $state<string | null>(null);
+  let goalDraftRecovered = $state(false);
+  let goalComposerInput = $state<HTMLInputElement>();
+  let goalDraftScope = $derived(
+    sessionStore.activeSessionId || `project:${projectStore.currentPath ?? 'workspace'}`,
+  );
+  $effect(() => {
+    const nextScope = goalDraftScope;
+    if (goalDraftHydratedFor === nextScope) return;
+    if (goalDraftHydratedFor !== null) {
+      saveLocalFormDraft('goal-composer', goalDraftHydratedFor, { objective: goalObjective, scope: goalScope });
+    }
+    const recovered = loadLocalFormDraft('goal-composer', nextScope);
+    goalDraftHydratedFor = nextScope;
+    goalObjective = recovered.objective || '';
+    goalScope =
+      recovered.scope === 'workspace' || recovered.scope === 'project' || recovered.scope === 'session'
+        ? recovered.scope
+        : 'workspace';
+    goalDraftRecovered = Boolean(recovered.objective);
+  });
+  $effect(() => {
+    const draftScope = goalDraftScope;
+    if (goalDraftHydratedFor !== draftScope) return;
+    saveLocalFormDraft('goal-composer', draftScope, { objective: goalObjective, scope: goalScope });
+  });
+  $effect(() => {
+    const command = (event: Event) => {
+      const detail = (event as CustomEvent<GoalActionRequest | string>).detail;
+      const request: GoalActionRequest =
+        typeof detail === 'string' ? { action: detail as GoalActionRequest['action'] } : detail;
+      if (request.action !== 'goal_create') return;
+      showGoalComposer = true;
+      goalError = '';
+      if (request.objective) goalObjective = request.objective;
+      setTimeout(() => goalComposerInput?.focus(), 0);
+    };
+    window.addEventListener('kory:goal-action', command);
+    return () => window.removeEventListener('kory:goal-action', command);
+  });
+  function toggleGoalComposer() {
+    showGoalComposer = !showGoalComposer;
+    goalError = '';
+    if (showGoalComposer) setTimeout(() => goalComposerInput?.focus(), 0);
+  }
+  async function createGoal() {
+    try {
+      goalError = '';
+      if (!goalObjective.trim()) {
+        goalComposerInput?.focus();
+        return;
+      }
+      if (goalScope === 'project' && !projectStore.currentPath)
+        throw new Error('Open a project before creating a project goal');
+      if (goalScope === 'session' && !sessionStore.activeSessionId)
+        throw new Error('Open a chat before creating a chat goal');
+      const goal = await goalStore.create({
+        objective: goalObjective.trim(),
+        scope: goalScope,
+        projectPath: goalScope === 'project' ? (projectStore.currentPath ?? undefined) : undefined,
+        sessionId: goalScope === 'session' ? (sessionStore.activeSessionId ?? undefined) : undefined,
+        planningDepth: agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive',
+      });
+      goalObjective = '';
+      goalDraftRecovered = false;
+      showGoalComposer = false;
+      // The created goal previews on the left so it can be revisited from any chat.
+      goalDisplayStore.update({ sidebar: true });
+      if (agentSettingsStore.settings.automaticGoalDriving) await goalStore.drive(goal.id);
+    } catch (err) {
+      goalError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   let liveFileMentions = $state<string[]>([]);
 
   $effect(() => {
@@ -206,6 +420,7 @@
   // Reasoning state - now tracks provider AND model
   let reasoningLevel = $state('medium');
   let showReasoningMenu = $state(false);
+  let restoredComposerPreferenceFor = $state('');
 
   let fallbackProvider = $derived.by(() => {
     const preferred = wsStore.providers.find(
@@ -227,7 +442,17 @@
   function findModelDef(
     provider: string,
     model: string | undefined,
-  ): { reasoningLevels?: string[]; canReason?: boolean; supportsFastMode?: boolean } | undefined {
+  ):
+    | {
+        id: string;
+        name?: string;
+        reasoningLevels?: string[];
+        canReason?: boolean;
+        supportsFastMode?: boolean;
+        supportsAttachments?: boolean;
+        vision?: boolean;
+      }
+    | undefined {
     if (!model) return undefined;
     const p = wsStore.providers.find((p) => p.name === provider);
     const catalog = (p as any)?.allAvailableModels as
@@ -236,6 +461,9 @@
           reasoningLevels?: string[];
           canReason?: boolean;
           supportsFastMode?: boolean;
+          supportsAttachments?: boolean;
+          vision?: boolean;
+          name?: string;
         }>
       | undefined;
     return catalog?.find((m) => m.id === model);
@@ -258,6 +486,29 @@
   let reasoningSupported = $derived(
     !!selectedModel && !!reasoningConfig && reasoningConfig.options.length > 0,
   );
+  let reasoningIsValid = $derived(
+    !!reasoningLevel && !!reasoningConfig && reasoningConfig.options.some((o) => o.value === reasoningLevel),
+  );
+
+  // Effort and Fast/Priority are model capabilities, so retain them per exact
+  // selected model rather than applying an unsupported choice to another
+  // provider. The live catalog below still wins if a model's capabilities
+  // changed since the preference was written.
+  $effect(() => {
+    const model = selectedModel;
+    if (!model || model === restoredComposerPreferenceFor) return;
+    restoredComposerPreferenceFor = model;
+    const saved = loadComposerPreference(model);
+    if (saved.reasoningLevel) reasoningLevel = saved.reasoningLevel;
+    if (typeof saved.fastMode === 'boolean') fastMode = saved.fastMode;
+  });
+
+  $effect(() => {
+    if (!reasoningConfig || reasoningConfig.options.length === 0) return;
+    if (reasoningLevel && !reasoningConfig.options.some((o) => o.value === reasoningLevel)) {
+      reasoningLevel = '';
+    }
+  });
   let fastMode = $state(false);
   let fastModeSupported = $derived(
     !!selectedModel &&
@@ -274,6 +525,18 @@
 
   $effect(() => {
     if (!fastModeSupported) fastMode = false;
+  });
+
+  $effect(() => {
+    const model = selectedModel;
+    if (!model || !reasoningIsValid) return;
+    saveComposerPreference(model, { reasoningLevel });
+  });
+
+  $effect(() => {
+    const model = selectedModel;
+    if (!model || !fastModeSupported) return;
+    saveComposerPreference(model, { fastMode });
   });
 
   let showPermissionMenu = $state(false);
@@ -361,13 +624,23 @@
       label: string;
       value: string;
       provider: string;
+      name: string;
       contextWindow?: number;
+      supportsAttachments?: boolean;
+      vision?: boolean;
     }> = [];
     for (const p of wsStore.providers) {
       if (p.enabled && (p.adapterAvailable ?? p.authenticated)) {
         const enabledIds = new Set(p.models);
         const catalog = (p as any).allAvailableModels as
-          | Array<{ id: string; name: string; contextWindow?: number; contextVerified?: boolean }>
+          | Array<{
+              id: string;
+              name: string;
+              contextWindow?: number;
+              contextVerified?: boolean;
+              supportsAttachments?: boolean;
+              vision?: boolean;
+            }>
           | undefined;
         if (catalog && catalog.length > 0) {
           for (const m of catalog) {
@@ -376,6 +649,9 @@
                 label: `(${providerLabel(p.name)}) ${m.name}`,
                 value: `${p.name}:${m.id}`,
                 provider: p.name,
+                name: m.name,
+                supportsAttachments: m.supportsAttachments,
+                vision: m.vision,
                 // Verified window size kept internally for the switch-overflow
                 // guard — deliberately NOT shown in the picker.
                 contextWindow: m.contextVerified ? m.contextWindow : undefined,
@@ -390,6 +666,7 @@
               label: `(${providerLabel(p.name)}) ${m}`,
               value: `${p.name}:${m}`,
               provider: p.name,
+              name: m,
             });
           }
         }
@@ -412,11 +689,34 @@
   });
 
   let filteredQuickModels = $derived.by(() => {
+    const candidates = modelPickerVisionOnly
+      ? availableModels.filter((model) => modelHasVerifiedImageInput(model))
+      : availableModels;
     const query = modelSearchQuery.trim().toLowerCase();
-    if (!query) return availableModels;
-    return availableModels.filter((model) =>
-      `${model.label} ${model.provider} ${model.value}`.toLowerCase().includes(query),
-    );
+    if (!query) return candidates;
+    return candidates.filter((model) => {
+      const haystack = `${model.name} ${providerLabel(model.provider)} ${model.provider} ${model.value}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  });
+
+  let isSearchingModels = $derived(modelSearchQuery.trim().length > 0);
+
+  let groupedModels = $derived.by(() => {
+    const map = new Map<string, (typeof availableModels)[number][]>();
+    const order: string[] = [];
+    for (const model of filteredQuickModels) {
+      if (!map.has(model.provider)) {
+        order.push(model.provider);
+        map.set(model.provider, []);
+      }
+      map.get(model.provider)!.push(model);
+    }
+    return order.map((provider) => ({
+      provider,
+      label: providerLabel(provider),
+      models: map.get(provider)!,
+    }));
   });
 
   let selectedModelLabel = $derived.by(() => {
@@ -436,11 +736,19 @@
   async function previewSelectedModelContext(value: string) {
     const sid = sessionStore.activeSessionId;
     if (!sid || !value) return;
+    if (contextImagePreview?.sessionId !== sid) contextImagePreview = null;
     const generation = ++contextPreviewGeneration;
     const target = availableModels.find((m) => m.value === value);
-    wsStore.setManagerContextWindow(sid, target?.contextWindow);
-    if (disableModelPreviewRequests) return;
     const { provider, model } = parseProviderModelSelection(value);
+    if (!provider || !model) {
+      wsStore.clearManagerContextPreview(sid);
+      return;
+    }
+    // A selection is a new telemetry epoch. Clear the prior provider/model's
+    // usage composition immediately; the matching backend response is the only
+    // thing allowed to repopulate it.
+    wsStore.beginManagerContextPreview(sid, provider, model, target?.contextWindow);
+    if (disableModelPreviewRequests) return;
     if (provider && model) {
       // listModels() starts provider/CLI discovery in the background. Recheck
       // a few times so a live limit replaces the catalog fallback as soon as
@@ -460,17 +768,40 @@
             body: JSON.stringify({ model, provider }),
           });
           const result = (await response.json()) as {
+            error?: string;
             usage?: {
+              provider?: string;
+              model?: string;
+              used?: number;
               contextWindow?: number;
               contextKnown?: boolean;
               contextSource?: 'live' | 'catalog' | 'alias';
+              usageKnown?: boolean;
+              hasImageAttachments?: boolean;
+              imageAttachmentCount?: number;
+              cachedInputTokens?: number;
+              breakdown?: { system: number; memory: number; tools: number; chat: number };
             };
           };
-          if (generation !== contextPreviewGeneration) return;
-          wsStore.setManagerContextWindow(
-            sid,
-            result.usage?.contextKnown ? result.usage.contextWindow : undefined,
-          );
+          if (!response.ok || !result.usage) {
+            throw new Error(result.error || `Context preview failed (${response.status})`);
+          }
+          if (
+            generation !== contextPreviewGeneration ||
+            sessionStore.activeSessionId !== sid ||
+            selectedModel !== value
+          )
+            return;
+          contextImagePreview = {
+            sessionId: sid,
+            imageCount:
+              typeof result.usage?.imageAttachmentCount === 'number'
+                ? result.usage.imageAttachmentCount
+                : result.usage?.hasImageAttachments
+                  ? 1
+                  : 0,
+          };
+          wsStore.applyManagerContextPreview(sid, provider, model, result.usage);
           if (result.usage?.contextSource === 'live' || result.usage?.contextSource === 'alias')
             return;
         } catch (err: unknown) {
@@ -497,7 +828,8 @@
       const key = `${sid}:none`;
       if (key === lastContextPreviewKey) return;
       lastContextPreviewKey = key;
-      wsStore.setManagerContextWindow(sid, undefined);
+      contextImagePreview = null;
+      wsStore.clearManagerContextPreview(sid);
       return;
     }
     // Track catalog changes so a late provider discovery can replace an
@@ -703,6 +1035,198 @@
     }
   }
 
+  function visibleTranscriptImageCount(): number {
+    return wsStore.feed.reduce((count, entry) => {
+      if (entry.type !== 'user_message') return count;
+      const entryAttachments = (entry.metadata as { attachments?: Attachment[] } | undefined)
+        ?.attachments;
+      return (
+        count +
+        (entryAttachments?.filter((attachment) => attachment.type === 'image').length ?? 0)
+      );
+    }, 0);
+  }
+
+  function contextImageCount(): number {
+    const sid = sessionStore.activeSessionId;
+    if (sid && contextImagePreview?.sessionId === sid) {
+      // The backend preview is the authoritative active-context count. The
+      // visible feed may include entries excluded by Time Travel/compaction.
+      return contextImagePreview.imageCount;
+    }
+    return visibleTranscriptImageCount();
+  }
+
+  /**
+   * Decisions that can withhold pixels always re-read the backend's active
+   * provider context. The cached preview is UI telemetry and may be stale
+   * after compaction, rewind, deletion, or an in-flight send.
+   */
+  async function authoritativeContextImageCount(modelValue: string): Promise<number> {
+    if (disableModelPreviewRequests) return visibleTranscriptImageCount();
+    const sid = sessionStore.activeSessionId;
+    const { provider, model } = parseProviderModelSelection(modelValue);
+    if (!sid || !provider || !model) return visibleTranscriptImageCount();
+    try {
+      const response = await apiFetch(apiUrl(`/api/sessions/${sid}/context/model-preview`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model, provider }),
+      });
+      const result = (await response.json()) as {
+        error?: string;
+        usage?: { hasImageAttachments?: boolean; imageAttachmentCount?: number };
+      };
+      if (!response.ok || !result.usage) {
+        throw new Error(result.error || `Context preview failed (${response.status})`);
+      }
+      const imageCount =
+        typeof result.usage.imageAttachmentCount === 'number'
+          ? result.usage.imageAttachmentCount
+          : result.usage.hasImageAttachments
+            ? 1
+            : 0;
+      if (sessionStore.activeSessionId === sid) {
+        contextImagePreview = { sessionId: sid, imageCount };
+      }
+      return imageCount;
+    } catch (err: unknown) {
+      console.debug(
+        'Authoritative image context lookup failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+      // Fail closed. The active feed can overcount compacted rows, but it will
+      // never silently send a known image to an unverified transport.
+      return visibleTranscriptImageCount();
+    }
+  }
+
+  function imageConsentKey(modelValue: string): string {
+    return `${sessionStore.activeSessionId ?? 'new-session'}::${modelValue}`;
+  }
+
+  function hasImageOmitConsent(modelValue: string): boolean {
+    const remembered = readRememberedImageInputMode(
+      typeof localStorage === 'undefined' ? undefined : localStorage,
+    );
+    return remembered === 'omit' || oneShotImageOmitConsents.has(imageConsentKey(modelValue));
+  }
+
+  function grantImageOmitConsent(modelValue: string, remember: boolean, oneShot = false) {
+    if (remember) {
+      rememberImageInputMode(
+        typeof localStorage === 'undefined' ? undefined : localStorage,
+        'omit',
+      );
+    } else if (oneShot) {
+      oneShotImageOmitConsents = new Set([
+        ...oneShotImageOmitConsents,
+        imageConsentKey(modelValue),
+      ]);
+    }
+  }
+
+  function consumeOneShotImageOmitConsent(modelValue: string) {
+    const key = imageConsentKey(modelValue);
+    if (!oneShotImageOmitConsents.has(key)) return;
+    const next = new Set(oneShotImageOmitConsents);
+    next.delete(key);
+    oneShotImageOmitConsents = next;
+  }
+
+  function showImageOmitNotice(modelValue: string) {
+    toastStore.warning('Sent without image input. Images remain visible in the transcript.', {
+      duration: 8_000,
+      actionLabel: 'Ask next time',
+      action: () => {
+        rememberImageInputMode(
+          typeof localStorage === 'undefined' ? undefined : localStorage,
+          'reject',
+        );
+        const next = new Set(oneShotImageOmitConsents);
+        next.delete(imageConsentKey(modelValue));
+        oneShotImageOmitConsents = next;
+      },
+    });
+  }
+
+  async function dispatchSend(
+    trimmed: string,
+    imageInputMode: ImageInputMode = 'reject',
+    historicalImageCount = contextImageCount(),
+  ) {
+    const now = Date.now();
+    if (now - lastSendAt < SEND_COOLDOWN_MS) return;
+    lastSendAt = now;
+    const outgoingAttachments = attachments.length > 0 ? [...attachments] : undefined;
+    const outgoingImageCount =
+      outgoingAttachments?.filter((attachment) => attachment.type === 'image').length ?? 0;
+    const modelValue = selectedModel;
+    // A preview started before this turn cannot overwrite the optimistic
+    // post-send image count with its older database snapshot.
+    contextPreviewGeneration++;
+    let accepted = false;
+    try {
+      accepted =
+        (await onSend(
+          trimmed,
+          modelValue,
+          reasoningLevel,
+          outgoingAttachments,
+          fastMode,
+          imageInputMode,
+        )) !== false;
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Could not send message');
+      return;
+    }
+    // A consent/project/configuration interruption is not a send. Keep the
+    // local draft intact so closing that dialog or reloading cannot lose text
+    // or recoverable attachments.
+    if (!accepted) return;
+    if (outgoingImageCount > 0 && sessionStore.activeSessionId) {
+      const sid = sessionStore.activeSessionId;
+      contextImagePreview = {
+        sessionId: sid,
+        imageCount: historicalImageCount + outgoingImageCount,
+      };
+    }
+    consumeOneShotImageOmitConsent(modelValue);
+    if (imageInputMode === 'omit') showImageOmitNotice(modelValue);
+    clearCurrentDraft();
+  }
+
+  function continueWithoutImageInput(remember: boolean) {
+    const warning = imageFallbackWarning;
+    if (!warning) return;
+    imageFallbackWarning = null;
+    if (warning.mode === 'model-switch') {
+      // A non-persistent model-switch choice carries through only to the next
+      // send, avoiding a second dialog without turning it into "don't ask".
+      grantImageOmitConsent(warning.targetValue, remember, !remember);
+      applyModelSelection(warning.targetValue);
+      toastStore.info(
+        remember
+          ? 'Model selected. Image input will be omitted until you choose Ask next time.'
+          : 'Model selected. Image input will be omitted from the next send.',
+      );
+      return;
+    }
+    grantImageOmitConsent(warning.targetValue, remember);
+    void dispatchSend(
+      warning.message ?? value.trim(),
+      'omit',
+      warning.historicalImageCount ?? contextImageCount(),
+    );
+  }
+
+  function chooseVisionModelFromWarning() {
+    imageFallbackWarning = null;
+    // The click bubbles through the window-level outside-click handler. Open
+    // after that event finishes so it cannot immediately close the picker.
+    requestAnimationFrame(() => openModelPicker(true));
+  }
+
   async function send() {
     if (disabled) return;
     // Local slash commands control Koryphaios itself and must remain usable
@@ -714,27 +1238,54 @@
       return;
     }
     if (!selectedModel) {
-      showModelPicker = true;
+      openModelPicker();
       return;
     }
-    if (pendingAttachmentReads.size > 0) {
-      await Promise.all([...pendingAttachmentReads]);
+    if (imageAdmissionPending) return;
+    imageAdmissionPending = true;
+    try {
+      if (pendingAttachmentReads.size > 0) {
+        await Promise.all([...pendingAttachmentReads]);
+      }
+      const admissionValue = value;
+      const admissionAttachments = attachments;
+      const trimmed = admissionValue.trim();
+      if (!trimmed && admissionAttachments.length === 0) return;
+      const currentImages = admissionAttachments.filter(
+        (attachment) => attachment.type === 'image',
+      ).length;
+      const sendSessionId = sessionStore.activeSessionId;
+      const sendModelValue = selectedModel;
+      const historicalImages = await authoritativeContextImageCount(sendModelValue);
+      if (
+        sessionStore.activeSessionId !== sendSessionId ||
+        selectedModel !== sendModelValue ||
+        value !== admissionValue ||
+        attachments !== admissionAttachments
+      )
+        return;
+      const totalImages = historicalImages + currentImages;
+      const model = findModelDef(currentProvider, currentModel);
+      const hasOmitConsent = hasImageOmitConsent(selectedModel);
+      if (needsImageInputChoice(totalImages, model, hasOmitConsent)) {
+        imageFallbackWarning = {
+          mode: 'send',
+          targetValue: selectedModel,
+          targetLabel: selectedModelLabel,
+          imageCount: totalImages,
+          historicalImageCount: historicalImages,
+          message: trimmed,
+        };
+        return;
+      }
+      if (totalImages > 0 && !modelHasVerifiedImageInput(model) && hasOmitConsent) {
+        await dispatchSend(trimmed, 'omit', historicalImages);
+        return;
+      }
+      await dispatchSend(trimmed, 'reject', historicalImages);
+    } finally {
+      imageAdmissionPending = false;
     }
-    const trimmed = value.trim();
-    if (!trimmed && attachments.length === 0) return;
-    const now = Date.now();
-    if (now - lastSendAt < SEND_COOLDOWN_MS) return; // debounce duplicate sends
-    lastSendAt = now;
-    onSend(
-      trimmed,
-      selectedModel,
-      reasoningLevel,
-      attachments.length > 0 ? [...attachments] : undefined,
-      fastMode,
-    );
-    value = '';
-    attachments = [];
-    resizeToMin();
   }
 
   function stop() {
@@ -782,6 +1333,55 @@
     });
   }
 
+  async function loadComposerVoiceSettings(): Promise<VoiceSettings> {
+    const response = await apiFetch(apiUrl('/api/voice/settings'));
+    const result = await response.json();
+    if (!response.ok || !result.data)
+      throw new Error(result.error || 'Could not load voice settings');
+    voiceSettings = result.data;
+    return voiceSettings!;
+  }
+
+  function appendTranscription(transcript: string) {
+    const text = transcript.trim();
+    if (!text) return;
+    value = `${value}${value && !value.endsWith(' ') ? ' ' : ''}${text}`;
+    requestAnimationFrame(() => {
+      autoResize();
+      inputRef?.focus();
+    });
+  }
+
+  function startSystemRecognition(settings: VoiceSettings) {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+      webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+    };
+    const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!Recognition) throw new Error('System speech recognition is unavailable in this runtime');
+    const recognition = new Recognition();
+    recognition.lang = settings.input.language;
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result?.isFinal) appendTranscription(result[0].transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      if (event.error !== 'aborted' && event.error !== 'no-speech')
+        toastStore.error(`Speech recognition failed: ${event.error}`);
+    };
+    recognition.onend = () => {
+      if (activeSpeechRecognition === recognition) activeSpeechRecognition = null;
+      isRecording = false;
+    };
+    activeSpeechRecognition = recognition;
+    recognition.start();
+    isRecording = true;
+  }
+
   async function transcribeRecording(blob: Blob, language: string) {
     isTranscribing = true;
     try {
@@ -794,11 +1394,7 @@
       const result = await response.json();
       if (!response.ok || !result.data?.text)
         throw new Error(result.error || 'Transcription failed');
-      value = `${value}${value && !value.endsWith(' ') ? ' ' : ''}${result.data.text}`;
-      requestAnimationFrame(() => {
-        autoResize();
-        inputRef?.focus();
-      });
+      appendTranscription(result.data.text);
     } catch (error) {
       toastStore.error(error instanceof Error ? error.message : 'Transcription failed');
     } finally {
@@ -807,19 +1403,24 @@
   }
 
   async function toggleRecording() {
+    if (activeSpeechRecognition && isRecording) {
+      activeSpeechRecognition.stop();
+      return;
+    }
     if (activeRecorder && isRecording) {
       activeRecorder.stop();
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      toastStore.error('Microphone recording is unavailable in this runtime');
-      return;
-    }
     try {
-      const settingsResponse = await apiFetch(apiUrl('/api/voice/settings'));
-      const settingsResult = await settingsResponse.json();
-      if (!settingsResponse.ok || !settingsResult.data?.voiceModeEnabled)
+      const settings = await loadComposerVoiceSettings();
+      if (!settings.voiceModeEnabled)
         throw new Error('Enable the composer microphone in Voice settings first');
+      if (settings.input.provider === 'system') {
+        startSystemRecognition(settings);
+        return;
+      }
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
+        throw new Error('Microphone recording is unavailable in this runtime');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
       const type = audioMimeType();
@@ -833,7 +1434,7 @@
         const blob = new Blob(chunks, { type: recorder.mimeType || type || 'audio/webm' });
         activeRecorder = null;
         isRecording = false;
-        if (blob.size) void transcribeRecording(blob, settingsResult.data.input.language || 'en');
+        if (blob.size) void transcribeRecording(blob, settings.input.language || 'en');
       };
       recorder.start();
       isRecording = true;
@@ -858,6 +1459,13 @@
       }
     };
     window.addEventListener('keydown', handleGlobalEsc);
+    const handleVoiceSettingsChanged = (event: Event) => {
+      voiceSettings = (event as CustomEvent<VoiceSettings>).detail;
+    };
+    window.addEventListener('koryphaios:voice-settings-changed', handleVoiceSettingsChanged);
+    void loadComposerVoiceSettings().catch(() => {
+      voiceSettings = null;
+    });
 
     const resizeObserver = new ResizeObserver(() => {
       syncComposerMinHeight();
@@ -883,6 +1491,8 @@
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('keydown', handleGlobalEsc);
+      window.removeEventListener('koryphaios:voice-settings-changed', handleVoiceSettingsChanged);
+      activeSpeechRecognition?.abort();
       if (activeRecorder?.state !== 'inactive') activeRecorder?.stop();
       activeRecorder?.stream.getTracks().forEach((track) => track.stop());
       nowClock.unsubscribe();
@@ -914,6 +1524,18 @@
   } | null>(null);
 
   function applyModelSelection(value: string) {
+    const targetConsentKey = imageConsentKey(value);
+    if (
+      oneShotImageOmitConsents.size > 0 &&
+      !(
+        oneShotImageOmitConsents.size === 1 &&
+        oneShotImageOmitConsents.has(targetConsentKey)
+      )
+    ) {
+      oneShotImageOmitConsents = oneShotImageOmitConsents.has(targetConsentKey)
+        ? new Set([targetConsentKey])
+        : new Set();
+    }
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
@@ -924,7 +1546,9 @@
     previewSelectedModelContext(value);
   }
 
-  function selectModel(value: string) {
+  async function selectModel(value: string) {
+    const generation = ++modelSelectionGeneration;
+    const selectionSessionId = sessionStore.activeSessionId;
     const target = availableModels.find((m) => m.value === value);
     const usage = wsStore.contextUsage;
     if (target?.contextWindow && usage.isReliable && usage.used > target.contextWindow) {
@@ -937,7 +1561,59 @@
       };
       return;
     }
-    applyModelSelection(value);
+    if (imageAdmissionPending) return;
+    imageAdmissionPending = true;
+    const admissionAttachments = attachments;
+    try {
+      const historicalImageCount = await authoritativeContextImageCount(value);
+      if (
+        generation !== modelSelectionGeneration ||
+        sessionStore.activeSessionId !== selectionSessionId ||
+        attachments !== admissionAttachments
+      )
+        return;
+      const imageCount =
+        historicalImageCount +
+        admissionAttachments.filter((attachment) => attachment.type === 'image').length;
+      if (target && needsImageInputChoice(imageCount, target, hasImageOmitConsent(value))) {
+        showModelPicker = false;
+        imageFallbackWarning = {
+          mode: 'model-switch',
+          targetValue: value,
+          targetLabel: target.label,
+          imageCount,
+        };
+        return;
+      }
+      applyModelSelection(value);
+    } finally {
+      imageAdmissionPending = false;
+    }
+  }
+
+  function openModelPicker(visionOnly = false) {
+    modelPickerVisionOnly = visionOnly;
+    showModelPicker = true;
+    modelSearchQuery = '';
+    if (selectedModel) {
+      const provider = parseProviderModelSelection(selectedModel).provider ?? currentProvider;
+      expandedProviders = new Set(provider ? [provider] : []);
+    } else if (groupedModels.length === 1) {
+      expandedProviders = new Set([groupedModels[0].provider]);
+    } else {
+      expandedProviders = new Set();
+    }
+  }
+
+  function toggleProvider(provider: string) {
+    if (isSearchingModels) return;
+    const next = new Set(expandedProviders);
+    if (next.has(provider)) {
+      next.delete(provider);
+    } else {
+      next.add(provider);
+    }
+    expandedProviders = next;
   }
 
   function overflowAskAgentPrune() {
@@ -961,7 +1637,7 @@
     const w = overflowWarning;
     overflowWarning = null;
     await onExecuteCommand?.('/new');
-    if (w) applyModelSelection(w.value);
+    if (w) await selectModel(w.value);
   }
 
   function selectReasoning(value: string) {
@@ -1010,7 +1686,9 @@
     if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
   }
 
-  let canSend = $derived(!disabled && (value.trim().length > 0 || attachments.length > 0));
+  let canSend = $derived(
+    !disabled && !imageAdmissionPending && (value.trim().length > 0 || attachments.length > 0),
+  );
 
   // Dropdown, not a blind cycle button — all three modes stay visible and
   // pickable without clicking through the others.
@@ -1155,6 +1833,7 @@
   }
 
   function removeAttachment(index: number) {
+    if (imageAdmissionPending) return;
     if (previewAttachment === attachments[index]) {
       previewAttachment = null;
       previewTriggerRef = null;
@@ -1245,7 +1924,7 @@
 
   /** Force-paste image from OS clipboard (bypasses text). Used by Ctrl+Shift+V and the paste-image button. */
   async function pasteImageFromClipboard() {
-    if (isReadingClipboard) return;
+    if (isReadingClipboard || imageAdmissionPending) return;
     isReadingClipboard = true;
     try {
       // Prefer the browser API when available. It preserves the original image format.
@@ -1319,6 +1998,10 @@
 
   /** Ctrl+V / Cmd+V → paste image if available, else text. */
   function handlePaste(e: ClipboardEvent) {
+    if (imageAdmissionPending) {
+      e.preventDefault();
+      return;
+    }
     // If this exact event was already handled (container + textarea both fire), skip.
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
@@ -1398,8 +2081,11 @@
             ? 'var(--color-text-primary)'
             : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
           onclick={() => {
-            showModelPicker = !showModelPicker;
-            if (showModelPicker) modelSearchQuery = '';
+            if (showModelPicker) {
+              showModelPicker = false;
+            } else {
+              openModelPicker();
+            }
           }}
         >
           {#if selectedModel}
@@ -1414,6 +2100,13 @@
             class="absolute bottom-full left-0 mb-2 w-80 overflow-hidden rounded-xl border shadow-2xl z-50"
             style="background: var(--color-surface-2); border-color: var(--color-border);"
           >
+            {#if modelPickerVisionOnly}
+              <div
+                class="border-b border-[var(--color-border)] bg-[var(--color-accent)]/8 px-3 py-2 text-xs text-[var(--color-text-secondary)]"
+              >
+                Showing models with verified image input
+              </div>
+            {/if}
             <div class="relative border-b p-2.5" style="border-color: var(--color-border);">
               <Search
                 class="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2"
@@ -1429,7 +2122,7 @@
                 style="border-color: var(--color-border); padding-left: 2.25rem;"
               />
             </div>
-            <div class="max-h-60 overflow-y-auto">
+            <div class="max-h-72 overflow-y-auto">
               {#if availableModels.length === 0}
                 <div
                   class="px-4 py-4 text-xs leading-relaxed"
@@ -1456,25 +2149,67 @@
                 </div>
               {:else if filteredQuickModels.length === 0}
                 <div class="px-4 py-5 text-center text-xs" style="color: var(--color-text-muted);">
-                  No models match “{modelSearchQuery}”.
+                  {#if modelPickerVisionOnly && !modelSearchQuery.trim()}
+                    No enabled models report verified image input.
+                  {:else}
+                    No models match “{modelSearchQuery}”.
+                  {/if}
                 </div>
               {:else}
-                {#each filteredQuickModels as model}
-                  <button
-                    type="button"
-                    class="w-full text-left px-4 py-3 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel ===
-                    model.value
-                      ? 'text-[var(--color-accent)]'
-                      : ''}"
-                    style="color: {selectedModel === model.value
-                      ? 'var(--color-accent)'
-                      : 'var(--color-text-secondary)'};"
-                    onclick={() => selectModel(model.value)}
-                  >
-                    <ProviderIcon provider={model.provider} size={16} class="shrink-0" />
-                    <span class="flex-1 min-w-0 truncate">{model.label}</span>
-                  </button>
-                {/each}
+                <div class="py-1">
+                  {#each groupedModels as group (group.provider)}
+                    <div>
+                      <button
+                        type="button"
+                        class="w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] {selectedModel?.startsWith(
+                          `${group.provider}:`,
+                        )
+                          ? 'bg-[var(--color-surface-3)]/50'
+                          : ''}"
+                        style="color: var(--color-text-primary);"
+                        onclick={() => toggleProvider(group.provider)}
+                        aria-expanded={isSearchingModels || expandedProviders.has(group.provider)}
+                      >
+                        <div class="flex items-center gap-2 min-w-0">
+                          <ProviderIcon provider={group.provider} size={16} class="shrink-0" />
+                          <span class="text-sm font-medium truncate">{group.label}</span>
+                          <span class="text-xs text-[var(--color-text-muted)]"
+                            >({group.models.length})</span
+                          >
+                        </div>
+                        <span class="shrink-0 text-[var(--color-text-muted)]">
+                          {#if isSearchingModels || expandedProviders.has(group.provider)}
+                            <ChevronDown size={14} />
+                          {:else}
+                            <ChevronRight size={14} />
+                          {/if}
+                        </span>
+                      </button>
+                      {#if isSearchingModels || expandedProviders.has(group.provider)}
+                        <div class="pb-1">
+                          {#each group.models as model (model.value)}
+                            <button
+                              type="button"
+                              class="w-full text-left pl-10 pr-4 py-2 text-sm transition-colors hover:bg-[var(--color-surface-3)] flex items-center gap-2 {selectedModel ===
+                              model.value
+                                ? 'text-[var(--color-accent)]'
+                                : ''}"
+                              style="color: {selectedModel === model.value
+                                ? 'var(--color-accent)'
+                                : 'var(--color-text-secondary)'};"
+                              onclick={() => selectModel(model.value)}
+                            >
+                              <span class="flex-1 min-w-0 truncate">{model.name}</span>
+                              {#if selectedModel === model.value}
+                                <Check size={14} class="shrink-0" />
+                              {/if}
+                            </button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
               {/if}
             </div>
           </div>
@@ -1487,12 +2222,12 @@
           <button
             type="button"
             class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-            style="background: var(--color-surface-3); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+            style="background: var(--color-surface-3); color: {reasoningIsValid ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
             onclick={() => (showReasoningMenu = !showReasoningMenu)}
-            title="Set auto effort"
+            title={reasoningIsValid ? 'Set auto effort' : 'Choose reasoning effort for this model'}
           >
-            <BrainIcon {reasoningLevel} size={20} class="text-[#c890ab]" />
-            <span>{reasoningLabel(reasoningLevel)}</span>
+            <BrainIcon reasoningLevel={reasoningIsValid ? reasoningLevel : ''} size={20} class="text-[#c890ab]" />
+            <span>{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span>
             <ChevronDown size={14} class="text-text-muted" />
           </button>
 
@@ -1505,7 +2240,7 @@
                 class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70"
                 style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);"
               >
-                {`${modelDisplayName} · ${reasoningLabel(reasoningLevel)}`}
+                {`${modelDisplayName} · ${reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}`}
               </div>
               <div class="py-1">
                 {#each reasoningConfig.options as opt}
@@ -1659,6 +2394,74 @@
       </div>
     </div>
 
+    {#if goalDisplayStore.composer && showGoalComposer}
+      <div
+        class="mb-3 rounded-xl border p-3"
+        style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, var(--color-surface-2));"
+        role="group"
+        aria-label="New goal"
+      >
+        <div class="flex items-center gap-2">
+          <Target size={14} class="shrink-0 text-[var(--color-accent)]" />
+          <span class="text-xs font-semibold text-[var(--color-text-primary)]">New goal</span>
+          <button
+            type="button"
+            class="ml-auto rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+            aria-label="Close goal composer"
+            title="Close goal composer"
+            onclick={() => (showGoalComposer = false)}><X size={13} /></button
+          >
+        </div>
+        <div class="mt-2 flex gap-2">
+          <input
+            bind:this={goalComposerInput}
+            aria-label="Goal objective"
+            class="min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2.5 py-1.5 text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
+            placeholder="What should Koryphaios finish?"
+            bind:value={goalObjective}
+            onkeydown={(event) => {
+              if (event.key === 'Enter') void createGoal();
+            }}
+          />
+          <button
+            type="button"
+            class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+            style="background: var(--color-accent); color: var(--color-background, #101010);"
+            onclick={() => void createGoal()}
+            aria-label={agentSettingsStore.settings.automaticGoalDriving
+              ? 'Create and start goal'
+              : 'Create goal'}
+          >
+            {agentSettingsStore.settings.automaticGoalDriving ? 'Create & start' : 'Create'}
+          </button>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <div class="min-w-0 flex-1 sm:max-w-56">
+            <KorySelect
+              compact
+              value={goalScope}
+              label="Goal scope"
+              options={goalScopeOptions}
+              onchange={(value) => (goalScope = value as GoalScope)}
+            />
+          </div>
+          <p class="min-w-0 flex-1 text-[10px] text-[var(--color-text-muted)]">
+            {agentSettingsStore.settings.automaticGoalDriving
+              ? 'Starts automatically with the selected composer model and continues until done, paused, stopped, or genuinely blocked.'
+              : 'Automatic start is off. The goal will wait until you press Start.'}
+          </p>
+        </div>
+        {#if goalDraftRecovered}
+          <p class="mt-1.5 text-[10px] text-[var(--color-success)]">
+            Recovered unsent goal draft on this device.
+          </p>
+        {/if}
+        {#if goalError}<p class="mt-1.5 text-xs text-[var(--color-error)]" role="alert"
+            >{goalError}</p
+          >{/if}
+      </div>
+    {/if}
+
     {#if goalDisplayStore.composer && activeChatGoal}
       <button
         type="button"
@@ -1704,7 +2507,7 @@
     {/if}
 
     <!-- Input area -->
-    <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
+    <div class="flex flex-col gap-3 xl:flex-row xl:items-end">
       <div class="min-w-0 flex-1">
         {#if pickerOpen}
           <div
@@ -1781,11 +2584,24 @@
                   class="absolute right-1 top-1 rounded-full bg-black/70 p-0.5 text-white opacity-0 shadow-md transition-opacity hover:bg-black/90 focus:opacity-100 group-hover:opacity-100"
                   onclick={() => removeAttachment(i)}
                   aria-label={`Remove ${attachment.name}`}
+                  disabled={imageAdmissionPending}
                 >
                   <X size={12} />
                 </button>
               </div>
             {/each}
+          </div>
+        {/if}
+
+        {#if omittedAttachmentNames.length > 0}
+          <div
+            class="mb-3 rounded-lg border px-3 py-2 text-xs leading-relaxed"
+            style="border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border)); background: color-mix(in srgb, var(--color-warning) 9%, transparent); color: var(--color-text-secondary);"
+            role="status"
+          >
+            {omittedAttachmentNames.length === 1
+              ? `${omittedAttachmentNames[0]} is too large to persist and will need to be reattached after a restart — still attached for this session.`
+              : `${omittedAttachmentNames.length} attachments are too large to persist and will need to be reattached after a restart — still attached for now.`}
           </div>
         {/if}
 
@@ -1796,12 +2612,12 @@
             oninput={autoResize}
             onkeydown={handleKeydown}
             onpaste={handlePaste}
-            placeholder={disabled ? disabledMessage : placeholder}
+            placeholder={disabled ? disabledMessage : imageAdmissionPending ? 'Checking image input…' : placeholder}
             rows="1"
             class="input w-full"
             data-testid="composer-input"
-            {disabled}
-            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled
+            disabled={disabled || imageAdmissionPending}
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || imageAdmissionPending
               ? 'opacity: 0.6; cursor: not-allowed;'
               : ''}"
           ></textarea>
@@ -1827,7 +2643,7 @@
                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
                 style="color: var(--color-text-muted);"
                 onclick={() => (showGoalActions = !showGoalActions)}
-                disabled={disabled || !!configurationWarning}
+                disabled={disabled || imageAdmissionPending || !!configurationWarning}
                 aria-label="More composer actions"
                 title="More actions"><Plus size={16} /></button
               >
@@ -1842,7 +2658,6 @@
                       style="color: var(--color-text-primary);"
                       onclick={() => {
                         showGoalActions = false;
-                        goalDisplayStore.update({ sidebar: true });
                         queueMicrotask(() =>
                           window.dispatchEvent(
                             new CustomEvent('kory:goal-action', { detail: 'goal_create' }),
@@ -1877,7 +2692,7 @@
                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
                 style="color: var(--color-text-muted);"
                 onclick={() => (showReferenceMenu = !showReferenceMenu)}
-                disabled={disabled || !!configurationWarning}
+                disabled={disabled || imageAdmissionPending || !!configurationWarning}
                 title="Reference a file or folder"
               >
                 <Paperclip size={16} />
@@ -1911,7 +2726,9 @@
               class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
               style="color: var(--color-text-muted);"
               onclick={() => void pasteImageFromClipboard()}
-              disabled={disabled || !!configurationWarning || isReadingClipboard}
+              disabled={
+                disabled || imageAdmissionPending || !!configurationWarning || isReadingClipboard
+              }
               aria-label={isReadingClipboard
                 ? 'Reading image from clipboard'
                 : 'Paste image from clipboard'}
@@ -1919,21 +2736,35 @@
             >
               <Clipboard size={16} />
             </button>
-            <button
-              type="button"
-              class="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 {isRecording ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-error)_14%,transparent)]' : 'text-[var(--color-text-muted)]'}"
-              onclick={() => void toggleRecording()}
-              disabled={disabled || !!configurationWarning || isTranscribing}
-              aria-pressed={isRecording}
-              aria-label={isTranscribing ? 'Transcribing recording' : isRecording ? 'Stop recording' : 'Record voice prompt'}
-              title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop and transcribe' : 'Record voice prompt'}
-            >
-              <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
-            </button>
+            {#if composerMicrophoneEnabled}
+              <button
+                type="button"
+                class="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 {isRecording
+                  ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-error)_14%,transparent)]'
+                  : 'text-[var(--color-text-muted)]'}"
+                onclick={() => void toggleRecording()}
+                disabled={
+                  disabled || imageAdmissionPending || !!configurationWarning || isTranscribing
+                }
+                aria-pressed={isRecording}
+                aria-label={isTranscribing
+                  ? 'Transcribing recording'
+                  : isRecording
+                    ? 'Stop recording'
+                    : 'Record voice prompt'}
+                title={isTranscribing
+                  ? 'Transcribing…'
+                  : isRecording
+                    ? 'Stop and transcribe'
+                    : 'Record voice prompt'}
+              >
+                <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
+              </button>
+            {/if}
           </div>
         </div>
       </div>
-      <div class="w-full xl:w-auto xl:self-start">
+      <div class="w-full xl:w-auto xl:self-end">
         <div
           bind:this={actionPanelRef}
           class="flex flex-col gap-3 rounded-2xl border px-3 py-3 xl:min-w-[188px]"
@@ -2033,25 +2864,32 @@
 
           <button
             type="button"
-            onclick={isRunning ? stop : isWaiting && !canSend ? stop : send}
-            disabled={disabled || (!isRunning && !isWaiting && !canSend)}
+            onclick={isRunning || isWaiting ? stop : send}
+            disabled={
+              disabled || imageAdmissionPending || (!isRunning && !isWaiting && !canSend)
+            }
             class="btn flex w-full items-center justify-center gap-2 {isRunning
               ? 'stop-btn'
-              : isWaiting && !canSend
+              : isWaiting
                 ? 'waiting-btn'
                 : 'btn-primary'}"
             style="height: 52px; padding: 0 20px; font-size: 14px; {disabled ||
+            imageAdmissionPending ||
             (!isRunning && !isWaiting && !canSend)
               ? 'opacity: 0.5; cursor: not-allowed;'
               : ''}"
-            aria-label={isRunning
+            aria-label={imageAdmissionPending
+              ? 'Checking image input support'
+              : isRunning
               ? 'Stop the running model'
-              : isWaiting && !canSend
+              : isWaiting
                 ? 'Kory is waiting — click to cancel'
                 : 'Send message'}
-            title={isRunning
+            title={imageAdmissionPending
+              ? 'Checking active image context before sending'
+              : isRunning
               ? 'Stop (Esc)'
-              : isWaiting && !canSend
+              : isWaiting
                 ? waitingReason
                   ? `Waiting on ${waitingReason} — click to cancel`
                   : 'Kory is waiting — click to cancel'
@@ -2066,7 +2904,7 @@
                 <Square size={10} fill="currentColor" strokeWidth={0} />
               </span>
               <span>Stop</span>
-            {:else if isWaiting && !canSend}
+            {:else if isWaiting}
               <span class="waiting-dots" aria-hidden="true"
                 ><span></span><span></span><span></span></span
               >
@@ -2097,6 +2935,17 @@
     {/if}
   </div>
 </div>
+
+{#if imageFallbackWarning}
+  <ImageInputFallbackDialog
+    modelLabel={imageFallbackWarning.targetLabel}
+    imageCount={imageFallbackWarning.imageCount}
+    mode={imageFallbackWarning.mode}
+    oncontinue={continueWithoutImageInput}
+    onchoosemodel={chooseVisionModelFromWarning}
+    oncancel={() => (imageFallbackWarning = null)}
+  />
+{/if}
 
 {#if previewAttachment}
   <div

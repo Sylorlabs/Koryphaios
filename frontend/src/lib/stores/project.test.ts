@@ -7,6 +7,7 @@ function snapshot(
   projects: string[],
   selectedProject: string | null = null,
   unavailable: { workspace?: string | null; project?: string | null } = {},
+  seq?: number,
 ): WorkspaceNavigationSnapshot {
   return {
     workspaceRoot: '/workspace',
@@ -19,12 +20,36 @@ function snapshot(
     revision: projects.join('|'),
     unavailableWorkspace: unavailable.workspace ?? null,
     unavailableProject: unavailable.project ?? null,
+    ...(seq !== undefined ? { seq } : {}),
   };
 }
 
 beforeEach(() => projectStore.clearWorkspace());
 
 describe('projectStore filesystem reconciliation', () => {
+  test('discards stale snapshots that arrive after newer ones', () => {
+    projectStore.reconcile(snapshot(['/workspace/beta'], '/workspace/beta', {}, 10));
+    const stale = projectStore.reconcile(snapshot(['/workspace/alpha'], '/workspace/alpha', {}, 9));
+    expect(stale.changed).toBe(false);
+    expect(projectStore.currentPath).toBe('/workspace/beta');
+
+    // Equal snapshots are idempotent; newer ones still apply.
+    const equal = projectStore.reconcile(snapshot(['/workspace/beta'], '/workspace/beta', {}, 10));
+    expect(equal.changed).toBe(false);
+    const newer = projectStore.reconcile(
+      snapshot(['/workspace/gamma'], '/workspace/gamma', {}, 11),
+    );
+    expect(newer.changed).toBe(true);
+    expect(projectStore.currentPath).toBe('/workspace/gamma');
+  });
+
+  test('snapshots without a seq are always applied', () => {
+    projectStore.reconcile(snapshot(['/workspace/alpha'], '/workspace/alpha'));
+    const legacy = projectStore.reconcile(snapshot(['/workspace/beta'], '/workspace/beta'));
+    expect(legacy.changed).toBe(true);
+    expect(projectStore.currentPath).toBe('/workspace/beta');
+  });
+
   test('replaces folder snapshots instead of accumulating stale entries', () => {
     projectStore.reconcile(snapshot(['/workspace/alpha', '/workspace/beta'], '/workspace/alpha'));
     const result = projectStore.reconcile(

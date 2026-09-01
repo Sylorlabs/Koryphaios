@@ -238,7 +238,7 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
     ],
     [
       'read_note',
-      'read_note({id|title}) -> full body; use only when the complete document is genuinely required',
+      'read_note({id|title}) -> full body plus the current revision required for optimistic writes; use only when the complete document is genuinely required',
     ],
     [
       'recall_notes',
@@ -253,17 +253,30 @@ export function buildNotesNetworkSystemHint(projectRoot: string): string {
       'get_note_graph_summary({}) -> graph overview without loading note bodies',
     ],
     [
+      'get_note_properties',
+      'get_note_properties({noteId}) -> read the current revision and bounded typed YAML properties; malformed frontmatter fails closed',
+    ],
+    [
+      'query_note_base',
+      'query_note_base({baseId|baseName, limit?, offset?}) -> run an existing saved Base with deterministic bounded results; agents cannot supply a query AST',
+    ],
+    [
+      'record_work_note',
+      'record_work_note({title, summary, status, objective?, decisions?, changedFiles?, commands?, tests?, evidence?, risks?, followUps?, relatedNotes?, includeInContext?}) -> save a structured evidence note with the authenticated session and all provider, model, agent, and goal provenance available to Koryphaios',
+    ],
+    [
       'create_note',
       'create_note({title, content?, folderPath?, tags?, includeInContext?}) -> create Markdown note',
     ],
     [
-      'update_note',
-      'update_note({id|title, content?|newTitle?|folderPath?|tags?|pinned?|includeInContext?}) -> edit note or live project file',
+      'set_note_property',
+      'set_note_property({noteId, expectedRevision, key, type, value}) -> optimistically update one typed YAML property without overwriting a newer note revision',
     ],
     [
-      'delete_note',
-      'delete_note({id|title}) -> delete note; live project documents delete the underlying file',
+      'update_note',
+      'update_note({id|title, expectedRevision, content?|newTitle?|folderPath?|tags?|pinned?|includeInContext?}) -> edit only the revision returned by read_note; stale writes fail instead of overwriting newer work',
     ],
+    ['delete_note', 'delete_note({id|title}) -> move a note to recoverable trash'],
     [
       'link_notes',
       'link_notes({fromId|fromTitle, toId|toTitle, syncContent?}) -> connect notes and optionally add [[wikilink]]',

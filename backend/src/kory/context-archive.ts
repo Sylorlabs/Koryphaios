@@ -39,6 +39,8 @@ export interface ArchiveEntry {
   contentSha256: string;
   truncated: boolean;
   redacted: boolean;
+  /** Whether the archived tool execution failed. Legacy/non-tool rows omit this. */
+  isError?: boolean;
   /** Hidden from the agent's context (stubbed). The preview stays recoverable. */
   prunedForAgent?: boolean;
 }
@@ -47,8 +49,32 @@ export interface UsageSnapshot {
   used: number;
   max: number;
   contextKnown: boolean;
+  /** Exact routing identity that produced this provider-reported snapshot.
+   *  Legacy rows omit these fields and therefore cannot be reused after a
+   *  model/provider preview until another authoritative report arrives. */
+  model?: string;
+  provider?: string;
+  /** Exact conversation boundary whose provider request produced this usage.
+   *  Legacy rows omit these fields and fail closed when usage is restored. */
+  activeMessageId?: string | null;
+  contextRevision?: number;
+  cachedInputTokens?: number;
   breakdown?: { system: number; memory: number; tools: number; chat: number };
   ts: number;
+}
+
+export function usageSnapshotMatchesBoundary(
+  usage: UsageSnapshot | undefined,
+  boundary: { messageId: string | null; contextRevision: number } | undefined,
+): usage is UsageSnapshot {
+  return (
+    usage !== undefined &&
+    boundary !== undefined &&
+    usage.activeMessageId !== undefined &&
+    typeof usage.contextRevision === 'number' &&
+    usage.activeMessageId === boundary.messageId &&
+    usage.contextRevision === boundary.contextRevision
+  );
 }
 
 export interface ArchiveRetention {
@@ -59,6 +85,18 @@ export interface ArchiveRetention {
   compactedAt: number;
 }
 
+/**
+ * Reversible projection of the archive onto the active conversation branch.
+ * Entries that existed when the boundary was applied are visible only through
+ * the target checkpoint timestamp. Entries recorded afterward belong to the
+ * new branch and remain visible even though their timestamps are newer.
+ */
+export interface ArchiveTimelineVisibilityBoundary {
+  cutoffTimestamp: number;
+  throughCounter: number;
+  updatedAt: number;
+}
+
 interface SessionState {
   entries: ArchiveEntry[];
   byId: Map<string, ArchiveEntry>;
@@ -66,6 +104,7 @@ interface SessionState {
   loaded: boolean;
   lastUsage?: UsageSnapshot;
   retention?: ArchiveRetention;
+  timelineVisibility?: ArchiveTimelineVisibilityBoundary;
 }
 
 export class ContextArchiveService {
@@ -135,6 +174,25 @@ export class ContextArchiveService {
           }
           continue;
         }
+        if (row.type === 'timeline_visibility') {
+          const boundary = row.boundary as Record<string, unknown> | undefined;
+          if (
+            boundary &&
+            typeof boundary.cutoffTimestamp === 'number' &&
+            Number.isFinite(boundary.cutoffTimestamp) &&
+            typeof boundary.throughCounter === 'number' &&
+            Number.isSafeInteger(boundary.throughCounter) &&
+            boundary.throughCounter >= -1 &&
+            typeof boundary.updatedAt === 'number' &&
+            Number.isFinite(boundary.updatedAt)
+          ) {
+            if (s.timelineVisibility) requiresRewrite = true;
+            s.timelineVisibility = boundary as unknown as ArchiveTimelineVisibilityBoundary;
+          } else {
+            requiresRewrite = true;
+          }
+          continue;
+        }
         const entry = this.normalizeEntry(sessionId, row);
         if (!entry) {
           requiresRewrite = true;
@@ -193,6 +251,7 @@ export class ContextArchiveService {
     kind: ArchiveKind,
     label: string,
     content: string,
+    isError?: boolean,
   ): Promise<string> {
     if (this.erasingSessions.has(sessionId)) {
       throw new Error('Context archive write refused because this session is being deleted');
@@ -211,6 +270,7 @@ export class ContextArchiveService {
       contentSha256: persisted.contentSha256,
       truncated: persisted.truncated,
       redacted: persisted.redacted,
+      ...(typeof isError === 'boolean' ? { isError } : {}),
     };
     await this.append(sessionId, entry as unknown as Record<string, unknown>);
     s.counter++;
@@ -222,7 +282,8 @@ export class ContextArchiveService {
 
   async get(sessionId: string, id: string): Promise<ArchiveEntry | undefined> {
     const s = await this.ensureLoaded(sessionId);
-    return s.byId.get(id);
+    const entry = s.byId.get(id);
+    return entry && this.isTimelineVisible(s, entry) ? entry : undefined;
   }
 
   /** Case-insensitive substring search across labels and content. */
@@ -233,6 +294,7 @@ export class ContextArchiveService {
     // Newest first — recent activity is almost always what's being recalled.
     for (let i = s.entries.length - 1; i >= 0 && hits.length < limit; i--) {
       const e = s.entries[i];
+      if (!this.isTimelineVisible(s, e)) continue;
       if (e.label.toLowerCase().includes(q) || e.content.toLowerCase().includes(q)) hits.push(e);
     }
     return hits;
@@ -241,7 +303,43 @@ export class ContextArchiveService {
   /** Most recent N entries, oldest→newest, for the activity index. In-memory — fast. */
   async listRecent(sessionId: string, limit = 30): Promise<ArchiveEntry[]> {
     const s = await this.ensureLoaded(sessionId);
-    return s.entries.slice(-limit);
+    return s.entries.filter((entry) => this.isTimelineVisible(s, entry)).slice(-limit);
+  }
+
+  /** Move the visible archive projection with a successful conversation rewind.
+   * Physical entries remain intact so redo can reveal a later checkpoint. */
+  async setTimelineVisibilityBoundary(
+    sessionId: string,
+    cutoffTimestamp: number,
+  ): Promise<ArchiveTimelineVisibilityBoundary> {
+    if (!Number.isFinite(cutoffTimestamp) || cutoffTimestamp < 0) {
+      throw new Error('Context archive refused an invalid timeline cutoff');
+    }
+    const s = await this.ensureLoaded(sessionId);
+    const boundary: ArchiveTimelineVisibilityBoundary = {
+      cutoffTimestamp,
+      throughCounter: s.counter - 1,
+      updatedAt: Date.now(),
+    };
+    await this.append(sessionId, { type: 'timeline_visibility', boundary });
+    s.timelineVisibility = boundary;
+    // The marker itself is already durable. Compaction is maintenance only;
+    // do not turn a committed visibility move into an apparent rewind failure.
+    try {
+      await this.compactIfNeeded(sessionId, s);
+    } catch (err) {
+      serverLog.warn(
+        { err: err instanceof Error ? err.message : String(err), sessionId },
+        'Context archive visibility moved but compaction was deferred',
+      );
+    }
+    return boundary;
+  }
+
+  async getTimelineVisibilityBoundary(
+    sessionId: string,
+  ): Promise<ArchiveTimelineVisibilityBoundary | undefined> {
+    return (await this.ensureLoaded(sessionId)).timelineVisibility;
   }
 
   /** Persist the latest context-usage snapshot so a reloaded session's bar
@@ -333,9 +431,15 @@ export class ContextArchiveService {
     const usageRow = state.lastUsage
       ? `${JSON.stringify({ type: 'usage', usage: state.lastUsage })}\n`
       : '';
+    const timelineVisibilityRow = state.timelineVisibility
+      ? `${JSON.stringify({ type: 'timeline_visibility', boundary: state.timelineVisibility })}\n`
+      : '';
     // Reserve enough room for retention metadata before selecting newest
     // entries. The final size check below handles digit growth deterministically.
-    const metadataReserve = 1_024 + Buffer.byteLength(usageRow, 'utf8');
+    const metadataReserve =
+      1_024 +
+      Buffer.byteLength(usageRow, 'utf8') +
+      Buffer.byteLength(timelineVisibilityRow, 'utf8');
     let selectedBytes = 0;
     const retainedNewestFirst: ArchiveEntry[] = [];
     for (let index = candidates.length - 1; index >= 0; index--) {
@@ -360,6 +464,11 @@ export class ContextArchiveService {
         ...retained.map((entry) => JSON.stringify(entry)),
       ];
       if (state.lastUsage) rows.push(JSON.stringify({ type: 'usage', usage: state.lastUsage }));
+      if (state.timelineVisibility) {
+        rows.push(
+          JSON.stringify({ type: 'timeline_visibility', boundary: state.timelineVisibility }),
+        );
+      }
       return `${rows.join('\n')}\n`;
     };
     let output = render();
@@ -395,6 +504,13 @@ export class ContextArchiveService {
     state.entries = retained;
     state.byId = new Map(retained.map((entry) => [entry.id, entry]));
     state.retention = retention;
+  }
+
+  private isTimelineVisible(state: SessionState, entry: ArchiveEntry): boolean {
+    const boundary = state.timelineVisibility;
+    if (!boundary || entry.ts <= boundary.cutoffTimestamp) return true;
+    const match = /^cx_(\d+)$/.exec(entry.id);
+    return !!match && Number(match[1]) > boundary.throughCounter;
   }
 
   private preview(
@@ -464,6 +580,7 @@ export class ContextArchiveService {
           : safe.contentSha256,
       truncated: row.truncated === true || safe.truncated,
       redacted: row.redacted === true || safe.redacted,
+      ...(typeof row.isError === 'boolean' ? { isError: row.isError } : {}),
       prunedForAgent: row.prunedForAgent === true,
     };
   }

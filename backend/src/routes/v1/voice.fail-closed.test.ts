@@ -44,7 +44,6 @@ describe('voice routes validate locally before provider requests', () => {
   test.each([
     ['/api/voice/transcribe', { audioBase64: '' }, 'Recorded audio is required'],
     ['/api/voice/synthesize', { text: '' }, 'Text is required'],
-    ['/api/voice/packs/not-a-pack/download', {}, 'Unknown voice pack'],
   ] as const)('%s rejects invalid input without a network request', async (path, body, message) => {
     const response = await app.handle(authorizedRequest(path, body));
     const payload = (await response.json()) as { ok: boolean; code: string; error: string };

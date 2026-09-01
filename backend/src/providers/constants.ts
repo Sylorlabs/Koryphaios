@@ -88,7 +88,7 @@ export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   perplexity: 'https://api.perplexity.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
-  tokenrouter: 'https://tokenrouter.me/v1',
+  tokenrouter: 'https://api.tokenrouter.io/v1',
   digitalocean: 'https://inference.do-ai.run/v1',
   xai: 'https://api.x.ai/v1',
   novita: 'https://api.novita.ai/v3/openai',

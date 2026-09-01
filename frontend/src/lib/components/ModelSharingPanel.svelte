@@ -279,46 +279,45 @@
   const remoteCliCount = $derived(remote?.catalog?.providers?.filter((p: any) => p.agentic).length ?? 0);
 </script>
 
-<div class="space-y-6">
-  <div class="flex items-start gap-3">
-    <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl" style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;">
+<div class="space-y-8">
+  <div class="flex items-start gap-4">
+    <div class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl" style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;">
       <Share2 size={18} />
     </div>
     <div>
       <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Models you share</h3>
-      <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+      <p class="mt-2 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
         Lend providers for inference without sharing your workspace or files. Only the model call travels.
       </p>
     </div>
   </div>
 
   <!-- ── HOST: share my providers ── -->
-  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
+  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7">
     <div class="flex items-center gap-3">
       <Share2 size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
     </div>
-    <p class="ml-8 mt-1 text-[11px] text-[var(--color-text-muted)]">
+    <p class="ml-8 mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
       Every provider is listed here. Search by name, then enable the connected providers you want to lend.
     </p>
 
     {#if loadingHost}
-      <div class="flex items-center gap-2 text-xs text-[var(--color-text-muted)]"><Loader2 size={14} class="animate-spin" /> Loading providers…</div>
+      <div class="mt-6 flex items-center gap-2 text-xs text-[var(--color-text-muted)]"><Loader2 size={14} class="animate-spin" /> Loading providers…</div>
     {:else if candidates.length === 0}
-      <p class="text-xs text-[var(--color-text-muted)]">Connect a provider first — authenticated providers appear here to share.</p>
+      <p class="mt-6 text-xs text-[var(--color-text-muted)]">Connect a provider first — authenticated providers appear here to share.</p>
     {:else}
-      <div class="mb-3 flex items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2">
+      <div class="mb-4 mt-6 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5">
         <Search size={14} class="shrink-0 text-[var(--color-text-muted)]" />
         <input bind:value={providerSearch} type="search" placeholder="Search all providers…" class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]" aria-label="Search providers to share" />
         <span class="text-[10px] text-[var(--color-text-muted)]">{filteredCandidates.length}/{candidates.length}</span>
       </div>
-      <div class="max-h-[30rem] space-y-2 overflow-y-auto pr-1">
+      <div class="max-h-[32rem] space-y-3 overflow-y-auto pr-2">
         {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
           <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]" style="border-color: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 45%, var(--color-border))' : 'var(--color-border)'};">
             <SettingsSwitch
-              compact
               large
               checked={on}
               disabled={!c.available}
@@ -327,16 +326,16 @@
               onchange={() => toggleShare(c)}
             />
             {#if c.available && c.models.length > 0}
-              <div class="flex items-center justify-between gap-3 px-3 pb-2">
+              <div class="flex items-center justify-between gap-4 px-4 pb-3">
                 <span class="text-[10px] text-[var(--color-text-muted)]">{modelsFor(c).length} of {c.models.length} models shared</span>
-                <button type="button" onclick={() => expandedProvider = expandedProvider === c.provider ? null : c.provider} class="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" aria-expanded={expandedProvider === c.provider}>
+                <button type="button" onclick={() => expandedProvider = expandedProvider === c.provider ? null : c.provider} class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" aria-expanded={expandedProvider === c.provider}>
                   <SlidersHorizontal size={12} /> Choose models <ChevronDown size={12} class={expandedProvider === c.provider ? 'rotate-180' : ''} />
                 </button>
               </div>
               {#if expandedProvider === c.provider}
-                <div class="mx-3 mb-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
-                  <div class="mb-2 px-1 text-[10px] text-[var(--color-text-muted)]">Only these models are advertised to guests and accepted by the host.</div>
-                  <div class="grid gap-1 sm:grid-cols-2">
+                <div class="mx-4 mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+                  <div class="mb-3 px-1 text-[10px] leading-4 text-[var(--color-text-muted)]">Only these models are advertised to guests and accepted by the host.</div>
+                  <div class="grid gap-2 sm:grid-cols-2">
                     {#each c.models as model (model.id)}
                       <SettingsSwitch compact checked={modelsFor(c).includes(model.id)} label={model.name} description={model.id} onchange={() => toggleModel(c, model.id)} />
                     {/each}
@@ -344,7 +343,7 @@
                 </div>
               {/if}
             {/if}
-            <div class="flex flex-wrap gap-1.5 px-3 pb-3">
+            <div class="flex flex-wrap gap-2 px-4 pb-4">
               <span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"><meta.icon size={10} /> {meta.label}</span>
               {#if c.agentic}<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"><HardDrive size={10} /> CLI</span>{/if}
               {#if !c.available}<span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">Not connected</span>{/if}
@@ -355,35 +354,35 @@
       </div>
 
       {#if anyRisky}
-        <div class="mt-4 rounded-2xl border p-3 text-[11px] leading-relaxed" style="border-color: color-mix(in srgb, #f59e0b 40%, transparent); background: color-mix(in srgb, #f59e0b 8%, transparent); color: var(--color-text-secondary);">
+        <div class="mt-6 rounded-2xl border p-4 text-[11px] leading-relaxed" style="border-color: color-mix(in srgb, #f59e0b 40%, transparent); background: color-mix(in srgb, #f59e0b 8%, transparent); color: var(--color-text-secondary);">
           <strong style="color: #f59e0b;">Heads up:</strong> you've selected subscription-backed providers. Lending a subscription to
           another person is account-sharing that several providers' terms forbid and actively enforce (bans). Your own
           <em>API keys</em> are the safe way to share. Enable these only if you accept the risk.
         </div>
       {/if}
 
-      <div class="sticky bottom-0 -mx-5 -mb-5 mt-4 flex items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-3">
+      <div class="mt-6 flex flex-col items-stretch justify-between gap-4 border-t border-[var(--color-border)] pt-5 sm:flex-row sm:items-center">
         <span class="text-[10px] text-[var(--color-text-muted)]">Changes apply only after saving.</span>
-        <button type="button" onclick={saveHost} disabled={savingHost} class="btn btn-primary shrink-0 text-xs px-5 py-2">
+        <button type="button" onclick={saveHost} disabled={savingHost} class="btn btn-primary shrink-0 px-6 py-2.5 text-xs">
           {savingHost ? 'Saving…' : 'Save shared providers'}
         </button>
       </div>
 
       {#if sharingAnyCli && sandbox}
         <!-- Sandbox policy — how the shared CLI runs on YOUR machine. -->
-        <div class="mt-5 border-t border-[var(--color-border)] pt-5">
-          <div class="flex items-center gap-2 mb-1">
+        <div class="mt-7 border-t border-[var(--color-border)] pt-7">
+          <div class="mb-2 flex items-center gap-2">
             <Lock size={14} style="color: #a78bfa;" />
             <span class="text-xs font-bold text-[var(--color-text-primary)]">CLI sandbox</span>
             {#if savingSandbox}<Loader2 size={11} class="animate-spin text-[var(--color-text-muted)]" />{/if}
           </div>
-          <p class="text-[11px] text-[var(--color-text-muted)] mb-3">
+          <p class="mb-4 text-[11px] leading-5 text-[var(--color-text-muted)]">
             You're sharing a CLI model, which runs on your PC. Choose how it's confined.
           </p>
 
           <!-- OS-level enforcement indicator (mechanism-aware) -->
           {#if sandboxCaps}
-            <div class="mb-3 rounded-xl px-3 py-2 text-[10px] leading-relaxed" style="background: {sandboxCaps.osIsolation ? 'color-mix(in srgb, #22c55e 10%, transparent)' : 'color-mix(in srgb, #f59e0b 10%, transparent)'};">
+            <div class="mb-4 rounded-xl px-4 py-3 text-[10px] leading-relaxed" style="background: {sandboxCaps.osIsolation ? 'color-mix(in srgb, #22c55e 10%, transparent)' : 'color-mix(in srgb, #f59e0b 10%, transparent)'};">
               {#if sandboxCaps.mechanism === 'bubblewrap'}
                 <span style="color:#22c55e"><strong>Kernel-hardened jail active</strong> (bubblewrap).</span>
                 The filesystem jail and network block are enforced by the Linux kernel — the CLI can't escape them, even via its own shell.
@@ -399,7 +398,7 @@
           {/if}
 
           <!-- Presets -->
-          <div class="flex flex-wrap gap-1.5 mb-3">
+          <div class="mb-4 flex flex-wrap gap-2">
             {#each PRESET_META as p (p.id)}
               <button
                 type="button"
@@ -415,7 +414,7 @@
           </div>
 
           <!-- Per-option toggles -->
-          <div class="space-y-1.5">
+          <div class="space-y-2">
             {#each SANDBOX_TOGGLES as opt (opt.key)}
               {@const on = sandbox[opt.key] === true}
               <SettingsSwitch
@@ -427,7 +426,7 @@
               />
             {/each}
           </div>
-          <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+          <p class="mt-3 text-[10px] leading-4 text-[var(--color-text-muted)]">
             A guest's access tier can only tighten these, never loosen them. Blocked catastrophic commands (rm -rf /, shutdown…) always apply.
             <a href="https://koryphaios.com/docs/sandbox" target="_blank" rel="noreferrer" class="underline hover:text-[var(--color-accent)]">How the sandbox works →</a>
           </p>
@@ -435,9 +434,9 @@
       {/if}
 
       <!-- Dedicated model-sharing link — grants ONLY model access, not session access. -->
-      <div class="mt-5 border-t border-[var(--color-border)] pt-5">
+      <div class="mt-7 border-t border-[var(--color-border)] pt-7">
         {#if hosting}
-          <div class="flex items-center justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-4">
+          <div class="flex flex-col items-stretch justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-5 sm:flex-row sm:items-center">
             <div>
               <div class="text-xs font-bold text-[var(--color-text-primary)]">Model-sharing invite</div>
               <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
@@ -463,12 +462,12 @@
   </section>
 
   <!-- ── CLIENT: use a host's models ── -->
-  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5">
-    <div class="flex items-center gap-3 mb-1">
+  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7">
+    <div class="mb-2 flex items-center gap-3">
       <MonitorSmartphone size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Use someone's models</h4>
     </div>
-    <p class="text-[11px] text-[var(--color-text-muted)] mb-5">
+    <p class="mb-6 text-[11px] leading-5 text-[var(--color-text-muted)]">
       Paste a host's model link (or join code). Their models appear in your model picker and run on your own
       projects and files — you keep your workspace, they supply the inference.
     </p>
@@ -476,7 +475,7 @@
     {#if remote?.connected}
       {@const apiCount = remoteApiCount}
       {@const cliCount = remoteCliCount}
-      <div class="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-1)] p-4">
+      <div class="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-1)] p-5">
         <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-xs font-bold text-[var(--color-text-primary)]">Connected to {remote.hostName ?? 'host'}</div>
@@ -486,7 +485,7 @@
           </div>
           <button type="button" onclick={disconnect} class="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10">Disconnect</button>
         </div>
-        <div class="mt-3 space-y-1.5 text-[10px] text-[var(--color-text-muted)]">
+        <div class="mt-4 space-y-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
           {#if apiCount}
             <div class="flex items-start gap-1.5"><ShieldCheck size={11} style="color:#22c55e" class="mt-px shrink-0" /> <span><strong>{apiCount} API model(s)</strong> — run on the host, your files never leave your PC.</span></div>
           {/if}
@@ -496,15 +495,15 @@
         </div>
       </div>
     {:else}
-      <div class="flex items-center gap-2">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
         <input
           type="text"
           bind:value={joinCode}
           placeholder="Model link or join code from the host"
-          class="input flex-1 text-sm"
+          class="input min-h-11 flex-1 text-sm"
           onkeydown={(e) => e.key === 'Enter' && connect()}
         />
-        <button type="button" onclick={connect} disabled={connecting || !joinCode.trim()} class="btn btn-primary text-xs px-5 py-2">
+        <button type="button" onclick={connect} disabled={connecting || !joinCode.trim()} class="btn btn-primary min-h-11 px-6 py-2 text-xs">
           {connecting ? 'Connecting…' : 'Connect'}
         </button>
       </div>

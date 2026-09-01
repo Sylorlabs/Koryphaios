@@ -5,16 +5,36 @@ import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { serverLog } from '../../logger';
 import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
-import { AuthenticationError, ConflictError, NotFoundError } from '../../errors/types';
+import {
+  AuthenticationError,
+  ConflictError,
+  NotFoundError,
+  ValidationError,
+} from '../../errors/types';
+import { SESSION } from '../../constants';
 import { timeTravelDegradedResponse, withSessionRecoveryGuard } from './session-recovery-guard';
 import {
   eraseSessionsCoordinated,
   tryAcquireSessionCreationLease,
 } from '../../services/session-erasure-service';
+import {
+  archiveSessionCoordinated,
+  restoreSessionCoordinated,
+} from '../../services/session-archive-service';
+
+async function requireActiveSession(sessionId: string) {
+  const { sessions } = getContext();
+  const session = await sessions.get(sessionId);
+  if (!session) throw new NotFoundError('Session', sessionId);
+  if (session.archivedAt !== undefined) {
+    throw new ConflictError('Recover this archived chat before changing or continuing its work.');
+  }
+  return session;
+}
 
 async function timeTravelForSession(sessionId: string) {
-  const { sessions, kory, timeTravel } = getContext();
-  if (!(await sessions.get(sessionId))) throw new NotFoundError('Session', sessionId);
+  const { kory, timeTravel } = getContext();
+  await requireActiveSession(sessionId);
   const workingDirectory = await kory.resolveSessionWorkingDirectoryPublic(sessionId);
   return timeTravel.forWorkingDirectory(workingDirectory);
 }
@@ -23,7 +43,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .get('/', async ({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { sessions } = getContext();
-    const list = await sessions.list();
+    const list = await sessions.listActive();
     return { ok: true, data: list };
   })
   .post(
@@ -73,6 +93,11 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const result = await eraseSessionsCoordinated({ kind: 'all' });
     return { ok: true, deleted: result.deleted, operationId: result.operationId };
   })
+  .get('/archived', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const list = await getContext().sessions.listArchived();
+    return { ok: true, data: list };
+  })
   .get('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { sessions } = getContext();
@@ -85,7 +110,30 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { sessions } = getContext();
-      const updated = await sessions.update(id, body);
+      const current = await sessions.get(id);
+      if (!current) throw new NotFoundError('Session', id);
+      if (
+        current.archivedAt !== undefined &&
+        (body.title === undefined || Object.keys(body).some((field) => field !== 'title'))
+      ) {
+        throw new ConflictError('Archived chats can only be renamed, recovered, or deleted.');
+      }
+      const title = body.title?.trim();
+      if (body.title !== undefined) {
+        if (!title) throw new ValidationError('Chat name cannot be empty.');
+        if (title.length > SESSION.MAX_TITLE_LENGTH) {
+          throw new ValidationError(
+            `Chat name cannot exceed ${SESSION.MAX_TITLE_LENGTH} characters.`,
+          );
+        }
+        if (/\p{Cc}/u.test(title)) {
+          throw new ValidationError('Chat name cannot contain control characters.');
+        }
+      }
+      const updated = await sessions.update(id, {
+        ...body,
+        ...(title !== undefined ? { title } : {}),
+      });
       if (!updated) throw new NotFoundError('Session', id);
       return { ok: true, data: updated };
     },
@@ -102,6 +150,16 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       ),
     },
   )
+  .post('/:id/archive', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const session = await archiveSessionCoordinated(id);
+    return { ok: true, data: session };
+  })
+  .post('/:id/restore', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const session = await restoreSessionCoordinated(id);
+    return { ok: true, data: session };
+  })
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });
@@ -137,6 +195,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/compact',
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      await requireActiveSession(id);
       const result = await getContext().kory.compactSession({
         sessionId: id,
         selectedModel: body.model,
@@ -155,17 +214,22 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   )
   .get('/:id/context', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    if (!(await getContext().sessions.get(id))) throw new NotFoundError('Session', id);
+    const { sessions, messages } = getContext();
+    if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
     // Archived tool activity for this session — used to restore tool entries
     // in the feed after a reload (they're not part of the message history).
-    const { getContextArchive } = await import('../../kory/context-archive');
+    const { getContextArchive, usageSnapshotMatchesBoundary } =
+      await import('../../kory/context-archive');
     const archive = getContextArchive();
     if (!archive) return { ok: true, data: [] };
-    const entries = await archive.listRecent(id, 500);
-    const lastUsage = await archive.getLastUsage(id);
+    const [entries, lastUsage, boundary] = await Promise.all([
+      archive.listRecent(id, 500),
+      archive.getLastUsage(id),
+      messages.getActiveBoundary(id),
+    ]);
     return {
       ok: true,
-      lastUsage: lastUsage ?? null,
+      lastUsage: usageSnapshotMatchesBoundary(lastUsage, boundary) ? lastUsage : null,
       data: entries.map((e) => ({
         id: e.id,
         ts: e.ts,
@@ -176,6 +240,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         contentSha256: e.contentSha256,
         truncated: e.truncated,
         redacted: e.redacted,
+        isError: e.isError,
         prunedForAgent: e.prunedForAgent === true,
       })),
     };
@@ -188,18 +253,13 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       // backend's trusted window data (never a frontend guess).
       const { kory, sessions } = getContext();
       if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
-      const lease = kory.tryAcquireSessionMutationBarrier(id);
-      if (!lease) {
-        throw new ConflictError('Wait for active session work or deletion to finish.');
-      }
       // previewModelContext types provider as `never` to force literal callers;
       // the runtime value is a valid provider string from the client request.
-      try {
-        const usage = await kory.previewModelContext(id, body.model, body.provider as never);
-        return { ok: true, usage };
-      } finally {
-        lease.release();
-      }
+      // This is a read-only response. It deliberately does not acquire the
+      // session mutation barrier, emit websocket usage, or persist anything,
+      // so the picker can refresh during a turn without racing run state.
+      const usage = await kory.previewModelContext(id, body.model, body.provider as never);
+      return { ok: true, usage };
     },
     { body: t.Object({ model: t.String(), provider: t.String() }) },
   )
@@ -209,8 +269,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // User-driven "hide from agent": stubs this entry out of the model's
       // context on the next turn. Its bounded, redacted preview stays archived.
-      const { sessions, kory } = getContext();
-      if (!(await sessions.get(id))) throw new NotFoundError('Session', id);
+      const { kory } = getContext();
       const lease = kory.tryAcquireSessionMutationBarrier(id);
       if (!lease) {
         throw new ConflictError('Wait for active session work or deletion to finish.');
@@ -218,6 +277,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       const { getContextArchive } = await import('../../kory/context-archive');
       const archive = getContextArchive();
       try {
+        await requireActiveSession(id);
         if (!archive) return { ok: false, error: 'Context archive unavailable' };
         // Body has no t.Object schema so it is untyped — cast to the expected shape.
         const hidden =
@@ -277,7 +337,15 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
           const result = await (
             await timeTravelForSession(id)
           ).travelTo(body.hash, id, body.expectedCurrentHash);
-          return { ok: result.success, message: result.message };
+          const eventEpoch =
+            result.success && result.conversationEffect === 'rewind'
+              ? getContext().wsManager.rewriteSessionTimeline(id).epoch
+              : undefined;
+          return {
+            ok: result.success,
+            message: result.message,
+            ...(eventEpoch !== undefined ? { eventEpoch } : {}),
+          };
         },
       });
     },

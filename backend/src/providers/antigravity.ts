@@ -68,6 +68,7 @@ import {
 } from './managed-cli-storage';
 import { buildProviderCliEnv } from './cli-environment';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { applyModelsDevMetadata } from './models-dev';
 
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
@@ -79,23 +80,41 @@ const LOG_POLL_INTERVAL_MS = 150;
 // tool runs before the answer). We map each Koryphaios session to the agy
 // conversation it created on its first turn and resume it afterwards, sending
 // only the NEW turn — agy keeps its own history.
-const sessionConversations = new Map<string, string>();
+interface AntigravityConversationCacheEntry {
+  conversationId: string;
+  providerConversationRevision: number;
+}
+
+const sessionConversations = new Map<string, AntigravityConversationCacheEntry>();
+
+export function canResumeAntigravityConversation(
+  cached: AntigravityConversationCacheEntry | undefined,
+  providerConversationRevision: number,
+  forceFreshConversation = false,
+): boolean {
+  return (
+    !forceFreshConversation &&
+    cached !== undefined &&
+    cached.providerConversationRevision === providerConversationRevision
+  );
+}
 let cachedPrivatePromptFileSupport: boolean | undefined;
 
 export function antigravityHelpSupportsPrivatePromptFile(help: string): boolean {
-  return /(?:^|\s)--prompt-file(?:\s|=|<)/m.test(help);
+  return /(?:^|\s)--(?:prompt-file|input-format|output-format)(?:\s|=|<)/m.test(help);
 }
 
-function supportsPrivatePromptFile(bin: string): boolean {
+function supportsPrivateTransport(bin: string): boolean {
   if (cachedPrivatePromptFileSupport !== undefined) return cachedPrivatePromptFileSupport;
   try {
     const result = spawnSync(bin, ['--help'], {
       encoding: 'utf8',
       timeout: 4_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: getSafeSubprocessEnv(),
     });
-    cachedPrivatePromptFileSupport = antigravityHelpSupportsPrivatePromptFile(result.stdout ?? '');
+    const combinedOutput = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
+    cachedPrivatePromptFileSupport = antigravityHelpSupportsPrivatePromptFile(combinedOutput);
   } catch {
     cachedPrivatePromptFileSupport = false;
   }
@@ -166,13 +185,11 @@ function refreshModelsInBackground(): void {
     .then(([models, groups]) => {
       if (models.length > 0) {
         cachedQuotaGroups = groups;
-        // Build a group-name → ModelQuota map from the groups
         const quotaMap = new Map<string, ModelQuota>();
         if (groups) {
           for (const g of groups) {
             const buckets = g.buckets;
             if (buckets.length === 0) continue;
-            // Use the more restrictive (lower) remaining fraction
             const binding = buckets.reduce((min, b) =>
               b.remainingFraction < min.remainingFraction ? b : min,
             );
@@ -183,7 +200,32 @@ function refreshModelsInBackground(): void {
           }
         }
         cachedQuota = quotaMap;
-        cachedModels = mergeQuotaIntoModels(models, quotaMap);
+        const enriched = applyModelsDevMetadata('antigravity', models, [
+          'google',
+          'anthropic',
+          'openai',
+        ]);
+        const withLiveWindows = enriched.map((m) => {
+          if (m.contextWindow && m.contextWindow > 0) return m;
+          const apiId = (m.apiModelId ?? m.id).toLowerCase();
+          let fallback = 0;
+          let out = m.maxOutputTokens;
+          if (apiId.startsWith('gemini-')) {
+            fallback = 1_048_576;
+            out = out || 8192;
+          } else if (apiId.startsWith('claude-')) {
+            fallback = 200_000;
+            out = out || 8192;
+          } else if (apiId.startsWith('gpt-')) {
+            fallback = 131_072;
+            out = out || 16384;
+          } else {
+            fallback = 200_000;
+            out = out || 8192;
+          }
+          return { ...m, contextWindow: fallback, contextVerified: true, maxOutputTokens: out };
+        });
+        cachedModels = mergeQuotaIntoModels(withLiveWindows, quotaMap);
         cachedModelsAt = Date.now();
       }
     })
@@ -213,6 +255,31 @@ function mergeQuotaIntoModels(
     const q = groupName ? quota.get(groupName) : undefined;
     return q ? { ...m, quota: q } : m;
   });
+}
+
+function tryFetchAgyModelsSync(): ModelDef[] | null {
+  const bin = whichBinary('agy');
+  if (!bin) return null;
+  try {
+    const result = spawnSync(bin, ['models'], {
+      encoding: 'utf8',
+      timeout: 4000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: buildProviderCliEnv('antigravity', {
+        ANTIGRAVITY_HOME: getKoryphaiosAntigravityHome(),
+        HOME: getKoryphaiosAntigravityHome(),
+        USERPROFILE: getKoryphaiosAntigravityHome(),
+      }),
+    });
+    const out = (result.stdout ?? '').toString();
+    const lines = out
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return lines.length === 0 ? [] : lines.map(modelDefFromCliName);
+  } catch {
+    return null;
+  }
 }
 
 async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
@@ -336,6 +403,7 @@ export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
           tokensIn: Number(usage.input_tokens ?? 0),
           tokensOut: Number(usage.output_tokens ?? 0),
           tokensCache: Number(usage.cache_read_tokens ?? 0),
+          tokensCacheRead: Number(usage.cache_read_tokens ?? 0),
         });
       }
       if (envelope.result?.status && envelope.result.status !== 'SUCCESS') {
@@ -445,6 +513,32 @@ export class AntigravityProvider implements Provider {
     if (cachedModels && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedModels;
     }
+    if (cachedModels && cachedModels.length > 0) return cachedModels;
+    const sync = tryFetchAgyModelsSync();
+    if (sync && sync.length > 0) {
+      const enriched = applyModelsDevMetadata('antigravity', sync, [
+        'google',
+        'anthropic',
+        'openai',
+      ]);
+      const withWindows = enriched.map((m) => {
+        if (m.contextWindow && m.contextWindow > 0) return m;
+        const apiId = (m.apiModelId ?? m.id).toLowerCase();
+        let fallback = 200_000;
+        if (apiId.startsWith('gemini-')) fallback = 1_048_576;
+        else if (apiId.startsWith('claude-')) fallback = 200_000;
+        else if (apiId.startsWith('gpt-')) fallback = 131_072;
+        return {
+          ...m,
+          contextWindow: fallback,
+          contextVerified: true,
+          maxOutputTokens: m.maxOutputTokens || 8192,
+        };
+      });
+      cachedModels = mergeQuotaIntoModels(withWindows, cachedQuota);
+      cachedModelsAt = Date.now();
+      return cachedModels;
+    }
     refreshModelsInBackground();
     return cachedModels ?? [];
   }
@@ -475,7 +569,12 @@ export class AntigravityProvider implements Provider {
   private resolveCliModel(modelId: string): string | undefined {
     const models = this.listModels();
     const model = models.find((m) => m.id === modelId || m.apiModelId === modelId);
-    return model?.apiModelId ?? models[0]?.apiModelId;
+    if (model?.apiModelId) return model.apiModelId;
+    if (models[0]?.apiModelId) return models[0].apiModelId;
+    if (modelId) {
+      return modelId.startsWith('antigravity-') ? modelId.slice('antigravity-'.length) : modelId;
+    }
+    return undefined;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -488,11 +587,11 @@ export class AntigravityProvider implements Provider {
       };
       return;
     }
-    if (!supportsPrivatePromptFile(bin)) {
+    if (!supportsPrivateTransport(bin)) {
       yield {
         type: 'error',
         error:
-          'Antigravity is unavailable securely: this agy version lacks --prompt-file. Update agy; Koryphaios will not expose prompts in process arguments.',
+          'Antigravity is unavailable securely: this agy version lacks private stream input support. Update agy; Koryphaios will not expose prompts in process arguments.',
       };
       return;
     }
@@ -500,14 +599,40 @@ export class AntigravityProvider implements Provider {
     // Resume the agy conversation tied to this Koryphaios session when we have
     // one — then only the NEW turn is sent (agy holds the prior history), which
     // avoids a fresh agentic session re-exploring the workspace every message.
+    const providerConversationRevision = request.providerConversationRevision ?? 0;
+    const cachedConversation = request.sessionId
+      ? sessionConversations.get(request.sessionId)
+      : undefined;
     let convId =
-      !researchOnly && request.sessionId ? sessionConversations.get(request.sessionId) : undefined;
+      !researchOnly &&
+      canResumeAntigravityConversation(
+        cachedConversation,
+        providerConversationRevision,
+        request.forceFreshConversation,
+      )
+        ? cachedConversation!.conversationId
+        : undefined;
+    if (
+      request.sessionId &&
+      cachedConversation &&
+      !request.forceFreshConversation &&
+      cachedConversation.providerConversationRevision !== providerConversationRevision
+    ) {
+      sessionConversations.delete(request.sessionId);
+    }
     if (convId && !existsSync(join(AGY_CONV_DIR, `${convId}.db`))) {
       // agy pruned it — start a fresh conversation with full history.
       if (request.sessionId) sessionConversations.delete(request.sessionId);
       convId = undefined;
     }
     const convsBefore = convId ? null : listConversationIds();
+    const rememberSessionConversation = (conversationId: string): void => {
+      if (researchOnly || request.forceFreshConversation || !request.sessionId) return;
+      sessionConversations.set(request.sessionId, {
+        conversationId,
+        providerConversationRevision,
+      });
+    };
 
     const attachmentScope = createCliAttachmentScope();
     const prompt = convId
@@ -611,17 +736,13 @@ export class AntigravityProvider implements Provider {
     // read-only from the user's message text. A question like "what tools
     // do you have?" should not silently strip the agent's write capability.
     const args = [
-      '--print',
-      '--prompt-file',
-      promptArtifact.path,
-      // Current agy releases expose the live response and authoritative token
-      // totals directly. Do not wait for sidecar databases or treat a buffered
-      // plain-text stdout write as streaming.
+      '--input-format',
+      'stream-json',
       '--output-format',
       'stream-json',
       '--model',
       cliModel,
-      ...(request.harnessRole === 'critic'
+      ...(request.harnessRole === 'critic' || request.permissionMode === 'plan'
         ? ['--mode', 'plan', '--sandbox']
         : ['--mode', 'accept-edits', '--sandbox']),
       '--log-file',
@@ -662,7 +783,7 @@ export class AntigravityProvider implements Provider {
       () =>
         spawn(wrapped.command, wrapped.args, {
           cwd: cwd || tmpdir(),
-          stdio: ['ignore', 'pipe', 'pipe'],
+          stdio: ['pipe', 'pipe', 'pipe'],
           env: agyEnv,
         }),
       [promptArtifact, ...attachmentScope.artifacts],
@@ -672,6 +793,14 @@ export class AntigravityProvider implements Provider {
       },
     );
     bridgeGrantLease?.bindToChild(child);
+
+    // Send the prompt over stream-json stdin transport (zero private tokens in argv)
+    const streamInputPayload =
+      JSON.stringify({
+        event: 'user',
+        message: { content: prompt },
+      }) + '\n';
+    child.stdin.end(streamInputPayload, 'utf8');
 
     const onAbort = () => {
       try {
@@ -729,8 +858,36 @@ export class AntigravityProvider implements Provider {
       const events: ProviderEvent[] = [];
       const lines = stdoutLineBuffer.split('\n');
       stdoutLineBuffer = final ? '' : (lines.pop() ?? '');
-      for (const line of lines) events.push(...parseAntigravityStreamLine(line));
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const parsed = JSON.parse(line.trim()) as { event?: string; conversation_id?: string };
+          if (parsed.conversation_id && !convId) {
+            convId = parsed.conversation_id;
+            rememberSessionConversation(parsed.conversation_id);
+            transcriptTail.convId = parsed.conversation_id;
+            trajectoryTail.convId = parsed.conversation_id;
+          }
+        } catch {
+          /* ignore non-json */
+        }
+        events.push(...parseAntigravityStreamLine(line));
+      }
       if (final && stdoutLineBuffer.trim()) {
+        try {
+          const parsed = JSON.parse(stdoutLineBuffer.trim()) as {
+            event?: string;
+            conversation_id?: string;
+          };
+          if (parsed.conversation_id && !convId) {
+            convId = parsed.conversation_id;
+            rememberSessionConversation(parsed.conversation_id);
+            transcriptTail.convId = parsed.conversation_id;
+            trajectoryTail.convId = parsed.conversation_id;
+          }
+        } catch {
+          /* ignore non-json */
+        }
         events.push(...parseAntigravityStreamLine(stdoutLineBuffer));
         stdoutLineBuffer = '';
       }
@@ -742,7 +899,7 @@ export class AntigravityProvider implements Provider {
       const found = detectNewConversation(convsBefore);
       if (found) {
         convId = found;
-        if (request.sessionId) sessionConversations.set(request.sessionId, found);
+        rememberSessionConversation(found);
         // Focus the tailers on the discovered conversation.
         transcriptTail.convId = found;
         trajectoryTail.convId = found;
@@ -1094,6 +1251,8 @@ const AGY_TOOL_TYPES = new Set([
   'GENERIC',
   'INVOKE_SUBAGENT',
   'MANAGE_TASK',
+  'GENERATE_IMAGE',
+  'IMAGE_GENERATION',
 ]);
 
 interface TranscriptTailState {

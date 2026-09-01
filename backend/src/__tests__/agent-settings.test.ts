@@ -198,6 +198,7 @@ describe('tool allowlist and blocklist merging', () => {
   it('bounds numeric and structured settings at the persistence boundary', () => {
     const merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, {
       maxCriticIterations: 99,
+      autoCompactThreshold: 105,
       contextKeepRecentTurns: -2,
       managerModelAccess: {
         general: ['openai:gpt', 42, 'openai:gpt'],
@@ -214,6 +215,7 @@ describe('tool allowlist and blocklist merging', () => {
     });
 
     expect(merged.maxCriticIterations).toBe(DEFAULT_AGENT_SETTINGS.maxCriticIterations);
+    expect(merged.autoCompactThreshold).toBe(DEFAULT_AGENT_SETTINGS.autoCompactThreshold);
     expect(merged.contextKeepRecentTurns).toBe(DEFAULT_AGENT_SETTINGS.contextKeepRecentTurns);
     expect(merged.managerModelAccess).toEqual({ general: ['openai:gpt'] });
     expect(merged.managerNotes).toEqual({ general: 'keep this safe' });

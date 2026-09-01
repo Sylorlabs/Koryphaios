@@ -10,7 +10,19 @@ const { buildLocalBearerToken } = await import('../../auth/local-route-auth');
 const { errorHandler } = await import('../../middleware/error-handling');
 const { processSupervisor } = await import('../../process-supervisor/supervisor');
 const processDatabase = await import('../../process-supervisor/database');
+const { setContext } = await import('../../context');
 const { processRoutes } = await import('./processes');
+
+setContext({
+  sessions: {
+    getActive: async (sessionId: string) => ({ id: sessionId }),
+    get: async (sessionId: string) => ({ id: sessionId }),
+  },
+  kory: {
+    hasActiveSessionExecution: () => true,
+    tryAcquireSessionMutationBarrier: () => null,
+  },
+} as never);
 
 const app = new Elysia().onError(errorHandler).use(processRoutes);
 
@@ -48,7 +60,9 @@ describe('process route cancellation truth', () => {
     const auth = localAuth.createSession();
     try {
       processSupervisor.getProcess = ((id: string) =>
-        id === 'retained-restart' ? ({ id } as never) : undefined) as typeof originalGetProcess;
+        id === 'retained-restart'
+          ? ({ id, sessionId: 'retained-restart-session' } as never)
+          : undefined) as typeof originalGetProcess;
       processSupervisor.restartProcess = (async () => null) as typeof originalRestartProcess;
 
       const response = await app.handle(

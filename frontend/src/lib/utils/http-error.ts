@@ -17,7 +17,7 @@ export function friendlyHttpError(status: number, action: string): string {
     case 500:
     case 502:
     case 503:
-      return `Server error — please try again shortly`;
+      return `Could not ${action} — the local Koryphaios backend needs attention`;
     default:
       return `Something went wrong (${status})`;
   }

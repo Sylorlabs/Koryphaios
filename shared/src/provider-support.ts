@@ -88,6 +88,7 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   llamacpp: compatible(['chat', 'local-runtime'], 'openai-compatible-contract'),
   kimicode: compatible(['chat', 'coding-agent'], 'provider-specific-contract'),
   opencodego: compatible(['chat', 'gateway'], 'provider-specific-contract'),
+  chatbase: compatible(['chat'], 'provider-specific-contract'),
 
   claude: preview(
     ['chat', 'coding-agent'],
@@ -135,9 +136,17 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
     ['chat'],
     'GitLab Duo chat is intentionally unavailable because this build has no supported inference contract; no generic OpenAI fallback is used.',
   ),
-  freebuff: unavailable(
-    ['coding-agent'],
-    'Freebuff setup material may be detected for diagnostics, but Koryphaios does not call an undocumented execution API.',
+  freebuff: preview(
+    ['chat', 'coding-agent'],
+    'cli-contract',
+    'Runs the real Freebuff 0.0.162 TUI through a tmux PTY. A mandatory OS sandbox confines native Freebuff tools to a disposable checkout; authoritative project actions use the authenticated Kory MCP bridge.',
+    '0.0.162',
+  ),
+  codebuff: preview(
+    ['chat', 'coding-agent'],
+    'provider-specific-contract',
+    'Uses the official @codebuff/sdk with a user-owned Codebuff API key and the documented codebuff/base@0.0.16 agent. Supported filesystem and command tools are overridden through Kory ToolRegistry; SDK-local artifacts stay disposable and live account verification is still required.',
+    '@codebuff/sdk 0.10.7',
   ),
   jules: unavailable(
     ['async-agent'],
@@ -148,9 +157,17 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   luma: unavailable(['image'], 'Luma requires a dedicated image/video capability adapter.'),
   fal: unavailable(['image'], 'Fal requires a dedicated media capability adapter.'),
   elevenlabs: unavailable(['audio'], 'ElevenLabs belongs in the dedicated audio capability route.'),
-  deepgram: unavailable(['audio'], 'Deepgram belongs in the dedicated transcription route.'),
+  deepgram: preview(
+    ['audio'],
+    'provider-specific-contract',
+    'Deepgram prerecorded transcription is available through the dedicated voice route.',
+  ),
   gladia: unavailable(['audio'], 'Gladia belongs in the dedicated transcription route.'),
-  assemblyai: unavailable(['audio'], 'AssemblyAI belongs in the dedicated transcription route.'),
+  assemblyai: preview(
+    ['audio'],
+    'provider-specific-contract',
+    'AssemblyAI upload and asynchronous transcription are available through the dedicated voice route.',
+  ),
   lmnt: unavailable(['audio'], 'LMNT belongs in the dedicated speech route.'),
   voyageai: unavailable(['embedding'], 'Voyage AI belongs in the dedicated embeddings route.'),
   mixedbread: unavailable(['embedding'], 'Mixedbread belongs in the dedicated embeddings route.'),

@@ -65,22 +65,46 @@ describe('secret-store permissions', () => {
 
   test('stripProviderSecrets removes secret fields from the clean map', () => {
     const { clean, secrets } = stripProviderSecrets({
-      openai: { apiKey: 'sk-abc', baseUrl: 'https://api.openai.com/v1' },
+      openai: {
+        apiKey: 'sk-abc',
+        baseUrl: 'https://api.openai.com/v1',
+        headers: { Authorization: 'Bearer custom-secret', 'x-tenant-token': 'tenant-secret' },
+      },
       claude: { authToken: 'tok-xyz', name: 'claude' },
     });
     expect(clean.openai).toEqual({ baseUrl: 'https://api.openai.com/v1' });
     expect(clean.claude).toEqual({ name: 'claude' });
     expect(secrets.openai?.apiKey).toBe('sk-abc');
+    expect(secrets.openai?.headers).toEqual({
+      Authorization: 'Bearer custom-secret',
+      'x-tenant-token': 'tenant-secret',
+    });
     expect(secrets.claude?.authToken).toBe('tok-xyz');
   });
 
   test('hydrateProviderSecrets merges stored secrets back into a providers map', () => {
-    saveProviderSecrets(root, { openai: { apiKey: 'sk-abc' } });
+    saveProviderSecrets(root, {
+      openai: {
+        apiKey: 'sk-abc',
+        headers: { Authorization: 'Bearer custom-secret', 'x-private-key': 'private' },
+      },
+    });
     const hydrated = hydrateProviderSecrets(root, {
-      openai: { baseUrl: 'https://api.openai.com/v1' },
+      openai: {
+        baseUrl: 'https://api.openai.com/v1',
+        headers: { 'x-public-routing': 'west' },
+      },
       claude: { name: 'claude' },
     });
-    expect(hydrated.openai).toEqual({ baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-abc' });
+    expect(hydrated.openai).toEqual({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-abc',
+      headers: {
+        'x-public-routing': 'west',
+        Authorization: 'Bearer custom-secret',
+        'x-private-key': 'private',
+      },
+    });
     expect(hydrated.claude).toEqual({ name: 'claude' });
   });
 

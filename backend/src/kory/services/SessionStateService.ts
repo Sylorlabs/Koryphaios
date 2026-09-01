@@ -27,6 +27,8 @@ export interface CommandRecord {
 
 export interface SessionState {
   abortController: AbortController;
+  /** Last manager-owned activity used only for bounded idle cleanup. */
+  lastActivityAt: number;
   pendingInputResolver?: (selection: string) => void;
   changes: ChangeSummary[];
   lastKnownGoodHash?: string;
@@ -53,6 +55,7 @@ export class SessionStateService {
     if (!session) {
       session = {
         abortController: new AbortController(),
+        lastActivityAt: Date.now(),
         changes: [],
         toolCalls: [],
         commands: [],
@@ -60,6 +63,14 @@ export class SessionStateService {
       this.sessions.set(sessionId, session);
     }
     return session;
+  }
+
+  touchSession(sessionId: string, now = Date.now()): void {
+    this.ensureSession(sessionId).lastActivityAt = now;
+  }
+
+  getLastActivityAt(sessionId: string): number | null {
+    return this.sessions.get(sessionId)?.lastActivityAt ?? null;
   }
 
   hasSession(sessionId: string): boolean {

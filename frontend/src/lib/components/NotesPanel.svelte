@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy, tick, type Component } from 'svelte';
   import Search from 'lucide-svelte/icons/search';
   import Plus from 'lucide-svelte/icons/plus';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
@@ -11,6 +11,7 @@
   import BookOpen from 'lucide-svelte/icons/book-open';
   import Paperclip from 'lucide-svelte/icons/paperclip';
   import Trash2 from 'lucide-svelte/icons/trash-2';
+  import History from 'lucide-svelte/icons/history';
   import X from 'lucide-svelte/icons/x';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
@@ -18,11 +19,13 @@
   import FileText from 'lucide-svelte/icons/file-text';
   import Image from 'lucide-svelte/icons/image';
   import Download from 'lucide-svelte/icons/download';
+  import ArchiveRestore from 'lucide-svelte/icons/archive-restore';
   import Tag from 'lucide-svelte/icons/tag';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Eye from 'lucide-svelte/icons/eye';
   import Code2 from 'lucide-svelte/icons/code-2';
   import LayoutGrid from 'lucide-svelte/icons/layout-grid';
+  import Table2 from 'lucide-svelte/icons/table-2';
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
   import Check from 'lucide-svelte/icons/check';
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
@@ -33,9 +36,11 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { apiFetch } from '$lib/api.svelte';
   import { projectDisplayName, projectStore } from '$lib/stores/project.svelte';
+  import { noteBasesStore } from '$lib/stores/note-bases.svelte';
   import { selectProjectNavigation } from '$lib/utils/project-navigation';
-  import NotesGraph from './NotesGraph.svelte';
-  import NotesCanvas from './NotesCanvas.svelte';
+  import NotesQuickSwitcher from './NotesQuickSwitcher.svelte';
+  import NotesRecoveryDialog, { type NotesRecoveryTab } from './NotesRecoveryDialog.svelte';
+  import NotePropertiesPanel from './NotePropertiesPanel.svelte';
   import VirtualList from './VirtualList.svelte';
   import { Marked } from 'marked';
   import markedKatex from 'marked-katex-extension';
@@ -43,7 +48,16 @@
   import DOMPurify from 'dompurify';
   import { renderDataviewQuery } from '$lib/utils/dataview';
   import { notePlugins } from '$lib/utils/note-plugins';
-  import type { NoteWithLinks, NoteAttachment } from '@koryphaios/shared';
+  import type {
+    NoteWithLinks,
+    NoteAttachment,
+    TrashedNote,
+    NoteRevision,
+    NoteRevisionSummary,
+    NoteDraft,
+    NoteDraftSummary,
+    VaultRestoreResult,
+  } from '@koryphaios/shared';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
@@ -62,6 +76,17 @@
     isCurrentDraftVersion,
     utf8DraftBytes,
   } from '$lib/utils/draft-save';
+  import {
+    DurableNoteDraftBackup,
+    type DraftBackupState,
+    type DurableDraftSnapshot,
+  } from '$lib/utils/durable-note-draft';
+  import {
+    discardDurableNoteDraft,
+    durableNoteDraftTransport,
+    getDurableNoteDraft,
+    listDurableNoteDrafts,
+  } from '$lib/stores/note-drafts';
 
   // Isolated markdown renderer for the notes preview: renders [[wikilinks]] as
   // clickable spans and leaves the global `marked` config (chat) untouched.
@@ -149,7 +174,29 @@
   });
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let activeView = $state<'editor' | 'preview' | 'graph' | 'canvas'>('editor');
+  let activeView = $state<'editor' | 'preview' | 'bases' | 'graph' | 'canvas'>('editor');
+  let NotesGraphComponent = $state<Component<{
+    onNodeClick: (noteId: string) => void;
+  }> | null>(null);
+  let NotesCanvasComponent = $state<Component<{
+    onOpenNote?: (noteId: string) => void;
+  }> | null>(null);
+  let NotesBasesComponent = $state<Component<{
+    onOpenNote: (noteId: string) => void;
+  }> | null>(null);
+  let NotesVaultRestoreComponent = $state<Component<{
+    open: boolean;
+    projectPath: string | null;
+    onClose: () => void;
+    onRestored: (result: VaultRestoreResult) => void | Promise<void>;
+  }> | null>(null);
+  let graphComponentError = $state<string | null>(null);
+  let canvasComponentError = $state<string | null>(null);
+  let graphComponentLoading = false;
+  let canvasComponentLoading = false;
+  let basesComponentError = $state<string | null>(null);
+  let basesComponentLoading = false;
+  let vaultRestoreComponentLoading = $state(false);
   let titleInput = $state('');
   let folderInput = $state('');
   let contentInput = $state('');
@@ -172,6 +219,17 @@
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let searchInput = $state('');
   let searchQuery = $state('');
+  let showQuickSwitcher = $state(false);
+  let recentNoteIds = $state<string[]>([]);
+  let showRecoveryDialog = $state(false);
+  let showVaultRestoreDialog = $state(false);
+  let recoveryTab = $state<NotesRecoveryTab>('history');
+  let recoveryTrash = $state<TrashedNote[]>([]);
+  let recoveryRevisions = $state<NoteRevisionSummary[]>([]);
+  let selectedRecoveryRevision = $state<NoteRevision | null>(null);
+  let recoveryLoading = $state(false);
+  let recoveryError = $state<string | null>(null);
+  let recoveryGeneration = 0;
   let expandedFolders = $state<Set<string>>(new Set(['/']));
   let dragOver = $state(false);
   let editorAreaEl = $state<HTMLDivElement | undefined>(undefined);
@@ -207,6 +265,21 @@
   const draftRegistry = createDraftRegistry<StrandedNoteDraft>('notes-editor');
   let strandedDrafts = $state<StrandedNoteDraft[]>(draftRegistry.list());
   let strandedDraft = $derived(strandedDrafts[0] ?? null);
+  let durableDrafts = $state<NoteDraftSummary[]>([]);
+  let durableDraft = $derived(durableDrafts[0] ?? null);
+  let durableDraftsLoading = $state(false);
+  let durableDraftError = $state<string | null>(null);
+  let draftBackupState = $state<DraftBackupState>('idle');
+  let draftBackupError = $state<string | null>(null);
+  let draftBackupEditVersion = $state(0);
+  let draftBackupAcknowledgedVersion = $state(0);
+  let recoveredDraftRequiresExplicitSave = $state(false);
+  const durableDraftBackup = new DurableNoteDraftBackup(durableNoteDraftTransport, (status) => {
+    draftBackupState = status.state;
+    draftBackupError = status.error ?? null;
+    draftBackupEditVersion = status.editVersion;
+    draftBackupAcknowledgedVersion = status.acknowledgedEditVersion;
+  });
   let attachmentLoadErrors = $state<Set<string>>(new Set());
   let attachmentLoadGeneration = 0;
   let wikilinkActiveIndex = $state(0);
@@ -216,20 +289,63 @@
     if (!isNarrow) showSidebar = true;
   }
 
+  async function loadGraphComponent(): Promise<void> {
+    if (NotesGraphComponent || graphComponentLoading) return;
+    graphComponentLoading = true;
+    graphComponentError = null;
+    try {
+      NotesGraphComponent = (await import('./NotesGraph.svelte')).default;
+    } catch (error) {
+      graphComponentError = error instanceof Error ? error.message : 'Graph view failed to load';
+    } finally {
+      graphComponentLoading = false;
+    }
+  }
+
+  async function loadCanvasComponent(): Promise<void> {
+    if (NotesCanvasComponent || canvasComponentLoading) return;
+    canvasComponentLoading = true;
+    canvasComponentError = null;
+    try {
+      NotesCanvasComponent = (await import('./NotesCanvas.svelte')).default;
+    } catch (error) {
+      canvasComponentError = error instanceof Error ? error.message : 'Canvas view failed to load';
+    } finally {
+      canvasComponentLoading = false;
+    }
+  }
+
+  async function loadBasesComponent(): Promise<void> {
+    if (NotesBasesComponent || basesComponentLoading) return;
+    basesComponentLoading = true;
+    basesComponentError = null;
+    try {
+      NotesBasesComponent = (await import('./NotesBasesWorkspace.svelte')).default;
+    } catch (error) {
+      basesComponentError = error instanceof Error ? error.message : 'Bases failed to load';
+    } finally {
+      basesComponentLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (activeView === 'graph') void loadGraphComponent();
+    if (activeView === 'canvas') void loadCanvasComponent();
+    if (activeView === 'bases') void loadBasesComponent();
+  });
+
   // ── Derived ───────────────────────────────────────────────────────────────
-  let filteredNotes = $derived.by(() => {
-    const q = searchQuery.trim().toLowerCase();
-    const folder = notesStore.selectedFolder;
-    return notesStore.notes.filter((n) => {
-      const inFolder =
-        folder === '/' ? true : n.folderPath === folder || n.folderPath.startsWith(folder + '/');
-      const matchesQuery =
-        !q ||
-        n.title.toLowerCase().includes(q) ||
-        n.content.toLowerCase().includes(q) ||
-        n.tags.some((t) => t.toLowerCase().includes(q));
-      return inFolder && matchesQuery;
-    });
+  let filteredNotes = $derived(notesStore.visibleNotes);
+  let quickSwitcherFavoriteIds = $derived.by(() => {
+    const favorites = new Set(
+      notesStore.catalog.filter((note) => note.pinned).map((note) => note.id),
+    );
+    const currentId = notesStore.currentNote?.id;
+    if (currentId) {
+      if (pinned) favorites.add(currentId);
+      else favorites.delete(currentId);
+    }
+    return [...favorites];
   });
 
   function estimateNoteHeight(note: { content?: string; tags?: string[] }): number {
@@ -345,6 +461,12 @@
     }
   }
 
+  function updatePropertiesContent(nextContent: string): void {
+    if (nextContent === contentInput) return;
+    contentInput = nextContent;
+    scheduleAutosave();
+  }
+
   function handleContentKeydown(event: KeyboardEvent) {
     if (!showWikilinkMenu || wikilinkSuggestions.length === 0) return;
     if (event.key === 'ArrowDown') {
@@ -404,6 +526,7 @@
 
   // ── Load on mount ─────────────────────────────────────────────────────────
   onMount(() => {
+    notesStore.isPanelOpen = true;
     window.addEventListener('keydown', handleGlobalKeydown);
     window.addEventListener('open-notes-graph', handleOpenGraphEvent);
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -412,8 +535,11 @@
   });
 
   function handleVisibilityChange() {
-    if (document.visibilityState === 'hidden' && isDirty && notesStore.settings.autosaveEnabled) {
-      void saveCurrentNote();
+    if (document.visibilityState === 'hidden' && isDirty) {
+      void durableDraftBackup.flush();
+      if (notesStore.settings.autosaveEnabled && !recoveredDraftRequiresExplicitSave) {
+        void saveCurrentNote();
+      }
     }
   }
 
@@ -424,11 +550,13 @@
   }
 
   onDestroy(() => {
+    notesStore.isPanelOpen = false;
     window.removeEventListener('keydown', handleGlobalKeydown);
     window.removeEventListener('open-notes-graph', handleOpenGraphEvent);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('resize', updateNarrow);
     cancelAutosave();
+    void durableDraftBackup.flush();
     if (loadedProjectPath === projectStore.currentPath) {
       const action = draftExitAction({
         dirty: isDirty,
@@ -445,7 +573,12 @@
   });
 
   $effect(() => {
-    if (!isDirty && strandedDrafts.length === 0) return;
+    if (
+      !isDirty &&
+      strandedDrafts.length === 0 &&
+      draftBackupAcknowledgedVersion >= draftBackupEditVersion
+    )
+      return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
@@ -467,11 +600,19 @@
       currentNote
     ) {
       holdCurrentDraft(previousProjectPath);
+      void durableDraftBackup.flush();
     }
 
     loadedProjectPath = projectPath;
+    showVaultRestoreDialog = false;
     cancelAutosave();
+    durableDraftBackup.abandonLocalIdentity();
+    durableDrafts = [];
+    durableDraftError = null;
+    recoveredDraftRequiresExplicitSave = false;
     notesStore.beginProjectTransition();
+    noteBasesStore.beginProjectTransition();
+    if (projectPath && activeView === 'bases') void noteBasesStore.refresh();
     lastOpenedNoteId = null;
     titleInput = '';
     folderInput = '';
@@ -487,15 +628,11 @@
     attachmentObjectUrls = {};
 
     if (projectPath) {
-      void (async () => {
-        // The first notes read joins the project's single-flight filesystem
-        // scan. Build folders/graph only after that authoritative catalog is
-        // ready, otherwise a fresh project can render a false empty sidebar.
-        const notesLoaded = await notesStore.fetchNotes();
-        if (projectStore.currentPath !== projectPath) return;
-        if (!notesLoaded) return;
-        await Promise.all([notesStore.fetchFolderTree(), notesStore.fetchGraph()]);
-      })();
+      // The store owns the single refresh path. Before mount this is a no-op;
+      // setting isPanelOpen=true then starts it. Project changes while mounted
+      // come through here and reuse the same catalog/folder/graph sequence.
+      void notesStore.refreshOpenPanel();
+      void refreshDurableDrafts(projectPath);
     }
   });
 
@@ -578,32 +715,90 @@
       isDirty = false;
       baseRevision = note.revision;
       saveState = 'idle';
+      recoveredDraftRequiresExplicitSave = false;
+      startDurableDraftForCurrentNote();
       notesStore.clearConflict();
       activeView = note.format === 'html' ? 'preview' : 'editor';
-    } else if (activeView === 'preview') {
-      // The Preview tab only exists for an open note. Keep the roving tab stop
-      // and tabpanel label valid after deletion or a project transition.
-      activeView = 'editor';
+    } else {
+      if (activeView === 'preview') {
+        // The Preview tab only exists for an open note. Keep the roving tab stop
+        // and tabpanel label valid after deletion or a project transition.
+        activeView = 'editor';
+      }
+      durableDraftBackup.abandonLocalIdentity();
     }
   });
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
   function handleGlobalKeydown(e: KeyboardEvent) {
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      showQuickSwitcher = true;
+      return;
+    }
     if (e.key === 'Escape' && showEditorSettings) {
       e.preventDefault();
       showEditorSettings = false;
       void tick().then(() => settingsTriggerEl?.focus());
       return;
     }
-    const ctrl = e.ctrlKey || e.metaKey;
     if (ctrl && e.key.toLowerCase() === 's') {
-      if (activeView === 'canvas') return;
+      if (activeView === 'canvas' || activeView === 'bases') return;
       e.preventDefault();
       void saveCurrentNote();
     }
   }
 
   // ── Note CRUD ─────────────────────────────────────────────────────────────
+  function currentDraftSnapshot(): DurableDraftSnapshot {
+    return {
+      title: titleInput.trim() || 'Untitled',
+      content: contentInput,
+      folderPath: folderInput || '/',
+      tags: [...tags],
+      pinned,
+      includeInContext,
+      format: notesStore.currentNote?.format === 'html' ? 'html' : 'markdown',
+    };
+  }
+
+  function startDurableDraftForCurrentNote(): void {
+    const note = notesStore.currentNote;
+    const projectPath = projectStore.currentPath;
+    const revision = baseRevision ?? note?.revision;
+    if (!note || !projectPath || !revision) {
+      durableDraftBackup.abandonLocalIdentity();
+      return;
+    }
+    durableDraftBackup.start({
+      projectPath,
+      noteId: note.id,
+      baseRevision: revision,
+      baseTitle: note.title,
+    });
+  }
+
+  async function refreshDurableDrafts(projectPath = projectStore.currentPath): Promise<void> {
+    if (!projectPath) {
+      durableDrafts = [];
+      return;
+    }
+    durableDraftsLoading = true;
+    durableDraftError = null;
+    try {
+      const drafts = await listDurableNoteDrafts(projectPath);
+      if (projectStore.currentPath === projectPath) durableDrafts = drafts;
+    } catch (error) {
+      if (projectStore.currentPath === projectPath) {
+        durableDraftError =
+          error instanceof Error ? error.message : 'Failed to load recovery drafts';
+      }
+    } finally {
+      if (projectStore.currentPath === projectPath) durableDraftsLoading = false;
+    }
+  }
+
   function noteDraftKey(projectPath: string, noteId: string): string {
     return `${projectPath}\0${noteId}`;
   }
@@ -646,6 +841,8 @@
     saveState = 'dirty';
     draftRegistry.delete(noteDraftKey(projectPath, noteId));
     refreshDrafts();
+    startDurableDraftForCurrentNote();
+    durableDraftBackup.markEdited(currentDraftSnapshot());
     return true;
   }
 
@@ -656,6 +853,10 @@
       autosaveEnabled: notesStore.settings.autosaveEnabled,
     });
     if (action === 'none') return true;
+    if (!(await durableDraftBackup.flush())) {
+      toastStore.error('The latest edit is not backed up yet. Retry before leaving this note.');
+      return false;
+    }
     if (action === 'hold') {
       holdCurrentDraft();
       return true;
@@ -669,14 +870,15 @@
     if (!opened || notesStore.currentNote?.id !== id) return;
     await tick();
     restoreHeldDraft(projectStore.currentPath, id);
+    recentNoteIds = [id, ...recentNoteIds.filter((noteId) => noteId !== id)].slice(0, 30);
     activeView = notesStore.currentNote?.format === 'html' ? 'preview' : 'editor';
     if (isNarrow) showSidebar = false; // reveal the editor full-width on phones
   }
 
-  async function createNewNote() {
+  async function createNewNote(initialTitle = 'Untitled') {
     if (!(await canLeaveCurrentNote())) return;
     const note = await notesStore.createNote({
-      title: 'Untitled',
+      title: initialTitle.trim() || 'Untitled',
       content: '',
       folderPath:
         notesStore.selectedFolder !== '/'
@@ -688,11 +890,97 @@
     });
     if (note) {
       await notesStore.fetchNote(note.id);
+      recentNoteIds = [note.id, ...recentNoteIds.filter((noteId) => noteId !== note.id)].slice(
+        0,
+        30,
+      );
       activeView = 'editor';
       await tick();
-      titleInputEl?.focus();
-      titleInputEl?.select();
+      if (initialTitle === 'Untitled') {
+        titleInputEl?.focus();
+        titleInputEl?.select();
+      } else {
+        contentAreaEl?.focus();
+      }
     }
+  }
+
+  async function toggleQuickSwitcherFavorite(noteId: string): Promise<void> {
+    const catalogNote = notesStore.catalog.find((note) => note.id === noteId);
+    if (!catalogNote) return;
+    if (notesStore.currentNote?.id === noteId) {
+      pinned = !pinned;
+      scheduleAutosave();
+      return;
+    }
+    await notesStore.updateNote(noteId, {
+      pinned: !catalogNote.pinned,
+      expectedRevision: catalogNote.revision,
+    });
+  }
+
+  async function loadRecoveryTab(tab: NotesRecoveryTab): Promise<void> {
+    const generation = ++recoveryGeneration;
+    recoveryTab = tab;
+    recoveryLoading = true;
+    recoveryError = null;
+    selectedRecoveryRevision = null;
+    const noteId = notesStore.currentNote?.id;
+    const trash = await notesStore.listTrashedNotes();
+    const trashError = notesStore.error;
+    const revisions = noteId ? await notesStore.listNoteRevisions(noteId) : [];
+    const historyError = notesStore.error;
+    if (generation !== recoveryGeneration) return;
+    recoveryTrash = trash;
+    recoveryRevisions = revisions;
+    recoveryError = trashError ?? historyError;
+    recoveryLoading = false;
+  }
+
+  function openRecovery(tab: NotesRecoveryTab): void {
+    showRecoveryDialog = true;
+    void loadRecoveryTab(tab === 'history' && !notesStore.currentNote ? 'trash' : tab);
+  }
+
+  async function selectRecoveryRevision(summary: NoteRevisionSummary): Promise<void> {
+    const generation = ++recoveryGeneration;
+    recoveryLoading = true;
+    recoveryError = null;
+    selectedRecoveryRevision = await notesStore.getNoteRevision(summary.noteId, summary.revision);
+    if (generation !== recoveryGeneration) return;
+    recoveryError = notesStore.error;
+    recoveryLoading = false;
+  }
+
+  async function restoreRecoveryRevision(summary: NoteRevisionSummary): Promise<void> {
+    if (!(await canLeaveCurrentNote())) return;
+    const current = notesStore.currentNote;
+    if (!current || current.id !== summary.noteId) {
+      recoveryError = 'That note is no longer open. Reopen History before restoring.';
+      return;
+    }
+    const restored = await notesStore.restoreNoteRevision(
+      summary.noteId,
+      summary.revision,
+      current.revision,
+    );
+    if (!restored) {
+      recoveryError = notesStore.error;
+      return;
+    }
+    lastOpenedNoteId = null;
+    await notesStore.fetchNote(restored.id);
+    await tick();
+    await loadRecoveryTab('history');
+  }
+
+  async function restoreTrashedRecoveryNote(note: TrashedNote): Promise<void> {
+    const restored = await notesStore.restoreTrashedNote(note);
+    if (!restored) {
+      recoveryError = notesStore.error;
+      return;
+    }
+    await loadRecoveryTab('trash');
   }
 
   async function saveCurrentNote(
@@ -713,8 +1001,14 @@
       if (!success) return false;
       return isDirty && !notesStore.conflict ? saveCurrentNote() : true;
     }
+    if (!(await durableDraftBackup.flush())) {
+      saveState = 'error';
+      toastStore.error('The latest edit could not be backed up. Retry before saving.');
+      return false;
+    }
 
     const version = editVersion;
+    const backedUpEditVersion = durableDraftBackup.status.editVersion;
     const draft = {
       title: titleInput.trim() || 'Untitled',
       content: contentInput,
@@ -733,7 +1027,13 @@
           saveState = notesStore.conflict ? 'conflict' : 'error';
           return false;
         }
+        await durableDraftBackup.afterAuthoritativeSave(
+          backedUpEditVersion,
+          updated.revision,
+          currentDraftSnapshot(),
+        );
         baseRevision = updated.revision;
+        recoveredDraftRequiresExplicitSave = false;
         if (isCurrentDraftVersion(version, editVersion)) {
           isDirty = false;
           saveState = 'saved';
@@ -746,6 +1046,7 @@
           saveState = 'dirty';
         }
         if (activeView === 'graph') await notesStore.fetchGraph();
+        void refreshDurableDrafts();
         return true;
       })
       .finally(() => {
@@ -757,10 +1058,14 @@
   async function deleteCurrentNote() {
     const note = notesStore.currentNote;
     if (!note) return;
-    const dirtyWarning = isDirty ? ' Unsaved changes will also be discarded.' : '';
-    if (!confirm(`Delete "${note.title}"? This cannot be undone.${dirtyWarning}`)) return;
+    const dirtyWarning = isDirty ? ' Unsaved changes will remain available in Draft recovery.' : '';
+    if (!confirm(`Move "${note.title}" to Trash? You can restore it later.${dirtyWarning}`)) return;
     cancelAutosave();
     if (savePromise) await savePromise;
+    if (isDirty && !(await durableDraftBackup.flush())) {
+      toastStore.error('The latest edit is not backed up yet. Retry before moving this note.');
+      return;
+    }
     const current = notesStore.currentNote;
     if (!current || current.id !== note.id) return;
     const deleted = await notesStore.deleteNote(current.id, current.revision);
@@ -769,6 +1074,7 @@
     if (projectPath) {
       draftRegistry.delete(noteDraftKey(projectPath, current.id));
       refreshDrafts();
+      void refreshDurableDrafts(projectPath);
     }
   }
 
@@ -782,9 +1088,15 @@
     isDirty = true;
     editVersion++;
     saveState = 'dirty';
+    try {
+      durableDraftBackup.markEdited(currentDraftSnapshot());
+    } catch (error) {
+      draftBackupState = 'error';
+      draftBackupError = error instanceof Error ? error.message : 'Draft backup could not start';
+    }
     cancelAutosave();
     const delay = autosaveDelayForDraft({
-      enabled: notesStore.settings.autosaveEnabled,
+      enabled: notesStore.settings.autosaveEnabled && !recoveredDraftRequiresExplicitSave,
       overBudget: overNoteBudget,
       delayMs: notesStore.settings.autosaveDelayMs,
     });
@@ -934,7 +1246,7 @@
     activeView = 'canvas';
   }
 
-  const viewOrder = ['editor', 'preview', 'graph', 'canvas'] as const;
+  const viewOrder = ['editor', 'preview', 'bases', 'graph', 'canvas'] as const;
   function handleViewTabKeydown(event: KeyboardEvent, current: (typeof viewOrder)[number]) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -954,6 +1266,11 @@
   }
 
   function handleCanvasOpenNote(noteId: string) {
+    activeView = 'editor';
+    void openNote(noteId);
+  }
+
+  function handleBaseOpenNote(noteId: string) {
     activeView = 'editor';
     void openNote(noteId);
   }
@@ -1012,6 +1329,29 @@
     if (!file || !(await canLeaveCurrentNote())) return;
     const imported = await notesStore.importNoteFile(file);
     if (imported) await openNote(imported.id);
+  }
+
+  async function handleVaultRestored(_result: VaultRestoreResult): Promise<void> {
+    await Promise.all([notesStore.refreshOpenPanel(), noteBasesStore.refresh()]);
+    if (projectStore.currentPath) await refreshDurableDrafts(projectStore.currentPath);
+    toastStore.success('The verified vault is now available in Notes');
+  }
+
+  async function openVaultRestore(): Promise<void> {
+    if (vaultRestoreComponentLoading) return;
+    showVaultRestoreDialog = true;
+    if (NotesVaultRestoreComponent) return;
+    vaultRestoreComponentLoading = true;
+    try {
+      NotesVaultRestoreComponent = (await import('./NotesVaultRestoreDialog.svelte')).default;
+    } catch (error) {
+      showVaultRestoreDialog = false;
+      toastStore.error(
+        error instanceof Error ? error.message : 'Could not open the vault restore inspector',
+      );
+    } finally {
+      vaultRestoreComponentLoading = false;
+    }
   }
 
   function loadRemoteNote() {
@@ -1093,6 +1433,8 @@
     activeView = 'editor';
     draftRegistry.delete(noteDraftKey(draft.projectPath, draft.noteId));
     refreshDrafts();
+    startDurableDraftForCurrentNote();
+    durableDraftBackup.markEdited(currentDraftSnapshot());
     toastStore.info(`Recovered the unsaved draft for ${draft.noteTitle}`);
   }
 
@@ -1104,6 +1446,103 @@
     toastStore.info('Discarded the held draft');
   }
 
+  async function copyDurableDraftToNewNote(draft: NoteDraft): Promise<void> {
+    if (!(await canLeaveCurrentNote())) return;
+    const copy = await notesStore.createNote({
+      title: `${draft.title || draft.baseTitle} (recovered)`,
+      content: draft.content,
+      folderPath: draft.folderPath || '/',
+      tags: [...draft.tags],
+      pinned: draft.pinned,
+      includeInContext: draft.includeInContext,
+      format: draft.format,
+    });
+    if (!copy) return;
+    try {
+      await discardDurableNoteDraft(projectStore.currentPath!, draft);
+    } catch {
+      // A duplicate recovery entry is preferable to losing the copied note.
+    }
+    await notesStore.fetchNote(copy.id);
+    await refreshDurableDrafts();
+    toastStore.success('Recovered the draft as a new note');
+  }
+
+  async function recoverDurableDraft(summary: NoteDraftSummary): Promise<void> {
+    const projectPath = projectStore.currentPath;
+    if (!projectPath || !(await canLeaveCurrentNote())) return;
+    durableDraftsLoading = true;
+    durableDraftError = null;
+    try {
+      const draft = await getDurableNoteDraft(projectPath, summary.id);
+      if (draft.state === 'orphaned' || draft.state === 'trashed') {
+        await copyDurableDraftToNewNote(draft);
+        return;
+      }
+      if (
+        draft.state === 'conflict' &&
+        !confirm(
+          'This draft was based on an older revision. Open it for review? Nothing is overwritten until you explicitly press Save.',
+        )
+      ) {
+        return;
+      }
+      const opened = await notesStore.fetchNote(draft.noteId);
+      const remote = opened ? notesStore.currentNote : null;
+      if (!remote || remote.id !== draft.noteId) {
+        await copyDurableDraftToNewNote({ ...draft, state: 'orphaned' });
+        return;
+      }
+      titleInput = draft.title;
+      folderInput = draft.folderPath;
+      contentInput = draft.content;
+      tags = [...draft.tags];
+      pinned = draft.pinned;
+      includeInContext = draft.includeInContext;
+      notesStore.currentNote = { ...remote, format: draft.format };
+      baseRevision = remote.revision;
+      editVersion++;
+      isDirty = true;
+      recoveredDraftRequiresExplicitSave = true;
+      saveState = draft.state === 'conflict' ? 'conflict' : 'dirty';
+      activeView = 'editor';
+      durableDraftBackup.attachRecovered(
+        {
+          projectPath,
+          noteId: draft.noteId,
+          baseRevision: draft.baseRevision,
+          baseTitle: draft.baseTitle,
+        },
+        draft,
+      );
+      toastStore.info(
+        draft.state === 'conflict'
+          ? 'Opened the older draft for review; explicit Save is required'
+          : 'Opened the backed-up draft; explicit Save is required',
+      );
+    } catch (error) {
+      durableDraftError = error instanceof Error ? error.message : 'Failed to recover draft';
+    } finally {
+      durableDraftsLoading = false;
+    }
+  }
+
+  async function discardDurableDraft(summary: NoteDraftSummary): Promise<void> {
+    const projectPath = projectStore.currentPath;
+    if (!projectPath || !confirm(`Discard the backed-up draft for "${summary.title}"?`)) return;
+    try {
+      await discardDurableNoteDraft(projectPath, summary);
+      if (durableDraftBackup.status.draftId === summary.id) {
+        durableDraftBackup.abandonLocalIdentity();
+        startDurableDraftForCurrentNote();
+      }
+      await refreshDurableDrafts(projectPath);
+      toastStore.info('Discarded the recovery draft');
+    } catch (error) {
+      durableDraftError = error instanceof Error ? error.message : 'Failed to discard draft';
+    }
+  }
+
   function formatBytes(value: number) {
     if (value < 1024) return `${value} B`;
     if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
@@ -1112,6 +1551,41 @@
 </script>
 
 <div class="relative flex h-full min-h-0 min-w-0" style="background: var(--color-surface-1);">
+  <NotesQuickSwitcher
+    open={showQuickSwitcher}
+    notes={notesStore.catalog}
+    recentIds={recentNoteIds}
+    favoriteIds={quickSwitcherFavoriteIds}
+    onOpen={(noteId) => void openNote(noteId)}
+    onCreate={(exactTitle) => void createNewNote(exactTitle)}
+    onToggleFavorite={(noteId) => void toggleQuickSwitcherFavorite(noteId)}
+    onClose={() => (showQuickSwitcher = false)}
+  />
+  <NotesRecoveryDialog
+    open={showRecoveryDialog}
+    initialTab={recoveryTab}
+    {currentNote}
+    trash={recoveryTrash}
+    revisions={recoveryRevisions}
+    loading={recoveryLoading}
+    error={recoveryError}
+    selectedRevision={selectedRecoveryRevision}
+    onSelectRevision={(revision) => void selectRecoveryRevision(revision)}
+    onRestoreRevision={(revision) => void restoreRecoveryRevision(revision)}
+    onRestoreTrash={(note) => void restoreTrashedRecoveryNote(note)}
+    onClose={() => {
+      recoveryGeneration++;
+      showRecoveryDialog = false;
+    }}
+  />
+  {#if NotesVaultRestoreComponent}
+    <NotesVaultRestoreComponent
+      open={showVaultRestoreDialog}
+      projectPath={projectStore.currentPath}
+      onClose={() => (showVaultRestoreDialog = false)}
+      onRestored={handleVaultRestored}
+    />
+  {/if}
   {#if isNarrow && showSidebar}
     <!-- Tap-outside backdrop to dismiss the note-list overlay on phones -->
     <button
@@ -1140,6 +1614,47 @@
         <span class="text-sm font-semibold" style="color: var(--color-text-primary);">Notes</span>
       </div>
       <div class="flex items-center gap-1">
+        <button
+          type="button"
+          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => openRecovery('trash')}
+          title="Recover notes from Trash"
+          aria-label="Open Notes Trash"
+        >
+          <Trash2 size={13} />
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => void notesStore.exportVault()}
+          title="Export lossless project vault"
+          aria-label="Export lossless project vault"
+        >
+          <Download size={13} />
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          disabled={vaultRestoreComponentLoading}
+          onclick={() => void openVaultRestore()}
+          title="Preview and restore a vault archive"
+          aria-label="Restore Notes vault"
+        >
+          {#if vaultRestoreComponentLoading}<LoaderCircle class="animate-spin" size={13} />{:else}<ArchiveRestore size={13} />{/if}
+        </button>
+        <button
+          type="button"
+          class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (showQuickSwitcher = true)}
+          title="Quick switcher (Ctrl/⌘ O)"
+          aria-label="Open note quick switcher"
+        >
+          <Search size={13} />
+        </button>
         <input
           bind:this={importInputEl}
           type="file"
@@ -1196,7 +1711,7 @@
           type="button"
           class="p-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-secondary);"
-          onclick={createNewNote}
+          onclick={() => void createNewNote()}
           title="New note"
           aria-label="New note"
         >
@@ -1232,6 +1747,12 @@
           }}
         />
       </div>
+      {#if searchQuery && notesStore.searchResultsTruncated}
+        <p class="mt-1.5 px-1 text-[10px]" style="color: var(--color-warning);" role="status">
+          Showing the top {notesStore.searchResultLimit} full-text matches. Refine the query to narrow
+          the vault.
+        </p>
+      {/if}
     </div>
 
     <!-- Folder tree -->
@@ -1315,11 +1836,20 @@
             <button
               type="button"
               class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-[var(--color-surface-4)]"
-              style="background: var(--color-surface-3); color: var(--color-text-secondary);"
+              style={searchQuery === tag
+                ? 'background: var(--color-accent); color: white;'
+                : 'background: var(--color-surface-3); color: var(--color-text-secondary);'}
+              aria-pressed={searchQuery === tag}
               onclick={() => {
-                searchInput = tag;
-                searchQuery = tag;
-                void notesStore.setSearchQuery(tag);
+                if (searchQuery === tag) {
+                  searchInput = '';
+                  searchQuery = '';
+                  void notesStore.setSearchQuery('');
+                } else {
+                  searchInput = tag;
+                  searchQuery = tag;
+                  void notesStore.setSearchQuery(tag);
+                }
               }}
             >
               <Tag size={8} />
@@ -1340,16 +1870,22 @@
         <div class="flex flex-col items-center justify-center py-10 text-center px-4">
           <StickyNote size={24} class="opacity-20 mb-2" style="color: var(--color-text-muted);" />
           <div class="text-xs" style="color: var(--color-text-muted);">
-            {searchInput ? 'No matching notes' : 'No notes yet'}
+            {searchInput
+              ? 'No matching notes'
+              : notesStore.isIndexing
+                ? 'Indexing project notes…'
+                : 'No notes yet'}
           </div>
-          <button
-            type="button"
-            class="mt-3 text-xs px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
-            style="color: var(--color-accent);"
-            onclick={createNewNote}
-          >
-            + New note
-          </button>
+          {#if !notesStore.isIndexing}
+            <button
+              type="button"
+              class="mt-3 text-xs px-3 py-1.5 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
+              style="color: var(--color-accent);"
+              onclick={() => void createNewNote()}
+            >
+              + New note
+            </button>
+          {/if}
         </div>
       {:else}
         <VirtualList
@@ -1485,6 +2021,25 @@
           </button>
         {/if}
         <button
+          id="notes-tab-bases"
+          type="button"
+          role="tab"
+          aria-selected={activeView === 'bases'}
+          aria-controls="notes-view-panel"
+          tabindex={activeView === 'bases' ? 0 : -1}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style="background: {activeView === 'bases'
+            ? 'var(--color-surface-3)'
+            : 'transparent'}; color: {activeView === 'bases'
+            ? 'var(--color-text-primary)'
+            : 'var(--color-text-muted)'};"
+          onclick={() => (activeView = 'bases')}
+          onkeydown={(event) => handleViewTabKeydown(event, 'bases')}
+        >
+          <Table2 size={12} />
+          Bases
+        </button>
+        <button
           id="notes-tab-graph"
           type="button"
           role="tab"
@@ -1554,6 +2109,17 @@
               {activeView === 'preview' ? 'Edit' : 'Preview'}
             </button>
           {/if}
+
+          <button
+            type="button"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+            style="color: var(--color-text-muted);"
+            onclick={() => openRecovery('history')}
+            title="Saved revision history"
+          >
+            <History size={12} />
+            <span class="text-[10px]">History</span>
+          </button>
 
           <button
             type="button"
@@ -1665,7 +2231,8 @@
             class="p-1.5 rounded-lg text-xs transition-colors hover:bg-[var(--color-surface-3)]"
             style="color: var(--color-text-muted);"
             onclick={() => void deleteCurrentNote()}
-            title="Delete note"
+            title="Move note to Trash"
+            aria-label="Move note to Trash"
           >
             <Trash2 size={12} />
           </button>
@@ -1701,6 +2268,57 @@
             onclick={discardStrandedDraft}>Discard draft</button
           >
         </div>
+      </div>
+    {/if}
+
+    {#if durableDraft}
+      <div
+        class="shrink-0 border-b px-4 py-2.5"
+        style="border-color: color-mix(in srgb, var(--color-info) 30%, var(--color-border)); background: var(--color-info-bg);"
+        role="status"
+      >
+        <div class="flex flex-wrap items-center gap-3">
+          <History size={15} class="shrink-0 text-[var(--color-info)]" />
+          <p class="min-w-56 flex-1 text-xs leading-5 text-[var(--color-text-primary)]">
+            A crash-safe draft for “{durableDraft.title}” is available ({durableDraft.state}).
+            {#if durableDrafts.length > 1}
+              {durableDrafts.length - 1} more draft{durableDrafts.length === 2 ? '' : 's'} await
+              review.
+            {/if}
+          </p>
+          <button
+            type="button"
+            class="rounded-lg px-2.5 py-1.5 text-xs font-semibold hover:brightness-110 disabled:opacity-50"
+            style="background: var(--color-info); color: var(--color-surface-0);"
+            disabled={durableDraftsLoading}
+            onclick={() => void recoverDurableDraft(durableDraft)}
+          >
+            {durableDraft.state === 'recoverable'
+              ? 'Open draft'
+              : durableDraft.state === 'conflict'
+                ? 'Review draft'
+                : 'Copy to new note'}
+          </button>
+          <button
+            type="button"
+            class="rounded-lg border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+            disabled={durableDraftsLoading}
+            onclick={() => void discardDurableDraft(durableDraft)}>Discard</button
+          >
+        </div>
+      </div>
+    {:else if durableDraftError}
+      <div
+        class="shrink-0 border-b px-4 py-2 text-xs text-[var(--color-error)]"
+        style="border-color: var(--color-border); background: var(--color-error-bg);"
+        role="alert"
+      >
+        Draft recovery could not load: {durableDraftError}
+        <button
+          type="button"
+          class="ml-2 underline"
+          onclick={() => void refreshDurableDrafts()}>Retry</button
+        >
       </div>
     {/if}
 
@@ -1759,6 +2377,40 @@
       </div>
     {/if}
 
+    {#if notesStore.indexWarning && !notesStore.error && !notesStore.conflict && activeView !== 'canvas'}
+      <div
+        class="shrink-0 border-b px-4 py-2"
+        style="border-color: color-mix(in srgb, var(--color-warning) 25%, var(--color-border)); background: var(--color-warning-bg);"
+        role="status"
+      >
+        <div class="flex items-center gap-3">
+          <AlertTriangle size={14} class="shrink-0 text-[var(--color-warning)]" />
+          <p class="min-w-0 flex-1 text-xs leading-5 text-[var(--color-text-primary)]">
+            {notesStore.indexWarning}
+          </p>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-[var(--color-warning)] hover:bg-[var(--color-surface-2)]"
+            onclick={() => void notesStore.syncProjectDocuments()}
+            ><RefreshCw size={12} /> Retry indexing</button
+          >
+        </div>
+      </div>
+    {/if}
+
+    {#if notesStore.isIndexing && !notesStore.error && !notesStore.conflict && activeView !== 'canvas'}
+      <div
+        class="shrink-0 border-b px-4 py-2"
+        style="border-color: var(--color-border); background: var(--color-info-bg);"
+        role="status"
+      >
+        <div class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+          <RefreshCw size={12} class="shrink-0 animate-spin text-[var(--color-info)]" />
+          Indexing project notes in the background. Existing notes stay available.
+        </div>
+      </div>
+    {/if}
+
     {#if overNoteBudget}
       <div
         class="shrink-0 border-b px-4 py-2 text-xs text-[var(--color-text-primary)]"
@@ -1777,10 +2429,88 @@
       role="tabpanel"
       aria-labelledby={`notes-tab-${activeView}`}
     >
-      {#if activeView === 'canvas'}
-        <NotesCanvas onOpenNote={handleCanvasOpenNote} />
+      {#if activeView === 'bases'}
+        {#if NotesBasesComponent}
+          <NotesBasesComponent onOpenNote={handleBaseOpenNote} />
+        {:else if basesComponentError}
+          <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <p class="text-xs" style="color: var(--color-error);">{basesComponentError}</p>
+            <button
+              type="button"
+              class="rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
+              style="border-color: var(--color-border); color: var(--color-text-primary);"
+              onclick={() => void loadBasesComponent()}>Retry Bases</button
+            >
+          </div>
+        {:else}
+          <div
+            class="flex h-full items-center justify-center gap-2 text-xs"
+            style="color: var(--color-text-muted);"
+            role="status"
+          >
+            <LoaderCircle size={13} class="animate-spin" /> Loading Bases…
+          </div>
+        {/if}
+      {:else if activeView === 'canvas'}
+        {#if NotesCanvasComponent}
+          <NotesCanvasComponent onOpenNote={handleCanvasOpenNote} />
+        {:else if canvasComponentError}
+          <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <p class="text-xs" style="color: var(--color-error);">{canvasComponentError}</p>
+            <button
+              type="button"
+              class="rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
+              style="border-color: var(--color-border); color: var(--color-text-primary);"
+              onclick={() => void loadCanvasComponent()}>Retry Canvas</button
+            >
+          </div>
+        {:else}
+          <div
+            class="flex h-full items-center justify-center gap-2 text-xs"
+            style="color: var(--color-text-muted);"
+            role="status"
+          >
+            <LoaderCircle size={13} class="animate-spin" /> Loading Canvas…
+          </div>
+        {/if}
       {:else if activeView === 'graph'}
-        <NotesGraph onNodeClick={handleGraphNodeClick} />
+        <div class="h-full flex flex-col">
+          {#if notesStore.graphData.truncated || notesStore.graphData.linksTruncated}
+            <div
+              class="flex items-center gap-2 px-4 py-1.5 border-b text-[11px]"
+              style="border-color: var(--color-border); color: var(--color-text-muted);"
+              role="status"
+            >
+              <AlertTriangle size={12} />
+              Large graph — showing {notesStore.graphData.shown ??
+                notesStore.graphData.nodes.length}
+              of {notesStore.graphData.total ?? 'many'} notes. Use search to narrow the set.
+            </div>
+          {/if}
+          {#if NotesGraphComponent}
+            <div class="min-h-0 flex-1">
+              <NotesGraphComponent onNodeClick={handleGraphNodeClick} />
+            </div>
+          {:else if graphComponentError}
+            <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <p class="text-xs" style="color: var(--color-error);">{graphComponentError}</p>
+              <button
+                type="button"
+                class="rounded-lg border px-3 py-1.5 text-xs hover:bg-[var(--color-surface-3)]"
+                style="border-color: var(--color-border); color: var(--color-text-primary);"
+                onclick={() => void loadGraphComponent()}>Retry Graph</button
+              >
+            </div>
+          {:else}
+            <div
+              class="flex flex-1 items-center justify-center gap-2 text-xs"
+              style="color: var(--color-text-muted);"
+              role="status"
+            >
+              <LoaderCircle size={13} class="animate-spin" /> Loading Graph…
+            </div>
+          {/if}
+        </div>
       {:else if activeView === 'preview' && currentNote?.format === 'html'}
         <div class="h-full flex flex-col" style="background: var(--color-surface-1);">
           <div
@@ -1947,6 +2677,12 @@
               </div>
             </div>
 
+            <NotePropertiesPanel
+              content={contentInput}
+              format={currentNote.format ?? 'markdown'}
+              onchange={updatePropertiesContent}
+            />
+
             <!-- Divider -->
             <div class="border-t" style="border-color: var(--color-border);"></div>
 
@@ -2012,11 +2748,34 @@
               class="flex items-center justify-between text-[11px]"
               style="color: var(--color-text-muted);"
             >
-              <span
-                >{notesStore.settings.autosaveEnabled
-                  ? `Autosave after ${(notesStore.settings.autosaveDelayMs / 1000).toFixed(1)}s`
-                  : 'Autosave off · only Ctrl/⌘ S or Save writes to disk'}</span
-              >
+              <span class="flex flex-wrap items-center gap-x-1">
+                <span
+                  >{notesStore.settings.autosaveEnabled
+                    ? `Autosave after ${(notesStore.settings.autosaveDelayMs / 1000).toFixed(1)}s`
+                    : 'Autosave off · only Ctrl/⌘ S or Save writes to disk'}</span
+                >
+                {#if isDirty}
+                  <span aria-hidden="true">·</span>
+                  <span
+                    title={draftBackupError ?? 'The editor is backed up separately from note saves'}
+                    style="color: {draftBackupState === 'error' || draftBackupState === 'conflict'
+                      ? 'var(--color-error)'
+                      : draftBackupState === 'backed-up'
+                        ? 'var(--color-success)'
+                        : 'var(--color-text-muted)'};"
+                  >
+                    {draftBackupState === 'backing-up'
+                      ? 'Backing up…'
+                      : draftBackupState === 'backed-up'
+                        ? 'Backed up'
+                        : draftBackupState === 'conflict'
+                          ? 'Backup conflict'
+                          : draftBackupState === 'error'
+                            ? 'Backup failed'
+                            : 'Backup queued'}
+                  </span>
+                {/if}
+              </span>
               <span
                 >{contentInput.split(/\s+/).filter(Boolean).length.toLocaleString()} words · {formatBytes(
                   contentBytes,
@@ -2207,7 +2966,7 @@
               type="button"
               class="px-4 py-2 rounded-xl text-xs font-semibold transition-colors"
               style="background: rgba(var(--color-accent-rgb), 0.12); color: var(--color-accent); border: 1px solid rgba(var(--color-accent-rgb), 0.25);"
-              onclick={createNewNote}
+              onclick={() => void createNewNote()}
             >
               + New Note
             </button>

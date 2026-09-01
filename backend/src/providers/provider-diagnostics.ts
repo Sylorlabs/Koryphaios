@@ -30,10 +30,35 @@ export interface SafeProviderDiagnostic {
   code?: string;
   errorName?: string;
   exitCode?: number;
+  /** Sanitized, secret-redacted upstream reason. Bounded in length so it is
+   * safe to log, persist, and show to the user. */
+  upstreamDetail?: string;
 }
 
 const MAX_CAPTURED_DIAGNOSTIC_BYTES = 64 * 1024;
 const DIAGNOSTIC_FINGERPRINT_KEY = randomBytes(32);
+
+const UPSTREAM_DETAIL_MAX_CHARS = 220;
+/** Secret-looking substrings (API keys, bearer tokens, key=value pairs). */
+const SECRET_PATTERNS: RegExp[] = [
+  /\b(?:sk|xai|rk|gsk|co|ghp|gho|github_pat|AIza)[-_][A-Za-z0-9_-]{8,}/g,
+  /\bBearer\s+\S+/gi,
+  /\b(?:api[_-]?key|access[_-]?token|authorization)["'=:\s]+\S+/gi,
+];
+
+/**
+ * Human-readable, secret-redacted upstream reason extracted from an error.
+ * OpenAI SDK `APIError.message` already embeds the provider's response body,
+ * so this recovers the actual rejection cause ("Model not found",
+ * "reasoning_effort is not supported", …) instead of the opaque category text.
+ */
+export function safeUpstreamDetail(value: unknown, maxChars = UPSTREAM_DETAIL_MAX_CHARS): string {
+  let text = rawDiagnosticText(value);
+  for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, '[redacted]');
+  text = text.replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
 
 function rawDiagnosticText(value: unknown): string {
   if (typeof value === 'string') return value;
@@ -121,6 +146,7 @@ export function safeProviderDiagnostic(
 ): SafeProviderDiagnostic {
   const text = rawDiagnosticText(value);
   const status = options.status ?? statusFrom(value);
+  const upstreamDetail = safeUpstreamDetail(value);
   return {
     provider,
     source,
@@ -134,6 +160,7 @@ export function safeProviderDiagnostic(
     ...(safeCodeFrom(value) ? { code: safeCodeFrom(value) } : {}),
     ...(safeNameFrom(value) ? { errorName: safeNameFrom(value) } : {}),
     ...(options.exitCode !== undefined ? { exitCode: options.exitCode } : {}),
+    ...(upstreamDetail ? { upstreamDetail } : {}),
   };
 }
 
@@ -149,6 +176,13 @@ function providerLabel(provider: string): string {
     devin: 'Devin',
     grok: 'Grok Build',
     openai: 'OpenAI',
+    xai: 'xAI',
+    nvidia: 'NVIDIA',
+    moonshot: 'Moonshot',
+    deepseek: 'DeepSeek',
+    groq: 'Groq',
+    togetherai: 'Together AI',
+    zai: 'Z.ai',
   };
   return labels[provider] ?? provider;
 }
@@ -171,13 +205,13 @@ export function safeProviderFailureMessage(
     case 'permission':
       return `${label} denied this request. Check the provider account and permission settings.`;
     case 'invalid_request':
-      return `${label} rejected the request. Check the selected model and provider settings.`;
+      return `${label} rejected the request. Check the selected model and provider settings.${diagnostic.upstreamDetail ? ` — provider said: "${diagnostic.upstreamDetail}"` : ''}`;
     case 'cancelled':
       return `${label} request was cancelled.`;
     case 'unavailable':
       return `${label} is unavailable or failed to start.`;
     default:
-      return `${label} request failed. Retry or inspect provider status in Settings.`;
+      return `${label} request failed. Retry or inspect provider status in Settings.${diagnostic.upstreamDetail ? ` — provider said: "${diagnostic.upstreamDetail}"` : ''}`;
   }
 }
 

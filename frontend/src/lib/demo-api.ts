@@ -564,6 +564,13 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
   }
 
   // Sessions CRUD — in-memory, nothing persisted.
+  if (path === '/api/sessions/archived') {
+    return ok(
+      [...demoSessions.values()]
+        .filter((session) => session.archivedAt !== undefined)
+        .sort((left, right) => (right.archivedAt ?? 0) - (left.archivedAt ?? 0)),
+    );
+  }
   if (path === '/api/sessions') {
     if (method === 'POST') {
       const body = parseBody(init);
@@ -574,7 +581,11 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
         ),
       );
     }
-    return ok([...demoSessions.values()].sort((a, b) => b.updatedAt - a.updatedAt));
+    return ok(
+      [...demoSessions.values()]
+        .filter((session) => session.archivedAt === undefined)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+    );
   }
   const sessionMatch = path.match(/^\/api\/sessions\/([^/]+)$/);
   if (sessionMatch) {

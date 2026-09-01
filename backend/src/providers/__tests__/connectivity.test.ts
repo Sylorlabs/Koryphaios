@@ -4,6 +4,10 @@
  * API keys are never printed or logged; use masked strings in assertions if needed.
  */
 
+// Disable CLI auto-detection — these tests verify API-key provider connectivity,
+// not CLI harness providers. CLI probing adds 4-6s that pushes the 5s timeout.
+process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+
 import { describe, test, expect, beforeAll } from 'bun:test';
 import { ProviderRegistry } from '../registry';
 import type { ProviderName } from '@koryphaios/shared';

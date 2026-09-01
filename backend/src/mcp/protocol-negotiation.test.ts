@@ -1,11 +1,39 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DEFAULT_NOTE_TOOL_PERMISSIONS } from '@koryphaios/shared';
 import { handleMcpRequest } from './koryphaios-mcp-endpoint';
 import { setContext } from '../context';
+import { saveNotesAgentPermissions } from '../notes/notes-settings';
 
 // Minimal context stub so exposedToolDefs() can read kory.tools without a full
-// bootstrap. The tools registry is empty — we only test the result shape.
+// bootstrap. Including the work-note tool proves the public knowledge MCP
+// endpoint does not silently omit this Kory-native capability.
 setContext({
-  kory: { tools: { getAll: () => [], execute: async () => ({ output: '', isError: false }) } },
+  kory: {
+    tools: {
+      getAll: () => [
+        {
+          name: 'record_work_note',
+          description: 'Record a structured work note',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              summary: { type: 'string' },
+              status: {
+                type: 'string',
+                enum: ['completed', 'partial', 'blocked', 'decision'],
+              },
+            },
+            required: ['title', 'summary', 'status'],
+          },
+        },
+      ],
+      execute: async () => ({ output: '', isError: false }),
+    },
+  },
 } as never);
 
 // Unit tests for the 2026-07-28 protocol negotiation in the Koryphaios MCP
@@ -71,6 +99,65 @@ describe('MCP endpoint protocol negotiation (2026-07-28)', () => {
     expect(result.result.ttlMs).toBeGreaterThan(0);
     expect(result.result.cacheScope).toBe('private');
     expect(result.result.resultType).toBe('complete');
+  });
+
+  test('tools/list exposes the structured work-note capability', async () => {
+    const result = (await handleMcpRequest(
+      { jsonrpc: '2.0', id: 11, method: 'tools/list', params: {} },
+      '/tmp',
+    )) as {
+      result: {
+        tools: Array<{ name: string; inputSchema: { required?: string[] } }>;
+      };
+    };
+
+    expect(result.result.tools).toContainEqual(
+      expect.objectContaining({
+        name: 'record_work_note',
+        inputSchema: expect.objectContaining({ required: ['title', 'summary', 'status'] }),
+      }),
+    );
+  });
+
+  test('work-note writes fail closed when this stateless endpoint cannot ask for approval', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'kory-mcp-work-note-approval-'));
+    try {
+      const result = (await handleMcpRequest(
+        {
+          jsonrpc: '2.0',
+          id: 12,
+          method: 'tools/call',
+          params: {
+            name: 'record_work_note',
+            arguments: { title: 'Result', summary: 'Evidence', status: 'completed' },
+          },
+        },
+        projectRoot,
+      )) as { result: { isError: boolean; content: Array<{ text: string }> } };
+
+      expect(result.result.isError).toBe(true);
+      expect(result.result.content[0]?.text).toContain('has no approval channel');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('tools/list omits work-note recording when Notes permissions block it', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'kory-mcp-work-note-block-'));
+    try {
+      saveNotesAgentPermissions(projectRoot, {
+        preset: 'custom',
+        tools: { ...DEFAULT_NOTE_TOOL_PERMISSIONS, record_work_note: 'block' },
+      });
+      const result = (await handleMcpRequest(
+        { jsonrpc: '2.0', id: 13, method: 'tools/list', params: {} },
+        projectRoot,
+      )) as { result: { tools: Array<{ name: string }> } };
+
+      expect(result.result.tools.map((tool) => tool.name)).not.toContain('record_work_note');
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   test('tools/list for modern client stamps serverInfo in _meta', async () => {

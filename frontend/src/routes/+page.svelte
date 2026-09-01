@@ -8,12 +8,14 @@
     projectDisplayName,
     type WorkspaceNavigationSnapshot,
   } from '$lib/stores/project.svelte';
+  import { createWorkspaceController } from '$lib/utils/workspace-controller.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { isDemoMode, isFullDemo, isGuidedDemo } from '$lib/demo.svelte';
   import { appStore } from '$lib/stores/app.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
+  import type { ImageInputMode } from '$lib/utils/image-input-fallback';
   import ManagerFeed from '$lib/components/ManagerFeed.svelte';
   import AgentThreadFeed from '$lib/components/AgentThreadFeed.svelte';
   import CommandInput from '$lib/components/CommandInput.svelte';
@@ -101,6 +103,7 @@
   let projectFolderInput = $state<HTMLInputElement>();
   let recentProjects = $state<RecentProject[]>([]);
   let composerDraft = $state('');
+  let clearComposerDraftRequest = $state(0);
   let interactionMode = $derived(
     sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId)
       ?.interactionMode ?? 'act',
@@ -109,8 +112,6 @@
   let planReady = $derived(validatePlanReadiness(currentPlanText).ready);
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
-  let workspaceRefreshPromise: Promise<void> | null = null;
-  let lastReconciledSessionId = '';
   let contextBarHover = $state(false);
   // Set when the user tries to send without a project open — holds the pending
   // message so it can be dispatched after they pick a project or opt into home.
@@ -120,6 +121,7 @@
     reasoningLevel?: string;
     attachments?: Array<{ type: string; data: string; name: string }>;
     fastMode?: boolean;
+    imageInputMode?: ImageInputMode;
   } | null>(null);
 
   // Segmented context bar: what's occupying the window (system prompt, memory
@@ -132,7 +134,6 @@
     { key: 'tools', label: 'Tools', color: '#f59e0b' },
     { key: 'chat', label: 'Chat', color: '#3b82f6' },
   ] as const;
-
   let contextSegments = $derived.by(() => {
     const usage = wsStore.contextUsage;
     const b = usage.breakdown;
@@ -143,11 +144,11 @@
     // sessions' segments to zero width.
     const percentFloat = Math.min(100, (usage.used / usage.max) * 100);
     if (usage.used > sum) {
-      // Provider reports MORE than we composed: the gap is the provider's own
-      // harness overhead (e.g. Claude Code's system prompt + native tool
-      // defs). Show each segment at its true estimate plus an explicit
-      // "Provider harness" segment — never smear the gap across our segments.
-      const harness = usage.used - sum;
+      // The provider reports more tokens than our chars/4 category estimate.
+      // That gap may be a CLI harness, tokenizer variance, hidden formatting,
+      // or output tokens. Keep it visible without inventing provider-specific
+      // provenance that the backend did not report.
+      const remainder = usage.used - sum;
       const perToken = percentFloat / usage.used;
       return [
         ...CONTEXT_SEGMENTS.map((s) => ({
@@ -156,11 +157,11 @@
           widthPercent: b[s.key] * perToken,
         })),
         {
-          key: 'harness',
-          label: 'Provider harness',
+          key: 'provider-remainder',
+          label: 'Provider remainder',
           color: '#9ca3af',
-          tokens: harness,
-          widthPercent: harness * perToken,
+          tokens: remainder,
+          widthPercent: remainder * perToken,
         },
       ].filter((s) => s.tokens > 0);
     }
@@ -172,6 +173,14 @@
         widthPercent: percentFloat * share,
       };
     }).filter((s) => s.tokens > 0);
+  });
+
+  let cachedContextNotice = $derived.by(() => {
+    const usage = wsStore.contextUsage;
+    const cached = usage.cachedInputTokens ?? 0;
+    if (cached <= 0) return '';
+    const provider = usage.provider === 'codex' ? 'Codex' : 'The provider';
+    return `${provider} reused ${formatTokenCount(cached)} cached input tokens. They are already included in the total, still occupy the model window, and are not extra chat messages. Provider usage arrives during or at the end of a turn, so this meter can jump when that report lands.`;
   });
 
   function formatTokenCount(n: number): string {
@@ -360,6 +369,52 @@
         if (projectStore.currentPath) {
           void refreshComposerFileMentions();
         }
+        if (authStore.isAuthenticated && !sessionStore.activeSessionId) {
+          const hasWorkspaceContext = !!(projectStore.workspaceRoot || projectStore.currentPath);
+          if (!hasWorkspaceContext) {
+            void sessionStore.newChat().catch((err: unknown) => {
+              console.warn(
+                'Failed to auto-create new chat on launch:',
+                err instanceof Error ? err.message : String(err),
+              );
+            });
+          } else {
+            const path = projectStore.currentPath;
+            if (path) {
+              const existing = sessionStore.sessionsForProject(path);
+              if (existing.length > 0) {
+                const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+                sessionStore.activeSessionId = latest.id;
+              } else {
+                void sessionStore.newChat().catch((err: unknown) => {
+                  console.warn(
+                    'Failed to auto-create new chat on launch:',
+                    err instanceof Error ? err.message : String(err),
+                  );
+                });
+              }
+            } else {
+              const wsSessions = sessionStore.sessions.filter((s) => !s.workingDirectory);
+              if (wsSessions.length > 0) {
+                const latest = wsSessions.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
+                sessionStore.activeSessionId = latest.id;
+              } else {
+                void sessionStore.newChat().catch((err: unknown) => {
+                  console.warn(
+                    'Failed to auto-create new chat on launch:',
+                    err instanceof Error ? err.message : String(err),
+                  );
+                });
+              }
+            }
+          }
+        }
+        // Host controls and pending approvals are backed by the collaboration
+        // record, not the renderer. Rehydrate them after session selection so
+        // a normal desktop reload does not strand an active team host.
+        if (authStore.isAuthenticated && sessionStore.activeSessionId) {
+          await collaborationStore.restore(sessionStore.activeSessionId);
+        }
       });
       void notesStore.fetchSettings();
     } else {
@@ -405,22 +460,37 @@
     const handleFocusInput = () => inputRef?.focus();
     window.addEventListener('kory:focus-input', handleFocusInput);
 
+    const handleWorkspaceSnapshot = (event: Event) => {
+      const snapshot = (event as CustomEvent).detail as WorkspaceNavigationSnapshot | undefined;
+      if (!snapshot) return;
+      reconcileWorkspaceSnapshot(snapshot);
+    };
+    const handleWorkspaceRefresh = () => {
+      void refreshWorkspaceNavigation();
+    };
     const handleWorkspaceFocus = () => {
       if (document.visibilityState === 'visible') void refreshWorkspaceNavigation();
     };
     const handleProjectUnavailable = () => {
-      lastReconciledSessionId = '';
+      workspace.setLastReconciledSessionId('');
       sessionStore.activeSessionId = '';
       toastStore.error(
         'The open project moved or was deleted. Choose a current folder to continue.',
       );
+      // Clear the broken path from persistence so it doesn't survive a
+      // relaunch or keep triggering API 400s via the requestPath header.
+      void workspace.acknowledgeUnavailableProject();
       void refreshWorkspaceNavigation();
     };
+    // Push events are authoritative; the interval is only a low-frequency
+    // fallback for missed broadcasts (e.g. while the WS reconnects).
     const workspaceRefreshTimer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refreshWorkspaceNavigation();
-    }, 2_000);
+    }, 30_000);
     window.addEventListener('focus', handleWorkspaceFocus);
     document.addEventListener('visibilitychange', handleWorkspaceFocus);
+    window.addEventListener('kory-workspace-snapshot', handleWorkspaceSnapshot);
+    window.addEventListener('kory-workspace-refresh', handleWorkspaceRefresh);
     window.addEventListener('kory-project-unavailable', handleProjectUnavailable);
 
     return () => {
@@ -436,112 +506,47 @@
       );
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
+      window.removeEventListener('kory-workspace-snapshot', handleWorkspaceSnapshot);
+      window.removeEventListener('kory-workspace-refresh', handleWorkspaceRefresh);
       window.clearInterval(workspaceRefreshTimer);
       window.removeEventListener('focus', handleWorkspaceFocus);
-      document.removeEventListener('visibilitychange', handleWorkspaceFocus);
+      window.removeEventListener('visibilitychange', handleWorkspaceFocus);
       window.removeEventListener('kory-project-unavailable', handleProjectUnavailable);
     };
   });
 
-  function reconcileWorkspaceSnapshot(snapshot: WorkspaceNavigationSnapshot): void {
-    const result = projectStore.reconcile(snapshot);
-    if (result.projectBecameUnavailable || result.workspaceBecameUnavailable) {
-      lastReconciledSessionId = '';
-      sessionStore.activeSessionId = '';
-      const missing = result.projectBecameUnavailable ?? result.workspaceBecameUnavailable;
-      toastStore.error(
-        `${projectDisplayName(missing)} moved or was deleted. The folder list has been refreshed.`,
-      );
-    }
-    if (result.changed && projectStore.currentPath) void refreshComposerFileMentions();
-  }
-
-  async function readWorkspaceNavigation(): Promise<WorkspaceNavigationSnapshot | null> {
-    const response = await apiFetch(apiUrl('/api/workspace/state'));
-    const body = (await response.json()) as {
-      ok?: boolean;
-      data?: WorkspaceNavigationSnapshot;
-      error?: string;
-    };
-    if (!response.ok || !body.ok || !body.data) return null;
-    return body.data;
-  }
-
-  async function selectAuthoritativeProject(path: string): Promise<boolean> {
-    const response = await apiFetch(apiUrl('/api/workspace/select'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path }),
-    });
-    const body = (await response.json()) as {
-      ok?: boolean;
-      data?: WorkspaceNavigationSnapshot;
-      error?: string;
-    };
-    if (!response.ok || !body.ok || !body.data) {
-      toastStore.error(body.error || 'Project folder is unavailable');
-      return false;
-    }
-    reconcileWorkspaceSnapshot(body.data);
-    return true;
-  }
-
-  async function deselectAuthoritativeProject(): Promise<void> {
-    const response = await apiFetch(apiUrl('/api/workspace/deselect'), { method: 'POST' });
-    const body = (await response.json()) as { ok?: boolean; data?: WorkspaceNavigationSnapshot };
-    if (response.ok && body.ok && body.data) reconcileWorkspaceSnapshot(body.data);
-  }
-
-  async function acknowledgeUnavailableProject(): Promise<void> {
-    const response = await apiFetch(apiUrl('/api/workspace/acknowledge-unavailable'), {
-      method: 'POST',
-    });
-    const body = (await response.json()) as { ok?: boolean; data?: WorkspaceNavigationSnapshot };
-    if (response.ok && body.ok && body.data) reconcileWorkspaceSnapshot(body.data);
-  }
-
-  function refreshWorkspaceNavigation(
-    options: { restoreFromActiveSession?: boolean } = {},
-  ): Promise<void> {
-    if (workspaceRefreshPromise) return workspaceRefreshPromise;
-    workspaceRefreshPromise = (async () => {
-      const snapshot = await readWorkspaceNavigation();
-      if (!snapshot) return;
-      reconcileWorkspaceSnapshot(snapshot);
-      if (
-        options.restoreFromActiveSession &&
-        !snapshot.workspaceRoot &&
-        !snapshot.selectedProject
-      ) {
+  const workspace = createWorkspaceController(
+    {
+      requestSnapshot: (path: string, init?: RequestInit) => apiFetch(apiUrl(path), init),
+      getActiveSessionWorkingDirectory: () => {
         const active = sessionStore.sessions.find(
           (session) => session.id === sessionStore.activeSessionId,
         );
-        if (active?.workingDirectory) await selectAuthoritativeProject(active.workingDirectory);
-      }
-    })()
-      .catch((error: unknown) => {
-        console.warn(
-          'Workspace refresh failed:',
-          error instanceof Error ? error.message : String(error),
-        );
-      })
-      .finally(() => {
-        workspaceRefreshPromise = null;
-      });
-    return workspaceRefreshPromise;
-  }
+        return active?.workingDirectory ?? null;
+      },
+      clearActiveSession: () => {
+        sessionStore.activeSessionId = '';
+      },
+    },
+    { onProjectChanged: () => void refreshComposerFileMentions() },
+  );
+  const reconcileWorkspaceSnapshot = workspace.reconcileWorkspaceSnapshot;
+  const selectAuthoritativeProject = workspace.selectAuthoritativeProject;
+  const deselectAuthoritativeProject = workspace.deselectAuthoritativeProject;
+  const refreshWorkspaceNavigation = workspace.refreshWorkspaceNavigation;
+  const acknowledgeUnavailableProject = workspace.acknowledgeUnavailableProject;
 
   $effect(() => {
     const authenticated = appStore.authReady;
     const sessionId = sessionStore.activeSessionId;
-    if (!authenticated || !sessionId || sessionId === lastReconciledSessionId) return;
-    lastReconciledSessionId = sessionId;
+    if (!authenticated || !sessionId || sessionId === workspace.lastReconciledSessionId) return;
+    workspace.setLastReconciledSessionId(sessionId);
     const session = sessionStore.sessions.find((item) => item.id === sessionId);
     if (session?.workingDirectory) {
       if (session.workingDirectory !== projectStore.currentPath) {
         void selectAuthoritativeProject(session.workingDirectory).then((selected) => {
           if (selected) return;
-          lastReconciledSessionId = '';
+          workspace.setLastReconciledSessionId('');
           sessionStore.activeSessionId = '';
         });
       }
@@ -643,8 +648,6 @@
     } else if (shortcutStore.matches('focus_input', e)) {
       e.preventDefault();
       inputRef?.focus();
-    } else if (shortcutStore.matches('close', e) && showSettings) {
-      showSettings = false;
     }
   }
 
@@ -825,7 +828,9 @@
     }
 
     if (root === 'goal') {
-      goalDisplayStore.update({ sidebar: true });
+      // Goal creation happens in the composer above the chat; the sidebar only
+      // previews goals once they exist.
+      if (parts[1]?.toLowerCase() !== 'create') goalDisplayStore.update({ sidebar: true });
       const request = parseGoalSlashCommand(parts.slice(1));
       queueMicrotask(() =>
         window.dispatchEvent(
@@ -876,6 +881,7 @@
       const maybe = parsed as Record<string, unknown>;
       if (typeof maybe.showSidebar === 'boolean') showSidebar = maybe.showSidebar;
       if (typeof maybe.showAgents === 'boolean') showAgents = maybe.showAgents;
+      if (typeof maybe.agentsDismissed === 'boolean') agentsDismissed = maybe.agentsDismissed;
     } catch (err: unknown) {
       console.debug(
         'Failed to parse layout prefs from localStorage:',
@@ -892,6 +898,7 @@
       JSON.stringify({
         showSidebar,
         showAgents,
+        agentsDismissed,
       }),
     );
   });
@@ -967,32 +974,31 @@
       sessionStore.activeSessionId = latest.id;
       return latest.id;
     }
-    // No prior chats for this project — start a new one.
-    return sessionStore.createSession();
+    // No prior chats for this project — start a new one scoped to it. An
+    // unscoped session here would trip the session reconciler into
+    // deselecting the project the user just chose.
+    return sessionStore.createSession({ workingDirectory: path });
   }
 
-  /** Open a folder as a project. Resumes the last session for the path if one
-   *  exists; otherwise creates a fresh chat with the provided content. */
+  /** Open a folder as a project. User explicitly selected this project
+   *  → always start a fresh chat (launch resume is handled separately). */
   async function openProjectAtPath(
     path: string,
     fresh: { title: string; text: string; fileName?: string },
   ) {
     if (!(await selectAuthoritativeProject(path))) return;
-    // Refresh session list from DB so we find prior chats for this path.
-    await sessionStore.fetchSessions();
-    const existing = sessionStore.sessionsForProject(path);
-    if (existing.length > 0) {
-      // Resume the most recent session — don't create a blank one.
-      const latest = existing.reduce((a, b) => (a.updatedAt >= b.updatedAt ? a : b));
-      sessionStore.activeSessionId = latest.id;
-      toastStore.success(`Resumed ${projectDisplayName(path)} — ${latest.title}`);
-    } else {
-      // First time opening this project — bootstrap with the scanned content.
-      await createProjectFromText(fresh.title, fresh.text, {
+    const newId = await sessionStore.createSession({ workingDirectory: path });
+    if (newId) {
+      void sessionStore.renameSession(newId, fresh.title);
+      recentProjects = addRecentProject(recentProjects, {
+        title: fresh.title,
+        content: fresh.text,
         source: 'file',
         fileName: fresh.fileName,
         path,
       });
+      currentProjectContent = fresh.text;
+      void refreshComposerFileMentions();
       toastStore.success(`Opened ${projectDisplayName(path)} — new chat`);
     }
   }
@@ -1141,8 +1147,9 @@
 
   async function handleMenuAction(action: string) {
     if (action.startsWith('goal_')) {
-      goalDisplayStore.update({ sidebar: true });
-      // The Goal panel is conditionally mounted; dispatch after Svelte commits it.
+      // Goal creation happens in the composer above the chat; the sidebar only
+      // previews goals once they exist.
+      if (action !== 'goal_create') goalDisplayStore.update({ sidebar: true });
       queueMicrotask(() =>
         window.dispatchEvent(
           new CustomEvent<GoalActionRequest>('kory:goal-action', {
@@ -1235,10 +1242,21 @@
             break;
           }
           reconcileWorkspaceSnapshot(body.data);
+          workspace.setLastReconciledSessionId('');
           sessionStore.activeSessionId = '';
-          toastStore.success(
-            `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders`,
-          );
+          {
+            const newId = await sessionStore.newChat();
+            if (newId) {
+              workspace.setLastReconciledSessionId(newId);
+              toastStore.success(
+                `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders — new chat`,
+              );
+            } else {
+              toastStore.success(
+                `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders`,
+              );
+            }
+          }
         } catch (error) {
           toastStore.error(String(error));
         }
@@ -1314,7 +1332,10 @@
           await openRecentProject(action.slice('open_recent:'.length));
         } else if (action.startsWith('select_project:')) {
           const path = decodeURIComponent(action.slice('select_project:'.length));
-          if (await selectAuthoritativeProject(path)) await resumeOrCreateSession(path);
+          if (await selectAuthoritativeProject(path)) {
+            const newId = await sessionStore.createSession({ workingDirectory: path });
+            if (newId) toastStore.success(`Opened ${projectDisplayName(path)} — new chat`);
+          }
         }
         break;
     }
@@ -1332,21 +1353,24 @@
       reasoningLevel?: string;
       attachments?: Array<{ type: string; data: string; name: string }>;
       fastMode?: boolean;
+      imageInputMode?: ImageInputMode;
     };
   } | null>(null);
 
-  function confirmAgenticConsent() {
+  async function confirmAgenticConsent() {
     const p = agenticConsentPrompt;
     if (!p) return;
     agenticConsent = new Set([...agenticConsent, p.provider]);
     agenticConsentPrompt = null;
-    handleSend(
+    const sent = await handleSend(
       p.pending.message,
       p.pending.model,
       p.pending.reasoningLevel,
       p.pending.attachments,
       p.pending.fastMode,
+      p.pending.imageInputMode,
     );
+    if (sent) clearComposerDraftRequest += 1;
   }
 
   async function handleSend(
@@ -1355,7 +1379,8 @@
     reasoningLevel?: string,
     attachments?: Array<{ type: string; data: string; name: string }>,
     fastMode?: boolean,
-  ) {
+    imageInputMode?: ImageInputMode,
+  ): Promise<boolean> {
     if (isDemoMode) {
       composerDraft = '';
       // Full demo: simulate a manager turn for the user's own prompt.
@@ -1363,15 +1388,22 @@
       void import('$lib/demo.svelte').then((m) =>
         isFullDemo ? m.demoSend(message) : m.replayDemo(),
       );
-      return;
+      return true;
     }
     if (!projectStore.currentPath) {
       // Fail closed until the user chooses a current folder. Treating HOME as
       // an ephemeral project conflicted with authoritative workspace refresh:
       // the next snapshot correctly rejected the broad path and detached the
       // newly created session.
-      noProjectPrompt = { message, model, reasoningLevel, attachments, fastMode };
-      return;
+      noProjectPrompt = {
+        message,
+        model,
+        reasoningLevel,
+        attachments,
+        fastMode,
+        imageInputMode,
+      };
+      return false;
     }
     const configurationWarning = getModelConfigurationWarning(wsStore.providers, model);
     if (configurationWarning) {
@@ -1379,7 +1411,7 @@
       settingsInitialTab = 'providers';
       settingsInitialAgentSection = undefined;
       showSettings = true;
-      return;
+      return false;
     }
     // Remote CLI model: copies this project to the host to run there. Confirm
     // once per session so the client always knows their files are leaving.
@@ -1391,38 +1423,38 @@
       agenticConsentPrompt = {
         provider: providerName,
         hostName: remoteProvider.remoteHostName ?? remoteProvider.label ?? 'the host',
-        pending: { message, model, reasoningLevel, attachments, fastMode },
+        pending: { message, model, reasoningLevel, attachments, fastMode, imageInputMode },
       };
-      return;
+      return false;
     }
-    if (!message.trim() && !(attachments && attachments.length > 0)) return;
+    if (!message.trim() && !(attachments && attachments.length > 0)) return false;
 
     // The welcome screen deliberately has a usable composer. Its first send
     // creates a correctly scoped chat and continues immediately—requiring a
     // separate click on "+" made the primary action look broken.
     if (!sessionStore.activeSessionId) {
       const createdSessionId = await sessionStore.newChat();
-      if (!createdSessionId) return;
+      if (!createdSessionId) return false;
     }
     if (agentRail.selectedAgentId) {
       // Sub-agents get the same controls as the manager: the composer's model
       // and reasoning pickers apply to the selected agent's next turn.
-      wsStore.sendAgentMessage(
+      return wsStore.sendAgentMessage(
         sessionStore.activeSessionId,
         agentRail.selectedAgentId,
         message,
         model,
         reasoningLevel,
       );
-      return;
     }
-    wsStore.sendMessage(
+    return wsStore.sendMessage(
       sessionStore.activeSessionId,
       message,
       model,
       reasoningLevel,
       attachments,
       fastMode,
+      imageInputMode,
     );
   }
 
@@ -1654,7 +1686,7 @@
             </button>
           </div>
 
-          {#if projectStore.openProjects.length > 0}
+          {#if projectStore.workspaceRoot || projectStore.openProjects.length > 0}
             <div class="mb-8 text-left">
               <div
                 class="mb-3 px-1 text-xs font-semibold uppercase tracking-[0.14em]"
@@ -1663,11 +1695,29 @@
                 Choose a project for this chat
               </div>
               <div class="flex flex-wrap gap-2">
+                {#if projectStore.workspaceRoot}
+                  <button
+                    type="button"
+                    class="rounded-xl border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                    style="border-color: {projectStore.currentPath === projectStore.workspaceRoot
+                      ? 'var(--color-accent)'
+                      : 'var(--color-border)'}; color: var(--color-text-primary);"
+                    onclick={() =>
+                      handleMenuAction(
+                        `select_project:${encodeURIComponent(projectStore.workspaceRoot ?? '')}`,
+                      )}
+                    title={projectStore.workspaceRoot}
+                  >
+                    {projectDisplayName(projectStore.workspaceRoot)} · workspace root
+                  </button>
+                {/if}
                 {#each projectStore.openProjects as path (path)}
                   <button
                     type="button"
                     class="rounded-xl border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]"
-                    style="border-color: var(--color-border); color: var(--color-text-primary);"
+                    style="border-color: {projectStore.currentPath === path
+                      ? 'var(--color-accent)'
+                      : 'var(--color-border)'}; color: var(--color-text-primary);"
                     onclick={() => handleMenuAction(`select_project:${encodeURIComponent(path)}`)}
                     title={path}
                   >
@@ -1772,7 +1822,7 @@
               ></div>
             {/if}
           </div>
-          {#if wsStore.contextUsage.max > 0}
+          {#if wsStore.contextUsage.isReliable && wsStore.contextUsage.max > 0}
             <span
               class="shrink-0 tabular-nums"
               style="font-size: var(--text-xs); color: {wsStore.contextUsage.percent > 85
@@ -1789,7 +1839,15 @@
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
               title="Usage is real (provider-reported). The provider/CLI did not report a verified window size for this model, so no percentage can be shown honestly."
             >
-              ~{formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
+              {formatTokenCount(wsStore.contextUsage.used)} used · window not reported by provider
+            </span>
+          {:else if wsStore.contextUsage.reason === 'usage_unknown' && wsStore.contextUsage.max > 0}
+            <span
+              class="shrink-0 tabular-nums"
+              style="font-size: var(--text-xs); color: var(--color-text-muted);"
+              title="Verified {formatTokenCount(wsStore.contextUsage.max)} window — usage appears after the provider's first token report."
+            >
+              0 used · {formatTokenCount(wsStore.contextUsage.max)} window
             </span>
           {:else if wsStore.contextUsage.reason === 'context_unknown'}
             <span
@@ -1831,14 +1889,37 @@
             </span>
           </div>
         {/if}
+        {#if cachedContextNotice}
+          <div
+            class="pt-1"
+            style="font-size: var(--text-xs); color: var(--color-text-muted);"
+            title={cachedContextNotice}
+          >
+            {wsStore.contextUsage.provider === 'codex' ? 'Codex' : 'Provider'} reused
+            {formatTokenCount(wsStore.contextUsage.cachedInputTokens ?? 0)} cached input tokens
+            <span class="opacity-60"
+              >· already included, not extra messages · meter updates when usage arrives</span
+            >
+          </div>
+        {/if}
       </div>
     {/if}
   {/snippet}
 
   {#snippet composer()}
-    {#if !collaborationStore.activeJoinedSession}<CommandInput
+    {#if !collaborationStore.activeJoinedSession}
+      <WorkflowPanel
+        open={showWorkflows}
+        sessionId={sessionStore.activeSessionId}
+        initialTask={workflowTask}
+        onclose={() => (showWorkflows = false)}
+        onchange={() => void refreshActiveWorkflow()}
+      />
+      <CommandInput
         bind:inputRef
         bind:value={composerDraft}
+        draftKey={sessionStore.activeSessionId || 'welcome'}
+        clearDraftRequest={clearComposerDraftRequest}
         onSend={handleSend}
         onExecuteCommand={handleSlashCommand}
         isRunning={agentRail.selectedAgent
@@ -1892,7 +1973,8 @@
             activeComposerModel || undefined,
           );
         }}
-      />{/if}
+      />
+    {/if}
   {/snippet}
 
   {#snippet backgroundShells()}
@@ -1905,13 +1987,6 @@
 <PermissionDialog />
 <QuestionDialog />
 <TimeTravelPanel bind:open={showTimeTravel} />
-<WorkflowPanel
-  open={showWorkflows}
-  sessionId={sessionStore.activeSessionId}
-  initialTask={workflowTask}
-  onclose={() => (showWorkflows = false)}
-  onchange={() => void refreshActiveWorkflow()}
-/>
 <RewindDialog />
 <ChangesSummary />
 {#if !showGitConflicts && gitStore.state.conflicts.length > 0}
@@ -2071,7 +2146,7 @@
           type="button"
           class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors"
           style="background: var(--color-accent); color: var(--color-surface-0);"
-          onclick={confirmAgenticConsent}
+          onclick={() => void confirmAgenticConsent()}
         >
           Send my files &amp; run
         </button>

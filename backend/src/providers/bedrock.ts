@@ -12,14 +12,15 @@ import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
 import { BedrockClient, ListFoundationModelsCommand } from '@aws-sdk/client-bedrock';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { AnthropicProvider } from './anthropic';
+import { hasAwsCredentialSource } from './aws-credential-scan';
 import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 
-function awsRegion(): string {
-  return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
+function awsRegion(override?: string): string {
+  return override || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1';
 }
 
-function hasAwsCredentials(): boolean {
+function envAwsCredentialSource(): boolean {
   return !!(
     (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) ||
     process.env.AWS_PROFILE
@@ -100,10 +101,27 @@ export class BedrockProvider extends AnthropicProvider {
     super(config, 'bedrock');
   }
 
+  /**
+   * A credential source is either on the system (env vars, AWS shared
+   * credentials/config files) or stored explicitly by the user via Settings
+   * (apiKey = access key ID, authToken = secret access key).
+   */
+  private hasCredentialMaterial(): boolean {
+    return (
+      envAwsCredentialSource() ||
+      hasAwsCredentialSource() ||
+      !!(this.config.apiKey && this.config.authToken)
+    );
+  }
+
+  private region(): string {
+    return awsRegion(this.config.awsRegion);
+  }
+
   override isAvailable(): boolean {
     // Presence only means "detected" to ProviderRegistry. Even a successful
     // control-plane catalog call does not establish runtime inference access.
-    return !this.config.disabled && hasAwsCredentials();
+    return !this.config.disabled && this.hasCredentialMaterial();
   }
 
   /**
@@ -131,8 +149,12 @@ export class BedrockProvider extends AnthropicProvider {
   }
 
   async verifyAccess(): Promise<{ success: boolean; state?: 'detected'; error?: string }> {
-    if (!hasAwsCredentials()) {
-      return { success: false, error: 'AWS credential source not detected' };
+    if (!this.hasCredentialMaterial()) {
+      return {
+        success: false,
+        error:
+          'No AWS credential source detected on this system. Enter an access key ID and secret access key, or configure the AWS CLI.',
+      };
     }
     await this.discoverAnthropicModels();
     if (this.modelDiscoveryError) return { success: false, error: this.modelDiscoveryError };
@@ -150,16 +172,16 @@ export class BedrockProvider extends AnthropicProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
     try {
-      const summaries = await this.catalogLoader(awsRegion(), controller.signal);
+      const summaries = await this.catalogLoader(this.region(), controller.signal);
       const models = mapBedrockAnthropicTextModels(summaries);
       this.discoveredModels = models;
       this.modelsAt = Date.now();
       this.modelDiscoveryError = undefined;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      this.modelDiscoveryError = `AWS Bedrock catalog access check failed in ${awsRegion()}: ${message}`;
+      this.modelDiscoveryError = `AWS Bedrock catalog access check failed in ${this.region()}: ${message}`;
       providerLog.debug(
-        { provider: 'bedrock', region: awsRegion(), error: message },
+        { provider: 'bedrock', region: this.region(), error: message },
         'Bedrock Anthropic catalog discovery failed',
       );
     } finally {
@@ -169,15 +191,19 @@ export class BedrockProvider extends AnthropicProvider {
 
   protected override makeClient(): Anthropic {
     // AnthropicBedrock signs every request with AWS SigV4. Credentials come from the
-    // standard AWS chain; set explicit keys only when present so the chain can resolve
-    // a shared profile / instance role otherwise.
+    // standard AWS chain; explicit keys (env first, then user-entered settings values)
+    // are set only when present so the chain can resolve a shared profile / instance
+    // role otherwise.
+    const accessKey = process.env.AWS_ACCESS_KEY_ID || this.config.apiKey;
+    const secretKey = process.env.AWS_SECRET_ACCESS_KEY || this.config.authToken;
+    const sessionToken = process.env.AWS_SESSION_TOKEN || this.config.awsSessionToken;
     const opts: Record<string, unknown> = {
-      awsRegion: awsRegion(),
+      awsRegion: this.region(),
       fetch: createUsageInterceptingFetch(globalThis.fetch),
     };
-    if (process.env.AWS_ACCESS_KEY_ID) opts.awsAccessKey = process.env.AWS_ACCESS_KEY_ID;
-    if (process.env.AWS_SECRET_ACCESS_KEY) opts.awsSecretKey = process.env.AWS_SECRET_ACCESS_KEY;
-    if (process.env.AWS_SESSION_TOKEN) opts.awsSessionToken = process.env.AWS_SESSION_TOKEN;
+    if (accessKey) opts.awsAccessKey = accessKey;
+    if (secretKey) opts.awsSecretKey = secretKey;
+    if (sessionToken) opts.awsSessionToken = sessionToken;
     // AnthropicBedrock shares the Anthropic Messages API surface — type-compatible for
     // our streamResponse usage.
     return new AnthropicBedrock(

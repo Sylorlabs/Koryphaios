@@ -39,12 +39,29 @@ function makeTimers(): {
   };
 }
 
-function makeEngine(): { engine: RunStateEngine; states: Map<string, SessionRunState>; commitCalls: number } & ReturnType<typeof makeTimers> {
+function makeEngine(): {
+  engine: RunStateEngine;
+  states: Map<string, SessionRunState>;
+  commitCalls: number;
+} & ReturnType<typeof makeTimers> {
   const states = new Map<string, SessionRunState>();
   let commitCalls = 0;
   const t = makeTimers();
-  const engine = createRunStateEngine(() => states, () => { commitCalls++; }, t.timers);
-  return { engine, states, get commitCalls() { return commitCalls; }, ...t };
+  const engine = createRunStateEngine(
+    () => states,
+    () => {
+      commitCalls++;
+    },
+    t.timers,
+  );
+  return {
+    engine,
+    states,
+    get commitCalls() {
+      return commitCalls;
+    },
+    ...t,
+  };
 }
 
 function msg(
@@ -70,7 +87,8 @@ const AGENT = 'kory-manager';
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('run-state-core: phase predicates', () => {
-  test('isActivePhase identifies thinking/streaming/tool_calling', () => {
+  test('isActivePhase identifies analyzing/thinking/streaming/tool_calling', () => {
+    expect(isActivePhase('analyzing')).toBe(true);
     expect(isActivePhase('thinking')).toBe(true);
     expect(isActivePhase('streaming')).toBe(true);
     expect(isActivePhase('tool_calling')).toBe(true);
@@ -91,6 +109,7 @@ describe('run-state-core: phase predicates', () => {
 
 describe('run-state-core: phaseToAgentStatus', () => {
   test('maps each phase to the correct AgentStatus', () => {
+    expect(phaseToAgentStatus('analyzing')).toBe('analyzing');
     expect(phaseToAgentStatus('thinking')).toBe('thinking');
     expect(phaseToAgentStatus('streaming')).toBe('streaming');
     expect(phaseToAgentStatus('tool_calling')).toBe('tool_calling');
@@ -104,6 +123,11 @@ describe('run-state-core: phaseToAgentStatus', () => {
 
 describe('run-state-core: deriveButtonState', () => {
   test('active phase → stop', () => {
+    expect(deriveButtonState('analyzing', false)).toEqual({
+      mode: 'stop',
+      waitingReason: '',
+      phase: 'analyzing',
+    });
     expect(deriveButtonState('streaming', false)).toEqual({
       mode: 'stop',
       waitingReason: '',
@@ -124,9 +148,9 @@ describe('run-state-core: deriveButtonState', () => {
     });
   });
 
-  test('waiting phase + text in composer → send (steer while parked)', () => {
+  test('waiting phase + text remains waiting until the owned wait is cancelled', () => {
     expect(deriveButtonState('waiting_terminal', true, 'background terminal')).toEqual({
-      mode: 'send',
+      mode: 'waiting',
       waitingReason: 'background terminal',
       phase: 'waiting_terminal',
     });
@@ -144,10 +168,10 @@ describe('run-state-core: deriveButtonState', () => {
 });
 
 describe('run-state-core: startRun', () => {
-  test('sets phase to streaming and tracks kory-manager as active', () => {
+  test('sets phase to analyzing and tracks kory-manager as active', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    expect(engine.getPhase(SID)).toBe('streaming');
+    expect(engine.getPhase(SID)).toBe('analyzing');
     expect(engine.isRunning(SID)).toBe(true);
     expect(engine.states.get(SID)?.activeAgents.has(AGENT)).toBe(true);
     expect(engine.states.get(SID)?.stoppedByUser).toBe(false);
@@ -160,7 +184,7 @@ describe('run-state-core: startRun', () => {
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
     engine.startRun(SID);
     expect(engine.states.get(SID)?.stoppedByUser).toBe(false);
-    expect(engine.getPhase(SID)).toBe('streaming');
+    expect(engine.getPhase(SID)).toBe('analyzing');
   });
 });
 
@@ -182,25 +206,49 @@ describe('run-state-core: applyEvent stream transitions', () => {
   test('stream.tool_call → tool_calling', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    engine.applyEvent(msg('stream.tool_call', SID, { agentId: AGENT, toolCall: { id: 'tc1', name: 'bash', input: {} } }));
+    engine.applyEvent(
+      msg('stream.tool_call', SID, {
+        agentId: AGENT,
+        toolCall: { id: 'tc1', name: 'bash', input: {} },
+      }),
+    );
     expect(engine.getPhase(SID)).toBe('tool_calling');
   });
 
   test('stream.tool_result → back to streaming', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    engine.applyEvent(msg('stream.tool_call', SID, { agentId: AGENT, toolCall: { id: 'tc1', name: 'bash', input: {} } }));
+    engine.applyEvent(
+      msg('stream.tool_call', SID, {
+        agentId: AGENT,
+        toolCall: { id: 'tc1', name: 'bash', input: {} },
+      }),
+    );
     expect(engine.getPhase(SID)).toBe('tool_calling');
-    engine.applyEvent(msg('stream.tool_result', SID, { agentId: AGENT, toolResult: { callId: 'tc1', name: 'bash', output: '' } }));
+    engine.applyEvent(
+      msg('stream.tool_result', SID, {
+        agentId: AGENT,
+        toolResult: { callId: 'tc1', name: 'bash', output: '' },
+      }),
+    );
     expect(engine.getPhase(SID)).toBe('streaming');
   });
 });
 
 describe('run-state-core: applyEvent agent.status', () => {
+  test('analyzing status → analyzing phase', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'analyzing' }));
+    expect(engine.getPhase(SID)).toBe('analyzing');
+  });
+
   test('thinking status → thinking phase', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'thinking' }));
+    expect(
+      engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'thinking' })),
+    ).toBe(true);
     expect(engine.getPhase(SID)).toBe('thinking');
   });
 
@@ -284,7 +332,9 @@ describe('run-state-core: applyEvent agent.heartbeat', () => {
     engine.startRun(SID);
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.getPhase(SID)).toBe('done');
-    engine.applyEvent(msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }));
+    engine.applyEvent(
+      msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }),
+    );
     expect(engine.getPhase(SID)).toBe('done');
     expect(engine.isRunning(SID)).toBe(false);
   });
@@ -298,7 +348,9 @@ describe('run-state-core: applyEvent agent.heartbeat', () => {
     // Simulate the done-linger by manually setting phase to idle
     const s = engine.states.get(SID)!;
     s.phase = 'idle';
-    engine.applyEvent(msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }));
+    engine.applyEvent(
+      msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }),
+    );
     expect(engine.getPhase(SID)).toBe('streaming');
     expect(engine.isRunning(SID)).toBe(true);
   });
@@ -306,7 +358,9 @@ describe('run-state-core: applyEvent agent.heartbeat', () => {
   test('ignored for a session with no existing state (heartbeat cannot create a run)', () => {
     const { engine } = makeEngine();
     // No startRun, no prior events — session doesn't exist in the map.
-    engine.applyEvent(msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }));
+    engine.applyEvent(
+      msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }),
+    );
     expect(engine.getPhase(SID)).toBe('idle');
     expect(engine.states.has(SID)).toBe(false);
   });
@@ -316,13 +370,51 @@ describe('run-state-core: applyEvent agent.heartbeat', () => {
     engine.startRun(SID);
     engine.markUserStopped(SID);
     expect(engine.getPhase(SID)).toBe('done');
-    engine.applyEvent(msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }));
+    engine.applyEvent(
+      msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }),
+    );
     expect(engine.getPhase(SID)).toBe('done');
     expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
   });
 });
 
 describe('run-state-core: terminal-phase guard (stale resurrecting events)', () => {
+  test('returns false for a late thought so downstream feed reducers suppress it', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    expect(engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }))).toBe(
+      true,
+    );
+
+    expect(
+      engine.applyEvent(msg('stream.thinking', SID, { agentId: AGENT, thinking: 'late' })),
+    ).toBe(false);
+    expect(engine.getPhase(SID)).toBe('done');
+  });
+
+  test('permits a durable replayed thought after done without resurrecting the run', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
+
+    expect(
+      engine.applyEvent({
+        ...msg('stream.thinking', SID, { agentId: AGENT, thinking: 'historical' }),
+        replayed: true,
+      }),
+    ).toBe(true);
+    expect(engine.getPhase(SID)).toBe('done');
+  });
+
+  test('allows replayed stream content without a local run state', () => {
+    const { engine } = makeEngine();
+
+    expect(
+      engine.applyEvent(msg('stream.thinking', SID, { agentId: AGENT, thinking: 'replayed' })),
+    ).toBe(true);
+    expect(engine.states.has(SID)).toBe(false);
+  });
+
   test('stream.delta after done is ignored (no resurrection)', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
@@ -338,7 +430,12 @@ describe('run-state-core: terminal-phase guard (stale resurrecting events)', () 
     engine.startRun(SID);
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.getPhase(SID)).toBe('done');
-    engine.applyEvent(msg('stream.tool_call', SID, { agentId: AGENT, toolCall: { id: 'tc1', name: 'bash', input: {} } }));
+    engine.applyEvent(
+      msg('stream.tool_call', SID, {
+        agentId: AGENT,
+        toolCall: { id: 'tc1', name: 'bash', input: {} },
+      }),
+    );
     expect(engine.getPhase(SID)).toBe('done');
   });
 
@@ -356,7 +453,9 @@ describe('run-state-core: terminal-phase guard (stale resurrecting events)', () 
     engine.startRun(SID);
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.getPhase(SID)).toBe('done');
-    engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'thinking' }));
+    expect(
+      engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'thinking' })),
+    ).toBe(false);
     expect(engine.getPhase(SID)).toBe('done');
     expect(engine.isRunning(SID)).toBe(false);
   });
@@ -398,7 +497,7 @@ describe('run-state-core: terminal-phase guard (stale resurrecting events)', () 
     engine.startRun(SID);
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.getPhase(SID)).toBe('done');
-    engine.applyEvent(msg('compaction.started', SID, { sessionId: SID }));
+    expect(engine.applyEvent(msg('compaction.started', SID, { sessionId: SID }))).toBe(true);
     expect(engine.getPhase(SID)).toBe('streaming');
     expect(engine.isRunning(SID)).toBe(true);
   });
@@ -441,7 +540,9 @@ describe('run-state-core: user stop suppression', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
     engine.markUserStopped(SID);
-    engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }));
+    expect(engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }))).toBe(
+      false,
+    );
     expect(engine.getPhase(SID)).toBe('done');
   });
 
@@ -481,7 +582,9 @@ describe('run-state-core: user stop suppression', () => {
     // from idle (after the done-linger timer fires). Simulate the linger:
     const s = engine.states.get(SID)!;
     s.phase = 'idle';
-    engine.applyEvent(msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }));
+    engine.applyEvent(
+      msg('agent.heartbeat', SID, { agentId: AGENT, sessionId: SID, phase: 'streaming' }),
+    );
     expect(engine.getPhase(SID)).toBe('streaming');
   });
 });
@@ -491,7 +594,19 @@ describe('run-state-core: multi-agent tracking', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
     // Spawn a worker
-    engine.applyEvent(msg('agent.spawned', SID, { agent: { id: 'worker-1', name: 'Worker', role: 'worker', model: 'm', provider: 'p', domain: 'general' }, task: 'do stuff' }));
+    engine.applyEvent(
+      msg('agent.spawned', SID, {
+        agent: {
+          id: 'worker-1',
+          name: 'Worker',
+          role: 'worker',
+          model: 'm',
+          provider: 'p',
+          domain: 'general',
+        },
+        task: 'do stuff',
+      }),
+    );
     engine.applyEvent(msg('agent.status', SID, { agentId: 'worker-1', status: 'thinking' }));
     expect(engine.isRunning(SID)).toBe(true);
     // Complete the manager — worker is still active
@@ -516,7 +631,7 @@ describe('run-state-core: system.info "Session cancelled"', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
     engine.applyEvent(msg('system.info', SID, { message: 'Some other info' }));
-    expect(engine.getPhase(SID)).toBe('streaming');
+    expect(engine.getPhase(SID)).toBe('analyzing');
   });
 });
 
@@ -540,7 +655,7 @@ describe('run-state-core: resetSession & clearAll', () => {
   test('resetSession removes the session from the map', () => {
     const { engine } = makeEngine();
     engine.startRun(SID);
-    expect(engine.getPhase(SID)).toBe('streaming');
+    expect(engine.getPhase(SID)).toBe('analyzing');
     engine.resetSession(SID);
     expect(engine.getPhase(SID)).toBe('idle');
     expect(engine.states.has(SID)).toBe(false);
@@ -575,7 +690,12 @@ describe('run-state-core: timer wiring', () => {
     const { engine, watchdogArms } = makeEngine();
     engine.startRun(SID);
     watchdogArms.length = 0; // clear the initial arm
-    engine.applyEvent(msg('stream.tool_call', SID, { agentId: AGENT, toolCall: { id: 'tc1', name: 'bash', input: {} } }));
+    engine.applyEvent(
+      msg('stream.tool_call', SID, {
+        agentId: AGENT,
+        toolCall: { id: 'tc1', name: 'bash', input: {} },
+      }),
+    );
     // The engine calls armWatchdog, but the reactive wrapper suspends it.
     // In the core, armWatchdog is called — the wrapper decides whether to
     // actually set the timer. So we just verify armWatchdog was called.
@@ -598,5 +718,59 @@ describe('run-state-core: isBusy', () => {
     engine.startRun(SID);
     engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'done' }));
     expect(engine.isBusy(SID)).toBe(false);
+  });
+});
+
+describe('run-state-core: authoritative run projection', () => {
+  function runStateMessage(
+    revision: number,
+    phase: RunPhase,
+    status: 'idle' | 'active' | 'waiting' | 'terminal',
+  ): WSMessage {
+    return msg('run.state', SID, {
+      snapshot: {
+        sessionId: SID,
+        runId: 'run-authoritative',
+        revision,
+        phase,
+        status,
+        waitingReason: phase === 'waiting_user' ? 'awaiting_user_input' : '',
+        activeAgentIds: status === 'active' ? [AGENT] : [],
+        startedAt: 10,
+        updatedAt: 20 + revision,
+        finishedAt: status === 'terminal' ? 20 + revision : null,
+        terminalReason: status === 'terminal' ? 'completed' : null,
+      },
+      transition: null,
+    });
+  }
+
+  test('legacy stream/status traffic cannot contradict a canonical revision', () => {
+    const { engine } = makeEngine();
+    engine.startRun(SID);
+    expect(engine.applyEvent(runStateMessage(4, 'waiting_user', 'waiting'))).toBe(true);
+    expect(engine.getPhase(SID)).toBe('waiting_user');
+
+    // These still pass to transcript reducers, but do not own lifecycle state.
+    expect(engine.applyEvent(msg('stream.delta', SID, { agentId: AGENT, content: 'late' }))).toBe(
+      true,
+    );
+    expect(
+      engine.applyEvent(msg('agent.status', SID, { agentId: AGENT, status: 'thinking' })),
+    ).toBe(true);
+    expect(engine.getPhase(SID)).toBe('waiting_user');
+  });
+
+  test('rejects an older run snapshot and applies a newer terminal snapshot', () => {
+    const { engine, doneLingerArms } = makeEngine();
+    engine.applyEvent(runStateMessage(5, 'streaming', 'active'));
+    expect(engine.applyEvent(runStateMessage(4, 'thinking', 'active'))).toBe(false);
+    expect(engine.getPhase(SID)).toBe('streaming');
+
+    engine.applyEvent(runStateMessage(6, 'cancelled', 'terminal'));
+    expect(engine.getPhase(SID)).toBe('cancelled');
+    expect(engine.isBusy(SID)).toBe(false);
+    expect(engine.states.get(SID)?.stoppedByUser).toBe(true);
+    expect(doneLingerArms).toHaveLength(0);
   });
 });

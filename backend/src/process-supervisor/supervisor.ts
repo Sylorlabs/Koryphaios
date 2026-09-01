@@ -28,6 +28,7 @@ import {
   cleanupOldProcesses,
   logProcessEvent,
   updateHealthCheck,
+  updateLiveProcessLogSnapshot,
   preparePersistedProcessCommand,
   type PersistedProcess,
 } from './database';
@@ -63,6 +64,10 @@ export interface SupervisedProcess extends PersistedProcess {
   >;
   healthCheckTimer?: Timer;
   restartTimer?: Timer;
+  /** Coalesced crash-recovery output checkpoint; terminal writes still own the
+   * final snapshot. */
+  logSnapshotTimer?: Timer;
+  lastLogSnapshotPersistedAt?: number;
   /** Coalesces concurrent user/session cancellation requests. The process
    * remains in the authoritative live map until this promise has verified the
    * owned process group exited and the durable terminal transition published. */
@@ -202,6 +207,9 @@ export class ProcessSupervisor {
   private initializationPromise?: Promise<void>;
   private cleanupTimer?: Timer;
   private readonly MAX_LOG_SIZE = 100_000;
+  /** Bound write pressure while keeping a relaunch from losing an entire
+   * long-running process transcript. */
+  private readonly LIVE_LOG_SNAPSHOT_INTERVAL_MS = 1_000;
   private readonly spawnProcess: ProcessSpawner;
   private readonly agentToolBarriers = new Map<string, symbol>();
   private readonly agentStartsInFlight = new Map<string, number>();
@@ -1111,6 +1119,7 @@ export class ProcessSupervisor {
         if (type === 'stdout') proc.stdout = (proc.stdout + chunk).slice(-this.MAX_LOG_SIZE);
         else proc.stderr = (proc.stderr + chunk).slice(-this.MAX_LOG_SIZE);
         proc.lastOutputAt = Date.now();
+        this.scheduleLiveLogSnapshot(proc);
       }
     } catch (err) {
       // The stream reader throws when the child exits and the pipe closes.
@@ -1134,6 +1143,33 @@ export class ProcessSupervisor {
         isBackground: proc.isBackground,
       });
     }
+  }
+
+  private scheduleLiveLogSnapshot(proc: SupervisedProcess): void {
+    if (proc.logSnapshotTimer || proc.terminalEventEmitted) return;
+    const elapsed = Date.now() - (proc.lastLogSnapshotPersistedAt ?? 0);
+    const delay = Math.max(0, this.LIVE_LOG_SNAPSHOT_INTERVAL_MS - elapsed);
+    proc.logSnapshotTimer = setTimeout(() => {
+      proc.logSnapshotTimer = undefined;
+      // A restarted process can reuse the same durable id. Persist only if
+      // this exact live instance still owns the supervisor map.
+      if (this.processes.get(proc.id) !== proc || proc.terminalEventEmitted) return;
+      const stdout = proc.stdout;
+      const stderr = proc.stderr;
+      void updateLiveProcessLogSnapshot(proc.id, stdout, stderr)
+        .then(() => {
+          proc.lastLogSnapshotPersistedAt = Date.now();
+        })
+        .catch((err: unknown) => {
+          serverLog.debug(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              processId: proc.id,
+            },
+            'Live process log checkpoint failed; a later chunk or terminal write will retry',
+          );
+        });
+    }, delay);
   }
 
   private monitorExit(proc: SupervisedProcess): void {
@@ -1758,6 +1794,7 @@ export class ProcessSupervisor {
   private cleanupTimers(proc: SupervisedProcess): void {
     if (proc.healthCheckTimer) clearInterval(proc.healthCheckTimer);
     if (proc.restartTimer) clearTimeout(proc.restartTimer);
+    if (proc.logSnapshotTimer) clearTimeout(proc.logSnapshotTimer);
   }
 }
 

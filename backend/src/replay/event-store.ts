@@ -37,17 +37,19 @@ export class EventStore {
 
   async appendMany(sessionId: string, events: AgentEvent[]): Promise<void> {
     if (events.length === 0) return;
-    await db.transaction(async (tx) => {
+    db.transaction((tx) => {
       for (const event of events) {
-        await tx.insert(replayEvents).values({
-          id: event.id,
-          sessionId,
-          sequence: event.sequence,
-          timestamp: new Date(event.timestamp),
-          type: event.type,
-          payload: JSON.stringify(event.payload),
-          parentEventId: event.parentEventId ?? null,
-        });
+        tx.insert(replayEvents)
+          .values({
+            id: event.id,
+            sessionId,
+            sequence: event.sequence,
+            timestamp: new Date(event.timestamp),
+            type: event.type,
+            payload: JSON.stringify(event.payload),
+            parentEventId: event.parentEventId ?? null,
+          })
+          .run();
       }
     });
   }
@@ -124,17 +126,19 @@ export class EventStore {
     upToSequence?: number,
   ): Promise<number> {
     const events = await this.getEvents(sourceSessionId);
-    await db.transaction(async (tx) => {
+    db.transaction((tx) => {
       for (const e of events) {
-        await tx.insert(replayEvents).values({
-          id: `fork_${e.id}_${Date.now()}`,
-          sessionId: targetSessionId,
-          sequence: e.sequence,
-          timestamp: new Date(e.timestamp),
-          type: e.type,
-          payload: JSON.stringify(e.payload),
-          parentEventId: e.parentEventId ?? null,
-        });
+        tx.insert(replayEvents)
+          .values({
+            id: `fork_${e.id}_${Date.now()}`,
+            sessionId: targetSessionId,
+            sequence: e.sequence,
+            timestamp: new Date(e.timestamp),
+            type: e.type,
+            payload: JSON.stringify(e.payload),
+            parentEventId: e.parentEventId ?? null,
+          })
+          .run();
       }
     });
     return events.length;

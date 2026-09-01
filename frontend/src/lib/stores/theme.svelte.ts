@@ -3,6 +3,7 @@
 import { browser } from '$app/environment';
 import { loadFont } from '$lib/fonts';
 import { THEME_PRESETS, type ConcreteThemePreset } from '$lib/theme-palette';
+import { readableForeground } from '$lib/theme-contrast';
 
 export { THEME_PRESETS } from '$lib/theme-palette';
 export type ThemePreset = ConcreteThemePreset | 'system';
@@ -110,6 +111,11 @@ function createThemeStore() {
     root.style.setProperty('--color-accent', accentVars.main);
     root.style.setProperty('--color-accent-hover', accentVars.hover);
     root.style.setProperty('--color-accent-rgb', hexToRgb(accentVars.main));
+    root.style.setProperty('--color-on-accent', readableForeground(accentVars.main));
+    root.style.setProperty(
+      '--color-on-success',
+      readableForeground(vars['--color-success'] ?? '#22c55e'),
+    );
     root.style.setProperty('--font-sans', FONT_FAMILIES[font]);
 
     const isLight = resolvedPreset === 'light';

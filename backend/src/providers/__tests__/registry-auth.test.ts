@@ -1,3 +1,8 @@
+// Disable CLI auto-detection — these tests verify API-key provider credential
+// verification, not CLI harness providers. CLI probing adds 4-6s that pushes
+// the 5s test timeout.
+process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
 import { ProviderRegistry } from '../registry';

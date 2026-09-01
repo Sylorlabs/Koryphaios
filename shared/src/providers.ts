@@ -26,6 +26,8 @@ export const ProviderName = {
   Devin: 'devin',
   Jules: 'jules',
   Copilot: 'copilot',
+  Freebuff: 'freebuff',
+  Codebuff: 'codebuff',
 
   // Curated coding models (OpenCode Zen)
   OpenCodeZen: 'opencodezen',
@@ -81,6 +83,9 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'codex-auth',
   'grok',
   'antigravity',
+  'cline',
+  'cursor',
+  'devin',
   'jules',
   'openai',
   'google',
@@ -91,6 +96,8 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'groq',
   'digitalocean',
   'copilot',
+  'freebuff',
+  'codebuff',
   'opencodezen',
   'opencodego',
   'azure',
@@ -128,6 +135,7 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'zai',
   'zenmux',
   'poe',
+  'chatbase',
 ];
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
@@ -153,6 +161,9 @@ export interface ModelDef {
   deprecated?: boolean;
   /** For alias-based CLI models: the real resolved model ID (e.g. 'claude-opus-4-8' for alias 'opus') */
   realModelId?: string;
+  vision?: boolean;
+  functionCall?: boolean;
+  contextVerified?: boolean;
 }
 
 export interface ProviderConfig {
@@ -165,6 +176,8 @@ export interface ProviderConfig {
   selectedModels?: string[];
   /** Whether to skip the model selection dialog in the future. */
   hideModelSelector?: boolean;
+  lastVerifiedAt?: number;
+  lastVerificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
   headers?: Record<string, string>;
   /** Explicit provider deployment identifier; never inferred from a base-model catalog. */
   deployment?: string;
@@ -180,6 +193,9 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   codex: 'auth_only',
   'codex-auth': 'auth_only',
   grok: 'auth_only',
+  cline: 'auth_only',
+  cursor: 'auth_only',
+  devin: 'auth_only',
   openai: 'api_key',
   google: 'api_key',
   aistudio: 'api_key',
@@ -189,6 +205,8 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   groq: 'api_key',
   digitalocean: 'api_key',
   copilot: 'auth_only',
+  freebuff: 'auth_only',
+  codebuff: 'api_key',
   jules: 'api_key',
   opencodezen: 'api_key',
   opencodego: 'api_key',
@@ -227,6 +245,7 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   zai: 'api_key',
   zenmux: 'api_key',
   poe: 'api_key',
+  chatbase: 'api_key',
 };
 
 /** Environment variable mappings for providers */
@@ -246,6 +265,8 @@ export const PROVIDER_ENV_VARS: Record<
   groq: { apiKey: 'GROQ_API_KEY' },
   digitalocean: { apiKey: 'DIGITALOCEAN_API_KEY' },
   copilot: { authToken: 'GITHUB_TOKEN' },
+  freebuff: {},
+  codebuff: { apiKey: 'CODEBUFF_API_KEY' },
   jules: { apiKey: 'JULES_API_KEY' },
   opencodezen: { apiKey: 'OPENCODE_ZEN_API_KEY' },
   opencodego: { apiKey: 'OPENCODE_GO_API_KEY' },
@@ -285,4 +306,5 @@ export const PROVIDER_ENV_VARS: Record<
   zai: { apiKey: 'ZAI_API_KEY' },
   zenmux: { apiKey: 'ZENMUX_API_KEY' },
   poe: { apiKey: 'POE_API_KEY' },
+  chatbase: { apiKey: 'CHATBASE_API_KEY' },
 };

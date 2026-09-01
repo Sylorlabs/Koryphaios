@@ -122,6 +122,7 @@ export function buildKorySkills(): KorySkillContent[] {
         '- kory__web_fetch: Fetch a URL',
         '',
         '## Notes (Knowledge Graph)',
+        '- kory__record_work_note: Record a structured result with Kory-owned run provenance',
         '- kory__create_note: Create a note',
         '- kory__read_note: Read a note',
         '- kory__search_notes: Full-text search notes',

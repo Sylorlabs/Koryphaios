@@ -5,6 +5,7 @@ import {
   sanitizeString,
   validateSessionId,
   validateProviderName,
+  getCorsHeaders,
 } from '../../security';
 import { RateLimiter } from '../rate-limit';
 
@@ -70,6 +71,17 @@ describe('validateProviderName', () => {
     expect(validateProviderName('invalid')).toBeNull();
     expect(validateProviderName('')).toBeNull();
     expect(validateProviderName(123)).toBeNull();
+  });
+});
+
+describe('getCorsHeaders', () => {
+  test('allows project, mutation-origin, and note-revision request headers', () => {
+    const allowed = getCorsHeaders()['Access-Control-Allow-Headers'];
+
+    expect(allowed).toContain('X-Koryphaios-Project');
+    expect(allowed).toContain('X-Kory-Client-Id');
+    expect(allowed).toContain('X-Kory-Mutation-Id');
+    expect(allowed).toContain('X-Kory-Note-Revision');
   });
 });
 

@@ -8,12 +8,43 @@
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import * as notesService from '../notes/notes-service';
 import { broadcastNotesNetworkUpdate } from '../notes/notes-events';
+import { recordWorkNoteTool } from './work-note';
+import {
+  getNotePropertiesTool,
+  queryNoteBaseTool,
+  setNotePropertyTool,
+} from './note-properties-bases';
 
 async function resolveId(
   input: { id?: string; title?: string },
   projectRoot: string,
 ): Promise<string | null> {
   return notesService.resolveNoteId(input.id, input.title, projectRoot);
+}
+
+export function formatReadNoteOutput(
+  note: {
+    id: string;
+    title: string;
+    folderPath: string;
+    tags: string[];
+    revision: number;
+    content: string;
+  },
+  backlinks: Array<{ title: string }>,
+  outlinks: Array<{ title: string }>,
+): string {
+  return [
+    '# ' + note.title,
+    'ID: ' + note.id,
+    'Revision: ' + note.revision,
+    'Folder: ' + note.folderPath,
+    'Tags: ' + note.tags.join(', '),
+    'Backlinks: ' + backlinks.map((backlink) => backlink.title).join(', '),
+    'Outlinks: ' + outlinks.map((outlink) => outlink.title).join(', '),
+    '',
+    note.content,
+  ].join('\n');
 }
 
 // ============================================================================
@@ -106,7 +137,7 @@ export const createNoteTool: Tool = {
 export const readNoteTool: Tool = {
   name: 'read_note',
   description:
-    'Read a note by title or ID. Returns full content, metadata, backlinks, and outlinks.',
+    'Read a note by title or ID. Returns full content, current revision, metadata, backlinks, and outlinks.',
   role: 'any',
   inputSchema: {
     type: 'object',
@@ -140,16 +171,7 @@ export const readNoteTool: Tool = {
       }
       const backlinks = await notesService.getNoteBacklinks(note.id, ctx.workingDirectory);
       const outlinks = await notesService.getNoteOutlinks(note.id, ctx.workingDirectory);
-      const output = [
-        '# ' + note.title,
-        'ID: ' + note.id,
-        'Folder: ' + note.folderPath,
-        'Tags: ' + note.tags.join(', '),
-        'Backlinks: ' + backlinks.map((b) => b.title).join(', '),
-        'Outlinks: ' + outlinks.map((o) => o.title).join(', '),
-        '',
-        note.content,
-      ].join('\n');
+      const output = formatReadNoteOutput(note, backlinks, outlinks);
       return {
         callId: call.id,
         name: call.name,
@@ -194,12 +216,22 @@ export const updateNoteTool: Tool = {
         enum: ['markdown', 'html'],
         description: "Switch note format; 'html' renders full HTML+CSS in the sandboxed preview.",
       },
+      expectedRevision: {
+        type: 'integer',
+        minimum: 1,
+        description: 'Current revision returned by read_note or get_note_properties',
+      },
     },
+    required: ['expectedRevision'],
   },
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
+      if (!Number.isSafeInteger(input.expectedRevision) || Number(input.expectedRevision) < 1) {
+        throw new Error('expectedRevision must be a positive integer');
+      }
+      const expectedRevision = Number(input.expectedRevision);
       const lookupTitle = input.newTitle ? input.title : input.title;
       let id =
         (input.id as string) ||
@@ -223,6 +255,7 @@ export const updateNoteTool: Tool = {
           pinned: input.pinned as boolean | undefined,
           includeInContext: input.includeInContext as boolean | undefined,
           format: input.format === 'html' || input.format === 'markdown' ? input.format : undefined,
+          expectedRevision,
         },
         ctx.workingDirectory,
       );
@@ -230,7 +263,7 @@ export const updateNoteTool: Tool = {
       return {
         callId: call.id,
         name: call.name,
-        output: 'Updated: ' + note.title + ' [' + note.id + ']',
+        output: 'Updated: ' + note.title + ' [' + note.id + ']\nRevision: ' + note.revision,
         isError: false,
         durationMs: Date.now() - start,
       };
@@ -252,7 +285,8 @@ export const updateNoteTool: Tool = {
 
 export const deleteNoteTool: Tool = {
   name: 'delete_note',
-  description: 'Delete a note from the knowledge network. Removes its graph edges and attachments.',
+  description:
+    'Move a note to recoverable trash. The note, graph metadata, attachments, and revision history remain available for restoration.',
   role: 'worker',
   inputSchema: {
     type: 'object',
@@ -287,7 +321,7 @@ export const deleteNoteTool: Tool = {
       return {
         callId: call.id,
         name: call.name,
-        output: 'Deleted: ' + (note?.title ?? id),
+        output: 'Moved to trash: ' + (note?.title ?? id),
         isError: false,
         durationMs: Date.now() - start,
       };
@@ -499,6 +533,7 @@ export const recallNotesTool: Tool = {
             '---',
             '# ' + note.title,
             'ID: ' + note.id,
+            'Revision: ' + note.revision,
             'Folder: ' + note.folderPath,
             'Tags: ' + note.tags.join(', '),
             'Outlinks: ' + note.outlinks.length,
@@ -870,8 +905,12 @@ export const renderNoteTool: Tool = {
 // ============================================================================
 
 export const noteTools: Tool[] = [
+  recordWorkNoteTool,
   createNoteTool,
   readNoteTool,
+  getNotePropertiesTool,
+  queryNoteBaseTool,
+  setNotePropertyTool,
   updateNoteTool,
   deleteNoteTool,
   linkNotesTool,

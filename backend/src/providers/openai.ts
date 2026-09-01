@@ -24,6 +24,7 @@ import {
 } from './model-list-cache';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
 import { withOpenRouterAttribution } from './api-endpoints';
+import { deriveProviderPromptCacheKey, resolvePromptCacheSegments } from './prompt-cache';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -37,10 +38,15 @@ export class OpenAIProvider implements Provider {
   protected get client(): OpenAI {
     if (!this._client) {
       const apiKey = this.config.apiKey || this.config.authToken;
+      const defaultHeaders: Record<string, string | null> = { ...(this.config.headers ?? {}) };
+      // The OpenAI SDK requires a constructor key and otherwise turns the
+      // placeholder into a real Authorization header. Keyless local/custom
+      // endpoints must receive no fabricated credential at all.
+      if (!apiKey && this.config.custom) defaultHeaders.Authorization = null;
       this._client = new OpenAI({
         apiKey: apiKey || 'placeholder',
         baseURL: this.baseUrl ?? this.config.baseUrl,
-        defaultHeaders: this.config.headers,
+        defaultHeaders,
         fetch: createUsageInterceptingFetch(globalThis.fetch),
       });
     }
@@ -48,7 +54,13 @@ export class OpenAIProvider implements Provider {
   }
 
   isAvailable(): boolean {
-    const available = !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+    const available =
+      !this.config.disabled &&
+      !!(
+        this.config.apiKey ||
+        this.config.authToken ||
+        (this.config.custom && (this.baseUrl || this.config.baseUrl))
+      );
     if (available && !isModelListCacheFresh(this.lastFetch)) {
       this.refreshModelsInBackground(this.getModelCatalogFallback());
     }
@@ -165,6 +177,9 @@ export class OpenAIProvider implements Provider {
         }
         this.lastFetch = Date.now();
       } catch (err) {
+        // Cache failures for the normal discovery TTL too. Otherwise every
+        // status render triggers another failing /models request.
+        this.lastFetch = Date.now();
         providerLog.debug(
           { provider: this.name, err: err instanceof Error ? err.message : String(err) },
           'Model list refresh failed; leaving catalog empty rather than exposing a fallback list',
@@ -235,6 +250,8 @@ export class OpenAIProvider implements Provider {
       reasoning_effort?: string;
       enable_thinking?: boolean;
       chat_template_kwargs?: { enable_thinking?: boolean };
+      prompt_cache_key?: string;
+      prompt_cache_options?: { mode: 'implicit'; ttl: '30m' };
     } = {
       model: modelDef?.apiModelId ?? request.model,
       messages,
@@ -244,6 +261,17 @@ export class OpenAIProvider implements Provider {
       ...(request.temperature !== undefined && { temperature: request.temperature }),
       ...(tools?.length && { tools }),
     };
+
+    if (this.name === 'openai') {
+      params.prompt_cache_key = deriveProviderPromptCacheKey(request, request.tools);
+      const apiModel = modelDef?.apiModelId ?? request.model;
+      if (/^gpt-5\.6(?:-|$)/i.test(apiModel)) {
+        // Keep the provider's rolling implicit breakpoint and add Kory's
+        // explicit immutable-system boundary. This spends at most two of the
+        // four write slots and caches both cross-task policy and conversation.
+        params.prompt_cache_options = { mode: 'implicit', ttl: '30m' };
+      }
+    }
 
     // This is deliberately API Priority, not Codex Fast mode. Fast is a
     // ChatGPT-credit feature; API projects use the documented `priority`
@@ -306,6 +334,21 @@ export class OpenAIProvider implements Provider {
             providerName: this.name,
             modelName: request.model,
           });
+        } else if (hasReasoningParams(params) && isParameterRejectionError(err)) {
+          // Some OpenAI-compatible providers/models reject reasoning controls
+          // outright (e.g. a model whose metadata flipped `canReason` on after
+          // a background refresh — the request worked before the refresh and
+          // 400s after). Degrade gracefully: drop the reasoning parameters and
+          // retry once rather than failing the turn.
+          providerLog.warn(
+            { provider: this.name, model: request.model },
+            'Model rejected reasoning parameters — retrying without them',
+          );
+          stripReasoningParams(params);
+          stream = await withRetry(createStream, {
+            providerName: this.name,
+            modelName: request.model,
+          });
         } else {
           throw err;
         }
@@ -317,12 +360,19 @@ export class OpenAIProvider implements Provider {
         const choice = chunk.choices?.[0];
         if (!choice) {
           if (chunk.usage) {
+            const rawUsage = chunk.usage as unknown as {
+              prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+              input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+            };
+            const details = rawUsage.prompt_tokens_details ?? rawUsage.input_tokens_details;
             yield {
               type: 'usage_update',
               // prompt_tokens already includes cached tokens — omit tokensCache
               // so context occupancy isn't double counted downstream.
               tokensIn: chunk.usage.prompt_tokens,
               tokensOut: chunk.usage.completion_tokens,
+              tokensCacheRead: details?.cached_tokens,
+              tokensCacheWrite: details?.cache_write_tokens,
             };
           }
           continue;
@@ -384,10 +434,29 @@ export class OpenAIProvider implements Provider {
         }
       }
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+        providerLog.error(
+          { ...diagnostic, model: request.model },
+          'OpenAI provider stream timed out',
+        );
+        yield {
+          type: 'error',
+          error: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
+        };
+        return;
+      }
       if (err instanceof Error && (err.name === 'AbortError' || err.name === 'AbortSignal')) return;
 
       const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
-      providerLog.error({ ...diagnostic, model: request.model }, 'OpenAI provider stream error');
+      providerLog.error(
+        {
+          ...diagnostic,
+          model: request.model,
+          rawMessage: err instanceof Error ? err.message.slice(0, 800) : String(err).slice(0, 800),
+        },
+        'OpenAI provider stream error',
+      );
       yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
     }
   }
@@ -423,7 +492,25 @@ export class OpenAIProvider implements Provider {
     const result: OpenAI.ChatCompletionMessageParam[] = [];
 
     if (request.systemPrompt) {
-      result.push({ role: 'system', content: request.systemPrompt });
+      const cacheSegments = resolvePromptCacheSegments(request);
+      const model = resolveModel(request.model)?.apiModelId ?? request.model;
+      if (this.name === 'openai' && /^gpt-5\.6(?:-|$)/i.test(model) && cacheSegments.valid) {
+        result.push({
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: cacheSegments.stable,
+              prompt_cache_breakpoint: { mode: 'explicit' },
+            },
+          ],
+        } as unknown as OpenAI.ChatCompletionSystemMessageParam);
+        if (cacheSegments.dynamic) {
+          result.push({ role: 'system', content: cacheSegments.dynamic });
+        }
+      } else {
+        result.push({ role: 'system', content: request.systemPrompt });
+      }
     }
 
     for (const msg of request.messages) {
@@ -545,6 +632,49 @@ function stripImageParts(
 function isVisionRejectionError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /image|vision|multimodal|image_url/i.test(msg);
+}
+
+/** Extract an HTTP status from an OpenAI SDK `APIError`-shaped rejection. */
+function rejectionStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const record = err as Record<string, unknown>;
+  const nested =
+    record.error && typeof record.error === 'object'
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  const status = record.status ?? record.statusCode ?? nested?.status;
+  return typeof status === 'number' && Number.isFinite(status) ? status : undefined;
+}
+
+/**
+ * True when the provider rejected the request because a request parameter was
+ * not accepted (400/422, or an explicit unsupported-parameter message). Used
+ * to trigger the graceful degrade-and-retry path for reasoning controls.
+ */
+export function isParameterRejectionError(err: unknown): boolean {
+  const status = rejectionStatus(err);
+  if (status === 400 || status === 422) return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /reasoning[_ ]?effort|unsupported[_ ](?:parameter|value|field)|unexpected[_ ](?:keyword|argument)|extra[_ ](?:inputs|fields)|unknown[_ ](?:parameter|field|argument)|unrecognized[_ ](?:parameter|argument|keyword)|not (?:a )?supported (?:parameter|argument|for this model)/i.test(
+    msg,
+  );
+}
+
+const REASONING_PARAM_KEYS = [
+  'reasoning_effort',
+  'thinking',
+  'enable_thinking',
+  'chat_template_kwargs',
+] as const;
+
+function hasReasoningParams(params: unknown): boolean {
+  const record = params as Record<string, unknown>;
+  return REASONING_PARAM_KEYS.some((key) => record[key] !== undefined);
+}
+
+function stripReasoningParams(params: unknown): void {
+  const record = params as Record<string, unknown>;
+  for (const key of REASONING_PARAM_KEYS) delete record[key];
 }
 
 // ─── OpenAI-Compatible Provider Factories ───────────────────────────────────

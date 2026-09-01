@@ -10,6 +10,7 @@ import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
 import type { AppConfig } from './config-schema';
 import type { GoalDriveService } from './kory/goal-drive-service';
+import type { SessionRunCoordinator } from './runs/session-run-coordinator';
 
 export interface AppContext {
   config: AppConfig;
@@ -24,6 +25,7 @@ export interface AppContext {
   kory: KoryManager;
   wsManager: WSManager;
   timeTravel: TimeTravelService;
+  runs: SessionRunCoordinator;
 }
 
 let context: AppContext | null = null;

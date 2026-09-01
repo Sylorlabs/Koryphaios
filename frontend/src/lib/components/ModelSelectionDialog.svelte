@@ -36,6 +36,25 @@
           ? [...(selectedModels || [])]
           : (availableModels || []).map((m) => m.id);
       initialized = true;
+    } else if (initialized && (availableModels || []).length > 0) {
+      const availableIds = new Set((availableModels || []).map((m) => m.id));
+      const stillValid = localSelected.filter((id) => availableIds.has(id));
+      if (stillValid.length !== localSelected.length) {
+        localSelected = stillValid;
+      }
+      if (localSelected.length === 0 && (availableModels || []).length > 0 && (selectedModels || []).length === 0) {
+        localSelected = (availableModels || []).map((m) => m.id);
+      }
+    }
+  });
+
+  $effect(() => {
+    if ((availableModels || []).length > 0 && !initialized) {
+      localSelected =
+        (selectedModels || []).length > 0
+          ? [...(selectedModels || [])]
+          : (availableModels || []).map((m) => m.id);
+      initialized = true;
     }
   });
 
@@ -155,7 +174,12 @@
     <!-- List -->
     <div class="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
       <div class="space-y-1">
-        {#if filteredModels.length === 0}
+        {#if (availableModels || []).length === 0}
+          <p class="px-3 py-8 text-center text-xs flex flex-col items-center gap-2" style="color: var(--color-text-muted);">
+            <span class="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"></span>
+            Loading models...
+          </p>
+        {:else if filteredModels.length === 0}
           <p class="px-3 py-8 text-center text-xs" style="color: var(--color-text-muted);">
             {emptyMessage ?? 'No provider-reported models are available.'}
           </p>

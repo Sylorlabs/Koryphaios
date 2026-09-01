@@ -34,6 +34,7 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import { copyText } from '$lib/utils/clipboard';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
@@ -60,13 +61,14 @@
   import 'highlight.js/styles/atom-one-dark.css';
   import type { FeedEntryLocal, FeedEntryType } from '$lib/types';
   import type { Note } from '@koryphaios/shared';
-  import { apiFetch } from '$lib/api.svelte';
+  import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { renderKoryChart } from '$lib/utils/chart-renderer';
   import { renderKoryColors } from '$lib/utils/color-renderer';
   import { htmlSandboxPlaceholder, expandHtmlSandboxes } from '$lib/utils/html-sandbox';
   import { computeStreamingSegments } from '$lib/utils/streaming-segments';
   import { playVoiceResponse, stopVoicePlayback } from '$lib/utils/voice-playback';
+  import { exactModelSelection, observedRunOutcome } from '$lib/utils/message-variants';
 
   hljs.registerLanguage('bash', bash);
   hljs.registerLanguage('cpp', cpp);
@@ -197,6 +199,27 @@
   };
   marked.setOptions({ renderer });
 
+  type ResponseVariant = {
+    id: string;
+    content: string;
+    model?: string;
+    provider?: string;
+    index: number;
+    isActive?: boolean;
+    attachments?: Array<{
+      type: 'image' | 'file';
+      data: string;
+      name: string;
+      mimeType?: string;
+    }>;
+  };
+
+  type VisibleMessageTarget = {
+    messageId?: string;
+    model?: string;
+    provider?: string;
+  };
+
   let {
     entry,
     isSelected,
@@ -205,6 +228,7 @@
     onSelect,
     onToggleGroup,
     onDelete,
+    onUserVisibilityChanged,
   } = $props<{
     entry: FeedEntryLocal;
     isSelected: boolean;
@@ -212,7 +236,8 @@
     isStreaming?: boolean;
     onSelect: (e: MouseEvent) => void;
     onToggleGroup: () => void;
-    onDelete: (e: MouseEvent) => void;
+    onDelete: (e: MouseEvent, target?: VisibleMessageTarget) => void | Promise<void>;
+    onUserVisibilityChanged?: () => void;
   }>();
 
   let copied = $state(false);
@@ -220,7 +245,11 @@
   let wasStreaming = $state(false);
   let entryElement = $state<HTMLDivElement>();
   let regenerating = $state(false);
+  let activatingVariant = $state(false);
+  let deleting = $state(false);
+  let pendingRegeneration = $state<{ sessionId: string; runId: string } | null>(null);
   let selectedVariant = $state(-1);
+  let selectedVariantKey = $state('');
   let toolDetailsOpen = $state(false);
   let contextMenu = $state<{ x: number; y: number } | null>(null);
   // Capture the live text selection at context-menu-open time.  Clicking the
@@ -235,14 +264,43 @@
   let renderedNotes = $state<Record<string, Note | null>>({});
   const pendingNoteRenders = new Set<string>();
   let responseVariants = $derived(
-    (entry.metadata?.responseVariants as
-      | Array<{ id: string; content: string; model?: string; index: number }>
-      | undefined) ?? [],
+    (entry.metadata?.responseVariants as ResponseVariant[] | undefined) ?? [],
   );
-  let currentText = $derived(
+  let activeVariantId = $derived(
+    typeof entry.metadata?.activeVariantId === 'string'
+      ? entry.metadata.activeVariantId
+      : (responseVariants.find((variant) => variant.isActive)?.id ?? null),
+  );
+  let currentVariant = $derived(
     selectedVariant >= 0 && responseVariants[selectedVariant]
-      ? responseVariants[selectedVariant].content
-      : entry.text,
+      ? responseVariants[selectedVariant]
+      : undefined,
+  );
+  let currentText = $derived(currentVariant ? currentVariant.content : entry.text);
+  let currentAttachments = $derived(
+    currentVariant ? currentVariant.attachments : entry.metadata?.attachments,
+  );
+  let currentMessageId = $derived(
+    currentVariant?.id ??
+      (typeof entry.metadata?.messageId === 'string' ? entry.metadata.messageId : undefined),
+  );
+  let currentModel = $derived(
+    currentVariant?.model ??
+      (typeof entry.metadata?.model === 'string' ? entry.metadata.model : undefined),
+  );
+  let currentProvider = $derived(
+    currentVariant?.provider ??
+      (typeof entry.metadata?.provider === 'string' ? entry.metadata.provider : undefined),
+  );
+  let selectedVariantIsActive = $derived(
+    !!currentMessageId && !!activeVariantId && currentMessageId === activeVariantId,
+  );
+  let variantIdentityAuthoritative = $derived(
+    entry.metadata?.variantIdentityAuthoritative === true,
+  );
+  let isImageResponse = $derived(
+    Array.isArray(currentAttachments) &&
+      currentAttachments.some((a) => (a as { type?: string }).type === 'image'),
   );
   let compactionExpanded = $state(false);
   // Some CLI harnesses return their worker transcript as a final assistant
@@ -322,55 +380,147 @@
   }
 
   $effect(() => {
-    if (entry.type === 'content' && selectedVariant < 0 && responseVariants.length > 0) {
-      selectedVariant = responseVariants.length - 1;
+    if (entry.type !== 'content' || responseVariants.length === 0) return;
+    const key = `${entry.metadata?.variantGroupId ?? ''}:${activeVariantId ?? 'unknown'}:${responseVariants.map((variant) => variant.id).join(',')}`;
+    if (
+      selectedVariantKey === key &&
+      selectedVariant >= 0 &&
+      selectedVariant < responseVariants.length
+    )
+      return;
+    selectedVariantKey = key;
+    const authoritativeIndex = activeVariantId
+      ? responseVariants.findIndex((variant) => variant.id === activeVariantId)
+      : -1;
+    // Legacy arrays have no trustworthy branch identity. Display their first
+    // stable sibling instead of pretending the newest response is active.
+    selectedVariant = authoritativeIndex >= 0 ? authoritativeIndex : 0;
+  });
+
+  async function refreshAuthoritativeHistory(sessionId: string): Promise<void> {
+    const messages = await sessionStore.fetchMessages(sessionId);
+    await wsStore.loadSessionMessages(sessionId, messages);
+  }
+
+  $effect(() => {
+    const pending = pendingRegeneration;
+    if (!pending) return;
+    const outcome = observedRunOutcome(
+      runStateStore.states.get(pending.sessionId),
+      pending.runId,
+    );
+    if (outcome.kind === 'pending') return;
+    pendingRegeneration = null;
+    if (outcome.kind === 'complete') {
+      void refreshAuthoritativeHistory(pending.sessionId)
+        .catch((error) => {
+          const detail = error instanceof Error ? error.message : 'Chat history refresh failed.';
+          toastStore.error(`The response completed, but the refreshed history failed: ${detail}`);
+        })
+        .finally(() => {
+          regenerating = false;
+        });
+      return;
     }
+    regenerating = false;
+    if (outcome.kind === 'cancelled') toastStore.info(outcome.reason);
+    else toastStore.error(outcome.reason);
   });
 
   async function regenerateResponse() {
     const sessionId = entry.metadata?.sessionId as string | undefined;
-    const messageId = entry.metadata?.messageId as string | undefined;
+    const messageId = currentMessageId;
     if (!sessionId || !messageId || regenerating) return;
     regenerating = true;
-    const startedAt = Date.now();
     try {
       const response = await apiFetch(apiUrl('/api/messages/regenerate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, messageId, model: entry.metadata?.model }),
+        body: JSON.stringify({
+          sessionId,
+          messageId,
+          model: exactModelSelection(currentProvider, currentModel),
+        }),
       });
-      const result = (await response.json()) as {
+      const result = await parseJsonResponse<{
         ok?: boolean;
         error?: string;
-        data?: { groupId: string; index: number };
-      };
-      if (!response.ok || !result.ok || !result.data)
+        data?: { runId?: string; groupId: string; index: number };
+      }>(response);
+      if (!response.ok || !result.ok || !result.data?.runId)
         throw new Error(result.error || 'Regeneration failed');
-      for (let attempt = 0; attempt < 180; attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const messages = await sessionStore.fetchMessages(sessionId);
-        const completed = messages.some(
-          (message) =>
-            message.variantGroupId === result.data!.groupId &&
-            message.variantIndex === result.data!.index,
-        );
-        const returnedEmpty = messages.some(
-          (message) =>
-            message.role === 'system' &&
-            message.createdAt >= startedAt &&
-            message.content ===
-              'The model returned an empty response. Please resend or rephrase your request.',
-        );
-        if (completed || returnedEmpty) {
-          await wsStore.loadSessionMessages(sessionId, messages);
-          return;
-        }
-      }
-      throw new Error('Regeneration timed out');
+      // The durable SessionRun owns completion. History is fetched exactly
+      // once after its matching runId reaches a terminal success state.
+      pendingRegeneration = { sessionId, runId: result.data.runId };
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Regeneration failed.';
       console.error('Failed to regenerate response:', error);
-    } finally {
+      toastStore.error(detail);
       regenerating = false;
+    }
+  }
+
+  async function activateSelectedVariant() {
+    const sessionId = entry.metadata?.sessionId as string | undefined;
+    const expectedActiveMessageId = entry.metadata?.activeMessageId;
+    const expectedProviderConversationRevision = entry.metadata?.providerConversationRevision;
+    const conversationRevision = entry.metadata?.conversationRevision;
+    if (!sessionId || !currentMessageId || activatingVariant || selectedVariantIsActive) return;
+    if (
+      !variantIdentityAuthoritative ||
+      typeof expectedActiveMessageId !== 'string' ||
+      typeof expectedProviderConversationRevision !== 'number' ||
+      typeof conversationRevision !== 'number'
+    ) {
+      toastStore.error(
+        'This chat does not have authoritative branch metadata yet. Reload after updating the backend; no branch was changed.',
+      );
+      return;
+    }
+
+    activatingVariant = true;
+    try {
+      const response = await apiFetch(apiUrl('/api/messages/variant'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          messageId: currentMessageId,
+          expectedActiveMessageId,
+          expectedProviderConversationRevision,
+        }),
+      });
+      const result = await parseJsonResponse<{ ok?: boolean; error?: string }>(response);
+      if (!response.ok || result.ok !== true) {
+        throw new Error(
+          result.error ||
+            (response.status === 404
+              ? 'This backend cannot activate response branches yet. Nothing changed.'
+              : `Response branch activation failed (${response.status}).`),
+        );
+      }
+      await refreshAuthoritativeHistory(sessionId);
+      toastStore.success('This response is now the active conversation branch.');
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Response branch activation failed.';
+      toastStore.error(detail);
+    } finally {
+      activatingVariant = false;
+    }
+  }
+
+  async function deleteVisibleEntry(event: MouseEvent) {
+    event.stopPropagation();
+    if (deleting) return;
+    deleting = true;
+    try {
+      await onDelete(event, {
+        messageId: currentMessageId,
+        model: currentModel,
+        provider: currentProvider,
+      });
+    } finally {
+      deleting = false;
     }
   }
 
@@ -399,11 +549,17 @@
 
   function toggleUserHidden(e: MouseEvent) {
     e.stopPropagation();
-    hideEntryFromUser();
+    void hideEntryFromUser();
   }
 
-  function hideEntryFromUser() {
-    wsStore.setEntryVisibility(entry.id, { userHidden: !entry.userHidden });
+  async function hideEntryFromUser() {
+    try {
+      await wsStore.setUserEntryVisibility(entry, !entry.userHidden);
+      onUserVisibilityChanged?.();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Could not save feed visibility.';
+      toastStore.error(detail);
+    }
   }
 
   async function copyToClipboard() {
@@ -415,6 +571,50 @@
       }, 2000);
     } catch (err) {
       console.error('Failed to copy text: ', err);
+    }
+  }
+
+  function base64ToBlob(base64: string, mimeType: string): Blob {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: mimeType });
+  }
+
+  async function copyImageToClipboard() {
+    const img = (currentAttachments as Array<{ type: string; data: string; mimeType?: string }> | undefined)?.find(
+      (a) => a.type === 'image',
+    );
+    if (!img?.data) return;
+    const mimeType = img.mimeType ?? 'image/png';
+    try {
+      // @ts-ignore ClipboardItem may not be in lib yet
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        const blob = base64ToBlob(img.data, mimeType);
+        // @ts-ignore
+        await navigator.clipboard.write([new ClipboardItem({ [mimeType]: blob })]);
+      } else {
+        const blob = base64ToBlob(img.data, mimeType);
+        const url = URL.createObjectURL(blob);
+        try {
+          const res = await fetch(url);
+          const b = await res.blob();
+          // @ts-ignore
+          await navigator.clipboard.write([new ClipboardItem({ [b.type || mimeType]: b })]);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch (err) {
+      console.error('Failed to copy image:', err);
+      try {
+        const blob = base64ToBlob(img.data, mimeType);
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } catch {}
     }
   }
 
@@ -592,7 +792,7 @@
     );
   }
 
-  type ToolCategory = 'bash' | 'read' | 'write' | 'web' | 'search' | 'other';
+  type ToolCategory = 'bash' | 'read' | 'write' | 'note' | 'web' | 'search' | 'other';
 
   // Analyzing/reading → eyeball. Editing/writing → pencil. Names cover both
   // Koryphaios tools and CLI-harness tool names (grok/claude-code/antigravity).
@@ -629,6 +829,7 @@
     'create_note',
     'update_note',
   ]);
+  const NOTE_WRITE_TOOLS = new Set(['record_work_note']);
   const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
   const BASH_TOOLS = new Set([
     'bash',
@@ -646,6 +847,7 @@
 
   function getToolCategory(meta?: Record<string, unknown>): ToolCategory {
     const name = getToolNameFromMeta(meta);
+    if (NOTE_WRITE_TOOLS.has(name)) return 'note';
     if (WEB_TOOLS.has(name)) return 'web';
     if (SEARCH_TOOLS.has(name) || /grep|glob|search|find|list_dir/i.test(name)) return 'search';
     if (BASH_TOOLS.has(name)) return 'bash';
@@ -666,6 +868,12 @@
         return { label: 'Reading File', resultLabel: 'File Contents', colorClass: 'text-cyan-400' };
       case 'write':
         return { label: 'Editing File', resultLabel: 'File Written', colorClass: 'text-amber-400' };
+      case 'note':
+        return {
+          label: 'Recording Work Note',
+          resultLabel: 'Work Note Recorded',
+          colorClass: 'text-violet-400',
+        };
       case 'web':
         return { label: 'Searching Web', resultLabel: 'Web Results', colorClass: 'text-sky-400' };
       case 'bash':
@@ -734,6 +942,8 @@
       case 'patch':
       case 'diff':
         return base || name;
+      case 'record_work_note':
+        return typeof input.title === 'string' ? input.title : 'work note';
       default:
         return name;
     }
@@ -778,6 +988,8 @@
       case 'search_notes':
       case 'recall_notes':
         return 'search notes';
+      case 'record_work_note':
+        return 'record work note';
       case 'patch':
       case 'apply_patch':
         return 'patch';
@@ -875,6 +1087,7 @@
         const cat = getToolCategory(meta);
         if (cat === 'read') return 'reading';
         if (cat === 'write') return 'writing';
+        if (cat === 'note') return 'writing';
         if (cat === 'web') return 'searching';
         if (cat === 'search') return 'verifying';
         if (cat === 'bash') return 'tool_calling';
@@ -1130,7 +1343,7 @@
                   >{/if}
               </div>
               <pre
-                class="max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
+                class="max-h-80 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
                   'The tool failed without returning diagnostic output.'}</pre>
             </section>
           {:else if toolCat === 'search'}
@@ -1292,26 +1505,46 @@
             </div>
           {/if}
 
-          {#if entry.metadata?.attachments && Array.isArray(entry.metadata.attachments) && entry.metadata.attachments.length > 0}
-            <div class="mt-3 flex flex-wrap gap-2">
-              {#each entry.metadata.attachments as attachment}
+          {#if currentAttachments && Array.isArray(currentAttachments) && currentAttachments.length > 0}
+            <div class="mt-3 flex flex-wrap gap-2 {entry.type === 'content' && isImageResponse ? 'items-start' : ''}">
+              {#each currentAttachments as attachment}
                 {#if attachment.type === 'image'}
-                  <button
-                    type="button"
-                    class="relative rounded-lg overflow-hidden border transition-transform hover:scale-105 active:scale-95"
-                    style="border-color: var(--color-border); width: 80px; height: 80px; cursor: zoom-in;"
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      zoomedImage = attachment.data;
-                      zoomedImageMimeType = attachment.mimeType ?? 'image/png';
-                    }}
-                  >
-                    <img
-                      src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
-                      alt={attachment.name}
-                      class="w-full h-full object-cover"
-                    />
-                  </button>
+                  {#if entry.type === 'content'}
+                    <button
+                      type="button"
+                      class="relative block overflow-hidden rounded-xl p-0 transition-transform hover:scale-[1.01] active:scale-[0.99]"
+                      style="border: none; background: transparent; max-width: min(100%, 42rem); width: auto; cursor: zoom-in; line-height: 0;"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        zoomedImage = attachment.data;
+                        zoomedImageMimeType = attachment.mimeType ?? 'image/png';
+                      }}
+                    >
+                      <img
+                        src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
+                        alt={attachment.name}
+                        class="block h-auto w-auto max-w-full rounded-xl"
+                        style="max-height: min(70vh, 42rem); object-fit: contain;"
+                      />
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="relative overflow-hidden rounded-lg border transition-transform hover:scale-[1.01] active:scale-[0.99]"
+                      style="border-color: var(--color-border); width: 80px; height: 80px; cursor: zoom-in;"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        zoomedImage = attachment.data;
+                        zoomedImageMimeType = attachment.mimeType ?? 'image/png';
+                      }}
+                    >
+                      <img
+                        src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
+                        alt={attachment.name}
+                        class="h-full w-full object-cover"
+                      />
+                    </button>
+                  {/if}
                 {/if}
               {/each}
             </div>
@@ -1327,31 +1560,37 @@
                   : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
                 onclick={(e) => {
                   e.stopPropagation();
-                  copyToClipboard();
+                  if (isImageResponse) void copyImageToClipboard();
+                  else void copyToClipboard();
                 }}
               >
                 {#if copied}
                   <Check size={10} />
                   Copied
+                {:else if isImageResponse}
+                  <Copy size={10} />
+                  Copy Image
                 {:else}
                   <Copy size={10} />
                   Copy Response
                 {/if}
               </button>
 
-              <button
-                type="button"
-                class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)]"
-                onclick={(event) => {
-                  event.stopPropagation();
-                  void toggleVoicePlayback();
-                }}
-                aria-pressed={voicePlaying}
-              >
-                {#if voicePlaying}<Square size={10} /> Stop{:else}<Volume2 size={10} /> Listen{/if}
-              </button>
+              {#if !isImageResponse}
+                <button
+                  type="button"
+                  class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)]"
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    void toggleVoicePlayback();
+                  }}
+                  aria-pressed={voicePlaying}
+                >
+                  {#if voicePlaying}<Square size={10} /> Stop{:else}<Volume2 size={10} /> Listen{/if}
+                </button>
+              {/if}
 
-              {#if entry.metadata?.messageId}
+              {#if currentMessageId}
                 <button
                   type="button"
                   class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
@@ -1359,8 +1598,8 @@
                     e.stopPropagation();
                     void regenerateResponse();
                   }}
-                  disabled={regenerating}
-                  title="Generate another response while preserving this one"
+                  disabled={regenerating || activatingVariant || deleting}
+                  title="Regenerate the response currently shown"
                 >
                   <RotateCcw size={10} class={regenerating ? 'animate-spin' : ''} />
                   {regenerating ? 'Regenerating' : 'Regenerate'}
@@ -1399,6 +1638,27 @@
                     <ChevronRight size={12} />
                   </button>
                 </div>
+                {#if selectedVariantIsActive}
+                  <span
+                    class="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300"
+                    title="Follow-up messages continue from this response"
+                  >Active branch</span>
+                {:else}
+                  <button
+                    type="button"
+                    class="rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={activatingVariant || regenerating || !variantIdentityAuthoritative}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      void activateSelectedVariant();
+                    }}
+                    title={variantIdentityAuthoritative
+                      ? 'Make the response currently shown the active branch for follow-up messages'
+                      : 'Authoritative branch metadata is unavailable; preview only'}
+                  >
+                    {activatingVariant ? 'Switching' : 'Use this response'}
+                  </button>
+                {/if}
               {/if}
 
               {#if entry.ghostHash}
@@ -1440,7 +1700,7 @@
               >
             </div>
             <pre
-              class="max-h-80 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
+              class="max-h-80 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
                 'No error details were provided.'}</pre>
           </section>
         {:else}
@@ -1478,14 +1738,14 @@
         <button
           class="p-1.5 rounded flex items-center justify-center hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
-          onclick={(e) => {
-            e.stopPropagation();
-            if (archiveId) void setAgentHidden(e, true);
-            onDelete(e);
+          disabled={deleting}
+          onclick={(event) => {
+            if (archiveId) void setAgentHidden(event, true);
+            void deleteVisibleEntry(event);
           }}
-          title="Delete (removes from view and from agent context)"
+          title="Delete the response currently shown"
         >
-          <Trash2 size={14} />
+          {#if deleting}<LoaderCircle size={14} class="animate-spin" />{:else}<Trash2 size={14} />{/if}
         </button>
       </div>
     </div>
@@ -1562,7 +1822,7 @@
       role="menuitem"
       class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
       onclick={() => {
-        hideEntryFromUser();
+        void hideEntryFromUser();
         contextMenu = null;
       }}><EyeOff size={13} /> Hide from me</button
     >
@@ -1570,10 +1830,12 @@
       type="button"
       role="menuitem"
       class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-red-300 hover:bg-red-500/10 hover:text-red-200"
+      disabled={deleting}
       onclick={(event) => {
         contextMenu = null;
-        onDelete(event);
-      }}><Trash2 size={13} /> Delete</button
+        void deleteVisibleEntry(event);
+      }}>{#if deleting}<LoaderCircle size={13} class="animate-spin" />{:else}<Trash2 size={13} />{/if}
+      Delete</button
     >
   </div>
 {/if}
@@ -1613,13 +1875,13 @@
             </p>
             {#if detail}
               <pre
-                class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
+                class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
             {/if}
           </article>
         {/each}
       {:else}
         <pre
-          class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/20 p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
+          class="max-h-64 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words rounded-lg bg-black/20 p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
             'No output was reported.'}</pre>
       {/if}
     </div>

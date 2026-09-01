@@ -1,6 +1,8 @@
 /** Versioned prompt compiler shared by manager, worker, and critic execution. */
 
 import type { ProviderName, UIMode, WorkerDomain } from '@koryphaios/shared';
+import type { PromptCachePlan } from '../../providers/types';
+import { createPromptCachePlan } from '../../providers/prompt-cache';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -12,7 +14,7 @@ import {
   type SkillResolverResult,
 } from '../skills';
 
-export const PROMPT_VERSION = 'kory-workflow-v6-verified-context-skills';
+export const PROMPT_VERSION = 'kory-workflow-v7-hierarchical-cache';
 
 export type TaskKind =
   | 'question'
@@ -97,6 +99,8 @@ export interface PromptManifest {
   totalContextTokenUpperBound: number;
   conflicts: string[];
   taskContractHash: string;
+  stablePrefixHash: string;
+  stablePrefixTokenEstimate: number;
 }
 
 export interface QualityGateReport {
@@ -123,6 +127,7 @@ export interface IntentDecisionState {
 
 export interface CompiledPrompt {
   systemPrompt: string;
+  promptCache: PromptCachePlan;
   manifest: PromptManifest;
   /** Non-fatal issues encountered during compilation. Callers may surface
    *  these to the user as warnings (e.g. via a system.warning WS event). */
@@ -432,6 +437,50 @@ export function deriveSkillContextBudget(input: {
 export function estimateOccupiedContextTokenUpperBound(messages: readonly unknown[]): number {
   return messages.reduce<number>((total, message) => {
     try {
+      if (
+        message !== null &&
+        typeof message === 'object' &&
+        'content' in (message as Record<string, unknown>) &&
+        Array.isArray((message as { content: unknown }).content)
+      ) {
+        const blocks = (message as { content: unknown[] }).content;
+        let blockTokens = 0;
+        for (const block of blocks) {
+          if (
+            block !== null &&
+            typeof block === 'object' &&
+            'type' in (block as Record<string, unknown>)
+          ) {
+            const typed = block as {
+              type: string;
+              text?: string;
+              imageData?: string;
+              data?: string;
+            };
+            if (typed.type === 'image') {
+              const rawLen =
+                typeof typed.imageData === 'string'
+                  ? typed.imageData.length
+                  : typeof typed.data === 'string'
+                    ? typed.data.length
+                    : 0;
+              const approxBytes = Math.ceil((rawLen * 3) / 4);
+              blockTokens += Math.max(
+                1024,
+                Math.min(4096, Math.ceil(approxBytes / 1024) * 256 + 1024),
+              );
+              continue;
+            }
+            if (typed.type === 'text' && typeof typed.text === 'string') {
+              blockTokens += textTokenUpperBound(typed.text);
+              continue;
+            }
+          }
+          blockTokens += textTokenUpperBound(JSON.stringify(block));
+        }
+        const meta = { ...(message as Record<string, unknown>), content: undefined };
+        return total + blockTokens + textTokenUpperBound(JSON.stringify(meta));
+      }
       return total + textTokenUpperBound(JSON.stringify(message));
     } catch {
       return total + textTokenUpperBound(String(message));
@@ -559,16 +608,20 @@ export function compilePrompt(input: {
     capabilityProfile.mode === 'native-passthrough'
       ? 'This provider uses a native harness wrapped by Kory role policy and verification. Filesystem isolation is guaranteed only when the runtime capability manifest reports it active; otherwise label it unavailable. Provider-specific quality measurements may influence recommendations but never remove role capability.'
       : 'This is Kory-managed execution. Tool and filesystem policy are enforced by the harness; do not attempt to bypass them.';
-  const baseSections = [
+  // Exact-prefix caches are invalidated by the first changed byte. Keep the
+  // cross-task contract stable first; task, selected skills, memory, and live
+  // mode notices are appended later by decreasing expected lifetime.
+  const stableSections = [
     `# Koryphaios prompt ${PROMPT_VERSION} (${adapter})`,
     roleRules,
     criticOutputContract,
     style,
     UNIVERSAL_CORE,
-    renderTaskContract(input.taskContract),
     `## Provider capability truth\n${providerRules}`,
     `## Applicable repository instructions (broad to specific)\n${instructionText}`,
   ];
+  const taskSections = [renderTaskContract(input.taskContract)];
+  const baseSections = [...stableSections, ...taskSections];
   const trustedWindow = input.model
     ? resolveTrustedContextWindow(input.model, input.provider as ProviderName)
     : { contextKnown: false as const };
@@ -628,7 +681,17 @@ export function compilePrompt(input: {
       omittedDetailChars,
     }),
   );
-  const systemPrompt = renderForProvider(adapter, [...baseSections, skillResolution.promptText]);
+  const systemPrompt = renderForProvider(adapter, [
+    ...stableSections,
+    ...taskSections,
+    skillResolution.promptText,
+  ]);
+  const stableSystemPrompt = renderForProvider(adapter, stableSections);
+  const promptCache = createPromptCachePlan({
+    stableSystemPrompt,
+    providerAdapter: adapter,
+    role: input.role,
+  });
   const systemPromptTokenUpperBound = textTokenUpperBound(systemPrompt);
   const totalContextTokenUpperBound =
     occupiedContextTokenUpperBound +
@@ -661,9 +724,12 @@ export function compilePrompt(input: {
     totalContextTokenUpperBound,
     conflicts: instructionState.conflicts,
     taskContractHash: sha256(JSON.stringify(input.taskContract)),
+    stablePrefixHash: promptCache.stablePrefixHash,
+    stablePrefixTokenEstimate: promptCache.estimatedStableTokens,
   };
   return {
     systemPrompt,
+    promptCache,
     manifest: { ...manifestBase, hash: sha256(JSON.stringify(manifestBase) + systemPrompt) },
     ...(warnings.length > 0 ? { warnings } : {}),
   };

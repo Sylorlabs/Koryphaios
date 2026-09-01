@@ -45,8 +45,8 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       if (!body.objective.trim()) throw new ValidationError('Goals require an objective');
       if (body.scope === 'project' && !body.projectPath?.trim())
         throw new ValidationError('Project goals require a project directory');
-      if (body.scope === 'session' && !(await getContext().sessions.get(body.sessionId!)))
-        throw new ValidationError('Session goals require an existing owning chat');
+      if (body.scope === 'session' && !(await getContext().sessions.getActive(body.sessionId!)))
+        throw new ValidationError('Session goals require an active owning chat');
       return { ok: true, data: sendUpdate(await getContext().goals.create(body)) };
     },
     {
@@ -102,9 +102,11 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { goals, sessions, goalDriver } = getContext();
       const goal = await goals.get(params.id);
-      const session = await sessions.get(body.sessionId);
+      const session = await sessions.getActive(body.sessionId);
       if (!goal) throw new NotFoundError('Goal', params.id);
-      if (!session) throw new NotFoundError('Session', body.sessionId);
+      if (!session) {
+        throw new ConflictError('Recover this archived chat before starting Goal Mode in it.');
+      }
       if (goal.scope === 'session' && goal.sessionId !== body.sessionId)
         throw new ConflictError('This session goal can only run in its owning chat.');
       let started: Goal;
@@ -144,9 +146,15 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
   })
   .post('/:id/resume', async ({ request, params }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-    if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);
+    const context = getContext();
+    const goal = await context.goals.get(params.id);
+    if (!goal) throw new NotFoundError('Goal', params.id);
+    const sessionId = goal.execution?.sessionId ?? goal.sessionId;
+    if (sessionId && !(await context.sessions.getActive(sessionId))) {
+      throw new ConflictError('Recover the archived Goal chat before resuming this Goal.');
+    }
     try {
-      return { ok: true, data: await getContext().goalDriver.resume(params.id) };
+      return { ok: true, data: await context.goalDriver.resume(params.id) };
     } catch (error) {
       throw new ConflictError(error instanceof Error ? error.message : 'Goal could not resume');
     }

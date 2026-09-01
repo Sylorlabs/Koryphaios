@@ -17,7 +17,7 @@
 //   devin        ~/.local/share/devin/cli/transcripts/*.json  ATIF final_metrics (session totals)
 //   cline        ~/.cline/data/sessions/<id>/*.messages.json  per-message metrics + modelInfo
 //   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
-//   freebuff     detected-only (fail-closed; no usage recorded)
+//   freebuff     Kory PTY usage events sourced from Freebuff's own log.jsonl
 //   jules        detected-only (approval-required; no local usage)
 //
 // Quota state: claude, codex, copilot, and antigravity expose live quota
@@ -39,7 +39,16 @@ import { serverLog } from '../logger';
 import {
   detectFreebuffCLILogin,
   detectJulesApiKey,
+  discoverFreebuffAccounts,
 } from '../providers/auth-utils';
+import { fetchAntigravityQuotaGroups } from '../providers/antigravity-quota';
+import {
+  getOpenRouterPricingCatalog,
+  quoteOpenRouterInput,
+  quoteOpenRouterUsage,
+  resolveOpenRouterModelPricing,
+  type OpenRouterPricingCatalog,
+} from '../providers/openrouter-pricing';
 
 export interface UsageWindow {
   /** 'hour' | 'day' | 'week' | 'month' */
@@ -69,7 +78,23 @@ export interface CliUsageReport {
   /** Current account-wide credit balance when the official Codex CLI reports one. */
   creditBalance?: string | null;
   /** Provenance for the activity time series. */
-  usageSource?: 'local-session-history' | 'codex-app-server';
+  usageSource?: 'local-session-history' | 'codex-app-server' | 'kory-provider-events';
+  /** Whether both sides came from upstream usage or only input context was exposed. */
+  usagePrecision?: 'provider-reported' | 'input-context-only';
+  /** Equivalent raw-API value for the covered token sides. Never an actual subscription charge. */
+  apiValueUsd?: number;
+  apiValueCoverage?: 'full' | 'input-only';
+  /** Official input-price scenarios when actual cache-token evidence is unavailable. */
+  apiValueMinUsd?: number;
+  apiValueMaxUsd?: number;
+  apiFreshInputValueUsd?: number;
+  apiFreshValueUsd?: number;
+  apiCacheAdjustedValueUsd?: number;
+  pricingSource?: 'openrouter-live';
+  pricingUpdatedAt?: number;
+  cacheAccounting?: 'provider-reported' | 'unavailable';
+  /** Provenance for provider-enforced quota limits, distinct from token activity. */
+  quotaSource?: 'live-cli-account';
   windows: UsageWindow[];
   /** Calendar-day token totals from the same local CLI session records. */
   dailyUsage: Array<{ date: string; tokens: number }>;
@@ -82,9 +107,37 @@ export interface CliUsageReport {
     apiEquivalent?: string;
     /** The API provider that serves the equivalent model (e.g. anthropic, openai, google). */
     apiProvider?: string;
+    /** Equivalent raw-API value for the covered token sides. */
+    apiValueUsd?: number;
+    apiValueCoverage?: 'full' | 'input-only';
+    apiValueMinUsd?: number;
+    apiValueMaxUsd?: number;
+    apiFreshInputValueUsd?: number;
+    apiFreshValueUsd?: number;
+    apiCacheAdjustedValueUsd?: number;
+    promptUsdPerMillion?: number;
+    completionUsdPerMillion?: number;
+    cacheReadUsdPerMillion?: number;
+    cacheWriteUsdPerMillion?: number;
+    pricingHasThresholds?: boolean;
+    /** Provider-owned full context window for this model. */
+    contextWindow?: number;
   }>;
   /** The backing API provider name for this CLI subscription (e.g. anthropic for claude). */
   apiProviderName?: string;
+  /** Current installed CLI picker metadata, even before the first turn. */
+  modelCatalog?: Array<{
+    model: string;
+    name: string;
+    contextWindow?: number;
+    contextVerified: boolean;
+    apiEquivalent?: string;
+    promptUsdPerMillion?: number;
+    completionUsdPerMillion?: number;
+    cacheReadUsdPerMillion?: number;
+    cacheWriteUsdPerMillion?: number;
+    pricingHasThresholds?: boolean;
+  }>;
   updatedAt: number;
 }
 
@@ -109,6 +162,17 @@ export interface UsageSample {
   tokensIn: number;
   tokensOut: number;
   cacheRead: number;
+  /** Whether cacheRead is already part of tokensIn for this log format. */
+  cacheReadIncludedInTokensIn?: boolean;
+  /** Whether this log format explicitly reports the cache-read field. */
+  cacheReadEvidence?: boolean;
+}
+
+const pricingSamplesByReport = new WeakMap<CliUsageReport, UsageSample[]>();
+
+function withPricingSamples(report: CliUsageReport, samples: UsageSample[]): CliUsageReport {
+  pricingSamplesByReport.set(report, samples);
+  return report;
 }
 
 function isReportedModel(model: string): boolean {
@@ -302,7 +366,7 @@ export const CLI_API_PROVIDER_MAP: Record<string, string> = {
   cline: 'cline',
   kimicode: 'kimicode',
   kilocode: 'kilocode',
-  freebuff: 'freebuff',
+  freebuff: 'openrouter',
   jules: 'google',
 };
 
@@ -343,9 +407,112 @@ export function makeApiEquivalentResolver(providerName: string): ApiEquivalentRe
     }
     return {
       apiEquivalent: match.apiModelId ?? match.realModelId ?? match.id,
-      apiProvider: match.provider ?? fallbackApiProvider,
+      apiProvider:
+        (match.apiModelId ?? match.realModelId)?.split('/')[0] ??
+        match.provider ??
+        fallbackApiProvider,
     };
   };
+}
+
+async function applyOpenRouterEquivalentPricing(
+  report: CliUsageReport,
+  samples: UsageSample[],
+  now: number,
+): Promise<void> {
+  const catalog = await getOpenRouterPricingCatalog();
+  report.apiProviderName = 'openrouter';
+  if (!catalog) return;
+  applyOpenRouterEquivalentPricingFromCatalog(report, samples, now, catalog);
+}
+
+export function applyOpenRouterEquivalentPricingFromCatalog(
+  report: CliUsageReport,
+  samples: UsageSample[],
+  now: number,
+  catalog: OpenRouterPricingCatalog,
+): void {
+  report.apiProviderName = 'openrouter';
+  const cutoff = now - 30 * DAY_MS;
+  const outputKnown = report.usagePrecision !== 'input-context-only';
+  report.byModel = report.byModel.map((entry) => {
+    const providerHint = entry.apiProvider;
+    const candidates = [...new Set([entry.apiEquivalent, entry.model].filter(Boolean))] as string[];
+    const official = candidates
+      .map((candidate) => resolveOpenRouterModelPricing(catalog, candidate, providerHint))
+      .find((candidate) => candidate !== null);
+    if (!official) {
+      return { ...entry, apiEquivalent: undefined, apiProvider: 'openrouter' };
+    }
+
+    const requests = samples
+      .filter(
+        (sample) => sample.model === entry.model && sample.ts >= cutoff && sample.tokensIn >= 0,
+      )
+      .map((sample) => ({
+        tokensIn:
+          sample.tokensIn + (sample.cacheReadIncludedInTokensIn === false ? sample.cacheRead : 0),
+        tokensOut: sample.tokensOut,
+        ...(sample.cacheReadEvidence ? { cacheReadTokens: sample.cacheRead } : {}),
+      }));
+    const quote = quoteOpenRouterUsage(official, requests);
+    const coversOutput = outputKnown && quote.coversOutput;
+    return {
+      ...entry,
+      apiEquivalent: official.id,
+      apiProvider: 'openrouter',
+      apiValueUsd: coversOutput ? quote.freshValueUsd : quote.freshInputUsd,
+      apiValueCoverage: coversOutput ? ('full' as const) : ('input-only' as const),
+      apiValueMinUsd: coversOutput ? quote.minimumValueUsd : quote.minimumInputUsd,
+      apiValueMaxUsd: coversOutput ? quote.maximumValueUsd : quote.maximumInputUsd,
+      apiFreshInputValueUsd: quote.freshInputUsd,
+      apiFreshValueUsd: coversOutput ? quote.freshValueUsd : quote.freshInputUsd,
+      ...(quote.cacheReadAdjustedValueUsd !== undefined
+        ? {
+            apiCacheAdjustedValueUsd: coversOutput
+              ? quote.cacheReadAdjustedValueUsd
+              : quote.cacheReadAdjustedValueUsd - (quote.outputUsd ?? 0),
+          }
+        : {}),
+      promptUsdPerMillion: quote.promptUsdPerMillion,
+      ...(quote.completionUsdPerMillion !== undefined
+        ? { completionUsdPerMillion: quote.completionUsdPerMillion }
+        : {}),
+      ...(quote.cacheReadUsdPerMillion !== undefined
+        ? { cacheReadUsdPerMillion: quote.cacheReadUsdPerMillion }
+        : {}),
+      ...(quote.cacheWriteUsdPerMillion !== undefined
+        ? { cacheWriteUsdPerMillion: quote.cacheWriteUsdPerMillion }
+        : {}),
+      pricingHasThresholds: quote.hasThresholdOverrides,
+    };
+  });
+
+  const priced = report.byModel.filter((entry) => entry.apiValueUsd !== undefined);
+  report.pricingSource = 'openrouter-live';
+  report.pricingUpdatedAt = catalog.fetchedAt;
+  report.cacheAccounting =
+    samples.length > 0 && samples.every((sample) => sample.cacheReadEvidence)
+      ? 'provider-reported'
+      : 'unavailable';
+  if (priced.length === 0) return;
+  report.apiValueUsd = priced.reduce((sum, entry) => sum + entry.apiValueUsd!, 0);
+  report.apiValueMinUsd = priced.reduce((sum, entry) => sum + entry.apiValueMinUsd!, 0);
+  report.apiValueMaxUsd = priced.reduce((sum, entry) => sum + entry.apiValueMaxUsd!, 0);
+  report.apiFreshInputValueUsd = priced.reduce(
+    (sum, entry) => sum + entry.apiFreshInputValueUsd!,
+    0,
+  );
+  report.apiFreshValueUsd = priced.reduce((sum, entry) => sum + entry.apiFreshValueUsd!, 0);
+  if (priced.every((entry) => entry.apiCacheAdjustedValueUsd !== undefined)) {
+    report.apiCacheAdjustedValueUsd = priced.reduce(
+      (sum, entry) => sum + entry.apiCacheAdjustedValueUsd!,
+      0,
+    );
+  }
+  report.apiValueCoverage = priced.every((entry) => entry.apiValueCoverage === 'full')
+    ? 'full'
+    : 'input-only';
 }
 
 // ── Per-file sample cache ─────────────────────────────────────────────────────
@@ -421,6 +588,8 @@ function parseClaudeLine(line: string, now: number): UsageSample | null {
       tokensIn: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
       tokensOut: u.output_tokens ?? 0,
       cacheRead: u.cache_read_input_tokens ?? 0,
+      cacheReadIncludedInTokensIn: false,
+      cacheReadEvidence: true,
     };
     if (row.message?.id) sample.id = row.message.id;
     return sample;
@@ -459,17 +628,20 @@ async function readClaude(now: number): Promise<CliUsageReport> {
     }
   }
   samples.push(...byId.values());
-  return {
-    provider: 'claude',
-    apiProviderName: CLI_API_PROVIDER_MAP['claude'],
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('claude')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'claude',
+      apiProviderName: CLI_API_PROVIDER_MAP['claude'],
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('claude')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Codex ─────────────────────────────────────────────────────────────────────
@@ -691,32 +863,35 @@ async function readCodex(
     .filter((bucket) => typeof bucket.startDate === 'string' && typeof bucket.tokens === 'number')
     .map((bucket) => ({ date: bucket.startDate!.slice(0, 10), tokens: bucket.tokens! }));
   const activityIsLive = liveDaily.length > 0;
-  return {
-    provider: 'codex',
-    apiProviderName: CLI_API_PROVIDER_MAP['codex'],
-    ...(account
-      ? {
-          accountId: account.id,
-          accountLabel: account.label,
-          ...(account.email ? { accountEmail: account.email } : {}),
-        }
-      : {}),
-    available: activityIsLive || hasReportedUsage(attributedSamples),
-    attribution: resolvedAttributionNote && !activityIsLive ? 'unavailable' : 'account',
-    ...(resolvedAttributionNote && !activityIsLive
-      ? { attributionNote: resolvedAttributionNote }
-      : {}),
-    planType: liveSnapshot?.planType ?? account?.plan ?? latestLimits?.plan,
-    creditBalance: liveSnapshot?.credits?.balance ?? null,
-    usageSource: activityIsLive ? 'codex-app-server' : 'local-session-history',
-    windows: activityIsLive
-      ? windowsFromDailyUsage(liveDaily, now)
-      : windowsFromSamples(attributedSamples, now),
-    dailyUsage: activityIsLive ? liveDaily : dailyUsageFromSamples(attributedSamples, now),
-    quotas: attributedQuotas,
-    byModel: byModelFromSamples(attributedSamples, now, makeApiEquivalentResolver('codex')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'codex',
+      apiProviderName: CLI_API_PROVIDER_MAP['codex'],
+      ...(account
+        ? {
+            accountId: account.id,
+            accountLabel: account.label,
+            ...(account.email ? { accountEmail: account.email } : {}),
+          }
+        : {}),
+      available: activityIsLive || hasReportedUsage(attributedSamples),
+      attribution: resolvedAttributionNote && !activityIsLive ? 'unavailable' : 'account',
+      ...(resolvedAttributionNote && !activityIsLive
+        ? { attributionNote: resolvedAttributionNote }
+        : {}),
+      planType: liveSnapshot?.planType ?? account?.plan ?? latestLimits?.plan,
+      creditBalance: liveSnapshot?.credits?.balance ?? null,
+      usageSource: activityIsLive ? 'codex-app-server' : 'local-session-history',
+      windows: activityIsLive
+        ? windowsFromDailyUsage(liveDaily, now)
+        : windowsFromSamples(attributedSamples, now),
+      dailyUsage: activityIsLive ? liveDaily : dailyUsageFromSamples(attributedSamples, now),
+      quotas: attributedQuotas,
+      byModel: byModelFromSamples(attributedSamples, now, makeApiEquivalentResolver('codex')),
+      updatedAt: now,
+    },
+    attributedSamples,
+  );
 }
 
 // ── GitHub Copilot CLI ────────────────────────────────────────────────────────
@@ -771,6 +946,8 @@ function readCopilot(now: number): CliUsageReport {
               tokensIn: u.inputTokens ?? 0,
               tokensOut: u.outputTokens ?? 0,
               cacheRead: u.cacheReadTokens ?? 0,
+              cacheReadIncludedInTokensIn: false,
+              cacheReadEvidence: true,
             });
           }
         } catch (err: unknown) {
@@ -783,17 +960,20 @@ function readCopilot(now: number): CliUsageReport {
       }
     }
   }
-  return {
-    provider: 'copilot',
-    apiProviderName: CLI_API_PROVIDER_MAP['copilot'],
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('copilot')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'copilot',
+      apiProviderName: CLI_API_PROVIDER_MAP['copilot'],
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('copilot')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── xAI Grok CLI ─────────────────────────────────────────────────────────────
@@ -849,17 +1029,21 @@ function readGrok(now: number): CliUsageReport {
       }
     }
   }
-  return {
-    provider: 'grok',
-    apiProviderName: CLI_API_PROVIDER_MAP['grok'],
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('grok')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'grok',
+      apiProviderName: CLI_API_PROVIDER_MAP['grok'],
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      usagePrecision: 'input-context-only',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('grok')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Subscription quota fetchers (live, cached) ───────────────────────────────
@@ -963,7 +1147,7 @@ async function fetchCopilotQuota(ghToken: string | undefined): Promise<void> {
 // every provider stream's usage_update events with timestamps) and report the
 // live per-group quota from the agy CLI's own `/usage` command.
 
-function readAntigravity(now: number): CliUsageReport {
+async function readAntigravity(now: number): Promise<CliUsageReport> {
   // 1. Token usage windows from the credit-accountant DB
   let samples: UsageSample[] = [];
   try {
@@ -983,38 +1167,25 @@ function readAntigravity(now: number): CliUsageReport {
     );
   }
 
-  // 2. Live per-group quota from the agy CLI (already cached by the provider)
+  // 2. Live per-group quota from the account's supported agy /usage command.
+  // Do this at Billing refresh time rather than relying only on the provider's
+  // model-cache refresh, so the displayed limit is current account data.
   const quotas: QuotaWindow[] = [];
   try {
-    const provider = getContext().providers.get('antigravity');
-    const quotaProvider = provider as unknown as {
-      getQuotaGroups?: () => Array<{
-        name: string;
-        buckets: Array<{
-          id: string;
-          name: string;
-          window: string;
-          remainingFraction: number;
-          resetTime: string;
-        }>;
-      }> | null;
-    };
-    if (provider && typeof quotaProvider.getQuotaGroups === 'function') {
-      const groups = quotaProvider.getQuotaGroups();
-      if (groups) {
-        for (const group of groups) {
-          for (const bucket of group.buckets) {
-            const mins = bucket.window === 'weekly' ? 10080 : bucket.window === '5h' ? 300 : null;
-            quotas.push({
-              label: `${group.name} ${bucket.name}`,
-              usedPercent: Math.max(
-                0,
-                Math.min(100, Math.round((1 - bucket.remainingFraction) * 100)),
-              ),
-              resetsAt: bucket.resetTime ? Date.parse(bucket.resetTime) : null,
-              windowMinutes: mins,
-            });
-          }
+    const groups = await fetchAntigravityQuotaGroups();
+    if (groups) {
+      for (const group of groups) {
+        for (const bucket of group.buckets) {
+          const mins = bucket.window === 'weekly' ? 10080 : bucket.window === '5h' ? 300 : null;
+          quotas.push({
+            label: `${group.name} ${bucket.name}`,
+            usedPercent: Math.max(
+              0,
+              Math.min(100, Math.round((1 - bucket.remainingFraction) * 100)),
+            ),
+            resetsAt: bucket.resetTime ? Date.parse(bucket.resetTime) : null,
+            windowMinutes: mins,
+          });
         }
       }
     }
@@ -1025,18 +1196,22 @@ function readAntigravity(now: number): CliUsageReport {
     );
   }
 
-  return {
-    provider: 'antigravity',
-    apiProviderName: CLI_API_PROVIDER_MAP['antigravity'],
-    available: hasReportedUsage(samples) || quotas.length > 0,
-    attribution: 'account',
-    usageSource: 'local-session-history',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas,
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('antigravity')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'antigravity',
+      apiProviderName: CLI_API_PROVIDER_MAP['antigravity'],
+      available: hasReportedUsage(samples) || quotas.length > 0,
+      attribution: 'account',
+      usageSource: 'local-session-history',
+      ...(quotas.length > 0 ? { quotaSource: 'live-cli-account' as const } : {}),
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas,
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('antigravity')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Cursor CLI ────────────────────────────────────────────────────────────────
@@ -1093,25 +1268,28 @@ function readCursorFromCreditDb(now: number, account?: DiscoveredCliAccount): Cl
     );
   }
 
-  return {
-    provider: 'cursor',
-    apiProviderName: CLI_API_PROVIDER_MAP['cursor'],
-    ...(account
-      ? {
-          accountId: account.id,
-          accountLabel: account.label,
-          ...(account.email ? { accountEmail: account.email } : {}),
-        }
-      : {}),
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    usageSource: 'local-session-history',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cursor')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'cursor',
+      apiProviderName: CLI_API_PROVIDER_MAP['cursor'],
+      ...(account
+        ? {
+            accountId: account.id,
+            accountLabel: account.label,
+            ...(account.email ? { accountEmail: account.email } : {}),
+          }
+        : {}),
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      usageSource: 'local-session-history',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cursor')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Devin CLI ─────────────────────────────────────────────────────────────────
@@ -1162,6 +1340,8 @@ async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<C
             tokensIn,
             tokensOut,
             cacheRead: metrics.total_cached_tokens ?? 0,
+            cacheReadIncludedInTokensIn: true,
+            cacheReadEvidence: true,
           });
         }
       } catch (err: unknown) {
@@ -1173,25 +1353,28 @@ async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<C
     }
   }
 
-  return {
-    provider: 'devin',
-    apiProviderName: CLI_API_PROVIDER_MAP['devin'],
-    ...(account
-      ? {
-          accountId: account.id,
-          accountLabel: account.label,
-          ...(account.email ? { accountEmail: account.email } : {}),
-        }
-      : {}),
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    usageSource: 'local-session-history',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('devin')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'devin',
+      apiProviderName: CLI_API_PROVIDER_MAP['devin'],
+      ...(account
+        ? {
+            accountId: account.id,
+            accountLabel: account.label,
+            ...(account.email ? { accountEmail: account.email } : {}),
+          }
+        : {}),
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      usageSource: 'local-session-history',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('devin')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Cline CLI ─────────────────────────────────────────────────────────────────
@@ -1261,6 +1444,8 @@ async function readCline(now: number, account?: DiscoveredCliAccount): Promise<C
                 tokensIn,
                 tokensOut,
                 cacheRead: metrics.cacheReadTokens ?? 0,
+                cacheReadIncludedInTokensIn: true,
+                cacheReadEvidence: true,
               });
             }
           }
@@ -1274,25 +1459,28 @@ async function readCline(now: number, account?: DiscoveredCliAccount): Promise<C
     }
   }
 
-  return {
-    provider: 'cline',
-    apiProviderName: CLI_API_PROVIDER_MAP['cline'],
-    ...(account
-      ? {
-          accountId: account.id,
-          accountLabel: account.label,
-          ...(account.email ? { accountEmail: account.email } : {}),
-        }
-      : {}),
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    usageSource: 'local-session-history',
-    windows: windowsFromSamples(samples, now),
-    dailyUsage: dailyUsageFromSamples(samples, now),
-    quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cline')),
-    updatedAt: now,
-  };
+  return withPricingSamples(
+    {
+      provider: 'cline',
+      apiProviderName: CLI_API_PROVIDER_MAP['cline'],
+      ...(account
+        ? {
+            accountId: account.id,
+            accountLabel: account.label,
+            ...(account.email ? { accountEmail: account.email } : {}),
+          }
+        : {}),
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      usageSource: 'local-session-history',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cline')),
+      updatedAt: now,
+    },
+    samples,
+  );
 }
 
 // ── Kimi Code CLI ─────────────────────────────────────────────────────────────
@@ -1390,6 +1578,8 @@ async function readKimiCode(now: number, account?: DiscoveredCliAccount): Promis
                   tokensIn,
                   tokensOut,
                   cacheRead: usage.input_cache_read ?? 0,
+                  cacheReadIncludedInTokensIn: true,
+                  cacheReadEvidence: true,
                 });
               }
             } catch (err: unknown) {
@@ -1409,32 +1599,197 @@ async function readKimiCode(now: number, account?: DiscoveredCliAccount): Promis
     }
   }
 
+  return withPricingSamples(
+    {
+      provider: 'kimicode',
+      apiProviderName: CLI_API_PROVIDER_MAP['kimicode'],
+      ...(account
+        ? {
+            accountId: account.id,
+            accountLabel: account.label,
+            ...(account.email ? { accountEmail: account.email } : {}),
+          }
+        : {}),
+      available: hasReportedUsage(samples),
+      attribution: 'account',
+      usageSource: 'local-session-history',
+      windows: windowsFromSamples(samples, now),
+      dailyUsage: dailyUsageFromSamples(samples, now),
+      quotas: [],
+      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('kimicode')),
+      updatedAt: now,
+    },
+    samples,
+  );
+}
+
+// ── Freebuff ─────────────────────────────────────────────────────────────────
+// The PTY adapter reads the selected model's exact input-context count from
+// Freebuff's own log before every request. Freebuff 0.0.162 does not write
+// upstream output-token usage, so Billing labels the equivalent value as an
+// input-only figure instead of estimating output from response text.
+
+async function readFreebuff(now: number): Promise<CliUsageReport | null> {
+  const accounts = discoverFreebuffAccounts();
+  if (accounts.length === 0 && !detectFreebuffCLILogin()) return null;
+
+  let samples: UsageSample[] = [];
+  try {
+    samples = getUsageSamplesByProvider('freebuff', now - SCAN_HORIZON_MS).map((row) => ({
+      ...row,
+      cacheRead: 0,
+    }));
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readFreebuff: credit DB unavailable',
+    );
+  }
+
+  let models: Array<{
+    id: string;
+    name: string;
+    apiModelId?: string;
+    contextWindow: number;
+    contextVerified?: boolean;
+  }> = [];
+  let providerAvailable = false;
+  try {
+    const provider = getContext().providers.get('freebuff');
+    if (provider) {
+      await provider.refreshModels?.();
+      models = provider.listModels();
+      providerAvailable = provider.isAvailable();
+    }
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'readFreebuff: installed model metadata unavailable',
+    );
+  }
+
+  // OpenRouter's unauthenticated official catalog is the pricing source for
+  // Freebuff inference equivalents. Availability and context limits still
+  // come from the installed Freebuff picker above.
+  const pricingCatalog = await getOpenRouterPricingCatalog();
+  const monthCutoff = now - 30 * DAY_MS;
+  const byModel = byModelFromSamples(samples, now).map((entry) => {
+    const catalogModel = models.find(
+      (model) => model.id === entry.model || model.apiModelId === entry.model,
+    );
+    const pickerModelId = catalogModel?.apiModelId ?? catalogModel?.id ?? entry.model;
+    const official = pricingCatalog
+      ? resolveOpenRouterModelPricing(pricingCatalog, pickerModelId)
+      : null;
+    const requestTokens = samples
+      .filter(
+        (sample) => sample.model === entry.model && sample.ts >= monthCutoff && sample.tokensIn > 0,
+      )
+      .map((sample) => sample.tokensIn);
+    const quote = official ? quoteOpenRouterInput(official, requestTokens) : null;
+    return {
+      ...entry,
+      ...(quote ? { apiEquivalent: quote.officialModelId, apiProvider: 'openrouter' } : {}),
+      ...(catalogModel?.contextVerified && catalogModel.contextWindow >= 1_024
+        ? { contextWindow: catalogModel.contextWindow }
+        : {}),
+      ...(quote
+        ? {
+            apiValueUsd: quote.freshInputUsd,
+            apiValueCoverage: 'input-only' as const,
+            apiValueMinUsd: quote.minimumInputUsd,
+            apiValueMaxUsd: quote.maximumInputUsd,
+            apiFreshInputValueUsd: quote.freshInputUsd,
+            apiFreshValueUsd: quote.freshInputUsd,
+            promptUsdPerMillion: quote.promptUsdPerMillion,
+            ...(quote.completionUsdPerMillion !== undefined
+              ? { completionUsdPerMillion: quote.completionUsdPerMillion }
+              : {}),
+            ...(quote.cacheReadUsdPerMillion !== undefined
+              ? { cacheReadUsdPerMillion: quote.cacheReadUsdPerMillion }
+              : {}),
+            ...(quote.cacheWriteUsdPerMillion !== undefined
+              ? { cacheWriteUsdPerMillion: quote.cacheWriteUsdPerMillion }
+              : {}),
+            pricingHasThresholds: quote.hasThresholdOverrides,
+          }
+        : {}),
+    };
+  });
+  const pricedRows = byModel.filter((entry) => entry.apiValueUsd !== undefined);
+  const apiFreshInputValueUsd = pricedRows.reduce(
+    (total, entry) => total + entry.apiFreshInputValueUsd!,
+    0,
+  );
+  const apiValueMinUsd = pricedRows.reduce((total, entry) => total + entry.apiValueMinUsd!, 0);
+  const apiValueMaxUsd = pricedRows.reduce((total, entry) => total + entry.apiValueMaxUsd!, 0);
+  const uniqueCatalog = new Map<string, NonNullable<CliUsageReport['modelCatalog']>[number]>();
+  for (const model of models) {
+    const id = model.apiModelId ?? model.id;
+    if (uniqueCatalog.has(id)) continue;
+    const official = pricingCatalog ? resolveOpenRouterModelPricing(pricingCatalog, id) : null;
+    uniqueCatalog.set(id, {
+      model: id,
+      name: model.name,
+      ...(model.contextVerified && model.contextWindow >= 1_024
+        ? { contextWindow: model.contextWindow }
+        : {}),
+      contextVerified: model.contextVerified === true && model.contextWindow >= 1_024,
+      ...(official
+        ? {
+            apiEquivalent: official.id,
+            promptUsdPerMillion: official.prompt * 1_000_000,
+            ...(official.completion !== undefined
+              ? { completionUsdPerMillion: official.completion * 1_000_000 }
+              : {}),
+            ...(official.inputCacheRead !== undefined
+              ? { cacheReadUsdPerMillion: official.inputCacheRead * 1_000_000 }
+              : {}),
+            ...(official.inputCacheWrite !== undefined
+              ? { cacheWriteUsdPerMillion: official.inputCacheWrite * 1_000_000 }
+              : {}),
+            pricingHasThresholds: official.overrides.length > 0,
+          }
+        : {}),
+    });
+  }
+
   return {
-    provider: 'kimicode',
-    apiProviderName: CLI_API_PROVIDER_MAP['kimicode'],
-    ...(account
+    provider: 'freebuff',
+    ...(accounts.length === 1
+      ? { accountId: accounts[0]!.id, accountLabel: accounts[0]!.label }
+      : {}),
+    available: providerAvailable || hasReportedUsage(samples),
+    attribution: 'account',
+    usageSource: 'kory-provider-events',
+    usagePrecision: 'input-context-only',
+    apiProviderName: 'openrouter',
+    cacheAccounting: 'unavailable',
+    ...(pricingCatalog
+      ? { pricingSource: 'openrouter-live' as const, pricingUpdatedAt: pricingCatalog.fetchedAt }
+      : {}),
+    ...(pricedRows.length > 0
       ? {
-          accountId: account.id,
-          accountLabel: account.label,
-          ...(account.email ? { accountEmail: account.email } : {}),
+          apiValueUsd: apiFreshInputValueUsd,
+          apiValueCoverage: 'input-only' as const,
+          apiValueMinUsd,
+          apiValueMaxUsd,
+          apiFreshInputValueUsd,
+          apiFreshValueUsd: apiFreshInputValueUsd,
         }
       : {}),
-    available: hasReportedUsage(samples),
-    attribution: 'account',
-    usageSource: 'local-session-history',
     windows: windowsFromSamples(samples, now),
     dailyUsage: dailyUsageFromSamples(samples, now),
     quotas: [],
-    byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('kimicode')),
+    byModel,
+    modelCatalog: [...uniqueCatalog.values()],
     updatedAt: now,
   };
 }
 
-// ── Unavailable CLI providers (kilocode, freebuff, jules) ─────────────────────
-// These providers are fail-closed or approval-required in this build. They never
-// emit usage_update and have no parseable local session logs. When their CLI
-// login is detected, surface them in billing with an explicit unavailable
-// attribution so users understand WHY no usage appears (not just "no data").
+// ── Unavailable CLI providers (jules) ────────────────────────────────────────
+// Approval-required providers without usage evidence remain explicit rather
+// than silently disappearing from Billing.
 
 function readUnavailableCli(
   providerName: string,
@@ -1510,15 +1865,8 @@ async function collectCliUsageReports(opts?: {
     (account) => (at: number) => readKimiCode(at, account),
   );
 
-  // ── Unavailable CLI providers: surface only when detected on-disk ──────────
+  // ── Freebuff and unavailable CLI providers ─────────────────────────────────
   const unavailableReaders: Array<(now: number) => CliUsageReport | null> = [
-    (at) =>
-      readUnavailableCli(
-        'freebuff',
-        detectFreebuffCLILogin,
-        'Freebuff is unavailable in this build. The prior integration used an undocumented SDK contract and is disabled; no usage is recorded.',
-        at,
-      ),
     (at) =>
       readUnavailableCli(
         'jules',
@@ -1528,7 +1876,7 @@ async function collectCliUsageReports(opts?: {
       ),
   ];
 
-  const readers: Array<(now: number) => CliUsageReport | Promise<CliUsageReport> | null> = [
+  const readers: Array<(now: number) => CliUsageReport | null | Promise<CliUsageReport | null>> = [
     readClaude,
     ...codexReaders,
     readCopilot,
@@ -1538,6 +1886,7 @@ async function collectCliUsageReports(opts?: {
     ...devinReaders,
     ...clineReaders,
     ...kimiReaders,
+    readFreebuff,
     ...unavailableReaders,
   ];
   const results = await Promise.allSettled(readers.map((reader) => reader(now)));
@@ -1552,6 +1901,12 @@ async function collectCliUsageReports(opts?: {
       reports.push(result.value);
     }
   }
+  await Promise.all(
+    reports.map(async (report) => {
+      const samples = pricingSamplesByReport.get(report);
+      if (samples) await applyOpenRouterEquivalentPricing(report, samples, now);
+    }),
+  );
   await quotaJobs;
   for (const r of reports) {
     const q = quotaCache.get(r.provider);

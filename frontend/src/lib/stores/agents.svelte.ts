@@ -6,6 +6,7 @@ import type {
   AgentStatus,
   StreamUsagePayload,
   ContextBreakdown,
+  SessionRunTerminalPhase,
 } from '@koryphaios/shared';
 import type { FeedEntry } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
@@ -30,6 +31,8 @@ export interface AgentState {
   hasUsageData: boolean;
   /** Estimated prompt composition from the backend (context-usage bar segments). */
   contextBreakdown?: ContextBreakdown;
+  /** Provider-reported cached input already included in tokensUsed. */
+  cachedInputTokens?: number;
   sessionId: string;
 }
 
@@ -61,6 +64,7 @@ initialAgents.set('kory-manager', {
 let agents = $state<Map<string, AgentState>>(initialAgents);
 let agentThreadFeeds = $state<Map<string, FeedEntry[]>>(new Map());
 let agentThreadVersion = $state(0);
+let managerContextSelection: { sessionId: string; provider: string; model: string } | null = null;
 
 // Svelte 5's $state does not proxy Map contents or the plain objects
 // stored in them — mutating an AgentState in place is invisible to the
@@ -86,7 +90,9 @@ function setAgentThreadFeed(sessionId: string, agentId: string, entries: FeedEnt
 function upsertAgentThreadEntry(sessionId: string, agentId: string, entry: Omit<FeedEntry, 'id'>) {
   const key = getAgentThreadKey(sessionId, agentId);
   const current = agentThreadFeeds.get(key) ?? [];
-  const nextEntry: FeedEntry = { ...entry, id: feedStore.nextFeedId('aft') };
+  const candidate: FeedEntry = { ...entry, id: feedStore.nextFeedId('aft') };
+  const nextEntry = feedStore.visibleEntriesForSession(sessionId, [candidate])[0];
+  if (!nextEntry) return;
   const next = [...current, nextEntry];
   if (next.length > MAX_THREAD_ENTRIES) {
     next.splice(0, next.length - MAX_THREAD_ENTRIES);
@@ -101,10 +107,19 @@ function accumulateAgentThreadEntry(
 ) {
   const key = getAgentThreadKey(sessionId, agentId);
   const current = agentThreadFeeds.get(key) ?? [];
+  const candidate: FeedEntry = { ...entry, id: 'pending-agent-thread-entry' };
+  const visible = feedStore.visibleEntriesForSession(sessionId, [candidate])[0];
+  if (!visible) return;
+  entry = visible;
   const lastIdx = current.length - 1;
   const last = lastIdx >= 0 ? current[lastIdx] : null;
 
-  if (last && last.type === entry.type && last.agentId === entry.agentId) {
+  if (
+    last &&
+    last.type === entry.type &&
+    last.agentId === entry.agentId &&
+    Boolean(last.userHidden) === Boolean(entry.userHidden)
+  ) {
     last.text += entry.text;
     last.timestamp = entry.timestamp;
     if (last.type === 'thinking' && last.thinkingStartedAt) {
@@ -210,13 +225,36 @@ export function addToolCall(agentId: string, name: string, sessionId?: string) {
 export function updateUsage(agentId: string, payload: StreamUsagePayload, sessionId?: string) {
   const agent = agents.get(agentId);
   if (agent) {
-    agent.tokensUsed = Math.max(0, payload.tokensUsed || 0);
+    if (agentId === 'kory-manager') {
+      if (
+        !managerContextSelection ||
+        sessionId !== managerContextSelection.sessionId ||
+        payload.provider !== managerContextSelection.provider ||
+        payload.model !== managerContextSelection.model
+      ) {
+        // Startup replay can deliver an old usage event before the composer has
+        // selected anything. Fail closed until an exact selection is pinned;
+        // late events from the prior provider/model cannot take ownership.
+        return;
+      }
+    }
+    // A non-authoritative dispatch/preview update starts a fresh telemetry
+    // epoch. Never merge it with the prior provider/model's exact usage: that
+    // is how CLI harness overhead survived a switch to an API provider.
+    agent.tokensUsed = payload.usageKnown ? Math.max(0, payload.tokensUsed || 0) : 0;
     if (typeof payload.contextWindow === 'number') {
       agent.contextMax = payload.contextWindow;
+    } else if (!payload.contextKnown) {
+      agent.contextMax = 0;
     }
     agent.contextKnown = !!payload.contextKnown;
     agent.hasUsageData = !!payload.usageKnown;
-    if (payload.breakdown) agent.contextBreakdown = payload.breakdown;
+    agent.identity.provider = payload.provider;
+    agent.identity.model = payload.model;
+    agent.contextBreakdown = payload.usageKnown ? payload.breakdown : undefined;
+    agent.cachedInputTokens = payload.usageKnown
+      ? Math.max(0, payload.cachedInputTokens ?? 0)
+      : undefined;
     if (sessionId) agent.sessionId = sessionId;
     commitAgents();
   }
@@ -230,33 +268,148 @@ export function seedManagerUsage(
     used: number;
     max: number;
     contextKnown: boolean;
+    provider?: string;
+    model?: string;
+    cachedInputTokens?: number;
     breakdown?: ContextBreakdown;
   },
+): boolean {
+  const agent = agents.get('kory-manager');
+  if (!agent) return false;
+  // Legacy snapshots have no provider/model provenance. Applying one after a
+  // picker change can resurrect a CLI harness segment under an API provider,
+  // so fail closed until this exact selection reports fresh usage.
+  if (!usage.provider || !usage.model) return false;
+  if (
+    !managerContextSelection ||
+    managerContextSelection.sessionId !== sessionId ||
+    managerContextSelection.provider !== usage.provider ||
+    managerContextSelection.model !== usage.model
+  ) {
+    return false;
+  }
+  agent.tokensUsed = Math.max(0, usage.used);
+  agent.contextMax = usage.max > 0 ? usage.max : 0;
+  agent.contextKnown = usage.contextKnown && usage.max > 0;
+  agent.hasUsageData = true;
+  agent.identity.provider = usage.provider;
+  agent.identity.model = usage.model;
+  agent.contextBreakdown = usage.breakdown;
+  agent.cachedInputTokens = Math.max(0, usage.cachedInputTokens ?? 0);
+  agent.sessionId = sessionId;
+  commitAgents();
+  return true;
+}
+
+export interface ManagerContextPreview {
+  provider?: string;
+  model?: string;
+  used?: number;
+  contextWindow?: number;
+  contextKnown?: boolean;
+  usageKnown?: boolean;
+  cachedInputTokens?: number;
+  breakdown?: ContextBreakdown;
+}
+
+function clearManagerUsage(agent: AgentState) {
+  agent.tokensUsed = 0;
+  agent.hasUsageData = false;
+  agent.contextBreakdown = undefined;
+  agent.cachedInputTokens = undefined;
+}
+
+/** Start a backend-owned context preview for an exact provider/model pair.
+ *  A changed selection immediately drops the old pair's usage composition;
+ *  only a matching backend preview or stream usage event may repopulate it. */
+export function beginManagerContextPreview(
+  sessionId: string,
+  provider: string,
+  model: string,
+  contextWindow?: number,
 ) {
   const agent = agents.get('kory-manager');
   if (!agent) return;
-  agent.tokensUsed = Math.max(0, usage.used);
-  if (usage.max > 0) agent.contextMax = usage.max;
-  agent.contextKnown = usage.contextKnown && usage.max > 0;
-  agent.hasUsageData = true;
-  if (usage.breakdown) agent.contextBreakdown = usage.breakdown;
+  const selectionChanged =
+    agent.sessionId !== sessionId ||
+    agent.identity.provider !== provider ||
+    agent.identity.model !== model;
+  if (selectionChanged) clearManagerUsage(agent);
+  managerContextSelection = { sessionId, provider, model };
   agent.sessionId = sessionId;
+  agent.identity.provider = provider;
+  agent.identity.model = model;
+  if (contextWindow && contextWindow > 0) {
+    agent.contextMax = contextWindow;
+    agent.contextKnown = true;
+  } else {
+    agent.contextMax = 0;
+    agent.contextKnown = false;
+  }
   commitAgents();
 }
 
-/** Update the manager's context window immediately when the user switches
- *  models — the bar must re-baseline right away, not on the next turn. */
+/** Apply a model-preview response only while its provider/model is still the
+ *  active selection. Preview data replaces state wholesale; absent or unknown
+ *  usage means "awaiting provider report", never "reuse the previous total". */
+export function applyManagerContextPreview(
+  sessionId: string,
+  provider: string,
+  model: string,
+  usage: ManagerContextPreview | undefined,
+): boolean {
+  const agent = agents.get('kory-manager');
+  if (
+    !agent ||
+    agent.sessionId !== sessionId ||
+    agent.identity.provider !== provider ||
+    agent.identity.model !== model ||
+    (usage?.provider !== undefined && usage.provider !== provider) ||
+    (usage?.model !== undefined && usage.model !== model)
+  ) {
+    return false;
+  }
+
+  if (usage?.contextKnown && usage.contextWindow && usage.contextWindow > 0) {
+    agent.contextMax = usage.contextWindow;
+    agent.contextKnown = true;
+  } else {
+    agent.contextMax = 0;
+    agent.contextKnown = false;
+  }
+
+  if (usage?.usageKnown === true && typeof usage.used === 'number') {
+    agent.tokensUsed = Math.max(0, usage.used);
+    agent.hasUsageData = true;
+    agent.contextBreakdown = usage.breakdown;
+    agent.cachedInputTokens = Math.max(0, usage.cachedInputTokens ?? 0);
+  } else {
+    clearManagerUsage(agent);
+  }
+  commitAgents();
+  return true;
+}
+
+export function clearManagerContextPreview(sessionId: string) {
+  const agent = agents.get('kory-manager');
+  if (!agent) return;
+  managerContextSelection = null;
+  agent.sessionId = sessionId;
+  agent.contextMax = 0;
+  agent.contextKnown = false;
+  clearManagerUsage(agent);
+  commitAgents();
+}
+
+/** Legacy window-only update. New model selections should use
+ *  beginManagerContextPreview so provider/model provenance is retained. */
 export function setManagerContextWindow(sessionId: string, contextWindow?: number) {
   const agent = agents.get('kory-manager');
   if (!agent) return;
   if (agent.sessionId !== sessionId) {
     agent.sessionId = sessionId;
-    agent.tokensUsed = 0;
-    agent.contextBreakdown = undefined;
+    clearManagerUsage(agent);
   }
-  // Selecting a model is enough to render context metadata. A provider turn
-  // is not required just to show an empty window.
-  agent.hasUsageData = true;
   if (contextWindow && contextWindow > 0) {
     agent.contextMax = contextWindow;
     agent.contextKnown = true;
@@ -301,7 +454,11 @@ export function clearAgentStreamingState(agentId: string, sessionId?: string) {
 export function setManagerSessionId(sessionId: string) {
   const manager = agents.get('kory-manager');
   if (manager && manager.sessionId !== sessionId) {
+    managerContextSelection = null;
     manager.sessionId = sessionId;
+    manager.contextMax = 0;
+    manager.contextKnown = false;
+    clearManagerUsage(manager);
     commitAgents();
   }
 }
@@ -337,6 +494,37 @@ export function markSessionAgentsStopped(sessionId: string) {
     }
   }
   if (changed) commitAgents();
+}
+
+/**
+ * Resolve non-manager cards left visually active after an authoritative
+ * terminal SessionRun projection. The run aggregate is the only source that
+ * may make this call; keeping the agent records (and their thread/output)
+ * lets users still inspect completed work while removing a false spinner.
+ */
+export function terminalizeSessionSubAgents(
+  sessionId: string,
+  terminalPhase: SessionRunTerminalPhase,
+): number {
+  if (!sessionId) return 0;
+  // A cancellation is terminal but not a worker execution failure. Failed
+  // and restart-interrupted runs use error so the card remains truthful.
+  const terminalStatus: AgentStatus = terminalPhase === 'error' ? 'error' : 'done';
+  let changed = 0;
+  for (const [agentId, agent] of agents) {
+    if (
+      agentId === 'kory-manager' ||
+      agent.identity.role === 'manager' ||
+      agent.sessionId !== sessionId ||
+      TERMINAL_AGENT_STATUSES.has(agent.status)
+    ) {
+      continue;
+    }
+    agent.status = terminalStatus;
+    changed++;
+  }
+  if (changed) commitAgents();
+  return changed;
 }
 
 /** Mark a single agent as done (optimistic UI when user cancels one worker). */
@@ -386,25 +574,29 @@ export function getContextUsage(): {
   isReliable: boolean;
   reason?: string;
   breakdown?: ContextBreakdown;
+  cachedInputTokens?: number;
+  provider?: string;
 } {
   const activeSessionId = sessionStore.activeSessionId;
-  const candidates = [...agents.values()].filter(
-    (a) => a.sessionId === activeSessionId && a.hasUsageData,
-  );
-
-  if (candidates.length === 0) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'usage_unknown' };
-  }
-  // The manager owns the conversation context; workers/critics report their own
-  // (separate) usage and must not blank the bar the moment they spawn.
-  const manager = candidates.find(
+  const sessionAgents = [...agents.values()].filter((a) => a.sessionId === activeSessionId);
+  const sessionManager = sessionAgents.find(
     (a) => a.identity.role === 'manager' || a.identity.id === 'kory-manager',
   );
-  if (!manager && candidates.length > 1) {
-    return { used: 0, max: 0, percent: 0, isReliable: false, reason: 'multi_agent_usage' };
-  }
 
-  const agent = manager ?? candidates[0];
+  if (!sessionManager?.hasUsageData) {
+    return {
+      used: 0,
+      max: sessionManager?.contextKnown ? Math.max(0, sessionManager.contextMax) : 0,
+      percent: 0,
+      isReliable: false,
+      reason: 'usage_unknown',
+      provider: sessionManager?.identity.provider,
+    };
+  }
+  // The bar is the manager conversation's context window. A worker or critic
+  // has a separate provider call and must never take over merely because it is
+  // the only agent with usage while the selected manager awaits a fresh report.
+  const agent = sessionManager;
   if (!agent.contextKnown || agent.contextMax <= 0) {
     // Window size unknown — still report real usage so the bar never lies by
     // omission; the UI shows tokens-used with an "unknown window" treatment.
@@ -415,13 +607,23 @@ export function getContextUsage(): {
       isReliable: false,
       reason: 'context_unknown',
       breakdown: agent.contextBreakdown,
+      cachedInputTokens: agent.cachedInputTokens,
+      provider: agent.identity.provider,
     };
   }
 
   const used = Math.max(0, agent.tokensUsed);
   const max = agent.contextMax;
   const percent = Math.min(100, Math.round((used / max) * 100));
-  return { used, max, percent, isReliable: true, breakdown: agent.contextBreakdown };
+  return {
+    used,
+    max,
+    percent,
+    isReliable: true,
+    breakdown: agent.contextBreakdown,
+    cachedInputTokens: agent.cachedInputTokens,
+    provider: agent.identity.provider,
+  };
 }
 
 // ─── API Loading ─────────────────────────────────────────────────────────────
@@ -473,6 +675,7 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
 async function loadAgentThreadMessages(sessionId: string, agentId: string): Promise<void> {
   if (!sessionId || !agentId) return;
   try {
+    await feedStore.loadFeedPersistence(sessionId);
     const res = await apiFetch(
       apiUrl(`/api/agent/${agentId}/thread?sessionId=${encodeURIComponent(sessionId)}`),
     );
@@ -505,12 +708,29 @@ async function loadAgentThreadMessages(sessionId: string, agentId: string): Prom
             ? 'glow-kory'
             : '',
       text: entry.content,
-      metadata: { sessionId, sourceAgentId: agentId, threadRole: entry.role },
+      metadata: {
+        sessionId,
+        sourceAgentId: agentId,
+        threadRole: entry.role,
+        threadEntryId: entry.id,
+      },
     }));
-    setAgentThreadFeed(sessionId, agentId, entries);
+    setAgentThreadFeed(sessionId, agentId, feedStore.visibleEntriesForSession(sessionId, entries));
   } catch (error) {
     if (import.meta.env.DEV) console.warn('Failed to load agent thread messages', error);
   }
+}
+
+/** Reapply durable view tombstones after a thread action changes visibility. */
+function applySessionFeedVisibility(sessionId: string): void {
+  const prefix = `${sessionId}:`;
+  let changed = false;
+  for (const [key, entries] of agentThreadFeeds) {
+    if (!key.startsWith(prefix)) continue;
+    agentThreadFeeds.set(key, feedStore.visibleEntriesForSession(sessionId, entries));
+    changed = true;
+  }
+  if (changed) agentThreadVersion++;
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
@@ -543,8 +763,12 @@ export const agentStore = {
   removeAgent,
   clearNonManagerAgents,
   markSessionAgentsStopped,
+  terminalizeSessionSubAgents,
   markAgentStopped,
   seedManagerUsage,
+  beginManagerContextPreview,
+  applyManagerContextPreview,
+  clearManagerContextPreview,
   setManagerContextWindow,
   getAgentThreadKey,
   setAgentThreadFeed,
@@ -556,4 +780,5 @@ export const agentStore = {
   ensureAgentThreadFeed,
   loadAgentThreads,
   loadAgentThreadMessages,
+  applySessionFeedVisibility,
 };

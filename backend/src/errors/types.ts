@@ -205,8 +205,15 @@ export class ProviderUnavailableError extends ProviderError {
 }
 
 export class ProviderQuotaError extends ProviderError {
-  constructor(provider: string, details?: Record<string, unknown>) {
-    super(provider, `Provider "${provider}" quota exceeded`, 'QUOTA_EXCEEDED', 429, true, details);
+  constructor(provider: string, details?: Record<string, unknown>, message?: string) {
+    super(
+      provider,
+      message ?? `Provider "${provider}" quota exceeded`,
+      'QUOTA_EXCEEDED',
+      429,
+      true,
+      details,
+    );
   }
 }
 

@@ -27,7 +27,7 @@ import {
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
-/** A subset of tools to test with — the real catalog has 47 entries. */
+/** A representative subset; catalog integrity is asserted separately below. */
 const TEST_TOOLS: RuntimeKoryToolDef[] = [
   {
     name: 'kory__read_file',
@@ -170,8 +170,8 @@ describe('Kory MCP bridge — 2025-era fallback (InMemoryTransport)', () => {
 // ─── Tool catalog integrity ────────────────────────────────────────────────
 
 describe('Kory MCP bridge — tool catalog integrity', () => {
-  it('KORY_TOOLS has 48 tools', () => {
-    expect(KORY_TOOLS).toHaveLength(48);
+  it('KORY_TOOLS has 52 tools', () => {
+    expect(KORY_TOOLS).toHaveLength(52);
   });
 
   it('every tool name starts with kory__', () => {
@@ -181,7 +181,7 @@ describe('Kory MCP bridge — tool catalog integrity', () => {
   });
 
   it('manager role sees all tools', () => {
-    expect(toolsForRole('manager')).toHaveLength(48);
+    expect(toolsForRole('manager')).toHaveLength(52);
   });
 
   it('unknown role sees no tools', () => {

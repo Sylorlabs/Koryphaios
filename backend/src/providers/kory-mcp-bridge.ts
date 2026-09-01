@@ -20,10 +20,7 @@
 // The CLI spawns this as a subprocess (stdio MCP). Session ID correlates tool
 // calls back to the Kory session that owns the turn.
 
-import {
-  McpServer,
-  fromJsonSchema,
-} from '@modelcontextprotocol/server';
+import { McpServer, fromJsonSchema } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
 
@@ -227,7 +224,45 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'worker',
   },
 
-  // ── Notes (Obsidian-style knowledge graph) ──
+  // ── Notes (Koryphaios knowledge network) ──
+  {
+    name: 'kory__record_work_note',
+    description: 'Record an evidence-backed work result with Koryphaios-owned run provenance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        summary: { type: 'string' },
+        status: {
+          type: 'string',
+          enum: ['completed', 'partial', 'blocked', 'decision'],
+        },
+        objective: { type: 'string' },
+        decisions: { type: 'array', items: { type: 'string' } },
+        changedFiles: { type: 'array', items: { type: 'string' } },
+        commands: { type: 'array', items: { type: 'string' } },
+        tests: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              outcome: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
+              evidence: { type: 'string' },
+            },
+            required: ['name', 'outcome'],
+          },
+        },
+        evidence: { type: 'array', items: { type: 'string' } },
+        risks: { type: 'array', items: { type: 'string' } },
+        followUps: { type: 'array', items: { type: 'string' } },
+        relatedNotes: { type: 'array', items: { type: 'string' } },
+        includeInContext: { type: 'boolean' },
+      },
+      required: ['title', 'summary', 'status'],
+    },
+    role: 'worker',
+  },
   {
     name: 'kory__create_note',
     description: 'Create a new note in the Koryphaios knowledge graph.',
@@ -244,7 +279,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
   {
     name: 'kory__read_note',
-    description: 'Read a note by title or ID.',
+    description: 'Read a note by title or ID, including its current revision.',
     inputSchema: {
       type: 'object',
       properties: { title: { type: 'string' }, id: { type: 'string' } },
@@ -253,8 +288,70 @@ export const KORY_TOOLS: KoryToolDef[] = [
     role: 'any',
   },
   {
+    name: 'kory__get_note_properties',
+    description:
+      'Read bounded typed YAML properties from one project note; malformed frontmatter fails closed.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        noteId: { type: 'string', minLength: 1, maxLength: 512 },
+      },
+      required: ['noteId'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__query_note_base',
+    description:
+      'Query an existing saved project Base by ID or unique name with bounded deterministic pagination.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        baseId: { type: 'string', minLength: 1, maxLength: 512 },
+        baseName: { type: 'string', minLength: 1, maxLength: 120 },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        offset: { type: 'integer', minimum: 0, maximum: 100000 },
+      },
+      oneOf: [{ required: ['baseId'] }, { required: ['baseName'] }],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__set_note_property',
+    description: 'Set one typed YAML property with a mandatory authoritative note revision.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        noteId: { type: 'string', minLength: 1, maxLength: 512 },
+        expectedRevision: { type: 'integer', minimum: 1 },
+        key: { type: 'string', minLength: 1, maxLength: 80 },
+        type: {
+          type: 'string',
+          enum: ['text', 'number', 'checkbox', 'date', 'datetime', 'list', 'tags'],
+        },
+        value: {
+          oneOf: [
+            { type: 'string', maxLength: 2048 },
+            { type: 'number' },
+            { type: 'boolean' },
+            {
+              type: 'array',
+              maxItems: 100,
+              items: { type: 'string', maxLength: 2048 },
+            },
+          ],
+        },
+      },
+      required: ['noteId', 'expectedRevision', 'key', 'type', 'value'],
+    },
+    role: 'worker',
+  },
+  {
     name: 'kory__update_note',
-    description: 'Update an existing note.',
+    description: 'Update an existing note at an authoritative expected revision.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -262,14 +359,15 @@ export const KORY_TOOLS: KoryToolDef[] = [
         title: { type: 'string' },
         content: { type: 'string' },
         tags: { type: 'array', items: { type: 'string' } },
+        expectedRevision: { type: 'integer', minimum: 1 },
       },
-      required: ['id'],
+      required: ['id', 'expectedRevision'],
     },
     role: 'worker',
   },
   {
     name: 'kory__delete_note',
-    description: 'Delete a note.',
+    description: 'Move a note to recoverable trash.',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
     role: 'worker',
   },

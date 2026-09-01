@@ -88,7 +88,7 @@
         aria-live="assertive"
       >
         <ToastIcon size={18} class="shrink-0 mt-0.5" />
-        <p class="text-sm flex-1">{toast.message}</p>
+        <p class="text-sm flex-1 min-w-0 break-words [overflow-wrap:anywhere]">{toast.message}</p>
         {#if toast.onRetry}
           <button
             class="text-xs underline opacity-75 hover:opacity-100 ml-2 shrink-0"

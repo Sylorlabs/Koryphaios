@@ -9,7 +9,14 @@
  */
 
 export type NativeCliProvider =
-  'claude' | 'codex' | 'cline' | 'cursor' | 'devin' | 'antigravity' | 'grok';
+  | 'claude'
+  | 'codex'
+  | 'cline'
+  | 'cursor'
+  | 'devin'
+  | 'antigravity'
+  | 'grok'
+  | 'freebuff';
 
 const PROCESS_ENV_KEYS = [
   // Executable discovery and Windows process startup.
@@ -126,6 +133,9 @@ const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {
     'USERPROFILE',
   ],
   grok: ['GROK_CODE_XAI_API_KEY', 'XAI_API_KEY', 'GROK_HOME'],
+  // Authentication is copied into the PTY adapter's private HOME. Never pass
+  // the Freebuff credential through process.env.
+  freebuff: [],
 };
 
 function allowedKeysFor(provider: NativeCliProvider): ReadonlySet<string> {
@@ -179,4 +189,4 @@ export const PROVIDER_CLI_SECRET_KEYS_FOR_TESTING = Object.freeze({
   devin: 'COGNITION_API_KEY',
   antigravity: 'ANTIGRAVITY_API_KEY',
   grok: 'GROK_CODE_XAI_API_KEY',
-} satisfies Record<NativeCliProvider, string>);
+} satisfies Partial<Record<NativeCliProvider, string>>);

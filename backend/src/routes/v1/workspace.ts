@@ -12,6 +12,7 @@ import {
   validateWorkspaceRoot,
   WorkspaceNavigationStore,
 } from '../../stores/workspace-navigation-store';
+import { broadcastWorkspaceUpdate } from '../../stores/workspace-events';
 
 const SKIP_SEGMENTS = new Set([
   'node_modules',
@@ -32,7 +33,11 @@ function shouldSkipPath(relativePath: string): boolean {
 export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
   .get('/state', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: new WorkspaceNavigationStore(getDb()).snapshot() };
+    const { snapshot, healed } = new WorkspaceNavigationStore(getDb()).snapshotWithStatus();
+    // The snapshot self-heals filesystem drift; other windows must learn
+    // about the correction immediately, not on their next poll.
+    if (healed) broadcastWorkspaceUpdate(snapshot);
+    return { ok: true, data: snapshot };
   })
   .post('/open', ({ request, body, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
@@ -40,10 +45,9 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     try {
       const canonicalRoot = validateWorkspaceRoot(root);
       registerWorkspaceRoot(canonicalRoot);
-      return {
-        ok: true,
-        data: new WorkspaceNavigationStore(getDb()).openWorkspace(canonicalRoot),
-      };
+      const snapshot = new WorkspaceNavigationStore(getDb()).openWorkspace(canonicalRoot);
+      broadcastWorkspaceUpdate(snapshot);
+      return { ok: true, data: snapshot };
     } catch (error) {
       set.status = 400;
       return {
@@ -56,7 +60,9 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const path = String((body as { path?: string })?.path ?? '').trim();
     try {
-      return { ok: true, data: new WorkspaceNavigationStore(getDb()).selectProject(path) };
+      const snapshot = new WorkspaceNavigationStore(getDb()).selectProject(path);
+      broadcastWorkspaceUpdate(snapshot);
+      return { ok: true, data: snapshot };
     } catch (error) {
       set.status = 400;
       return {
@@ -67,18 +73,21 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
   })
   .post('/deselect', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: new WorkspaceNavigationStore(getDb()).deselectProject() };
+    const snapshot = new WorkspaceNavigationStore(getDb()).deselectProject();
+    broadcastWorkspaceUpdate(snapshot);
+    return { ok: true, data: snapshot };
   })
   .post('/acknowledge-unavailable', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return {
-      ok: true,
-      data: new WorkspaceNavigationStore(getDb()).acknowledgeUnavailable(),
-    };
+    const snapshot = new WorkspaceNavigationStore(getDb()).acknowledgeUnavailable();
+    broadcastWorkspaceUpdate(snapshot);
+    return { ok: true, data: snapshot };
   })
   .delete('/state', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    return { ok: true, data: new WorkspaceNavigationStore(getDb()).clear() };
+    const snapshot = new WorkspaceNavigationStore(getDb()).clear();
+    broadcastWorkspaceUpdate(snapshot);
+    return { ok: true, data: snapshot };
   })
   .get('/raw', ({ request, query, set }) => {
     // <img src> can't send Authorization headers, so accept the bearer token

@@ -3,16 +3,27 @@ import { serverLog } from '../logger';
 
 export type NotesMutationAction = 'create' | 'update' | 'delete' | 'link' | 'unlink';
 
+export interface NotesMutationOrigin {
+  clientId?: string;
+  mutationId?: string;
+}
+
 export function broadcastNotesNetworkUpdate(
   action: NotesMutationAction,
   noteId?: string,
   sessionId?: string,
+  origin?: NotesMutationOrigin,
 ): void {
   try {
     const { wsManager } = getContext();
     wsManager.broadcast({
       type: 'notes.updated',
-      payload: { action, noteId },
+      payload: {
+        action,
+        noteId,
+        ...(origin?.clientId ? { clientId: origin.clientId } : {}),
+        ...(origin?.mutationId ? { mutationId: origin.mutationId } : {}),
+      },
       timestamp: Date.now(),
       ...(sessionId ? { sessionId } : {}),
     });

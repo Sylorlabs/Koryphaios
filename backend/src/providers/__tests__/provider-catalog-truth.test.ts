@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
 import { PROVIDER_CONFIGS, PROVIDER_CONFIG_MAP } from '../provider-configs';
-import { ProviderRegistry, UNSUPPORTED_CHAT_PROVIDER_NAMES } from '../registry';
+import {
+  DEDICATED_CAPABILITY_PROVIDER_NAMES,
+  ProviderRegistry,
+  UNSUPPORTED_CHAT_PROVIDER_NAMES,
+} from '../registry';
 
 const EXPECTED_NON_CHAT_PROVIDERS: ProviderName[] = [
   'replicate',
@@ -38,6 +42,36 @@ describe('built-in provider catalog truth', () => {
     });
   });
 
+  it('uses the official TokenRouter gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('tokenrouter')).toMatchObject({
+      baseUrl: 'https://api.tokenrouter.io/v1',
+      envKeys: ['TOKENROUTER_API_KEY'],
+    });
+  });
+
+  it('migrates TokenRouter configs persisted with the retired gateway host', () => {
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    Object.assign(registry, {
+      config: {
+        server: { port: 3001, host: '127.0.0.1' },
+        providers: {
+          tokenrouter: {
+            name: 'tokenrouter',
+            baseUrl: 'https://tokenrouter.me/v1',
+            disabled: true,
+          },
+        },
+      },
+    });
+    const buildProviderConfig = (
+      registry as unknown as {
+        buildProviderConfig(name: ProviderName): ProviderConfig;
+      }
+    ).buildProviderConfig.bind(registry);
+
+    expect(buildProviderConfig('tokenrouter').baseUrl).toBe('https://api.tokenrouter.io/v1');
+  });
+
   it('provider names are unique', () => {
     const names = PROVIDER_CONFIGS.map((p) => p.name);
     const unique = new Set(names);
@@ -65,6 +99,7 @@ describe('built-in provider catalog truth', () => {
         disabled: false,
       };
       expect(createProvider(name, config), `${name} must not get a chat provider`).toBeNull();
+      if (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name)) continue;
       const verification = await registry.verifyConnection(name, {
         apiKey: config.apiKey,
         baseUrl: config.baseUrl,
@@ -78,6 +113,33 @@ describe('built-in provider catalog truth', () => {
       expect(connection.success).toBe(false);
       expect(connection.error).toBe(verification.error);
     }
+  });
+
+  it('reports dedicated voice adapters as configurable without exposing a chat adapter', () => {
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    const config: ProviderConfig = {
+      name: 'deepgram',
+      apiKey: 'configured-key',
+      baseUrl: PROVIDER_CONFIG_MAP.get('deepgram')?.baseUrl,
+      disabled: false,
+    };
+    Object.assign(registry, {
+      providers: new Map(),
+      providerConfigs: new Map([['deepgram', config]]),
+      circuitStates: new Map(),
+      customProviderIds: new Set(),
+      verificationRecords: new Map([
+        ['deepgram', { state: 'verified', checkedAt: Date.now(), scope: 'credential' }],
+      ]),
+    });
+
+    const status = registry.getStatus().find((entry) => entry.name === 'deepgram');
+    expect(status).toMatchObject({
+      authenticated: true,
+      adapterAvailable: false,
+      supportsApiKey: true,
+    });
+    expect(status?.configurationBlocked).toBeUndefined();
   });
 
   it('reports blocked modalities and mutation-capable adapters as unavailable, not ready', () => {

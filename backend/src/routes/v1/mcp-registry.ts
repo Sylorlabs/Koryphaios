@@ -9,6 +9,7 @@
 
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
+import { FEATURED_MCP_SERVERS } from '../../mcp/featured-registry';
 import { serverLog } from '../../logger';
 
 const REGISTRY_BASE_URL = 'https://registry.modelcontextprotocol.io';
@@ -184,12 +185,19 @@ function mapSearchResult(item: RegistryListItem): McpRegistrySearchResult | null
 }
 
 export const mcpRegistryRoutes = new Elysia({ prefix: '/api/v1/mcp-registry' })
+  .get('/featured', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: FEATURED_MCP_SERVERS };
+  })
   .get(
     '/search',
     async ({ request, set, query }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const q = (query.q ?? '').trim();
-      const limit = Math.min(Math.max(Number(query.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT, 1), MAX_RESULTS);
+      const limit = Math.min(
+        Math.max(Number(query.limit ?? DEFAULT_LIMIT) || DEFAULT_LIMIT, 1),
+        MAX_RESULTS,
+      );
       const cursor = query.cursor ?? undefined;
 
       if (!q) {

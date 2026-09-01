@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     agentSettingsStore,
     DEFAULT_AGENT_SETTINGS,
@@ -9,8 +10,12 @@
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
   import KorySelect from './KorySelect.svelte';
+  import SkillsWorkspace from './SkillsWorkspace.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
+  import { projectStore } from '$lib/stores/project.svelte';
+  import { loadAgentEditorDraft, saveAgentEditorDraft } from '$lib/utils/unsaved-editor-drafts';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import Bot from 'lucide-svelte/icons/bot';
   import Shield from 'lucide-svelte/icons/shield';
   import FileText from 'lucide-svelte/icons/file-text';
@@ -41,13 +46,24 @@
   interface Props {
     onClose?: () => void;
     focusPermissions?: boolean;
+    active?: boolean;
   }
 
-  let { onClose, focusPermissions = false }: Props = $props();
+  let { onClose, focusPermissions = false, active = true }: Props = $props();
 
   type AgentTab = 'settings' | 'preferences' | 'skills';
   type ControlSection = 'permissions' | 'quality' | 'workflow' | 'context' | 'research' | 'routing';
-  let selectedControlSection = $state<ControlSection>('permissions');
+  let expandedSections = $state<Record<ControlSection, boolean>>({
+    permissions: true,
+    quality: false,
+    workflow: false,
+    context: false,
+    research: false,
+    routing: true,
+  });
+  function toggleSection(id: ControlSection) {
+    expandedSections = { ...expandedSections, [id]: !expandedSections[id] };
+  }
 
   const AGENT_TABS: readonly { id: AgentTab; label: string; icon: typeof Bot }[] = [
     { id: 'settings', label: 'Behavior', icon: Bot },
@@ -86,7 +102,7 @@
 
   $effect(() => {
     if (!focusPermissions) return;
-    selectedControlSection = 'permissions';
+    expandedSections = { ...expandedSections, permissions: true };
   });
 
   // Local state for preferences editing
@@ -97,8 +113,6 @@
   let skillDraftDirty = $state(false);
   let skillPreviewPrompt = $state('');
   let skillCollisionChoices = $state<Record<string, 'personal' | 'project'>>({});
-  let showSkillComparison = $state(false);
-  let showBundledComparison = $state(false);
   let showSkillCreator = $state(false);
   let skillCreatorMode = $state<'template' | 'freeform'>('template');
   let newSkillSource = $state<'personal' | 'project'>('personal');
@@ -266,16 +280,6 @@
     );
   }
 
-  async function compareSelectedSkill() {
-    if (!selectedSkill) return;
-    showSkillComparison = await agentSettingsStore.compareSkillDraft(selectedSkill);
-  }
-
-  async function compareSelectedSkillWithBundled() {
-    if (!selectedSkill) return;
-    showBundledComparison = await agentSettingsStore.compareBundledSkill(selectedSkill);
-  }
-
   async function saveSelectedSkillDraft() {
     if (!selectedSkill) return;
     if (await agentSettingsStore.saveSkillDraft(selectedSkill, skillDraftContent))
@@ -392,6 +396,62 @@
       ),
     ) as Record<string, { text: string; dirty: boolean }>,
   );
+  let restoredEditorDraftScope = $state<string | null>(null);
+  let restoredEditorDraftNoticeScope = $state<string | null>(null);
+  let editorDraftScope = $derived(
+    projectStore.currentPath ?? agentSettingsStore.preferences?.path ?? 'personal',
+  );
+  let managerNotesDirty = $derived(Object.values(notesDrafts).some((draft) => draft.dirty));
+  let hasUnsavedEditorWork = $derived(preferencesDirty || managerNotesDirty);
+
+  // Preferences and manager notes have an explicit Save action. Keep a
+  // bounded local recovery copy between renderer restarts, scoped to the
+  // current project, and publish their dirty state to Settings' close guard.
+  $effect(() => {
+    const scope = editorDraftScope;
+    if (!active || restoredEditorDraftScope === scope) return;
+    const recovered = loadAgentEditorDraft(scope);
+    restoredEditorDraftScope = scope;
+    let restored = false;
+    if (recovered.preferences && !preferencesDirty) {
+      preferencesContent = recovered.preferences;
+      preferencesDirty = true;
+      restored = true;
+    }
+    if (recovered.managerNotes) {
+      for (const [groupId, text] of Object.entries(recovered.managerNotes)) {
+        if (!notesDrafts[groupId]?.dirty) {
+          notesDrafts[groupId] = { text, dirty: true };
+          restored = true;
+        }
+      }
+    }
+    if (restored && restoredEditorDraftNoticeScope !== scope) {
+      restoredEditorDraftNoticeScope = scope;
+      toastStore.info('Recovered unsaved Agent settings edits on this device.');
+    }
+  });
+
+  $effect(() => {
+    const scope = editorDraftScope;
+    if (restoredEditorDraftScope !== scope) return;
+    const managerNotes = Object.fromEntries(
+      Object.entries(notesDrafts)
+        .filter(([, draft]) => draft.dirty)
+        .map(([groupId, draft]) => [groupId, draft.text]),
+    );
+    saveAgentEditorDraft(scope, {
+      ...(preferencesDirty ? { preferences: preferencesContent } : {}),
+      ...(Object.keys(managerNotes).length ? { managerNotes } : {}),
+    });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('koryphaios:agent-settings-dirty', {
+          detail: { dirty: hasUnsavedEditorWork },
+        }),
+      );
+    }
+  });
   $effect(() => {
     const allNotes = (agentSettingsStore.settings.managerNotes ?? {}) as unknown as Record<
       string,
@@ -419,10 +479,10 @@
       string,
       string
     >;
-    await agentSettingsStore.saveSettings({
+    const saved = await agentSettingsStore.saveSettings({
       managerNotes: allNotes as any,
     });
-    notesDrafts[groupId] = { ...draft, dirty: false };
+    if (saved) notesDrafts[groupId] = { ...draft, dirty: false };
   }
   function toggleNotesGroup(groupId: string) {
     collapsedNotesGroups[groupId] = !collapsedNotesGroups[groupId];
@@ -493,11 +553,12 @@
         { name: 'render_note', label: 'Render note' },
         { name: 'get_note_backlinks', label: 'Note backlinks' },
         { name: 'get_note_graph_summary', label: 'Note graph summary' },
+        { name: 'record_work_note', label: 'Record work note' },
         { name: 'create_note', label: 'Create note' },
         { name: 'update_note', label: 'Update note' },
         { name: 'link_notes', label: 'Link notes' },
         { name: 'unlink_notes', label: 'Unlink notes' },
-        { name: 'delete_note', label: 'Delete note' },
+        { name: 'delete_note', label: 'Move note to trash' },
       ],
     },
     {
@@ -589,6 +650,188 @@
     preferencesContent = agentSettingsStore.preferences?.content ?? '';
     preferencesDirty = false;
   }
+
+  onMount(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedEditorWork) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      window.dispatchEvent(
+        new CustomEvent('koryphaios:agent-settings-dirty', { detail: { dirty: false } }),
+      );
+    };
+  });
+
+  const PERMISSION_TIER_BASE: { value: string; label: string; description: string }[] = [
+    {
+      value: 'ask',
+      label: 'Ask',
+      description:
+        'Reads run automatically; file edits and actions that change state ask for approval',
+    },
+    { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' },
+    {
+      value: 'guarded',
+      label: 'Guarded',
+      description: 'All edits automatic; ask only for risky actions',
+    },
+    { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' },
+  ];
+
+  let permissionModeValue = $derived(
+    (agentSettingsStore.settings.permissionMode === 'plan'
+      ? 'guarded'
+      : (agentSettingsStore.settings.permissionMode ?? 'guarded')) as string,
+  );
+
+  let permissionTierOptions = $derived.by(() => {
+    if (permissionModeValue === 'custom') {
+      return [
+        ...PERMISSION_TIER_BASE,
+        { value: 'custom', label: 'Custom', description: 'Use the rules below' },
+      ];
+    }
+    return PERMISSION_TIER_BASE;
+  });
+
+  async function handlePermissionTierChange(value: string) {
+    await agentSettingsStore.saveSettings(
+      {
+        permissionMode: value as 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom',
+      },
+      { quietSuccess: true },
+    );
+  }
+
+  let toolAccessTier = $state<string>('ask');
+  $effect(() => {
+    const mode = (
+      agentSettingsStore.settings.permissionMode === 'plan'
+        ? 'guarded'
+        : (agentSettingsStore.settings.permissionMode ?? 'ask')
+    ) as string;
+    if (['ask', 'edits', 'guarded', 'yolo', 'custom'].includes(mode) && toolAccessTier !== mode) {
+      if (toolAccessTier === 'ask' && mode !== 'ask') {
+        // keep initial 'ask' until user picks, but sync if still at default and mode changed
+      }
+    }
+  });
+
+  let toolAccessTierOptions = $derived.by(() => {
+    const byTier = (agentSettingsStore.settings as any).toolPermissionsByTier ?? {};
+    const customTier = byTier['custom'];
+    const hasCustomEdits =
+      (customTier && (customTier.allow.length > 0 || customTier.block.length > 0)) ||
+      permissionModeValue === 'custom' ||
+      agentSettingsStore.settings.permissionMode === 'custom';
+    if (hasCustomEdits) {
+      return [
+        ...PERMISSION_TIER_BASE,
+        { value: 'custom', label: 'Custom', description: 'Use the rules below' },
+      ];
+    }
+    return PERMISSION_TIER_BASE;
+  });
+
+  const READ_ONLY = new Set([
+    'read_file',
+    'grep',
+    'glob',
+    'ls',
+    'diff',
+    'web_search',
+    'web_fetch',
+    'view_image',
+    'fetch_context',
+    'get_resource_budget',
+    'load_skill_detail',
+    'list_notes',
+    'search_notes',
+    'read_note',
+    'recall_notes',
+    'render_note',
+    'get_note_backlinks',
+    'get_note_graph_summary',
+    'detect-errors',
+    'analyze-error',
+    'suggest-fixes',
+  ]);
+  const FILE_EDIT = new Set(['write_file', 'edit_file', 'batch_edit', 'patch', 'move_file']);
+  const RISKY = new Set([
+    'delete_file',
+    'delete_note',
+    'shell_manage',
+    'delegate_to_jules',
+    'commit_and_create_pr',
+    'manage_mcp_server',
+  ]);
+
+  function tierDefault(toolName: string, tier: string): ToolAccessState | null {
+    if (tier === 'yolo') return 'allow';
+    if (tier === 'guarded') return RISKY.has(toolName) ? 'default' : 'allow';
+    if (tier === 'edits')
+      return READ_ONLY.has(toolName) || FILE_EDIT.has(toolName) ? 'allow' : 'default';
+    if (tier === 'ask') return READ_ONLY.has(toolName) ? 'allow' : 'default';
+    return null;
+  }
+
+  function getToolAccessStateForTier(toolName: string, tier: string): ToolAccessState {
+    const tierEntry = (agentSettingsStore.settings as any).toolPermissionsByTier?.[tier];
+    if (tierEntry) {
+      if (tierEntry.block.includes(toolName)) return 'block';
+      if (tierEntry.allow.includes(toolName)) return 'allow';
+      const d = tierDefault(toolName, tier);
+      if (d) return d;
+      return 'default';
+    }
+    if (tier === 'custom') {
+      const allowlist = agentSettingsStore.settings.toolAllowlist ?? [];
+      const blocklist = agentSettingsStore.settings.toolBlocklist ?? [];
+      if (blocklist.includes(toolName)) return 'block';
+      if (allowlist.includes(toolName)) return 'allow';
+    }
+    const d = tierDefault(toolName, tier);
+    if (d) return d;
+    return 'default';
+  }
+
+  async function setToolAccessStateForTier(toolName: string, tier: string, state: ToolAccessState) {
+    const currentByTier = (agentSettingsStore.settings as any).toolPermissionsByTier ?? {};
+    const tierEntry = currentByTier[tier] ?? { allow: [], block: [] };
+    let allow = [...tierEntry.allow];
+    let block = [...tierEntry.block];
+    allow = allow.filter((n) => n !== toolName);
+    block = block.filter((n) => n !== toolName);
+    if (state === 'allow') allow.push(toolName);
+    else if (state === 'block') block.push(toolName);
+    const nextByTier = { ...currentByTier, [tier]: { allow, block } };
+    if (tier === 'custom') {
+      const globalAllow = [...(agentSettingsStore.settings.toolAllowlist ?? [])].filter(
+        (n) => n !== toolName,
+      );
+      const globalBlock = [...(agentSettingsStore.settings.toolBlocklist ?? [])].filter(
+        (n) => n !== toolName,
+      );
+      if (state === 'allow') globalAllow.push(toolName);
+      else if (state === 'block') globalBlock.push(toolName);
+      await agentSettingsStore.saveSettings(
+        {
+          toolPermissionsByTier: nextByTier,
+          toolAllowlist: globalAllow,
+          toolBlocklist: globalBlock,
+        } as any,
+        { quietSuccess: true },
+      );
+    } else {
+      await agentSettingsStore.saveSettings({ toolPermissionsByTier: nextByTier } as any, {
+        quietSuccess: true,
+      });
+    }
+  }
 </script>
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
@@ -614,6 +857,17 @@
 
   <!-- Content -->
   <div class="flex-1 min-h-0 overflow-hidden">
+    <div
+      class="h-full"
+      class:hidden={agentSettingsStore.activeTab !== 'skills' || agentSettingsStore.isLoading}
+      aria-hidden={agentSettingsStore.activeTab !== 'skills' || agentSettingsStore.isLoading}
+    >
+      <SkillsWorkspace
+        active={active &&
+          agentSettingsStore.activeTab === 'skills' &&
+          !agentSettingsStore.isLoading}
+      />
+    </div>
     {#if agentSettingsStore.isLoading}
       <div class="flex items-center justify-center h-full">
         <div
@@ -666,1013 +920,1242 @@
           </div>
         {/if}
         <div class="h-full min-h-0 overflow-y-auto p-4 sm:p-6">
-          <div class="mx-auto max-w-7xl">
-            <div class="grid min-w-0 gap-5 lg:grid-cols-[230px_minmax(0,1fr)]">
-              <aside class="min-w-0" aria-label="Agent settings categories">
+          <div class="mx-auto max-w-5xl space-y-3">
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('permissions')}
+                aria-expanded={expandedSections.permissions}
+              >
+                <span class="flex items-center gap-3">
+                  <LockKeyhole size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Permissions & autonomy</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Approvals and change limits</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.permissions
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.permissions}
                 <div
-                  class="flex gap-2 overflow-x-auto pb-1 lg:sticky lg:top-0 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0"
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
                 >
-                  {#each CONTROL_SECTIONS as section (section.id)}
-                    <button
-                      type="button"
-                      aria-pressed={selectedControlSection === section.id}
-                      onclick={() => (selectedControlSection = section.id)}
-                      class="flex min-h-12 shrink-0 items-center gap-3 rounded-xl px-3 text-left transition-colors lg:w-full {selectedControlSection ===
-                      section.id
-                        ? 'bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'
-                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)]'}"
+                  <section
+                    class="space-y-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <LockKeyhole size={17} class="text-[var(--color-accent)]" />
+                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                          Permissions & autonomy
+                        </h4>
+                      </div>
+                      <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                        Choose a preset or build a custom approval policy for this workspace.
+                      </p>
+                    </div>
+
+                    <div
+                      class="grid gap-2 sm:grid-cols-2 xl:grid-cols-5"
+                      role="radiogroup"
+                      aria-label="Permission mode"
                     >
-                      <section.icon size={16} class="shrink-0" />
-                      <span class="min-w-0">
-                        <span class="block text-xs font-medium">{section.label}</span>
-                        <span
-                          class="mt-0.5 hidden text-[10px] text-[var(--color-text-muted)] lg:block"
-                          >{section.description}</span
-                        >
-                      </span>
-                    </button>
-                  {/each}
-                  <div class="hidden border-t border-[var(--color-border)] pt-3 lg:mt-4 lg:block">
-                    <button
-                      type="button"
-                      onclick={() => (showResetConfirmation = true)}
-                      class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-                    >
-                      <RotateCcw size={14} /> Reset agent settings
-                    </button>
-                  </div>
-                </div>
-              </aside>
-              <div class="min-w-0">
-                <div class="grid gap-5">
-                  <div class="space-y-6">
-                    {#if selectedControlSection === 'permissions'}
-                      <section
-                        class="space-y-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div>
-                          <div class="flex items-center gap-2">
-                            <LockKeyhole size={17} class="text-[var(--color-accent)]" />
-                            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                              Permissions & autonomy
-                            </h4>
-                          </div>
-                          <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                            Choose a preset or build a custom approval policy for this workspace.
-                          </p>
-                        </div>
-
-                        <div
-                          class="grid gap-2 sm:grid-cols-2 xl:grid-cols-6"
-                          role="radiogroup"
-                          aria-label="Permission mode"
-                        >
-                          {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic; ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Confirm every action' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' }] as mode (mode.value)}
-                            {@const active =
-                              (agentSettingsStore.settings.permissionMode === 'plan'
-                                ? 'guarded'
-                                : (agentSettingsStore.settings.permissionMode ?? 'guarded')) ===
-                              mode.value}
-                            <button
-                              type="button"
-                              role="radio"
-                              aria-checked={active}
-                              onclick={() =>
-                                agentSettingsStore.saveSettings(
-                                  {
-                                    permissionMode: mode.value as
-                                      'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom',
-                                  },
-                                  { quietSuccess: true },
-                                )}
-                              class="min-h-24 rounded-xl border p-3 text-left transition-colors {active
-                                ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
-                            >
-                              <span
-                                class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
-                              >
-                                {mode.label}
-                                {#if active}<CheckCircle
-                                    size={14}
-                                    class="text-[var(--color-accent)]"
-                                  />{/if}
-                              </span>
-                              <span
-                                class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                                >{mode.description}</span
-                              >
-                            </button>
-                          {/each}
-                        </div>
-
-                        {#if agentSettingsStore.settings.permissionMode === 'custom'}
-                          <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
-                            <div>
-                              <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
-                                Custom approval rules
-                              </h5>
-                              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                                Fine-tune when Kory continues and when it pauses for you.
-                              </p>
-                            </div>
-                            <div class="grid gap-3 sm:grid-cols-2">
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.autoRunTools}
-                                label="Allow routine tools"
-                                description="When off, ask once before each routine tool action."
-                                onchange={() => toggleSetting('autoRunTools')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.autoApplySafeFixes}
-                                label="Apply safe file edits"
-                                description="Apply low-risk file changes without a separate confirmation."
-                                onchange={() => toggleSetting('autoApplySafeFixes')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.confirmRuleViolations}
-                                label="Ask before risky overrides"
-                                description="Require confirmation before an action may break workspace rules."
-                                onchange={() => toggleSetting('confirmRuleViolations')}
-                              />
-                            </div>
-                          </div>
-                        {/if}
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'quality'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4
-                            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                          >
-                            <Shield size={16} class="text-[var(--color-accent)]" />
-                            Independent review
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Configure the distinct Critic pass that reviews actual file changes.
-                            Turning it off leaves changed work explicitly unverified.
-                          </p>
-                        </div>
-
-                        <div class="grid gap-3 sm:grid-cols-2">
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.criticGateEnabled}
-                            label="Verify changed work"
-                            description="Run deterministic checks and an independent Critic before Kory can claim changed work is verified."
-                            onchange={() => toggleSetting('criticGateEnabled')}
-                          />
-                        </div>
-
-                        <div class="grid gap-3 sm:grid-cols-2">
-                          <KorySelect
-                            label="Critic outcome policy"
-                            value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
-                            disabled={!agentSettingsStore.settings.criticGateEnabled}
-                            options={[
-                              { value: 'strict', label: 'Strict — withhold completion' },
-                              { value: 'advisory', label: 'Advisory — report issues' },
-                              { value: 'off', label: 'Off — mark work unverified' },
-                            ]}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { gateStrictness: value as 'strict' | 'advisory' | 'off' },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <div class="mb-2 text-xs text-[var(--color-text-muted)]">
-                              Maximum Critic passes
-                            </div>
-                            <NumberStepper
-                              compact
-                              value={agentSettingsStore.settings.maxCriticIterations ?? 3}
-                              min={1}
-                              max={10}
-                              label="Maximum Critic passes"
-                              disabled={!agentSettingsStore.settings.criticGateEnabled}
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { maxCriticIterations: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                            <p
-                              class="mt-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                            >
-                              Bounds delegated repair attempts; it does not invent a passing
-                              verdict.
-                            </p>
-                          </div>
-                        </div>
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'workflow'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Workflow
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Control real task clarification, orchestration, Goal planning, and
-                            reversible skill learning.
-                          </p>
-                        </div>
-                        <div class="grid gap-3 sm:grid-cols-2">
-                          <KorySelect
-                            label="Intent interview"
-                            description="How many clarifying questions Kory asks before starting work."
-                            value={agentSettingsStore.settings.intentInterview ?? 'adaptive'}
-                            options={[
-                              { value: 'off', label: 'Off', description: 'Start working immediately without follow-up questions.' },
-                              { value: 'adaptive', label: 'Adaptive', description: 'Ask a few targeted questions when the task is vague or complex.' },
-                              { value: 'deep', label: 'Deep', description: 'Conduct a thorough Q&A to fully define the request before acting.' },
-                            ]}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { intentInterview: value as 'off' | 'adaptive' | 'deep' },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <KorySelect
-                            label="Execution strategy"
-                            description="How Kory distributes work across one or many agents."
-                            value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
-                            options={[
-                              { value: 'auto', label: 'Auto — choose for the task', description: 'Let Kory decide when a single agent or multiple agents fit best.' },
-                              { value: 'single', label: 'Single agent', description: 'Run the entire task through one agent.' },
-                              { value: 'multi', label: 'Multi-agent when available', description: 'Use multiple agents in parallel whenever the task allows it.' },
-                            ]}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                { agentExecutionMode: value as 'auto' | 'single' | 'multi' },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <KorySelect
-                            label="Goal planning"
-                            description="How Kory breaks tasks into tracked goals before acting."
-                            value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
-                            options={[
-                              { value: 'minimal', label: 'Minimal', description: 'Use goals only when the task is large or complex.' },
-                              { value: 'adaptive', label: 'Adaptive', description: 'Plan goals based on task size and uncertainty.' },
-                              { value: 'structured', label: 'Structured', description: 'Always create a step-by-step goal plan before starting work.' },
-                            ]}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                {
-                                  goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured',
-                                },
-                                { quietSuccess: true },
-                              )}
-                          />
-                          <KorySelect
-                            label="Skill learning"
-                            description="How Kory may create or install new skills from your sessions."
-                            value={agentSettingsStore.settings.skillLearningMode ??
-                              'propose-then-verify'}
-                            options={[
-                              { value: 'human-only', label: 'Human only', description: 'Never create or install a skill without your explicit approval.' },
-                              { value: 'propose-then-verify', label: 'Propose then verify', description: 'Suggest new skills and wait for your approval before installing.' },
-                              { value: 'automatic', label: 'Automatic, reversible', description: 'Create skills automatically; you can undo or remove them later.' },
-                            ]}
-                            onchange={(value) =>
-                              agentSettingsStore.saveSettings(
-                                {
-                                  skillLearningMode: value as
-                                    'human-only' | 'propose-then-verify' | 'automatic',
-                                },
-                                { quietSuccess: true },
-                              )}
-                          />
-                        </div>
-                        <SettingsSwitch
-                          checked={goalDisplayStore.sidebar}
-                          label="Show Active Goals in sidebar"
-                          description="Keep the compact cross-chat goal list visible in the session sidebar."
-                          onchange={() =>
-                            goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
-                        />
-                        <SettingsSwitch
-                          checked={goalDisplayStore.composer}
-                          label="Show goal context in composer"
-                          description="Place the optional goal selector to the right of model and reasoning controls."
-                          onchange={() =>
-                            goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
-                        />
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'permissions'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Autonomy limits
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Keep thresholds ready, then explicitly turn them on for runs that need
-                            an approval boundary.
-                          </p>
-                        </div>
-
-                        <SettingsSwitch
-                          checked={agentSettingsStore.settings.autonomyLimitsEnabled}
-                          label="Enable autonomy limits"
-                          description={agentSettingsStore.settings.autonomyLimitsEnabled
-                            ? agentSettingsStore.settings.permissionMode === 'guarded'
-                              ? 'Active for risky non-edit actions. Guarded always applies file edits automatically.'
-                              : `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
-                            : 'Off by default. The values below are saved but do not constrain runs until you enable this switch.'}
-                          onchange={() => toggleSetting('autonomyLimitsEnabled')}
-                        />
-
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <label
-                              for="max-files"
-                              class="mb-2 block text-xs text-[var(--color-text-muted)]"
-                              >Max Files Changed</label
-                            >
-                            <NumberStepper
-                              value={agentSettingsStore.settings.approvalThresholdFiles}
-                              min={1}
-                              max={50}
-                              label="Maximum files changed"
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { approvalThresholdFiles: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                            <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                              Used only while autonomy limits are enabled.
-                            </p>
-                          </div>
-
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <label
-                              for="max-lines"
-                              class="mb-2 block text-xs text-[var(--color-text-muted)]"
-                              >Max Lines Changed</label
-                            >
-                            <NumberStepper
-                              value={agentSettingsStore.settings.approvalThresholdLines}
-                              min={10}
-                              max={1000}
-                              step={10}
-                              label="Maximum lines changed"
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { approvalThresholdLines: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                            <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                              Used only while autonomy limits are enabled.
-                            </p>
-                          </div>
-                        </div>
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'permissions'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4
-                            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                          >
-                            <Boxes size={16} class="text-[var(--color-info)]" />
-                            Execution sandbox
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Control how strictly agent shell commands are confined. Granular toggles
-                            only apply while the sandbox is active.
-                          </p>
-                        </div>
-
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                          {#each [{ value: 'auto', label: 'Auto', description: 'Sandbox plan, critic, and worker execution only.' }, { value: 'always', label: 'Always', description: 'Sandbox every agent bash call, including the direct manager.' }, { value: 'off', label: 'Off', description: 'No sandbox. Catastrophic-command and approval prompts still apply.' }] as mode (mode.value)}
-                            {@const active =
-                              (agentSettingsStore.settings.sandbox?.mode ?? 'auto') === mode.value}
-                            <button
-                              type="button"
-                              role="radio"
-                              aria-checked={active}
-                              onclick={() =>
-                                setSandboxMode(mode.value as 'auto' | 'always' | 'off')}
-                              class="min-h-20 rounded-xl border p-3 text-left transition-colors {active
-                                ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
-                            >
-                              <span
-                                class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
-                              >
-                                {mode.label}
-                                {#if active}<CheckCircle
-                                    size={14}
-                                    class="text-[var(--color-accent)]"
-                                  />{/if}
-                              </span>
-                              <span
-                                class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                                >{mode.description}</span
-                              >
-                            </button>
-                          {/each}
-                        </div>
-
-                        {#if (agentSettingsStore.settings.sandbox?.mode ?? 'auto') !== 'off'}
-                          <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
-                            <div>
-                              <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
-                                Sandbox enforces
-                              </h5>
-                              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                                Turn a toggle off to relax that specific check while sandboxed.
-                              </p>
-                            </div>
-                            <div class="grid gap-3 sm:grid-cols-2">
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.sandbox?.commandWhitelist ??
-                                  true}
-                                label="Command whitelist"
-                                description="Only allow safe development commands (git, npm, bun, cargo, etc.)."
-                                onchange={() => toggleSandboxFlag('commandWhitelist')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.sandbox?.metacharacters ??
-                                  true}
-                                label="Block shell metacharacters"
-                                description="Block pipes, command substitution, and chaining. Disabling lets commands like `git add && git commit` run."
-                                onchange={() => toggleSandboxFlag('metacharacters')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.sandbox?.pathConfinement ??
-                                  true}
-                                label="Project path confinement"
-                                description="Block commands whose working directory is outside the project root."
-                                onchange={() => toggleSandboxFlag('pathConfinement')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.sandbox?.network ?? true}
-                                label="Block network commands"
-                                description="Block curl, wget, and other network tools while sandboxed."
-                                onchange={() => toggleSandboxFlag('network')}
-                              />
-                              <SettingsSwitch
-                                checked={agentSettingsStore.settings.sandbox?.containerTools ??
-                                  true}
-                                label="Block container tools"
-                                description="Block docker, podman, and similar container tools while sandboxed."
-                                onchange={() => toggleSandboxFlag('containerTools')}
-                              />
-                            </div>
-                          </div>
-                        {/if}
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'permissions'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4
-                            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                          >
-                            <Users size={16} class="text-[var(--color-accent)]" />
-                            Sub-agent approval
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Control how worker sub-agents (specialist workers spawned by the
-                            manager) are gated when they run tools.
-                          </p>
-                        </div>
-
-                        <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                          {#each [{ value: 'manager', label: 'Manager decides', description: "Workers inherit the manager's permission preset. No extra prompts beyond what the preset already requires." }, { value: 'user', label: 'I decide', description: 'Workers can read and search freely, but every file edit, bash command, and risky action prompts you before running.' }, { value: 'auto', label: 'Auto-approve', description: 'Workers run with no approval prompts and no sandbox. Catastrophic-command hard floors still apply.' }] as mode (mode.value)}
-                            {@const active =
-                              (agentSettingsStore.settings.subAgentApproval ?? 'manager') ===
-                              mode.value}
-                            <button
-                              type="button"
-                              role="radio"
-                              aria-checked={active}
-                              onclick={() =>
-                                setSubAgentApproval(mode.value as 'manager' | 'user' | 'auto')}
-                              class="min-h-24 rounded-xl border p-3 text-left transition-colors {active
-                                ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
-                                : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
-                            >
-                              <span
-                                class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
-                              >
-                                {mode.label}
-                                {#if active}<CheckCircle
-                                    size={14}
-                                    class="text-[var(--color-accent)]"
-                                  />{/if}
-                              </span>
-                              <span
-                                class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                                >{mode.description}</span
-                              >
-                            </button>
-                          {/each}
-                        </div>
-
-                        {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'auto'}
-                          <div
-                            class="flex gap-2 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-3 text-[11px] text-[var(--color-warning)]"
-                          >
-                            <AlertTriangle size={16} class="shrink-0" />
-                            <span
-                              >Auto-approve lets workers run unconstrained — no approval prompts and
-                              no sandbox. Only enable this for trusted, isolated work. Catastrophic
-                              commands (rm -rf /, mkfs, etc.) are still blocked by the hard floor.</span
-                            >
-                          </div>
-                        {/if}
-                        {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'user'}
-                          <div
-                            class="flex gap-2 rounded-xl border border-[var(--color-info)] bg-[var(--color-info-bg)] p-3 text-[11px] text-[var(--color-info)]"
-                          >
-                            <Eye size={16} class="shrink-0" />
-                            <span
-                              >Workers can read files and search without prompting. Every file edit,
-                              bash command, and risky action will pause for your approval. This
-                              gives you control over mutations without slowing down exploration.</span
-                            >
-                          </div>
-                        {/if}
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'permissions'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4
-                            class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
-                          >
-                            <Shield size={16} class="text-[var(--color-accent)]" />
-                            Tool access
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Override the permission preset for individual tools. <strong
-                              >Allow</strong
-                            >
-                            always runs without prompting.
-                            <strong>Block</strong> denies the tool entirely.
-                            <strong>Default</strong> follows the preset.
-                          </p>
-                        </div>
-
-                        <div class="space-y-3">
-                          {#each TOOL_CATALOG as group}
-                            <div
-                              class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
-                            >
-                              <h5
-                                class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
-                              >
-                                {group.category}
-                              </h5>
-                              <div class="grid gap-1.5 sm:grid-cols-2">
-                                {#each group.tools as tool (tool.name)}
-                                  {@const state = getToolAccessState(tool.name)}
-                                  <div
-                                    class="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
-                                  >
-                                    <span class="text-xs text-[var(--color-text-primary)]"
-                                      >{tool.label}</span
-                                    >
-                                    <div
-                                      class="flex shrink-0 gap-0.5 rounded-lg bg-[var(--color-surface-3)] p-0.5"
-                                    >
-                                      {#each ['allow', 'default', 'block'] as opt (opt)}
-                                        {@const isActive = state === opt}
-                                        <button
-                                          type="button"
-                                          onclick={() =>
-                                            setToolAccessState(tool.name, opt as ToolAccessState)}
-                                          class="rounded-md px-2 py-1 text-[10px] font-medium transition-colors {isActive
-                                            ? opt === 'allow'
-                                              ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
-                                              : opt === 'block'
-                                                ? 'bg-[var(--color-error-bg)] text-[var(--color-error)]'
-                                                : 'bg-[var(--color-surface-1)] text-[var(--color-text-primary)]'
-                                            : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
-                                        >
-                                          {opt === 'allow'
-                                            ? 'Allow'
-                                            : opt === 'block'
-                                              ? 'Block'
-                                              : 'Default'}
-                                        </button>
-                                      {/each}
-                                    </div>
-                                  </div>
-                                {/each}
-                              </div>
-                            </div>
-                          {/each}
-                        </div>
-
-                        {#if (agentSettingsStore.settings.toolAllowlist ?? []).length > 0 || (agentSettingsStore.settings.toolBlocklist ?? []).length > 0}
-                          <div
-                            class="flex items-center justify-between border-t border-[var(--color-border)] pt-3"
-                          >
-                            <span class="text-[10px] text-[var(--color-text-muted)]">
-                              {(agentSettingsStore.settings.toolAllowlist ?? []).length} allowed · {(
-                                agentSettingsStore.settings.toolBlocklist ?? []
-                              ).length} blocked
-                            </span>
-                            <button
-                              type="button"
-                              class="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-secondary)]"
-                              onclick={() =>
-                                agentSettingsStore.saveSettings(
-                                  { toolAllowlist: [], toolBlocklist: [] },
-                                  { quietSuccess: true },
-                                )}
-                            >
-                              Reset all to default
-                            </button>
-                          </div>
-                        {/if}
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'context'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Context & memory
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Everything the agent does is archived locally; stale tool outputs are
-                            collapsed out of its context and stay recoverable via fetch_context.
-                            Nothing is ever lost.
-                          </p>
-                        </div>
-
-                        <div class="grid gap-3 sm:grid-cols-2">
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
-                            label="Auto-Collapse Old Tool Output"
-                            description="Stub stale file reads, terminal output, and search results while keeping them recoverable."
-                            onchange={() => toggleSetting('contextPruningEnabled')}
-                          />
-
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.allowExternalPaths ?? false}
-                            label="External File Access"
-                            description="Let the chat image renderer and viewers serve files outside your home folder (external drives, mounts)."
-                            onchange={() => toggleSetting('allowExternalPaths')}
-                          />
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
-                            label="Agent Context Awareness"
-                            description="Give the agent a live window-usage report so it can prune or compact deliberately."
-                            onchange={() => toggleSetting('contextSelfAwareness')}
-                          />
-
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
-                            label="Automatic Compaction"
-                            description="After a completed turn reaches 80% of a trusted model window, schedule a recoverable context compaction."
-                            onchange={() => toggleSetting('autoCompactEnabled')}
-                          />
-
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.reasoningExpandedByDefault ??
-                              false}
-                            label="Expand Full Reasoning by Default"
-                            description="Show reasoning automatically while keeping every block individually collapsible."
-                            onchange={() => toggleSetting('reasoningExpandedByDefault')}
-                          />
-
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <label
-                              for="ctx-keep-turns"
-                              class="mb-2 block text-xs text-[var(--color-text-muted)]"
-                              >Keep Recent Turns Full</label
-                            >
-                            <NumberStepper
-                              value={agentSettingsStore.settings.contextKeepRecentTurns ?? 3}
-                              min={1}
-                              max={10}
-                              label="Recent turns kept full"
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { contextKeepRecentTurns: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                            <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                              Tool outputs from this many recent turns are never collapsed.
-                            </p>
-                          </div>
-
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <label
-                              for="ctx-min-chars"
-                              class="mb-2 block text-xs text-[var(--color-text-muted)]"
-                              >Minimum Size to Collapse</label
-                            >
-                            <NumberStepper
-                              value={agentSettingsStore.settings.contextPruneMinChars ?? 600}
-                              min={100}
-                              max={10000}
-                              step={100}
-                              label="Minimum output size to collapse"
-                              onchange={(value) =>
-                                agentSettingsStore.saveSettings(
-                                  { contextPruneMinChars: value },
-                                  { quietSuccess: true },
-                                )}
-                            />
-                            <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                              Outputs smaller than this (characters) stay in context — not worth
-                              collapsing.
-                            </p>
-                          </div>
-                        </div>
-                      </section>
-                    {/if}
-                  </div>
-
-                  <div class="space-y-6">
-                    {#if selectedControlSection === 'context'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="space-y-1">
-                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Memory policy
-                          </h4>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Control whether the agent can persist what it learns.
-                          </p>
-                        </div>
-
-                        <div class="space-y-3">
-                          <SettingsSwitch
-                            checked={agentSettingsStore.settings.agentCanUpdatePreferences}
-                            label="Remember explicit requests"
-                            description="Persist only requests that explicitly say remember or always; ordinary conversation never writes project preferences."
-                            onchange={() => toggleSetting('agentCanUpdatePreferences')}
-                          />
-                        </div>
-                      </section>
-                    {/if}
-
-                    {#if selectedControlSection === 'research'}
-                      <section
-                        class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-                      >
-                        <div class="flex items-center gap-2 text-[var(--color-warning)]">
-                          <FlaskConical size={16} />
-                          <h4 class="text-sm font-semibold">Research</h4>
-                        </div>
-
-                        <div class="space-y-3">
-                          <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                            <div class="flex items-start justify-between gap-4">
-                              <div class="flex items-center gap-2">
-                                <Globe size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
-                                <div>
-                                  <div class="text-sm font-medium text-[var(--color-text-primary)]">
-                                    Local Web Search
-                                  </div>
-                                  <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                                    Use DuckDuckGo fallback for web search.
-                                  </div>
-                                </div>
-                              </div>
-                              <div
-                                class="flex shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-0.5"
-                                role="group"
-                                aria-label="Local web search mode"
-                              >
-                                {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option (option.value)}
-                                  <button
-                                    type="button"
-                                    aria-pressed={agentSettingsStore.settings.localWebSearch ===
-                                      option.value}
-                                    onclick={() =>
-                                      agentSettingsStore.saveSettings({
-                                        localWebSearch: option.value as 'off' | 'on' | 'fallback',
-                                      })}
-                                    class="rounded-md px-2 py-1 text-[10px] font-medium transition-all {agentSettingsStore
-                                      .settings.localWebSearch === option.value
-                                      ? 'bg-[var(--color-accent)] text-white shadow-sm'
-                                      : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
-                                  >
-                                    {option.label}
-                                  </button>
-                                {/each}
-                              </div>
-                            </div>
-                          </div>
-
-                          <SettingsSwitch
-                            compact
-                            checked={agentSettingsStore.settings.multiSourceResearch}
-                            label="Multi-Source Research"
-                            description="Require verification across 3–5 sources for research tasks."
-                            onchange={() => toggleSetting('multiSourceResearch')}
-                          />
-                        </div>
-                      </section>
-                    {/if}
-
-                    <!-- Manager model access: checkbox grid per category -->
-                    {#if selectedControlSection === 'routing'}
-                      <section
-                        class="rounded-2xl p-5"
-                        style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
-                      >
+                      {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic; ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Reads run automatically; file edits and actions that change state ask for approval' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' }] as mode (mode.value)}
+                        {@const active =
+                          (agentSettingsStore.settings.permissionMode === 'plan'
+                            ? 'guarded'
+                            : (agentSettingsStore.settings.permissionMode ?? 'guarded')) ===
+                          mode.value}
                         <button
                           type="button"
-                          class="flex w-full items-start justify-between gap-4 text-left"
-                          aria-expanded={showModelAccess}
-                          onclick={() => (showModelAccess = !showModelAccess)}
+                          role="radio"
+                          aria-checked={active}
+                          onclick={() =>
+                            agentSettingsStore.saveSettings(
+                              {
+                                permissionMode: mode.value as
+                                  'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom',
+                              },
+                              { quietSuccess: true },
+                            )}
+                          class="min-h-24 rounded-xl border p-3 text-left transition-colors {active
+                            ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
                         >
-                          <span>
-                            <span
-                              class="block text-sm font-semibold text-[var(--color-text-primary)]"
-                              >Routing access</span
-                            >
-                            <span class="mt-1 block text-xs text-[var(--color-text-muted)]"
-                              >Restrict auto-routing by category. Your explicit composer choice
-                              always wins.</span
-                            >
+                          <span
+                            class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {mode.label}
+                            {#if active}<CheckCircle
+                                size={14}
+                                class="text-[var(--color-accent)]"
+                              />{/if}
                           </span>
-                          <ChevronRight
-                            size={16}
-                            class="shrink-0 text-[var(--color-text-muted)] transition-transform {showModelAccess
-                              ? 'rotate-90'
-                              : ''}"
-                          />
+                          <span
+                            class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                            >{mode.description}</span
+                          >
                         </button>
-                        {#if showModelAccess}
-                          <div class="mt-4 space-y-5">
-                            {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
+                      {/each}
+                    </div>
+
+                    {#if agentSettingsStore.settings.permissionMode === 'custom'}
+                      <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
+                        <div>
+                          <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
+                            Custom approval rules
+                          </h5>
+                          <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                            Fine-tune when Kory continues and when it pauses for you.
+                          </p>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.autoRunTools}
+                            label="Allow routine tools"
+                            description="When off, ask once before each routine tool action."
+                            onchange={() => toggleSetting('autoRunTools')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.autoApplySafeFixes}
+                            label="Apply safe file edits"
+                            description="Apply low-risk file changes without a separate confirmation."
+                            onchange={() => toggleSetting('autoApplySafeFixes')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.confirmRuleViolations}
+                            label="Ask before risky overrides"
+                            description="Require confirmation before an action may break workspace rules."
+                            onchange={() => toggleSetting('confirmRuleViolations')}
+                          />
+                        </div>
+                      </div>
+                    {/if}
+                  </section>
+
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        Autonomy limits
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Keep thresholds ready, then explicitly turn them on for runs that need an
+                        approval boundary.
+                      </p>
+                    </div>
+
+                    <SettingsSwitch
+                      checked={agentSettingsStore.settings.autonomyLimitsEnabled}
+                      label="Enable autonomy limits"
+                      description={agentSettingsStore.settings.autonomyLimitsEnabled
+                        ? agentSettingsStore.settings.permissionMode === 'guarded'
+                          ? 'Active for risky non-edit actions. Guarded always applies file edits automatically.'
+                          : `Active: approval is required before edits exceeding ${agentSettingsStore.settings.approvalThresholdFiles} files or ${agentSettingsStore.settings.approvalThresholdLines} lines.`
+                        : 'Off by default. The values below are saved but do not constrain runs until you enable this switch.'}
+                      onchange={() => toggleSetting('autonomyLimitsEnabled')}
+                    />
+
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <label
+                          for="max-files"
+                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          >Max Files Changed</label
+                        >
+                        <NumberStepper
+                          value={agentSettingsStore.settings.approvalThresholdFiles}
+                          min={1}
+                          max={50}
+                          label="Maximum files changed"
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { approvalThresholdFiles: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Used only while autonomy limits are enabled.
+                        </p>
+                      </div>
+
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <label
+                          for="max-lines"
+                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          >Max Lines Changed</label
+                        >
+                        <NumberStepper
+                          value={agentSettingsStore.settings.approvalThresholdLines}
+                          min={10}
+                          max={1000}
+                          step={10}
+                          label="Maximum lines changed"
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { approvalThresholdLines: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Used only while autonomy limits are enabled.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4
+                        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        <Boxes size={16} class="text-[var(--color-info)]" />
+                        Execution sandbox
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Control how strictly agent shell commands are confined. Granular toggles
+                        only apply while the sandbox is active.
+                      </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {#each [{ value: 'auto', label: 'Auto', description: 'Sandbox plan, critic, and worker execution only.' }, { value: 'always', label: 'Always', description: 'Sandbox every agent bash call, including the direct manager.' }, { value: 'off', label: 'Off', description: 'No sandbox. Catastrophic-command and approval prompts still apply.' }] as mode (mode.value)}
+                        {@const active =
+                          (agentSettingsStore.settings.sandbox?.mode ?? 'auto') === mode.value}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onclick={() => setSandboxMode(mode.value as 'auto' | 'always' | 'off')}
+                          class="min-h-20 rounded-xl border p-3 text-left transition-colors {active
+                            ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                        >
+                          <span
+                            class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {mode.label}
+                            {#if active}<CheckCircle
+                                size={14}
+                                class="text-[var(--color-accent)]"
+                              />{/if}
+                          </span>
+                          <span
+                            class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                            >{mode.description}</span
+                          >
+                        </button>
+                      {/each}
+                    </div>
+
+                    {#if (agentSettingsStore.settings.sandbox?.mode ?? 'auto') !== 'off'}
+                      <div class="space-y-3 border-t border-[var(--color-border)] pt-4">
+                        <div>
+                          <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
+                            Sandbox enforces
+                          </h5>
+                          <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                            Turn a toggle off to relax that specific check while sandboxed.
+                          </p>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.sandbox?.commandWhitelist ?? true}
+                            label="Command whitelist"
+                            description="Only allow safe development commands (git, npm, bun, cargo, etc.)."
+                            onchange={() => toggleSandboxFlag('commandWhitelist')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.sandbox?.metacharacters ?? true}
+                            label="Block shell metacharacters"
+                            description="Block pipes, command substitution, and chaining. Disabling lets commands like `git add && git commit` run."
+                            onchange={() => toggleSandboxFlag('metacharacters')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.sandbox?.pathConfinement ?? true}
+                            label="Project path confinement"
+                            description="Block commands whose working directory is outside the project root."
+                            onchange={() => toggleSandboxFlag('pathConfinement')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.sandbox?.network ?? true}
+                            label="Block network commands"
+                            description="Block curl, wget, and other network tools while sandboxed."
+                            onchange={() => toggleSandboxFlag('network')}
+                          />
+                          <SettingsSwitch
+                            checked={agentSettingsStore.settings.sandbox?.containerTools ?? true}
+                            label="Block container tools"
+                            description="Block docker, podman, and similar container tools while sandboxed."
+                            onchange={() => toggleSandboxFlag('containerTools')}
+                          />
+                        </div>
+                      </div>
+                    {/if}
+                  </section>
+
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4
+                        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        <Users size={16} class="text-[var(--color-accent)]" />
+                        Sub-agent approval
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Control how worker sub-agents (specialist workers spawned by the manager)
+                        are gated when they run tools.
+                      </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {#each [{ value: 'manager', label: 'Manager decides', description: "Workers inherit the manager's permission preset. No extra prompts beyond what the preset already requires." }, { value: 'user', label: 'I decide', description: 'Workers can read and search freely, but every file edit, bash command, and risky action prompts you before running.' }, { value: 'auto', label: 'Auto-approve', description: 'Workers run with no approval prompts and no sandbox. Catastrophic-command hard floors still apply.' }] as mode (mode.value)}
+                        {@const active =
+                          (agentSettingsStore.settings.subAgentApproval ?? 'manager') ===
+                          mode.value}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onclick={() =>
+                            setSubAgentApproval(mode.value as 'manager' | 'user' | 'auto')}
+                          class="min-h-24 rounded-xl border p-3 text-left transition-colors {active
+                            ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                        >
+                          <span
+                            class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {mode.label}
+                            {#if active}<CheckCircle
+                                size={14}
+                                class="text-[var(--color-accent)]"
+                              />{/if}
+                          </span>
+                          <span
+                            class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                            >{mode.description}</span
+                          >
+                        </button>
+                      {/each}
+                    </div>
+
+                    {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'auto'}
+                      <div
+                        class="flex gap-2 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-3 text-[11px] text-[var(--color-warning)]"
+                      >
+                        <AlertTriangle size={16} class="shrink-0" />
+                        <span
+                          >Auto-approve lets workers run unconstrained — no approval prompts and no
+                          sandbox. Only enable this for trusted, isolated work. Catastrophic
+                          commands (rm -rf /, mkfs, etc.) are still blocked by the hard floor.</span
+                        >
+                      </div>
+                    {/if}
+                    {#if (agentSettingsStore.settings.subAgentApproval ?? 'manager') === 'user'}
+                      <div
+                        class="flex gap-2 rounded-xl border border-[var(--color-info)] bg-[var(--color-info-bg)] p-3 text-[11px] text-[var(--color-info)]"
+                      >
+                        <Eye size={16} class="shrink-0" />
+                        <span
+                          >Workers can read files and search without prompting. Every file edit,
+                          bash command, and risky action will pause for your approval. This gives
+                          you control over mutations without slowing down exploration.</span
+                        >
+                      </div>
+                    {/if}
+                  </section>
+
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4
+                        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        <Shield size={16} class="text-[var(--color-accent)]" />
+                        Tool access
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Override the permission preset for individual tools. <strong>Allow</strong>
+                        always runs without prompting.
+                        <strong>Block</strong> denies the tool entirely.
+                        <strong>Ask</strong> follows the preset.
+                      </p>
+                    </div>
+
+                    <KorySelect
+                      value={toolAccessTier}
+                      options={toolAccessTierOptions}
+                      label="Permission tier to customize"
+                      description="Select which tier these tool overrides apply to — Allow/Ask/Block below is saved for that tier"
+                      onchange={(value) => (toolAccessTier = value)}
+                    />
+
+                    <div class="space-y-3">
+                      {#each TOOL_CATALOG as group}
+                        <div
+                          class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+                        >
+                          <h5
+                            class="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
+                          >
+                            {group.category}
+                          </h5>
+                          <div class="grid gap-1.5 sm:grid-cols-2">
+                            {#each group.tools as tool (tool.name)}
+                              {@const state = getToolAccessStateForTier(tool.name, toolAccessTier)}
                               <div
-                                class="rounded-xl p-4"
-                                style="background: var(--color-surface-0); border: 1px solid var(--color-border);"
+                                class="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
                               >
-                                <span
-                                  class="mb-3 block text-xs font-medium text-[var(--color-text-secondary)]"
-                                  >{cat.label}</span
+                                <span class="text-xs text-[var(--color-text-primary)]"
+                                  >{tool.label}</span
                                 >
-                                {#if availableModels.length === 0}
-                                  <span class="text-[10px] text-[var(--color-text-muted)] italic"
-                                    >No enabled models available</span
-                                  >
-                                {:else}
-                                  <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                                    {#each availableModels as m (m)}
-                                      {@const checked = modelsFor(cat.id).includes(m)}
-                                      <div
-                                        class="flex min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors"
-                                        style="background: {checked
-                                          ? 'color-mix(in srgb, var(--color-accent) 9%, var(--color-surface-2))'
-                                          : 'var(--color-surface-2)'}; border: 1px solid {checked
-                                          ? 'color-mix(in srgb, var(--color-accent) 38%, var(--color-border))'
-                                          : 'var(--color-border)'};"
-                                      >
-                                        <span
-                                          class="min-w-0 truncate font-mono text-[var(--color-text-primary)]"
-                                          >{m}</span
-                                        >
-                                        <SettingsToggle
-                                          {checked}
-                                          label={`Allow ${m} for ${cat.label}`}
-                                          onchange={() => void toggleCategoryModel(cat.id, m)}
-                                        />
-                                      </div>
-                                    {/each}
-                                  </div>
-                                {/if}
+                                <div
+                                  class="flex shrink-0 gap-0.5 rounded-lg bg-[var(--color-surface-3)] p-0.5"
+                                >
+                                  {#each ['allow', 'default', 'block'] as opt (opt)}
+                                    {@const isActive = state === opt}
+                                    <button
+                                      type="button"
+                                      onclick={() =>
+                                        setToolAccessStateForTier(
+                                          tool.name,
+                                          toolAccessTier,
+                                          opt as ToolAccessState,
+                                        )}
+                                      class="rounded-md px-2 py-1 text-[10px] font-medium transition-colors {isActive
+                                        ? opt === 'allow'
+                                          ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                                          : opt === 'block'
+                                            ? 'bg-[var(--color-error-bg)] text-[var(--color-error)]'
+                                            : 'bg-[var(--color-surface-1)] text-[var(--color-text-primary)]'
+                                        : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}"
+                                    >
+                                      {opt === 'allow'
+                                        ? 'Allow'
+                                        : opt === 'block'
+                                          ? 'Block'
+                                          : 'Ask'}
+                                    </button>
+                                  {/each}
+                                </div>
                               </div>
                             {/each}
                           </div>
-                        {/if}
-                      </section>
-
-                      <!-- Per-group standing guidance for the manager -->
-                      <section
-                        class="rounded-2xl p-5"
-                        style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
-                      >
-                        <div class="flex items-center gap-2">
-                          <StickyNote size={16} style="color: var(--color-accent);" />
-                          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                            Notes for the Manager
-                          </h4>
                         </div>
-                        <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-                          Per-group standing guidance injected into every conversation. Expand a
-                          group to edit its notes.
+                      {/each}
+                    </div>
+
+                    {#if ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.allow.length ?? 0) > 0 || ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.block.length ?? 0) > 0}
+                      <div
+                        class="flex items-center justify-between border-t border-[var(--color-border)] pt-3"
+                      >
+                        <span class="text-[10px] text-[var(--color-text-muted)]">
+                          {(agentSettingsStore.settings as any).toolPermissionsByTier?.[
+                            toolAccessTier
+                          ]?.allow.length ?? 0} allowed · {(agentSettingsStore.settings as any)
+                            .toolPermissionsByTier?.[toolAccessTier]?.block.length ?? 0} blocked in {toolAccessTier}
+                        </span>
+                        <button
+                          type="button"
+                          class="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-text-secondary)]"
+                          onclick={async () => {
+                            const next = {
+                              ...((agentSettingsStore.settings as any).toolPermissionsByTier ?? {}),
+                            };
+                            delete next[toolAccessTier];
+                            const patch: Record<string, unknown> = { toolPermissionsByTier: next };
+                            if (toolAccessTier === 'custom') {
+                              (patch as any).toolAllowlist = [];
+                              (patch as any).toolBlocklist = [];
+                            }
+                            await agentSettingsStore.saveSettings(patch as any, {
+                              quietSuccess: true,
+                            });
+                          }}
+                        >
+                          Reset {toolAccessTier} to ask
+                        </button>
+                      </div>
+                    {/if}
+                  </section>
+                </div>
+              {/if}
+            </div>
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('quality')}
+                aria-expanded={expandedSections.quality}
+              >
+                <span class="flex items-center gap-3">
+                  <Gavel size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Quality & Critic</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Review and verification</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.quality
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.quality}
+                <div
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                >
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1.5">
+                      <h4
+                        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        <Shield size={16} class="text-[var(--color-accent)]" />
+                        Independent review
+                      </h4>
+                      <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
+                        Configure the distinct Critic pass that reviews actual file changes. Turning
+                        it off leaves changed work explicitly unverified.
+                      </p>
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.criticGateEnabled}
+                        label="Verify changed work"
+                        description="Run deterministic checks and an independent Critic before Kory can claim changed work is verified."
+                        onchange={() => toggleSetting('criticGateEnabled')}
+                      />
+                    </div>
+
+                    <div class="grid gap-4 sm:grid-cols-2">
+                      <KorySelect
+                        label="Critic outcome policy"
+                        value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
+                        disabled={!agentSettingsStore.settings.criticGateEnabled}
+                        options={[
+                          { value: 'strict', label: 'Strict — withhold completion' },
+                          { value: 'advisory', label: 'Advisory — report issues' },
+                          { value: 'off', label: 'Off — mark work unverified' },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            { gateStrictness: value as 'strict' | 'advisory' | 'off' },
+                            { quietSuccess: true },
+                          )}
+                      />
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <div class="mb-2 text-xs text-[var(--color-text-muted)]">
+                          Maximum Critic passes
+                        </div>
+                        <NumberStepper
+                          compact
+                          value={agentSettingsStore.settings.maxCriticIterations ?? 3}
+                          min={1}
+                          max={10}
+                          label="Maximum Critic passes"
+                          disabled={!agentSettingsStore.settings.criticGateEnabled}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { maxCriticIterations: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                          Bounds delegated repair attempts; it does not invent a passing verdict.
                         </p>
-                        <div class="mt-4 space-y-2">
-                          {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
-                            {@const collapsed = collapsedNotesGroups[cat.id] ?? true}
-                            {@const draft = notesDrafts[cat.id] ?? { text: '', dirty: false }}
-                            <div
-                              class="rounded-xl overflow-hidden"
-                              style="background: var(--color-surface-0); border: 1px solid var(--color-border);"
-                            >
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              {/if}
+            </div>
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('workflow')}
+                aria-expanded={expandedSections.workflow}
+              >
+                <span class="flex items-center gap-3">
+                  <GitBranch size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Workflow</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Planning and learning</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.workflow
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.workflow}
+                <div
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                >
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        Workflow
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Control real task clarification, orchestration, Goal planning, and
+                        reversible skill learning.
+                      </p>
+                    </div>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <KorySelect
+                        label="Intent interview"
+                        description="How many clarifying questions Kory asks before starting work."
+                        value={agentSettingsStore.settings.intentInterview ?? 'adaptive'}
+                        options={[
+                          {
+                            value: 'off',
+                            label: 'Off',
+                            description: 'Start working immediately without follow-up questions.',
+                          },
+                          {
+                            value: 'adaptive',
+                            label: 'Adaptive',
+                            description:
+                              'Ask a few targeted questions when the task is vague or complex.',
+                          },
+                          {
+                            value: 'deep',
+                            label: 'Deep',
+                            description:
+                              'Conduct a thorough Q&A to fully define the request before acting.',
+                          },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            { intentInterview: value as 'off' | 'adaptive' | 'deep' },
+                            { quietSuccess: true },
+                          )}
+                      />
+                      <KorySelect
+                        label="Execution strategy"
+                        description="How Kory distributes work across one or many agents."
+                        value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
+                        options={[
+                          {
+                            value: 'auto',
+                            label: 'Auto — choose for the task',
+                            description:
+                              'Let Kory decide when a single agent or multiple agents fit best.',
+                          },
+                          {
+                            value: 'single',
+                            label: 'Single agent',
+                            description: 'Run the entire task through one agent.',
+                          },
+                          {
+                            value: 'multi',
+                            label: 'Multi-agent when available',
+                            description:
+                              'Use multiple agents in parallel whenever the task allows it.',
+                          },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            { agentExecutionMode: value as 'auto' | 'single' | 'multi' },
+                            { quietSuccess: true },
+                          )}
+                      />
+                      <KorySelect
+                        label="Goal planning"
+                        description="How Kory breaks tasks into tracked goals before acting."
+                        value={agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive'}
+                        options={[
+                          {
+                            value: 'minimal',
+                            label: 'Minimal',
+                            description: 'Use goals only when the task is large or complex.',
+                          },
+                          {
+                            value: 'adaptive',
+                            label: 'Adaptive',
+                            description: 'Plan goals based on task size and uncertainty.',
+                          },
+                          {
+                            value: 'structured',
+                            label: 'Structured',
+                            description:
+                              'Always create a step-by-step goal plan before starting work.',
+                          },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            {
+                              goalPlanningDepth: value as 'minimal' | 'adaptive' | 'structured',
+                            },
+                            { quietSuccess: true },
+                          )}
+                      />
+                      <KorySelect
+                        label="Skill learning"
+                        description="How Kory may create or install new skills from your sessions."
+                        value={agentSettingsStore.settings.skillLearningMode ??
+                          'propose-then-verify'}
+                        options={[
+                          {
+                            value: 'human-only',
+                            label: 'Human only',
+                            description:
+                              'Never create or install a skill without your explicit approval.',
+                          },
+                          {
+                            value: 'propose-then-verify',
+                            label: 'Propose then verify',
+                            description:
+                              'Suggest new skills and wait for your approval before installing.',
+                          },
+                          {
+                            value: 'automatic',
+                            label: 'Automatic, reversible',
+                            description:
+                              'Create skills automatically; you can undo or remove them later.',
+                          },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            {
+                              skillLearningMode: value as
+                                'human-only' | 'propose-then-verify' | 'automatic',
+                            },
+                            { quietSuccess: true },
+                          )}
+                      />
+                    </div>
+                    <SettingsSwitch
+                      checked={goalDisplayStore.sidebar}
+                      label="Show Active Goals in sidebar"
+                      description="Keep the compact cross-chat goal list visible in the session sidebar."
+                      onchange={() =>
+                        goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
+                    />
+                    <SettingsSwitch
+                      checked={goalDisplayStore.composer}
+                      label="Show goal context in composer"
+                      description="Place the optional goal selector to the right of model and reasoning controls."
+                      onchange={() =>
+                        goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
+                    />
+                  </section>
+                </div>
+              {/if}
+            </div>
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('context')}
+                aria-expanded={expandedSections.context}
+              >
+                <span class="flex items-center gap-3">
+                  <Brain size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Context & memory</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Context and persistence</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.context
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.context}
+                <div
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                >
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        Context & memory
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Everything the agent does is archived locally; stale tool outputs are
+                        collapsed out of its context and stay recoverable via fetch_context. Nothing
+                        is ever lost.
+                      </p>
+                    </div>
+
+                    <div class="grid gap-3 sm:grid-cols-2">
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
+                        label="Auto-Collapse Old Tool Output"
+                        description="Stub stale file reads, terminal output, and search results while keeping them recoverable."
+                        onchange={() => toggleSetting('contextPruningEnabled')}
+                      />
+
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.allowExternalPaths ?? false}
+                        label="External File Access"
+                        description="Let the chat image renderer and viewers serve files outside your home folder (external drives, mounts)."
+                        onchange={() => toggleSetting('allowExternalPaths')}
+                      />
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.contextSelfAwareness ?? true}
+                        label="Agent Context Awareness"
+                        description="Give the agent a live window-usage report so it can prune or compact deliberately."
+                        onchange={() => toggleSetting('contextSelfAwareness')}
+                      />
+
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.autoCompactEnabled ?? true}
+                        label="Automatic Compaction"
+                        description={`After a completed turn reaches ${agentSettingsStore.settings.autoCompactThreshold ?? 80}% of a trusted model window, schedule a recoverable context compaction.`}
+                        onchange={() => toggleSetting('autoCompactEnabled')}
+                      />
+
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
+                        label="Expand Full Reasoning by Default"
+                        description="Show reasoning automatically while keeping every block individually collapsible."
+                        onchange={() => toggleSetting('reasoningExpandedByDefault')}
+                      />
+
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <label
+                          for="ctx-compact-threshold"
+                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          >Compaction Trigger</label
+                        >
+                        <NumberStepper
+                          value={agentSettingsStore.settings.autoCompactThreshold ?? 80}
+                          min={10}
+                          max={99}
+                          step={1}
+                          unit="%"
+                          label="Context window percentage that triggers compaction"
+                          disabled={!(agentSettingsStore.settings.autoCompactEnabled ?? true)}
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { autoCompactThreshold: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Auto-compact when a turn reaches this percentage of the model's trusted
+                          context window.
+                        </p>
+                      </div>
+
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <label
+                          for="ctx-keep-turns"
+                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          >Keep Recent Turns Full</label
+                        >
+                        <NumberStepper
+                          value={agentSettingsStore.settings.contextKeepRecentTurns ?? 3}
+                          min={1}
+                          max={10}
+                          label="Recent turns kept full"
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { contextKeepRecentTurns: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Tool outputs from this many recent turns are never collapsed.
+                        </p>
+                      </div>
+
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <label
+                          for="ctx-min-chars"
+                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          >Minimum Size to Collapse</label
+                        >
+                        <NumberStepper
+                          value={agentSettingsStore.settings.contextPruneMinChars ?? 600}
+                          min={100}
+                          max={10000}
+                          step={100}
+                          label="Minimum output size to collapse"
+                          onchange={(value) =>
+                            agentSettingsStore.saveSettings(
+                              { contextPruneMinChars: value },
+                              { quietSuccess: true },
+                            )}
+                        />
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Outputs smaller than this (characters) stay in context — not worth
+                          collapsing.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="space-y-1">
+                      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        Memory policy
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Control whether the agent can persist what it learns.
+                      </p>
+                    </div>
+
+                    <div class="space-y-3">
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.agentCanUpdatePreferences}
+                        label="Remember explicit requests"
+                        description="Persist only requests that explicitly say remember or always; ordinary conversation never writes project preferences."
+                        onchange={() => toggleSetting('agentCanUpdatePreferences')}
+                      />
+                    </div>
+                  </section>
+                </div>
+              {/if}
+            </div>
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('research')}
+                aria-expanded={expandedSections.research}
+              >
+                <span class="flex items-center gap-3">
+                  <Search size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Research</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Search and source policy</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.research
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.research}
+                <div
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                >
+                  <section
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                  >
+                    <div class="flex items-center gap-2 text-[var(--color-warning)]">
+                      <FlaskConical size={16} />
+                      <h4 class="text-sm font-semibold">Research</h4>
+                    </div>
+
+                    <div class="space-y-3">
+                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                        <div class="flex items-start justify-between gap-4">
+                          <div class="flex items-center gap-2">
+                            <Globe size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
+                            <div>
+                              <div class="text-sm font-medium text-[var(--color-text-primary)]">
+                                Local Web Search
+                              </div>
+                              <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                                Use DuckDuckGo fallback for web search.
+                              </div>
+                            </div>
+                          </div>
+                          <div
+                            class="flex shrink-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-0.5"
+                            role="group"
+                            aria-label="Local web search mode"
+                          >
+                            {#each [{ value: 'off', label: 'Off' }, { value: 'fallback', label: 'Fallback' }, { value: 'on', label: 'On' }] as option (option.value)}
                               <button
                                 type="button"
-                                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-1)]"
-                                onclick={() => toggleNotesGroup(cat.id)}
+                                aria-pressed={agentSettingsStore.settings.localWebSearch ===
+                                  option.value}
+                                onclick={() =>
+                                  agentSettingsStore.saveSettings({
+                                    localWebSearch: option.value as 'off' | 'on' | 'fallback',
+                                  })}
+                                class="rounded-md px-2 py-1 text-[10px] font-medium transition-all {agentSettingsStore
+                                  .settings.localWebSearch === option.value
+                                  ? 'bg-[var(--color-accent)] text-white shadow-sm'
+                                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
                               >
-                                <span class="text-xs font-medium text-[var(--color-text-primary)]"
-                                  >{cat.label}</span
-                                >
-                                <div class="flex items-center gap-2">
-                                  {#if draft.dirty}
-                                    <span
-                                      class="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                                      style="background: var(--color-accent); color: var(--color-surface-0);"
-                                      >unsaved</span
-                                    >
-                                  {/if}
-                                  {#if hasGroupNotes(cat.id)}
-                                    <span
-                                      class="rounded-full px-2 py-0.5 text-[10px]"
-                                      style="background: var(--color-success); color: var(--color-surface-0);"
-                                      >has notes</span
-                                    >
-                                  {/if}
-                                  <ChevronRight
-                                    size={14}
-                                    class="text-[var(--color-text-muted)] transition-transform {collapsed
-                                      ? ''
-                                      : 'rotate-90'}"
-                                  />
-                                </div>
+                                {option.label}
                               </button>
-                              {#if !collapsed}
-                                <div class="border-t border-[var(--color-border)] px-4 py-3">
-                                  <textarea
-                                    class="w-full min-h-[100px] rounded-lg p-3 text-xs font-mono resize-y focus:outline-none"
-                                    style="background: var(--color-surface-2); color: var(--color-text-primary); border: 1px solid var(--color-border);"
-                                    placeholder={cat.notesPlaceholder}
-                                    value={draft.text}
-                                    oninput={(e) => {
-                                      notesDrafts[cat.id] = {
-                                        text: e.currentTarget.value,
-                                        dirty: true,
-                                      };
-                                    }}
-                                  ></textarea>
-                                  <div class="mt-2 flex justify-end">
-                                    <button
-                                      type="button"
-                                      class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                                      style="background: {draft.dirty
-                                        ? 'var(--color-accent)'
-                                        : 'var(--color-surface-3)'}; color: {draft.dirty
-                                        ? 'var(--color-surface-0)'
-                                        : 'var(--color-text-muted)'};"
-                                      onclick={() => void saveGroupNotes(cat.id)}
-                                    >
-                                      {draft.dirty ? 'Save' : 'Saved'}
-                                    </button>
-                                  </div>
-                                </div>
-                              {/if}
-                            </div>
-                          {/each}
+                            {/each}
+                          </div>
                         </div>
-                      </section>
-                    {/if}
-                  </div>
+                      </div>
+
+                      <SettingsSwitch
+                        compact
+                        checked={agentSettingsStore.settings.multiSourceResearch}
+                        label="Multi-Source Research"
+                        description="Require verification across 3–5 sources for research tasks."
+                        onchange={() => toggleSetting('multiSourceResearch')}
+                      />
+                    </div>
+                  </section>
                 </div>
-              </div>
+              {/if}
+            </div>
+            <div
+              class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
+            >
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                onclick={() => toggleSection('routing')}
+                aria-expanded={expandedSections.routing}
+              >
+                <span class="flex items-center gap-3">
+                  <Route size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span>
+                    <span class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >Routing & guidance</span
+                    >
+                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                      >Models and manager notes</span
+                    >
+                  </span>
+                </span>
+                <ChevronRight
+                  size={16}
+                  class="shrink-0 text-[var(--color-text-muted)] transition-transform {expandedSections.routing
+                    ? 'rotate-90'
+                    : ''}"
+                />
+              </button>
+              {#if expandedSections.routing}
+                <div
+                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                >
+                  <section
+                    class="rounded-2xl p-5"
+                    style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
+                  >
+                    <button
+                      type="button"
+                      class="flex w-full items-start justify-between gap-4 text-left"
+                      aria-expanded={showModelAccess}
+                      onclick={() => (showModelAccess = !showModelAccess)}
+                    >
+                      <span>
+                        <span class="block text-sm font-semibold text-[var(--color-text-primary)]"
+                          >Routing access</span
+                        >
+                        <span class="mt-1 block text-xs text-[var(--color-text-muted)]"
+                          >Restrict auto-routing by category. Your explicit composer choice always
+                          wins.</span
+                        >
+                      </span>
+                      <ChevronRight
+                        size={16}
+                        class="shrink-0 text-[var(--color-text-muted)] transition-transform {showModelAccess
+                          ? 'rotate-90'
+                          : ''}"
+                      />
+                    </button>
+                    {#if showModelAccess}
+                      <div class="mt-4 space-y-5">
+                        {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
+                          <div
+                            class="rounded-xl p-4"
+                            style="background: var(--color-surface-0); border: 1px solid var(--color-border);"
+                          >
+                            <span
+                              class="mb-3 block text-xs font-medium text-[var(--color-text-secondary)]"
+                              >{cat.label}</span
+                            >
+                            {#if availableModels.length === 0}
+                              <span class="text-[10px] text-[var(--color-text-muted)] italic"
+                                >No enabled models available</span
+                              >
+                            {:else}
+                              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                {#each availableModels as m (m)}
+                                  {@const checked = modelsFor(cat.id).includes(m)}
+                                  <div
+                                    class="flex min-w-0 items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-xs transition-colors"
+                                    style="background: {checked
+                                      ? 'color-mix(in srgb, var(--color-accent) 9%, var(--color-surface-2))'
+                                      : 'var(--color-surface-2)'}; border: 1px solid {checked
+                                      ? 'color-mix(in srgb, var(--color-accent) 38%, var(--color-border))'
+                                      : 'var(--color-border)'};"
+                                  >
+                                    <span
+                                      class="min-w-0 truncate font-mono text-[var(--color-text-primary)]"
+                                      >{m}</span
+                                    >
+                                    <SettingsToggle
+                                      {checked}
+                                      label={`Allow ${m} for ${cat.label}`}
+                                      onchange={() => void toggleCategoryModel(cat.id, m)}
+                                    />
+                                  </div>
+                                {/each}
+                              </div>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                    <div class="mt-6 border-t border-[var(--color-border)] pt-6">
+                      <div class="flex items-center gap-2">
+                        <StickyNote size={16} style="color: var(--color-accent);" />
+                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                          Notes for the Manager
+                        </h4>
+                      </div>
+                      <p class="mt-1 text-xs text-[var(--color-text-muted)]">
+                        Per-group standing guidance injected into every conversation. Expand a group
+                        to edit its notes.
+                      </p>
+                      <div class="mt-4 space-y-2">
+                        {#each MODEL_ACCESS_CATEGORIES as cat (cat.id)}
+                          {@const collapsed = collapsedNotesGroups[cat.id] ?? true}
+                          {@const draft = notesDrafts[cat.id] ?? { text: '', dirty: false }}
+                          <div
+                            class="rounded-xl overflow-hidden"
+                            style="background: var(--color-surface-0); border: 1px solid var(--color-border);"
+                          >
+                            <button
+                              type="button"
+                              class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-1)]"
+                              onclick={() => toggleNotesGroup(cat.id)}
+                            >
+                              <span class="text-xs font-medium text-[var(--color-text-primary)]"
+                                >{cat.label}</span
+                              >
+                              <div class="flex items-center gap-2">
+                                {#if draft.dirty}
+                                  <span
+                                    class="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                                    style="background: var(--color-accent); color: var(--color-surface-0);"
+                                    >unsaved</span
+                                  >
+                                {/if}
+                                {#if hasGroupNotes(cat.id)}
+                                  <span
+                                    class="rounded-full px-2 py-0.5 text-[10px]"
+                                    style="background: var(--color-success); color: var(--color-surface-0);"
+                                    >has notes</span
+                                  >
+                                {/if}
+                                <ChevronRight
+                                  size={14}
+                                  class="text-[var(--color-text-muted)] transition-transform {collapsed
+                                    ? ''
+                                    : 'rotate-90'}"
+                                />
+                              </div>
+                            </button>
+                            {#if !collapsed}
+                              <div class="border-t border-[var(--color-border)] px-4 py-3">
+                                <textarea
+                                  class="w-full min-h-[100px] rounded-lg p-3 text-xs font-mono resize-y focus:outline-none"
+                                  style="background: var(--color-surface-2); color: var(--color-text-primary); border: 1px solid var(--color-border);"
+                                  placeholder={cat.notesPlaceholder}
+                                  value={draft.text}
+                                  oninput={(e) => {
+                                    notesDrafts[cat.id] = {
+                                      text: e.currentTarget.value,
+                                      dirty: true,
+                                    };
+                                  }}
+                                ></textarea>
+                                <div class="mt-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                                    style="background: {draft.dirty
+                                      ? 'var(--color-accent)'
+                                      : 'var(--color-surface-3)'}; color: {draft.dirty
+                                      ? 'var(--color-surface-0)'
+                                      : 'var(--color-text-muted)'};"
+                                    onclick={() => void saveGroupNotes(cat.id)}
+                                  >
+                                    {draft.dirty ? 'Save' : 'Saved'}
+                                  </button>
+                                </div>
+                              </div>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              {/if}
+            </div>
+            <div class="pt-2">
+              <button
+                type="button"
+                onclick={() => (showResetConfirmation = true)}
+                class="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-3 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)]"
+              >
+                <RotateCcw size={14} /> Reset agent settings
+              </button>
             </div>
           </div>
         </div>
       </div>
     {:else if agentSettingsStore.activeTab === 'skills'}
+      <!-- Kept mounted above so per-revision and in-progress creator edits survive tab changes. -->
+    {:else if Boolean(agentSettingsStore.skills) && false}
       <div class="flex h-full min-h-0 flex-col">
         <section class="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <div class="mb-3 flex items-center justify-between gap-3">
@@ -2104,7 +2587,7 @@
             >
           </div>
           {#if agentSettingsStore.skillResolutionPreview}
-            {@const preview = agentSettingsStore.skillResolutionPreview}
+            {@const preview = agentSettingsStore.skillResolutionPreview!}
             <div class="mt-2 text-[10px] text-[var(--color-text-muted)]">
               Planning-only routing preview · {preview.selected.length} selected ·
               {preview.totalContextCost}/{preview.contextBudget} context characters ({preview.contextOverheadCost}
@@ -2225,8 +2708,6 @@
                 onclick={() => {
                   selectedSkillKey = `${skill.source}:${skill.name}:${skill.state}`;
                   skillDraftDirty = false;
-                  showSkillComparison = false;
-                  showBundledComparison = false;
                 }}
                 class="mb-1 w-full rounded-lg border py-2 pr-2.5 text-left transition-colors {selectedSkill?.name ===
                   skill.name &&
@@ -2234,7 +2715,7 @@
                 selectedSkill?.state === skill.state
                   ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
                   : 'border-transparent hover:bg-[var(--color-surface-2)]'}"
-                style={`padding-left: ${10 + Math.min(skill.metadata.depth, 4) * 12}px`}
+                style="padding-left: 10px"
               >
                 <div class="flex items-center justify-between gap-2">
                   <span class="truncate text-xs font-medium text-[var(--color-text-primary)]"
@@ -2277,18 +2758,6 @@
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
-                  <button
-                    onclick={() => void compareSelectedSkill()}
-                    class="rounded-md border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)]"
-                    >Compare</button
-                  >
-                  {#if selectedSkill.bundledUpdateAvailable}
-                    <button
-                      onclick={() => void compareSelectedSkillWithBundled()}
-                      class="rounded-md bg-[var(--color-accent)]/15 px-2 py-1 text-xs text-[var(--color-accent)]"
-                      >Compare with bundled</button
-                    >
-                  {/if}
                   <button
                     onclick={() => {
                       skillDraftContent = selectedSkill.content;
@@ -2366,7 +2835,7 @@
                 class="border-b border-[var(--color-border)] px-4 py-2 text-[10px] text-[var(--color-text-muted)]"
               >
                 {#if selectedSkillEvaluation}
-                  {@const gate = selectedSkillEvaluation.gate}
+                  {@const gate = selectedSkillEvaluation!.gate}
                   <span class="font-semibold text-[var(--color-text-secondary)]"
                     >Promotion evidence:</span
                   >
@@ -2386,7 +2855,7 @@
                   >
                   {#if gate.reasons.length}<div class="mt-1">{gate.reasons.join(' · ')}</div>{/if}
                   <div class="mt-1">
-                    {selectedSkillEvaluation.cases.length} evaluation cases are derived from the skill’s
+                    {selectedSkillEvaluation!.cases.length} evaluation cases are derived from the skill’s
                     visible trigger and non-trigger contract. No model score is shown until evidence is
                     recorded.
                   </div>
@@ -2394,128 +2863,6 @@
                   Loading the evidence card…
                 {/if}
               </div>
-              <textarea
-                bind:value={skillDraftContent}
-                oninput={() => (skillDraftDirty = true)}
-                spellcheck="false"
-                aria-label="Skill Markdown editor"
-                class="min-h-0 flex-1 resize-none bg-[var(--color-surface-0)] p-4 font-mono text-xs text-[var(--color-text-primary)] focus:outline-none"
-              ></textarea>
-              {#if showSkillComparison && agentSettingsStore.skillComparison}
-                <div
-                  class="max-h-[45%] overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
-                >
-                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span class="text-xs font-semibold text-[var(--color-text-primary)]"
-                      >Active versus draft</span
-                    >
-                    <button
-                      type="button"
-                      onclick={() => (showSkillComparison = false)}
-                      class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)]"
-                      >Close</button
-                    >
-                  </div>
-                  <div class="grid gap-2 xl:grid-cols-2">
-                    <pre
-                      class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
-                        .skillComparison.active}</pre>
-                    <pre
-                      class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
-                        .skillComparison.draft}</pre>
-                  </div>
-                </div>
-              {/if}
-              {#if showBundledComparison && agentSettingsStore.bundledComparison}
-                <div
-                  class="max-h-[45%] overflow-auto border-t border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
-                >
-                  <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <span class="text-xs font-semibold text-[var(--color-text-primary)]"
-                      >Your version versus bundled update</span
-                    >
-                    <div class="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(
-                            selectedSkill,
-                            'keep-local',
-                          )}
-                        disabled={agentSettingsStore.isMergingSkill}
-                        class="rounded bg-[var(--color-surface-3)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)] disabled:opacity-40"
-                        >Keep local</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'merge')}
-                        disabled={agentSettingsStore.isMergingSkill}
-                        class="rounded bg-[var(--color-warning)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
-                        >Merge to draft</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(
-                            selectedSkill,
-                            'merge-with-agent',
-                          )}
-                        disabled={agentSettingsStore.isMergingSkill}
-                        class="rounded bg-[var(--color-accent)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
-                        >{agentSettingsStore.isMergingSkill
-                          ? 'Merging…'
-                          : 'Merge with agent'}</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() =>
-                          void agentSettingsStore.applyBundledSkillUpdate(selectedSkill, 'replace')}
-                        disabled={agentSettingsStore.isMergingSkill}
-                        class="rounded bg-[var(--color-error)] px-2 py-1 text-[10px] text-white disabled:opacity-40"
-                        >Replace with bundled</button
-                      >
-                      <button
-                        type="button"
-                        onclick={() => (showBundledComparison = false)}
-                        disabled={agentSettingsStore.isMergingSkill}
-                        class="rounded border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-secondary)] disabled:opacity-40"
-                        >Close</button
-                      >
-                    </div>
-                  </div>
-                  {#if agentSettingsStore.isMergingSkill}
-                    <div
-                      class="mb-2 rounded bg-[var(--color-accent)]/10 px-3 py-2 text-[10px] text-[var(--color-accent)]"
-                    >
-                      The agent is reading both versions and producing a merged draft. This usually
-                      takes 10–30 seconds…
-                    </div>
-                  {/if}
-                  <div class="grid gap-2 xl:grid-cols-2">
-                    <div>
-                      <div
-                        class="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
-                      >
-                        Your version
-                      </div>
-                      <pre
-                        class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
-                          .bundledComparison.local}</pre>
-                    </div>
-                    <div>
-                      <div
-                        class="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]"
-                      >
-                        Bundled update
-                      </div>
-                      <pre
-                        class="overflow-auto whitespace-pre-wrap rounded bg-[var(--color-surface-0)] p-2 text-[9px] text-[var(--color-text-secondary)]">{agentSettingsStore
-                          .bundledComparison.bundled}</pre>
-                    </div>
-                  </div>
-                </div>
-              {/if}
             </section>
           {:else}
             <div class="flex items-center justify-center text-sm text-[var(--color-text-muted)]">

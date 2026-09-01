@@ -2,9 +2,9 @@
 //
 // Like the other subscription CLIs (claude-code, cursor): no API key needed in
 // Koryphaios — the locally logged-in `devin` binary authenticates itself.
-// Headless `-p` streams the answer text to stdout; the richer trajectory
-// (per-step reasoning, tool calls with output, and exact token usage) is
-// written to an `--export` JSON file which we tail for tools + usage.
+// Headless `-p` writes CLI output to stdout; authoritative agent messages,
+// per-step reasoning, tool calls with output, and exact token usage come from
+// the `--export` ATIF JSON. Stdout remains a fallback for legacy exports.
 //
 // Model list: Devin exposes a fixed set of named models (SWE-1.6,
 // Claude, GPT, Gemini, GLM, Kimi families) selected via --model. There is NO
@@ -20,6 +20,7 @@ import { tmpdir, homedir } from 'node:os';
 import { whichBinary } from './cli-detection';
 import { detectDevinCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
+import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
 import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
 import {
   type Provider,
@@ -60,6 +61,19 @@ export function sanitizeDevinOutput(value: string): string {
     );
 }
 
+export function selectDevinResponseEvents(
+  stdout: string,
+  exportEvents: ProviderEvent[],
+): ProviderEvent[] {
+  if (exportEvents.some((event) => event.type === 'content_delta' && event.content?.trim())) {
+    return exportEvents;
+  }
+  return [
+    ...(stdout.trim() ? [{ type: 'content_delta' as const, content: stdout }] : []),
+    ...exportEvents.filter((event) => event.type !== 'content_delta'),
+  ];
+}
+
 export function buildDevinProcessEnv(
   baseEnv: NodeJS.ProcessEnv,
   jailEnv: NodeJS.ProcessEnv | undefined,
@@ -71,6 +85,9 @@ export function buildDevinProcessEnv(
       ? {
           DEVIN_CONFIG_DIR: devinHome,
           XDG_CONFIG_HOME: devinHome,
+          XDG_DATA_HOME: join(devinHome, '.local', 'share'),
+          XDG_CACHE_HOME: join(devinHome, '.cache'),
+          XDG_STATE_HOME: join(devinHome, '.local', 'state'),
           HOME: devinHome,
           USERPROFILE: devinHome,
         }
@@ -81,9 +98,10 @@ export function buildDevinProcessEnv(
 }
 
 const HARNESS_SYSTEM_NOTE =
-  'You are running inside the Koryphaios orchestrator. Never spawn subagents or delegate to ' +
-  'other agents yourself; if work should be parallelized or delegated, say so in your response ' +
-  'and Koryphaios will dispatch its own worker agents.';
+  'You are running inside the Koryphaios orchestrator. Koryphaios owns tool execution, ' +
+  'permissions, and orchestration. Use the role-scoped kory__ tools from the kory MCP server ' +
+  'instead of native read, write, edit, exec, web, or subagent tools. Never spawn native ' +
+  'subagents; delegate only through an available kory__ tool, or explain what delegation is needed.';
 
 function buildPrompt(systemPrompt: string | undefined, messages: ProviderMessage[]): string {
   const lines: string[] = [];
@@ -144,9 +162,14 @@ export class DevinProvider implements Provider {
 
   listModels(): ModelDef[] {
     // `devin models` is account-scoped; never synthesize a list before it
-    // reports one.
+    // reports one. The CLI's `models list` is human-formatted and only
+    // reports model id + name; context windows must be enriched from the
+    // public models.dev catalog. Devin hosts a wide variety of models
+    // (Claude, GPT, Gemini, GLM, Kimi, Llama, …) under one subscription,
+    // so we look under the most common upstream provider keys.
+    refreshModelsDevCache();
     const caps = getDevinCapabilitiesSync();
-    const live: ModelDef[] = caps.models.map((m) => ({
+    const base: ModelDef[] = caps.models.map((m) => ({
       id: m.id,
       name: m.name,
       provider: 'devin' as const,
@@ -155,7 +178,16 @@ export class DevinProvider implements Provider {
       contextVerified: typeof m.contextWindow === 'number' && m.contextWindow >= 1024,
       maxOutputTokens: 0,
     }));
-    return live;
+    return applyModelsDevMetadata('devin', base, [
+      'anthropic',
+      'openai',
+      'google',
+      'xai',
+      'zai',
+      'moonshot',
+      'mistral',
+      'deepseek',
+    ]);
   }
 
   async refreshModels(): Promise<void> {
@@ -250,52 +282,51 @@ export class DevinProvider implements Provider {
           'json',
         );
         agentConfigPath = agentConfigArtifact.path;
-        // ── Wire MCP server (kory__ tools) ───────────────────────────────
-        // Write the kory MCP server to .devin/config.json so the CLI discovers
-        // it on startup and gets access to all kory__ tools.
-        const mcpConfigs = researchOnly ? null : bridge.buildMcpConfig(bridgeCtx);
-        if (mcpConfigs && mcpConfigs.length > 0 && devinHome) {
-          try {
-            bridge.writeMcpConfig(mcpConfigs, devinHome);
-          } catch (mcpErr) {
-            providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Devin');
-          }
-        }
+      }
+    }
 
-        // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
-        const hookConfigs = researchOnly ? null : bridge.buildHooks(bridgeCtx);
-        if (hookConfigs && hookConfigs.length > 0 && devinHome) {
-          try {
-            const hooksJson = bridge.serializeHooks(hookConfigs);
-            const hooksPath = join(devinHome, '.devin', 'hooks.v1.json');
-            writeManagedCliFile(hooksPath, hooksJson);
-          } catch (hookErr) {
-            providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Devin');
-          }
-        }
+    // ── Wire MCP server (kory__ tools) ───────────────────────────────
+    // Write the kory MCP server to the isolated user config so the CLI discovers
+    // it on startup and gets access to all kory__ tools.
+    const mcpConfigs = researchOnly ? null : bridge.buildMcpConfig(bridgeCtx);
+    if (mcpConfigs && mcpConfigs.length > 0 && devinHome) {
+      try {
+        bridge.writeMcpConfig(mcpConfigs, devinHome);
+      } catch (mcpErr) {
+        providerLog.warn({ err: mcpErr }, 'Failed to write kory MCP config for Devin');
+      }
+    }
 
-        // ── Wire rules (AGENTS.md) ───────────────────────────────────────
-        const ruleFiles = researchOnly ? null : bridge.buildRules(bridgeCtx);
-        if (ruleFiles) {
-          for (const rule of ruleFiles) {
-            try {
-              writeManagedCliFile(rule.path, rule.content);
-            } catch (ruleErr) {
-              providerLog.warn({ err: ruleErr }, 'Failed to write rules file for Devin');
-            }
-          }
-        }
+    // ── Wire hooks (PreToolUse enforcement layer) ────────────────────
+    const hookConfigs = researchOnly ? null : bridge.buildHooks(bridgeCtx);
+    if (hookConfigs && hookConfigs.length > 0 && devinHome) {
+      try {
+        bridge.writeHooksConfig(hookConfigs, devinHome);
+      } catch (hookErr) {
+        providerLog.warn({ err: hookErr }, 'Failed to write hooks config for Devin');
+      }
+    }
 
-        // ── Wire skills (.devin/skills/<name>/SKILL.md) ──────────────────
-        const skillFiles = researchOnly ? null : bridge.buildSkills(bridgeCtx);
-        if (skillFiles) {
-          for (const skill of skillFiles) {
-            try {
-              writeManagedCliFile(skill.path, skill.content);
-            } catch (skillErr) {
-              providerLog.warn({ err: skillErr }, 'Failed to write skill file for Devin');
-            }
-          }
+    // ── Wire rules (AGENTS.md) ───────────────────────────────────────
+    const ruleFiles = researchOnly ? null : bridge.buildRules(bridgeCtx);
+    if (ruleFiles) {
+      for (const rule of ruleFiles) {
+        try {
+          writeManagedCliFile(rule.path, rule.content);
+        } catch (ruleErr) {
+          providerLog.warn({ err: ruleErr }, 'Failed to write rules file for Devin');
+        }
+      }
+    }
+
+    // ── Wire skills (.devin/skills/<name>/SKILL.md) ──────────────────
+    const skillFiles = researchOnly ? null : bridge.buildSkills(bridgeCtx);
+    if (skillFiles) {
+      for (const skill of skillFiles) {
+        try {
+          writeManagedCliFile(skill.path, skill.content);
+        } catch (skillErr) {
+          providerLog.warn({ err: skillErr }, 'Failed to write skill file for Devin');
         }
       }
     }
@@ -425,19 +456,11 @@ export class DevinProvider implements Provider {
       child.once('exit', (code) => resolve(code ?? 0));
     });
 
-    let sawContent = false;
     while (true) {
       const settled = await Promise.race([
         exitPromise.then((code) => ({ done: true as const, code })),
         new Promise<{ done: false }>((r) => setTimeout(() => r({ done: false }), EXPORT_POLL_MS)),
       ]);
-      while (stdoutQueue.length > 0) {
-        const chunk = stdoutQueue.shift()!;
-        if (chunk) {
-          sawContent = true;
-          yield { type: 'content_delta', content: chunk };
-        }
-      }
       if (settled.done) {
         clearTimeout(timeout);
         request.signal?.removeEventListener('abort', onAbort);
@@ -445,20 +468,16 @@ export class DevinProvider implements Provider {
           exportArtifact.cleanup();
           return;
         }
-        // Drain any trailing stdout.
-        while (stdoutQueue.length > 0) {
-          const chunk = stdoutQueue.shift()!;
-          if (chunk) {
-            sawContent = true;
-            yield { type: 'content_delta', content: chunk };
-          }
-        }
         if (settled.code === -1) {
           yield { type: 'error', error: 'Devin: failed to launch the devin CLI process.' };
           exportArtifact.cleanup();
           return;
         }
-        if (settled.code !== 0 && !sawContent) {
+        const exportEvents = this.readExportEvents(exportPath);
+        const hasAgentContent = exportEvents.some(
+          (event) => event.type === 'content_delta' && event.content?.trim(),
+        );
+        if (settled.code !== 0 && !hasAgentContent) {
           const diagnostic = safeProviderDiagnostic('devin', 'stderr', stderr, {
             exitCode: settled.code,
           });
@@ -472,17 +491,16 @@ export class DevinProvider implements Provider {
           exportArtifact.cleanup();
           return;
         }
-        // Surface tools + reasoning + usage from the export trajectory.
-        yield* this.drainExport(exportPath);
         exportArtifact.cleanup();
+        yield* selectDevinResponseEvents(stdoutQueue.join(''), exportEvents);
         yield { type: 'complete', finishReason: 'end_turn' };
         return;
       }
     }
   }
 
-  private *drainExport(exportPath: string): Generator<ProviderEvent> {
-    if (!existsSync(exportPath)) return;
+  private readExportEvents(exportPath: string): ProviderEvent[] {
+    if (!existsSync(exportPath)) return [];
     // Use the full ATIF-v1.7 parser from the bridge (Phase 2): it extracts
     // reasoning, tool calls, the real resolved model, tool definitions, and
     // final metrics — superset of the legacy DevinExport parsing.
@@ -494,7 +512,7 @@ export class DevinProvider implements Provider {
         { err: err instanceof Error ? err.message : String(err) },
         'Devin export file not readable',
       );
-      return;
+      return [];
     }
     const bridge = new DevinCliBridge();
     const { trajectory, events } = bridge.parseTrajectory(raw);
@@ -508,7 +526,7 @@ export class DevinProvider implements Provider {
         'Devin ATIF trajectory parsed',
       );
     }
-    yield* events;
+    return events;
   }
 }
 

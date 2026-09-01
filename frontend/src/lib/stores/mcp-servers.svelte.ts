@@ -62,6 +62,8 @@ export interface McpRegistrySearchResult {
     description: string;
     isSecret: boolean;
   }>;
+  /** Curated grouping for featured registry entries. */
+  category?: string;
 }
 
 type McpListResponse = { ok?: boolean; data?: McpServerStatus[]; error?: string };
@@ -75,6 +77,11 @@ type McpEnvResponse = {
 type McpRegistrySearchResponse = {
   ok?: boolean;
   data?: { results: McpRegistrySearchResult[]; nextCursor: string | null };
+  error?: string;
+};
+type McpRegistryFeaturedResponse = {
+  ok?: boolean;
+  data?: McpRegistrySearchResult[];
   error?: string;
 };
 
@@ -268,6 +275,28 @@ function createMcpServersStore() {
     registryQuery = '';
   }
 
+  let featuredServers = $state<McpRegistrySearchResult[]>([]);
+  let featuredLoading = $state(false);
+  let featuredError = $state<string | undefined>(undefined);
+
+  async function loadFeatured(): Promise<void> {
+    if (featuredServers.length > 0 || featuredLoading) return;
+    featuredLoading = true;
+    featuredError = undefined;
+    try {
+      const res = await apiFetch(apiUrl('/api/v1/mcp-registry/featured'));
+      const json = await parseJsonResponse<McpRegistryFeaturedResponse>(res);
+      if (!json?.ok || !Array.isArray(json.data)) {
+        throw new Error(json?.error ?? 'Could not load featured MCP servers');
+      }
+      featuredServers = json.data;
+    } catch (err) {
+      featuredError = err instanceof Error ? err.message : 'Could not load featured MCP servers';
+    } finally {
+      featuredLoading = false;
+    }
+  }
+
   return {
     get servers() {
       return servers;
@@ -306,6 +335,17 @@ function createMcpServersStore() {
     },
     searchRegistry,
     clearRegistry,
+    // Featured (curated) registry entries
+    get featuredServers() {
+      return featuredServers;
+    },
+    get featuredLoading() {
+      return featuredLoading;
+    },
+    get featuredError() {
+      return featuredError;
+    },
+    loadFeatured,
   };
 }
 

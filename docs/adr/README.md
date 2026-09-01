@@ -18,3 +18,4 @@ Each ADR documents a decision that is:
 - [ADR-006: Explicit stub marking for embeddings instead of fake vectors](./006-embeddings-explicit-stub.md)
 - [ADR-007: Env-based KMS provider selection](./007-kms-env-based-selection.md)
 - [ADR-008: Skill polyhierarchy and professional facets](./008-skill-polyhierarchy-and-facets.md)
+- [ADR-009: Authoritative, revisioned SessionRun aggregate](./009-authoritative-session-run-aggregate.md)

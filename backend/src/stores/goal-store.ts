@@ -709,8 +709,8 @@ export class GoalStore {
     patch: Pick<Partial<Goal>, 'status' | 'blocker' | 'activity'>,
   ): Promise<Goal | undefined> {
     if (!expectedAttemptId.trim()) return undefined;
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row?.execution) return undefined;
       const prior = model(row);
       if (
@@ -739,7 +739,7 @@ export class GoalStore {
             .map(sanitizeActivity)
         : undefined;
       const clearsBlocker = Object.prototype.hasOwnProperty.call(patch, 'blocker');
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           status,
@@ -760,7 +760,8 @@ export class GoalStore {
             eq(goals.execution, row.execution),
           ),
         )
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }
@@ -792,43 +793,45 @@ export class GoalStore {
       sessionId,
       createdAt: Date.now(),
     });
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           activity: JSON.stringify([...goal.activity, event].slice(-MAX_GOAL_ACTIVITY)),
           updatedAt: new Date(),
         })
         .where(eq(goals.id, id))
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }
   async setChecklist(id: string, checklist: GoalChecklistItem[]) {
     const planningOnly = normalizePlanningChecklist(checklist);
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
       if (goal.status !== 'queued' && goal.status !== 'planning') {
         throw new Error('Checklist planning is only allowed before Goal execution starts');
       }
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({ checklist: JSON.stringify(planningOnly), updatedAt: new Date() })
         .where(and(eq(goals.id, id), inArray(goals.status, ['queued', 'planning'])))
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }
 
   /** Start exactly one ready item without exposing arbitrary checklist writes. */
   async startItem(id: string, itemId: string): Promise<Goal | undefined> {
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
       if (!['queued', 'planning', 'running'].includes(goal.status)) {
@@ -855,7 +858,7 @@ export class GoalStore {
           ? { ...entry, status: 'running' as const, startedAt: now, completedAt: undefined }
           : entry,
       );
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           status: 'running',
@@ -868,7 +871,8 @@ export class GoalStore {
           updatedAt: new Date(now),
         })
         .where(and(eq(goals.id, id), eq(goals.status, row.status)))
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }
@@ -904,8 +908,8 @@ export class GoalStore {
     );
     const verified = review.verifier.passed && provenanceFailure === undefined;
 
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
       const item = goal.checklist.find((entry) => entry.id === itemId);
@@ -987,7 +991,7 @@ export class GoalStore {
           createdAt: now,
         },
       ].slice(-MAX_GOAL_ACTIVITY);
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           checklist: JSON.stringify(checklist),
@@ -999,7 +1003,8 @@ export class GoalStore {
             ? and(eq(goals.id, id), eq(goals.status, 'running'), eq(goals.execution, row.execution))
             : eq(goals.id, id),
         )
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }
@@ -1009,8 +1014,8 @@ export class GoalStore {
     reason: string,
     expectedAttemptId?: string,
   ): Promise<Goal | undefined> {
-    return db.transaction(async (tx) => {
-      const [selected] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const selected = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!selected) return undefined;
       const goal = model(selected);
       const item = goal.checklist.find((entry) => entry.id === itemId);
@@ -1037,7 +1042,7 @@ export class GoalStore {
           createdAt: now,
         }),
       ].slice(-MAX_GOAL_ACTIVITY);
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           status: 'queued',
@@ -1057,14 +1062,15 @@ export class GoalStore {
               : []),
           ),
         )
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : expectedAttemptId ? undefined : goal;
     });
   }
   /** Reopen pre-split or otherwise unverified completed work before a resume. */
   async reopenUnverifiedItems(id: string): Promise<Goal | undefined> {
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
       if (goal.status === 'completed' || goal.status === 'cancelled') return goal;
@@ -1111,7 +1117,7 @@ export class GoalStore {
           createdAt: now,
         }),
       ].slice(-MAX_GOAL_ACTIVITY);
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           status: 'queued',
@@ -1123,13 +1129,14 @@ export class GoalStore {
           updatedAt: new Date(now),
         })
         .where(and(eq(goals.id, id), eq(goals.status, row.status)))
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : goal;
     });
   }
   async finalize(id: string): Promise<Goal | undefined> {
-    return db.transaction(async (tx) => {
-      const [row] = await tx.select().from(goals).where(eq(goals.id, id)).limit(1);
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
       if (!row) return undefined;
       const goal = model(row);
       if (goal.status === 'completed') return goal;
@@ -1161,7 +1168,7 @@ export class GoalStore {
           createdAt: now,
         }),
       ].slice(-MAX_GOAL_ACTIVITY);
-      const [updated] = await tx
+      const updated = tx
         .update(goals)
         .set({
           status: 'completed',
@@ -1172,7 +1179,8 @@ export class GoalStore {
           updatedAt: new Date(now),
         })
         .where(eq(goals.id, id))
-        .returning();
+        .returning()
+        .get();
       return updated ? model(updated) : undefined;
     });
   }

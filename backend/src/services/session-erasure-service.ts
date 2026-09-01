@@ -177,7 +177,10 @@ function productionDependencies(): SessionErasureDependencies {
   if (!archive) throw new Error('Context archive is unavailable; session erasure refused');
   return {
     getSession: (id) => sessions.get(id),
-    listSessions: () => sessions.list(),
+    // Permanent delete-all must inventory active and archived chats alike so
+    // archived project roots, receipts, counts, and lifecycle broadcasts are
+    // never silently omitted by the normal active-chat view.
+    listSessions: () => sessions.listAll(),
     inventorySessionIds: () => inventorySessionIdsForErasure(getDb()),
     getTrackedProcessSessionIds: () => processSupervisor.getTrackedSessionIds(),
     tryAcquireProcessBarrier: (id) => processSupervisor.tryAcquireSessionErasureBarrier(id),

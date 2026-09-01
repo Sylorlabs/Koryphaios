@@ -241,6 +241,7 @@ async function probeCapabilities(): Promise<DevinCapabilities> {
     version,
     ...flags,
     ...subs,
+    supportsHooks: true,
     rulesDirs: parsePathsOutput(rulesResult.stdout),
     skillsDirs: parsePathsOutput(skillsResult.stdout),
     models: parseDevinModelsOutput(modelsResult.stdout),

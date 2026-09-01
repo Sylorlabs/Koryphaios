@@ -29,7 +29,10 @@ export default defineConfig({
       // isolated browser origin must be admitted explicitly. The synthetic
       // passphrase protects this run's disposable local KMS without weakening
       // the production fail-closed default.
-      command: `KORYPHAIOS_PORT=${backendPort} KORYPHAIOS_DATA_DIR=${dataDirectory} CORS_ORIGINS=${frontendOrigins} KORYPHAIOS_KMS_PASSPHRASE=${testKmsPassphrase} KORY_DISABLE_CLI_AUTODETECT=1 bun run --cwd backend dev`,
+      // Run the backend without `bun --watch` so test-time DB writes from a
+      // side-channel node:sqlite connection never trigger an unrelated
+      // restart that would race the page's first HTTP request.
+      command: `KORYPHAIOS_PORT=${backendPort} KORYPHAIOS_DATA_DIR=${dataDirectory} CORS_ORIGINS=${frontendOrigins} KORYPHAIOS_KMS_PASSPHRASE=${testKmsPassphrase} KORY_DISABLE_CLI_AUTODETECT=1 bun run --cwd backend src/server.ts`,
       url: `${backendUrl}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000,

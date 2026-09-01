@@ -1,6 +1,7 @@
 <script lang="ts">
   import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
   import { base } from '$app/paths';
+  import { providersStore } from '$lib/stores/providers.svelte';
 
   interface Props {
     provider: string;
@@ -94,6 +95,7 @@
     antigravity: ['antigravity'],
     jules: ['jules'],
     cursor: ['cursor'],
+    chatbase: ['chatbase'],
     hyperbolic: ['hyperbolic'],
     portkey: ['portkey'],
     luma: ['luma'],
@@ -167,6 +169,7 @@
   };
 
   let loadError = $state(false);
+  let customLoadError = $state(false);
   let candidateIndex = $state(0);
 
   const unique = (values: string[]) => [...new Set(values.filter(Boolean))];
@@ -238,15 +241,28 @@
 
   const iconCandidates = $derived.by(() => getIconCandidates(provider));
   const currentCandidate = $derived.by(() => iconCandidates[candidateIndex] ?? null);
+  const customIcon = $derived(providersStore.getCustomProviderIcon(provider));
 
   $effect(() => {
     provider;
+    customIcon?.revision;
     candidateIndex = 0;
     loadError = false;
+    customLoadError = false;
   });
 </script>
 
-{#if provider.toLowerCase() === 'codex' || provider.toLowerCase() === 'codex-auth'}
+{#if customIcon && !customLoadError}
+  <img
+    src={customIcon.url}
+    alt={`${provider} custom logo`}
+    width={size}
+    height={size}
+    class={`provider-icon custom-provider-icon ${customIcon.shape === 'circle' ? 'custom-provider-icon-circle' : ''} ${className}`}
+    decoding="async"
+    onerror={() => (customLoadError = true)}
+  />
+{:else if provider.toLowerCase() === 'codex' || provider.toLowerCase() === 'codex-auth'}
   <svg
     width={size}
     height={size}
@@ -287,14 +303,14 @@
       fill="currentColor"
     />
   </svg>
-{:else if provider.toLowerCase() === 'freebuff'}
+{:else if provider.toLowerCase() === 'freebuff' || provider.toLowerCase() === 'codebuff'}
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
     class={`provider-icon freebuff-icon ${className}`}
     role="img"
-    aria-label="Freebuff logo"
+    aria-label={provider.toLowerCase() === 'codebuff' ? 'Codebuff logo' : 'Freebuff logo'}
   >
     <rect width="24" height="24" rx="5" fill="#1a1a1a" />
     <path
@@ -354,6 +370,15 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .custom-provider-icon {
+    object-fit: cover;
+    border-radius: 26%;
+  }
+
+  .custom-provider-icon-circle {
+    border-radius: 9999px;
   }
 
   .cerebras-icon {
