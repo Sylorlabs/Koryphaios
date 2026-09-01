@@ -55,6 +55,15 @@ Thumbs.db
 # Reference (excluded from repo)
 opencode-reference/
 
+# Generated audit ledger output
+audit/current/
+
+# Playwright MCP local artifacts
+backend/.playwright-mcp/
+
+# Ephemeral e2e test markers
+PW_AGENTIC_DELETE*
+
 # Koryphaios AI worktrees
 .trees/
 .claude/worktrees/
