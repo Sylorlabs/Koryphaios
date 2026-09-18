@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process';
 
 const PRIVATE_ROOT = join(
@@ -185,7 +185,7 @@ function createPrivateCliArtifact(
       if (cleaned) return;
       cleaned = true;
       const resolvedDirectory = resolve(directory);
-      const resolvedRoot = `${resolve(PRIVATE_ROOT)}/`;
+      const resolvedRoot = `${resolve(PRIVATE_ROOT)}${sep}`;
       if (!resolvedDirectory.startsWith(resolvedRoot) || basename(resolvedDirectory).length < 8) {
         return;
       }

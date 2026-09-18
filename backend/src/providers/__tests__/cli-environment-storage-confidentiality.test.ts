@@ -190,10 +190,14 @@ setInterval(() => {}, 1000);
         }
         expect(Date.now() - startedAt).toBeLessThan(2_000);
 
-        for (let attempt = 0; attempt < 100 && !existsSync(exitMarker); attempt++) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
+        let exitMarkerContents = '';
+        for (let attempt = 0; attempt < 100 && exitMarkerContents !== 'terminated'; attempt++) {
+          if (existsSync(exitMarker)) exitMarkerContents = readFileSync(exitMarker, 'utf8');
+          if (exitMarkerContents !== 'terminated') {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
         }
-        expect(readFileSync(exitMarker, 'utf8')).toBe('terminated');
+        expect(exitMarkerContents).toBe('terminated');
       } finally {
         server.close();
         rmSync(testRoot, { recursive: true, force: true });
