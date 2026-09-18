@@ -63,6 +63,9 @@ const OTHER_EXTERNAL = new Set<ProviderName>([
   // OpenCode Go chooses OpenAI vs Anthropic transport per live model metadata.
   'opencodego',
   'codebuff',
+  // Chatbase speaks its own agent-chat protocol (POST /agents/{id}/chat) and
+  // is covered by its dedicated suite, not the OpenAI-family shape.
+  'chatbase',
 ]);
 
 const EXPLICITLY_UNAVAILABLE = new Set<ProviderName>([

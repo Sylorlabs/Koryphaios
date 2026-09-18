@@ -2589,11 +2589,11 @@ class ProviderRegistry {
       }
 
       if (!this.hasValidModelCatalogEntry(payload, shape)) {
-        serverLog.debug(
-          { status: response.status, shape, url },
-          'Model catalog returned no valid entries but HTTP auth succeeded — treating as verified',
-        );
-        return { success: true, status: response.status };
+        return {
+          success: false,
+          status: response.status,
+          error: `HTTP ${response.status}: model catalog returned no valid ${shape} model entries`,
+        };
       }
       return { success: true, status: response.status };
     } catch (err: unknown) {

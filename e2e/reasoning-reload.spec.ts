@@ -3,6 +3,7 @@ import { createAuthSession } from './helpers/auth';
 import { ApiClient } from './helpers/api';
 import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 import { moveAndReadDbPath } from './helpers/db-path';
+import { openSqlite } from './helpers/sqlite';
 
 const PERSISTED_ERROR_TEXT =
   'Provider failed while generating this response. This error must survive reload.';
@@ -153,8 +154,7 @@ test('reasoning traces and errors survive a full app reload', async ({ page, req
  * or the backend will believe there is nothing to replay.
  */
 async function seedOrderedThinking(dbPath: string, sessionId: string): Promise<void> {
-  const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
-  const db = new DatabaseSync(dbPath);
+  const db = openSqlite(dbPath);
   try {
     const now = Date.now();
     db.prepare(
@@ -249,8 +249,7 @@ async function seedOrderedThinking(dbPath: string, sessionId: string): Promise<v
  * the new chain from root to leaf.
  */
 async function seedMessageLineage(dbPath: string, sessionId: string): Promise<void> {
-  const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
-  const db = new DatabaseSync(dbPath);
+  const db = openSqlite(dbPath);
   try {
     const now = Date.now();
     const userId = `seed-user-${sessionId}`;

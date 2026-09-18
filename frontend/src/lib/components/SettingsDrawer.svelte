@@ -1198,41 +1198,42 @@
   >
     <!-- Header -->
     <div
-      class="flex items-center justify-between px-5 py-3.5 shrink-0 border-b"
+      class="flex h-14 shrink-0 items-center justify-between border-b px-5"
       style="border-color: var(--color-border); background: var(--color-surface-0);"
     >
-      <div class="min-w-0">
+      <div class="flex min-w-0 items-center gap-3">
         <h2
           id="settings-title"
-          class="text-base font-semibold"
+          class="text-[15px] font-semibold tracking-tight"
           style="color: var(--color-text-primary);"
         >
           Settings
         </h2>
-        <p class="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
+        <span class="hidden h-4 w-px bg-[var(--color-border)] sm:block" aria-hidden="true"></span>
+        <p class="hidden truncate text-xs text-[var(--color-text-muted)] sm:block">
           Durable preferences and product capability status
         </p>
       </div>
       <button
         type="button"
-        class="flex h-9 w-9 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+        class="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
         onclick={requestSettingsClose}
         aria-label="Close settings"
       >
-        <X size={18} />
+        <X size={16} />
       </button>
     </div>
 
     <div class="flex min-h-0 flex-1 overflow-hidden">
       <aside
-        class="flex w-20 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)] sm:w-64"
+        class="flex w-16 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)] sm:w-60"
         aria-label="Settings navigation"
       >
-        <div class="hidden border-b border-[var(--color-border)] p-3 sm:block">
+        <div class="hidden p-3 pb-1 sm:block">
           <label for="settings-search" class="sr-only">Search settings</label>
           <div class="relative">
             <Search
-              size={14}
+              size={13}
               class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
             />
             <input
@@ -1241,37 +1242,37 @@
               type="search"
               bind:value={settingsSearch}
               placeholder="Search settings"
-              class="h-10 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-9 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
+              class="h-9 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-8 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
             />
             {#if settingsSearch}
               <button
                 type="button"
                 aria-label="Clear settings search"
                 onclick={() => (settingsSearch = '')}
-                class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
               >
-                <X size={13} />
+                <X size={12} />
               </button>
             {/if}
           </div>
         </div>
 
-        <nav class="min-h-0 flex-1 overflow-y-auto p-2" aria-label="Settings sections">
+        <nav class="min-h-0 flex-1 overflow-y-auto px-2 py-2" aria-label="Settings sections">
           {#each SETTINGS_GROUPS as group (group)}
             {@const groupEntries = filteredSettingsCatalog.filter((entry) => entry.group === group)}
             {#if groupEntries.length}
-              <div class="mb-3">
+              <div class="mb-2">
                 <div
-                  class="hidden px-2 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)] sm:block"
+                  class="hidden px-2.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] sm:block"
                 >
                   {group}
                 </div>
-                <div class="space-y-0.5">
+                <div class="space-y-px">
                   {#each groupEntries as entry (entry.id)}
                     {@const Icon = settingsIcons[entry.id]}
                     <button
                       type="button"
-                      class="settings-tab flex min-h-11 w-full items-center justify-center gap-3 rounded-xl px-2.5 py-2 text-left focus-visible:outline-none sm:justify-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/65 {activeTab ===
+                      class="settings-tab flex h-9 w-full items-center justify-center gap-2.5 rounded-lg px-2.5 text-left focus-visible:outline-none sm:justify-start focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/65 {activeTab ===
                       entry.id
                         ? 'settings-tab-active'
                         : ''}"
@@ -1279,17 +1280,11 @@
                       title={entry.description}
                       onclick={() => selectSettingsTab(entry.id)}
                     >
-                      <span
-                        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)]"
-                        aria-hidden="true"><Icon size={14} /></span
+                      <span class="settings-tab-icon flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true"
+                        ><Icon size={15} /></span
                       >
-                      <span class="hidden min-w-0 flex-1 sm:block">
-                        <span class="block truncate text-xs font-medium">{entry.label}</span>
-                        <span
-                          class="mt-0.5 block truncate text-[9px] text-[var(--color-text-muted)]"
-                          >{entry.scope}</span
-                        >
-                      </span>
+                      <span class="hidden min-w-0 flex-1 truncate text-[13px] sm:block">{entry.label}</span>
+                      <span class="sr-only">{entry.scope}</span>
                     </button>
                   {/each}
                 </div>
@@ -1320,16 +1315,22 @@
       <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
         {#if activeTab !== 'mcp' && activeTab !== 'archived'}
           <div
-            class="flex min-h-14 shrink-0 items-center gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5 py-2.5"
+            class="flex min-h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-6 py-3"
           >
             <div class="min-w-0">
               <h3 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">
                 {selectedSettingsEntry.label}
               </h3>
-              <p class="mt-0.5 truncate text-[10px] text-[var(--color-text-muted)]">
+              <p class="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
                 {selectedSettingsEntry.description}
               </p>
             </div>
+            <span
+              class="hidden shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 text-[10.5px] font-medium text-[var(--color-text-muted)] sm:inline-flex"
+              title="Where this setting applies"
+            >
+              {selectedSettingsEntry.scope}
+            </span>
           </div>
         {/if}
         <!-- Providers Tab -->
@@ -4662,19 +4663,30 @@
    * In the desktop webview that class could leave the old tab's filled layer
    * behind while Billing was mounting. */
   .settings-tab {
-    color: var(--color-text-muted);
+    color: var(--color-text-secondary);
     background: transparent;
     transition:
       color 150ms ease,
       background-color 150ms ease;
   }
+  .settings-tab .settings-tab-icon {
+    color: var(--color-text-muted);
+    transition: color 150ms ease;
+  }
   .settings-tab:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-2);
+  }
+  .settings-tab:hover .settings-tab-icon {
     color: var(--color-text-secondary);
   }
   .settings-tab.settings-tab-active {
     color: var(--color-text-primary);
     background: var(--color-surface-3);
     font-weight: 500;
+  }
+  .settings-tab.settings-tab-active .settings-tab-icon {
+    color: var(--color-accent);
   }
 
   /* Glassmorphism input styling override */

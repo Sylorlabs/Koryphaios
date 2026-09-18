@@ -69,9 +69,20 @@ export class ApiClient {
     return this.post('/api/messages', { sessionId, content, model });
   }
 
-  /** Fetches messages for a session. */
+  /**
+   * Fetches the session history projection. `data.messages` is the active
+   * lineage; the sibling fields carry the conversation revision boundary.
+   */
   async getMessages(sessionId: string) {
-    return this.getJson<{ data: unknown[] }>(`/api/messages/${sessionId}`);
+    return this.getJson<{
+      ok: boolean;
+      data: {
+        messages: unknown[];
+        activeMessageId: string | null;
+        conversationRevision: number;
+        providerConversationRevision: number;
+      };
+    }>(`/api/messages/${sessionId}`);
   }
 
   /** Checks backend health. */

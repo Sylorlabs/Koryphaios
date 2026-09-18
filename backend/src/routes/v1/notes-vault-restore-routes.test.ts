@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,7 +17,8 @@ const { errorHandler } = await import('../../middleware/error-handling');
 const { notesRoutes } = await import('./notes');
 
 const app = new Elysia().onError(errorHandler).use(notesRoutes);
-const fixtureRoot = mkdtempSync(join(tmpdir(), 'kory-vault-route-projects-'));
+// Restore canonicalizes project roots (macOS resolves /var → /private/var).
+const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kory-vault-route-projects-')));
 const sourceProject = join(fixtureRoot, 'source');
 const targetProject = join(fixtureRoot, 'target');
 let authorization = '';

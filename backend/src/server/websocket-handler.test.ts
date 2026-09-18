@@ -59,6 +59,9 @@ describe('websocket heartbeat handling', () => {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
         NODE_ENV: 'test',
+        // The handler module transitively opens the database; keep the child
+        // on an isolated in-memory store so the test-process guard stays intact.
+        DATABASE_URL: 'sqlite::memory:',
       },
       encoding: 'utf8',
       timeout: 5_000,

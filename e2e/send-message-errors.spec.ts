@@ -66,9 +66,9 @@ test('sending a message through the real backend produces no errors', async ({ p
   // ─── 5. Verify the message was persisted ────────────────────────────────
   const messages = await api.getMessages(sessionId);
   expect(messages.data).toBeDefined();
-  expect(Array.isArray(messages.data)).toBe(true);
+  expect(Array.isArray(messages.data.messages)).toBe(true);
   // The message should appear in the session's message history
-  const userMessages = (messages.data as any[]).filter((m) => m.role === 'user');
+  const userMessages = (messages.data.messages as any[]).filter((m) => m.role === 'user');
   expect(userMessages.length).toBeGreaterThan(0);
   expect(userMessages.some((m) => m.content?.includes('test message from Playwright e2e'))).toBe(
     true,

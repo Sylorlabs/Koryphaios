@@ -174,6 +174,7 @@ function main() {
     testFiles.sort();
 
     let testIndex = 0;
+    const failedFiles: string[] = [];
     for (const testFile of testFiles) {
       testIndex++;
       const display = relative(PROJECT_ROOT, testFile).split(sep).join('/');
@@ -184,8 +185,17 @@ function main() {
 
       if (result.status !== 0) {
         exitCode = result.status ?? 1;
+        failedFiles.push(display);
         // Keep going so the user sees all failures, not just the first.
       }
+    }
+    // Per-file output is long; restate failures at the end so a bounded CI
+    // log tail still names the files that need attention.
+    if (failedFiles.length > 0) {
+      console.error(`\nBackend test files failed (${failedFiles.length}):`);
+      for (const file of failedFiles) console.error(`  - ${file}`);
+    } else {
+      console.log(`\nAll ${testFiles.length} backend test files passed.`);
     }
   } finally {
     rmSync(testDbDir, { recursive: true, force: true });

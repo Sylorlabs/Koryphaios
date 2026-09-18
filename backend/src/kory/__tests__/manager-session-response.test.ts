@@ -1,5 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KoryphaiosConfig, Session } from '@koryphaios/shared';
@@ -26,7 +33,9 @@ afterAll(() => {
 });
 
 function makeDirectory(prefix: string): string {
-  const directory = mkdtempSync(join(tmpdir(), `${prefix}-`));
+  // The manager binds reviews to the realpath of the session project, so the
+  // fixture must be canonical too (macOS resolves /var → /private/var).
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), `${prefix}-`)));
   testDirectories.push(directory);
   return directory;
 }
@@ -74,10 +83,7 @@ function managerState(manager: KoryManager): SessionStateService {
   return (manager as unknown as { state: SessionStateService }).state;
 }
 
-async function waitForReviewStatus(
-  sessionId: string,
-  status: 'terminalized',
-): Promise<void> {
+async function waitForReviewStatus(sessionId: string, status: 'terminalized'): Promise<void> {
   for (let attempt = 0; attempt < 50; attempt++) {
     if ((await getSessionReview(sessionId))?.status === status) return;
     await Bun.sleep(10);

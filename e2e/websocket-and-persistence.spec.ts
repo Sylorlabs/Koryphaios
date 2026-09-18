@@ -84,7 +84,10 @@ test('API-created session appears in the frontend sidebar', async ({ page, reque
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
 
-  // The session should appear in the sidebar
+  // The session should appear in the sidebar. Its visible label is the project
+  // name, so match the accessible name that still carries the title.
   await expect(page.getByTestId('session-sidebar')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText(sessionTitle)).toBeVisible({ timeout: 15_000 });
+  await expect(
+    page.getByRole('button', { name: new RegExp(`^Open session ${sessionTitle}`) }),
+  ).toBeVisible({ timeout: 15_000 });
 });

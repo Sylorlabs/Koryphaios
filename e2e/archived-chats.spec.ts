@@ -106,7 +106,7 @@ test('archives a chat and manages its complete lifecycle from Settings', async (
     content: 'This message must not be persisted while archived.',
   });
   expect(rejectedMessage.status()).toBe(409);
-  expect(await api.getMessages(sessionId)).toEqual({ ok: true, data: [] });
+  expect((await api.getMessages(sessionId)).data.messages).toEqual([]);
 
   await page.keyboard.press('Control+,');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });

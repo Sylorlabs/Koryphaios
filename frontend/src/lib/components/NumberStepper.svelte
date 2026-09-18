@@ -25,7 +25,7 @@
     onchange,
     compact = false,
     disabled = false,
-    unit = 'cents',
+    unit = '',
   }: Props = $props();
 
   let editing = $state(false);

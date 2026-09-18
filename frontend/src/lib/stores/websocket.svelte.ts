@@ -671,6 +671,7 @@ function handleMessage(msg: WSMessage) {
           ? `Tool result (${p.toolResult.durationMs.toFixed(0)}ms): ${p.toolResult.output}`
           : `Tool result (time not reported by provider): ${p.toolResult.output}`;
       if (isForActiveSession) {
+        const toolCall = feedStore.findToolCallInput(p.toolResult.callId);
         feedStore.addFeedEntry({
           timestamp: msg.timestamp,
           type: 'tool_result',
@@ -681,6 +682,7 @@ function handleMessage(msg: WSMessage) {
           metadata: {
             ...orderedEventMetadata(msg),
             ...(isSubAgent && { isSubAgent: true }),
+            ...(toolCall && { toolCall }),
             toolResult: p.toolResult,
             sourceProvider: p.sourceProvider,
           },
@@ -1053,7 +1055,7 @@ function handleMessage(msg: WSMessage) {
         agentName: '',
         glowClass: '',
         text,
-          metadata: { ...orderedEventMetadata(msg), notificationType },
+        metadata: { ...orderedEventMetadata(msg), notificationType },
       });
       break;
     }

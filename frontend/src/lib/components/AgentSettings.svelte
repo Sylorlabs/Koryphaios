@@ -836,7 +836,7 @@
 
 <div class="flex h-full min-h-0 min-w-0 flex-col">
   <nav
-    class="flex h-11 shrink-0 items-end gap-5 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-5"
+    class="flex h-11 shrink-0 items-end gap-6 border-b border-[var(--color-border)] bg-[var(--color-surface-1)] px-6"
     aria-label="Agent behavior sections"
   >
     {#each AGENT_TABS as tab (tab.id)}
@@ -844,12 +844,12 @@
         type="button"
         aria-current={agentSettingsStore.activeTab === tab.id ? 'page' : undefined}
         onclick={() => agentSettingsStore.setActiveTab(tab.id)}
-        class="relative flex h-full items-center gap-2 border-b-2 px-0.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60 {agentSettingsStore.activeTab ===
+        class="relative flex h-full items-center gap-2 border-b-2 px-0.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60 {agentSettingsStore.activeTab ===
         tab.id
           ? 'border-[var(--color-accent)] text-[var(--color-text-primary)]'
           : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
       >
-        <tab.icon size={14} />
+        <tab.icon size={14} class={agentSettingsStore.activeTab === tab.id ? 'text-[var(--color-accent)]' : ''} />
         {tab.label}
       </button>
     {/each}
@@ -926,17 +926,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('permissions')}
                 aria-expanded={expandedSections.permissions}
               >
                 <span class="flex items-center gap-3">
-                  <LockKeyhole size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><LockKeyhole size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Permissions & autonomy</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Approvals and change limits</span
                     >
                   </span>
@@ -950,18 +950,15 @@
               </button>
               {#if expandedSections.permissions}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
                   <section
-                    class="space-y-5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-5 p-5"
                   >
                     <div>
-                      <div class="flex items-center gap-2">
-                        <LockKeyhole size={17} class="text-[var(--color-accent)]" />
-                        <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-                          Permissions & autonomy
-                        </h4>
-                      </div>
+                      <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        Approval preset
+                      </h4>
                       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                         Choose a preset or build a custom approval policy for this workspace.
                       </p>
@@ -1046,7 +1043,7 @@
                   </section>
 
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -1070,10 +1067,10 @@
                     />
 
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <label
                           for="max-files"
-                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Max Files Changed</label
                         >
                         <NumberStepper
@@ -1092,10 +1089,10 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <label
                           for="max-lines"
-                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Max Lines Changed</label
                         >
                         <NumberStepper
@@ -1118,7 +1115,7 @@
                   </section>
 
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4
@@ -1210,7 +1207,7 @@
                   </section>
 
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4
@@ -1284,7 +1281,7 @@
                   </section>
 
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4
@@ -1405,17 +1402,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('quality')}
                 aria-expanded={expandedSections.quality}
               >
                 <span class="flex items-center gap-3">
-                  <Gavel size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Gavel size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Quality & Critic</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Review and verification</span
                     >
                   </span>
@@ -1429,10 +1426,10 @@
               </button>
               {#if expandedSections.quality}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1.5">
                       <h4
@@ -1472,8 +1469,8 @@
                             { quietSuccess: true },
                           )}
                       />
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
-                        <div class="mb-2 text-xs text-[var(--color-text-muted)]">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                        <div class="mb-2 text-xs font-medium text-[var(--color-text-secondary)]">
                           Maximum Critic passes
                         </div>
                         <NumberStepper
@@ -1503,17 +1500,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('workflow')}
                 aria-expanded={expandedSections.workflow}
               >
                 <span class="flex items-center gap-3">
-                  <GitBranch size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><GitBranch size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Workflow</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Planning and learning</span
                     >
                   </span>
@@ -1527,10 +1524,10 @@
               </button>
               {#if expandedSections.workflow}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -1688,17 +1685,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('context')}
                 aria-expanded={expandedSections.context}
               >
                 <span class="flex items-center gap-3">
-                  <Brain size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Brain size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Context & memory</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Context and persistence</span
                     >
                   </span>
@@ -1712,10 +1709,10 @@
               </button>
               {#if expandedSections.context}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -1763,10 +1760,10 @@
                         onchange={() => toggleSetting('reasoningExpandedByDefault')}
                       />
 
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <label
                           for="ctx-compact-threshold"
-                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Compaction Trigger</label
                         >
                         <NumberStepper
@@ -1789,10 +1786,10 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <label
                           for="ctx-keep-turns"
-                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Keep Recent Turns Full</label
                         >
                         <NumberStepper
@@ -1811,10 +1808,10 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <label
                           for="ctx-min-chars"
-                          class="mb-2 block text-xs text-[var(--color-text-muted)]"
+                          class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Minimum Size to Collapse</label
                         >
                         <NumberStepper
@@ -1838,7 +1835,7 @@
                   </section>
 
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -1866,17 +1863,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('research')}
                 aria-expanded={expandedSections.research}
               >
                 <span class="flex items-center gap-3">
-                  <Search size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Search size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Research</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Search and source policy</span
                     >
                   </span>
@@ -1890,10 +1887,10 @@
               </button>
               {#if expandedSections.research}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
                   <section
-                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                    class="space-y-4 p-5"
                   >
                     <div class="flex items-center gap-2 text-[var(--color-warning)]">
                       <FlaskConical size={16} />
@@ -1901,7 +1898,7 @@
                     </div>
 
                     <div class="space-y-3">
-                      <div class="rounded-xl bg-[var(--color-surface-2)] p-4">
+                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
                         <div class="flex items-start justify-between gap-4">
                           <div class="flex items-center gap-2">
                             <Globe size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
@@ -1957,17 +1954,17 @@
             >
               <button
                 type="button"
-                class="flex w-full items-center justify-between gap-3 px-5 py-4 text-left hover:bg-[var(--color-surface-2)]"
+                class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 onclick={() => toggleSection('routing')}
                 aria-expanded={expandedSections.routing}
               >
                 <span class="flex items-center gap-3">
-                  <Route size={16} class="shrink-0 text-[var(--color-text-muted)]" />
+                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Route size={15} /></span>
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Routing & guidance</span
                     >
-                    <span class="block text-[10px] text-[var(--color-text-muted)]"
+                    <span class="block mt-0.5 text-[11px] text-[var(--color-text-muted)]"
                       >Models and manager notes</span
                     >
                   </span>
@@ -1981,12 +1978,9 @@
               </button>
               {#if expandedSections.routing}
                 <div
-                  class="border-t border-[var(--color-border)] p-5 space-y-5 bg-[var(--color-surface-1)]"
+                  class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="rounded-2xl p-5"
-                    style="background: var(--color-surface-2); border: 1px solid var(--color-border);"
-                  >
+                  <section class="p-5">
                     <button
                       type="button"
                       class="flex w-full items-start justify-between gap-4 text-left"

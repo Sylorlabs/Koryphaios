@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { MIGRATIONS } from '../../db/migrations';
 import {
   assertProjectPropertyProjectionCurrent,
@@ -21,8 +23,10 @@ import {
   type NoteBaseDefinition,
 } from '../note-bases-service';
 
-const PROJECT_A = '/tmp/kory-notes-properties-a';
-const PROJECT_B = '/tmp/kory-notes-properties-b';
+// The services persist `resolve(projectRoot)`; use already-resolved, platform
+// native paths so the stored root compares equal on Windows too.
+const PROJECT_A = resolve(join(tmpdir(), 'kory-notes-properties-a'));
+const PROJECT_B = resolve(join(tmpdir(), 'kory-notes-properties-b'));
 
 let database: Database;
 

@@ -130,6 +130,8 @@ describe('hardenFilePermissions', () => {
     const file = join(root, 'secrets.json');
     writeFileSync(file, '{}', { mode: 0o644 });
     if (!isWindows) {
+      // The create-time mode is masked by umask; force the loose fixture.
+      chmodSync(file, 0o644);
       expect(statSync(file).mode & 0o777).toBe(0o644);
     }
 

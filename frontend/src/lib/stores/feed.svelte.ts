@@ -174,7 +174,10 @@ function persistedClientErrorEntries(sessionId: string): FeedEntry[] {
   }));
 }
 
-async function loadFeedPersistence(sessionId: string, signal?: AbortSignal): Promise<SessionFeedPersistence | null> {
+async function loadFeedPersistence(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionFeedPersistence | null> {
   if (!sessionId) return null;
   const existing = persistenceForSession(sessionId);
   if (existing.loaded) return existing;
@@ -559,7 +562,10 @@ function addClientError(text: string) {
     });
 }
 
-function upsertCompaction(payload: CompactionProgressPayload, eventMetadata: Record<string, unknown> = {}) {
+function upsertCompaction(
+  payload: CompactionProgressPayload,
+  eventMetadata: Record<string, unknown> = {},
+) {
   if (!ownsFeed(payload.sessionId)) return;
   const existing = feed.find(
     (entry) => entry.type === 'compaction' && entry.metadata?.compactionId === payload.compactionId,
@@ -640,6 +646,23 @@ function updateToolCall(
   return true;
 }
 
+/** Input of the live `tool_call` row a result belongs to, so the result can
+ * show both the command and its output. */
+function findToolCallInput(
+  callId: string,
+): { id: string; name: string; input: Record<string, unknown> } | undefined {
+  if (!callId) return undefined;
+  const entry = feed.findLast(
+    (candidate) =>
+      candidate.type === 'tool_call' &&
+      (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === callId,
+  );
+  return (
+    entry?.metadata as
+      { toolCall?: { id: string; name: string; input: Record<string, unknown> } } | undefined
+  )?.toolCall;
+}
+
 /** Update an already-rendered row without changing its durable source. */
 function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidden?: boolean }) {
   const entry = feed.find((e) => e.id === id);
@@ -659,7 +682,9 @@ function setEntryVisibility(id: string, patch: { userHidden?: boolean; agentHidd
  */
 function bindMessageIdentity(sessionId: string, entryId: string, messageId: string): void {
   if (!sessionId || !entryId || !messageId) return;
-  const patchEntries = (entries: readonly FeedEntry[]): { entries: FeedEntry[]; changed: boolean } => {
+  const patchEntries = (
+    entries: readonly FeedEntry[],
+  ): { entries: FeedEntry[]; changed: boolean } => {
     let changed = false;
     const next = entries.map((entry) => {
       const nested = entry.entries ? patchEntries(entry.entries) : undefined;
@@ -667,9 +692,7 @@ function bindMessageIdentity(sessionId: string, entryId: string, messageId: stri
       changed = true;
       return {
         ...entry,
-        ...(entry.id === entryId
-          ? { metadata: { ...entry.metadata, sessionId, messageId } }
-          : {}),
+        ...(entry.id === entryId ? { metadata: { ...entry.metadata, sessionId, messageId } } : {}),
         ...(nested ? { entries: nested.entries } : {}),
       };
     });
@@ -806,7 +829,10 @@ async function deleteEntry(entry: FeedEntry, selectedMessageId?: string): Promis
     // lane after its message row is gone.
     const targetKeys = feedTargetKeysForEntry(entry);
     const previousVisibility = new Map<string, FeedTombstoneVisibility>(
-      persistenceForSession(sessionId).tombstones.map((record) => [record.targetKey, record.visibility]),
+      persistenceForSession(sessionId).tombstones.map((record) => [
+        record.targetKey,
+        record.visibility,
+      ]),
     );
     let messageDeleted = false;
     try {
@@ -841,7 +867,10 @@ async function deleteEntry(entry: FeedEntry, selectedMessageId?: string): Promis
         try {
           await restoreFeedVisibility(sessionId, targetKeys, previousVisibility);
         } catch (restoreError) {
-          console.warn('Failed to restore feed visibility after rejected message deletion:', restoreError);
+          console.warn(
+            'Failed to restore feed visibility after rejected message deletion:',
+            restoreError,
+          );
         }
       }
       console.error('Failed to delete message on backend:', err);
@@ -985,6 +1014,24 @@ function anchorPersistedRepliesToLiveContent(
 }
 
 // ─── Grouped Feed (for virtual list) ─────────────────────────────────────────
+
+/** Archive labels are `<tool> <JSON input>` clipped to 140 chars; only a
+ * label that still parses is trustworthy enough to show as the command. */
+function parseArchivedToolInput(summary: string): Record<string, unknown> | undefined {
+  const trimmed = summary.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      Object.keys(parsed).length
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function getToolName(entry: FeedEntry): string {
   const metadata = entry.metadata as
@@ -1308,7 +1355,11 @@ async function loadSessionMessages(
   // persisted answer it produced even when their wall clocks disagree.
   feed = visibleEntriesForSession(
     sessionId,
-    mergeFeedTimeline(historyWithLiveAnchors, persistedClientErrorEntries(sessionId), dedupedLiveTail),
+    mergeFeedTimeline(
+      historyWithLiveAnchors,
+      persistedClientErrorEntries(sessionId),
+      dedupedLiveTail,
+    ),
   );
   loadingSessionId = '';
   const committedIds = new Set(feed.map((entry) => entry.id));
@@ -1335,27 +1386,32 @@ async function loadSessionMessages(
       options.onUsage?.(contextData.lastUsage);
     }
     if (Array.isArray(contextData.data)) {
-      toolHistory = contextData.data.map((e) => ({
-        id: `arch-${e.id}`,
-        timestamp: e.ts,
-        type: 'tool_result' as const,
-        agentId: 'kory-manager',
-        agentName: 'Kory',
-        glowClass: '',
-        text: e.content || e.label,
-        agentHidden: e.prunedForAgent,
-        metadata: {
-          sessionId,
-          toolResult: {
-            callId: e.id,
-            name: e.label.split(' ')[0] || 'tool',
-            output: e.content,
-            isError: e.isError === true,
-            durationMs: 0,
-            archiveId: e.id,
+      toolHistory = contextData.data.map((e) => {
+        const name = e.label.split(' ')[0] || 'tool';
+        const input = parseArchivedToolInput(e.label.slice(name.length + 1));
+        return {
+          id: `arch-${e.id}`,
+          timestamp: e.ts,
+          type: 'tool_result' as const,
+          agentId: 'kory-manager',
+          agentName: 'Kory',
+          glowClass: '',
+          text: e.content || e.label,
+          agentHidden: e.prunedForAgent,
+          metadata: {
+            sessionId,
+            ...(input && { toolCall: { id: e.id, name, input } }),
+            toolResult: {
+              callId: e.id,
+              name,
+              output: e.content,
+              isError: e.isError === true,
+              durationMs: 0,
+              archiveId: e.id,
+            },
           },
-        },
-      }));
+        };
+      });
     }
   } catch (err: unknown) {
     /* archive unavailable — text history still loads */
@@ -1447,6 +1503,7 @@ export const feedStore = {
   beginThinking,
   getThinkingStart,
   updateToolCall,
+  findToolCallInput,
   removeContentEntriesForAgent,
   clearFeed,
   resetSessionFeed,

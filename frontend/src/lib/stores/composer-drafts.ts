@@ -28,8 +28,10 @@ const STORAGE_KEY = 'koryphaios-composer-drafts-v1';
 const MAX_DRAFTS = 16;
 const MAX_TEXT_CHARS = 64_000;
 const MAX_ATTACHMENT_COUNT = 4;
-const MAX_ATTACHMENT_CHARS = 1_000_000;
-const MAX_TOTAL_ATTACHMENT_CHARS = 2_400_000;
+// localStorage is ~5 MB per origin and shared by up to MAX_DRAFTS drafts, so
+// per-attachment payloads must stay well below the total budget.
+const MAX_ATTACHMENT_CHARS = 160_000;
+const MAX_TOTAL_ATTACHMENT_CHARS = 480_000;
 const MAX_ATTACHMENT_NAME_CHARS = 240;
 const MAX_DRAFT_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 

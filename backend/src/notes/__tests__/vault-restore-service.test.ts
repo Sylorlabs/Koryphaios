@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -25,7 +26,8 @@ const { previewVaultArchiveRestore, restoreVaultArchive } = await import('../vau
 
 const BLOCK = 512;
 const NOW = '2026-08-30T12:00:00.000Z';
-const fixtureRoot = mkdtempSync(join(tmpdir(), 'kory-vault-restore-'));
+// Restore canonicalizes project roots (macOS resolves /var → /private/var).
+const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kory-vault-restore-')));
 
 beforeAll(() => {
   mkdirSync(fixtureRoot, { recursive: true });

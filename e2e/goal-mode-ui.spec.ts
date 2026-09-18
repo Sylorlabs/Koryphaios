@@ -44,10 +44,13 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
   // Confirm the goal
   await newGoal.press('Enter');
 
-  // The goal preview should appear on the left sidebar
+  // The goal preview should appear on the left sidebar. The objective is also
+  // echoed in the selected-goal detail, so target the goal button by name.
   const goals = page.getByLabel('Active Goals');
   await expect(goals).toBeVisible({ timeout: 10_000 });
-  await expect(goals.getByText('Finish the release')).toBeVisible({ timeout: 10_000 });
+  await expect(
+    goals.getByRole('button', { name: 'Open goal: Finish the release' }).first(),
+  ).toBeVisible({ timeout: 10_000 });
 
   // The Critic quality gate toggle should be visible for the selected goal
   await expect(goals.getByText(/Critic quality gate (on|off)/)).toBeVisible({ timeout: 10_000 });

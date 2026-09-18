@@ -340,6 +340,13 @@
     return clippedToolDetail(entry);
   }
 
+  let toolOutputCopied = $state(false);
+  async function copyToolOutput(text: string) {
+    await copyText(text);
+    toolOutputCopied = true;
+    setTimeout(() => (toolOutputCopied = false), 1600);
+  }
+
   function openContextMenu(event: MouseEvent) {
     event.preventDefault();
     // Snapshot the selection BEFORE the menu opens — any subsequent click
@@ -1049,6 +1056,16 @@
     return typeof command === 'string' ? command : '';
   }
 
+  // When the input is nothing but the command we already render on its own
+  // line, the JSON dump would repeat it.
+  function isCommandOnlyInput(meta?: Record<string, unknown>): boolean {
+    const m = meta as { toolCall?: { input?: Record<string, unknown> } } | undefined;
+    const input = m?.toolCall?.input;
+    if (!input) return false;
+    const keys = Object.keys(input);
+    return keys.length === 1 && typeof input[keys[0]] === 'string';
+  }
+
   function getToolCallDetail(meta?: Record<string, unknown>): string {
     const m = meta as { toolCall?: { name?: string; input?: Record<string, unknown> } } | undefined;
     const input = m?.toolCall?.input;
@@ -1147,7 +1164,7 @@
       role="row"
       tabindex="0"
     >
-      <span class="text-xs text-text-muted shrink-0 w-16 leading-6 tabular-nums">
+      <span class="text-xs text-text-muted shrink-0 w-20 leading-6 tabular-nums whitespace-nowrap">
         {new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -1841,50 +1858,101 @@
 {/if}
 
 {#if toolDetailsOpen && (entry.type === 'tool_group' || entry.type === 'tool_call' || entry.type === 'tool_result' || rawTaskTranscript)}
+  {@const detailToolCat = getToolCategory(entry.metadata)}
+  {@const detailDisplay = getToolDisplay(detailToolCat)}
+  {@const detailToolName = getToolNameFromMeta(entry.metadata)}
+  {@const detailCommand = getBashCommand(entry.metadata)}
+  {@const detailFailed = entry.type === 'tool_result' && isToolError(entry.metadata)}
+  {@const detailIsInput = entry.type === 'tool_call' && !rawTaskTranscript}
+  {@const detailRaw = entry.type === 'tool_group' ? '' : detailText()}
+  {@const detailBody =
+    detailIsInput && detailCommand && isCommandOnlyInput(entry.metadata) ? '' : detailRaw}
+  {@const detailLines = detailBody ? detailBody.split('\n').length : 0}
   <div
-    class="mt-2 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+    class="tool-output-panel ml-[calc(6.25rem+2*var(--space-md))] mt-1.5 mb-2 overflow-hidden rounded-xl border"
+    class:tool-output-panel-failed={detailFailed}
   >
-    <header
-      class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2"
-    >
-      <span class="text-[11px] font-semibold text-[var(--color-text-secondary)]">
-        {entry.type === 'tool_group'
-          ? `${entry.entries?.length ?? 0} routine actions`
-          : rawTaskTranscript
-            ? 'Background task output'
-            : 'Tool output'}
-      </span>
-      <button
-        type="button"
-        class="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
-        onclick={() => (toolDetailsOpen = false)}
-        aria-label="Collapse details"
-      >
-        <ChevronUp size={14} />
-      </button>
-    </header>
-    <div class="max-h-72 space-y-2 overflow-y-auto p-3">
+    <header class="flex min-h-9 items-center gap-2.5 border-b px-3 py-1.5">
       {#if entry.type === 'tool_group'}
+        <Layers size={13} class="shrink-0 text-blue-400" />
+      {:else}
+        <Terminal size={13} class="shrink-0 {detailFailed ? 'text-red-400' : detailDisplay.colorClass}" />
+      {/if}
+      <span class="tool-output-kicker shrink-0">
+        {entry.type === 'tool_group'
+          ? 'Routine actions'
+          : rawTaskTranscript
+            ? 'Background task'
+            : detailFailed
+              ? 'Tool error'
+              : detailIsInput
+                ? 'Tool input'
+                : detailDisplay.resultLabel}
+      </span>
+      {#if entry.type === 'tool_group'}
+        <span class="tool-output-meta">{entry.entries?.length ?? 0} steps</span>
+      {:else}
+        {#if detailToolName && !rawTaskTranscript}
+          <span class="tool-output-chip min-w-0 truncate font-mono">{detailToolName}</span>
+        {/if}
+        {#if detailBody}
+          <span class="tool-output-meta ml-auto shrink-0 tabular-nums">
+            {detailLines} {detailLines === 1 ? 'line' : 'lines'}
+          </span>
+        {/if}
+      {/if}
+      <div class="flex shrink-0 items-center gap-0.5 {entry.type === 'tool_group' || !detailBody ? 'ml-auto' : ''}">
+        {#if detailBody}
+          <button
+            type="button"
+            class="tool-output-action"
+            onclick={() => void copyToolOutput(detailBody)}
+            aria-label="Copy output"
+            title="Copy output"
+          >
+            {#if toolOutputCopied}<Check size={13} class="text-emerald-400" />{:else}<Copy size={13} />{/if}
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="tool-output-action"
+          onclick={() => (toolDetailsOpen = false)}
+          aria-label="Collapse details"
+          title="Collapse"
+        >
+          <ChevronUp size={14} />
+        </button>
+      </div>
+    </header>
+    {#if entry.type === 'tool_group'}
+      <div class="tool-output-scroll max-h-80 overflow-y-auto">
         {#each entry.entries || [] as subEntry (subEntry.id)}
           {@const detail = clippedToolDetail(subEntry)}
-          <article
-            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)] p-2"
-          >
+          <article class="tool-output-step border-b px-3 py-2.5 last:border-b-0">
             <p class="text-[11px] font-medium {getEntryColor(subEntry.type)}">
               {subEntry.text.replace(/^Calling tool: /, '')}
             </p>
             {#if detail}
-              <pre
-                class="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words rounded-lg bg-black/20 p-2 text-[10px] leading-relaxed text-[var(--color-text-secondary)]">{detail}</pre>
+              <pre class="tool-output-pre mt-2 max-h-40 overflow-auto rounded-lg px-3 py-2">{detail}</pre>
             {/if}
           </article>
         {/each}
-      {:else}
-        <pre
-          class="max-h-64 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words rounded-lg bg-black/20 p-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">{detailText() ||
-            'No output was reported.'}</pre>
+      </div>
+    {:else}
+      {#if detailCommand && !rawTaskTranscript}
+        <div class="tool-output-command flex items-start gap-2 border-b px-3 py-2 font-mono text-[11.5px] leading-relaxed">
+          <span class="shrink-0 select-none text-emerald-400/80">$</span>
+          <span class="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--color-text-primary)]">{detailCommand}</span>
+        </div>
       {/if}
-    </div>
+      {#if detailBody}
+        <pre class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3.5 py-3">{detailBody}</pre>
+      {:else if !detailCommand}
+        <p class="px-3.5 py-4 text-center text-[11px] text-[var(--color-text-muted)]">
+          {detailIsInput ? 'No input was recorded.' : 'No output was reported.'}
+        </p>
+      {/if}
+    {/if}
   </div>
 {/if}
 
@@ -1923,6 +1991,85 @@
 {/if}
 
 <style>
+  /* Tool output panel: a quiet terminal-like surface aligned with the entry body. */
+  .tool-output-panel {
+    border-color: var(--color-border);
+    background: var(--color-surface-1);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
+  }
+  .tool-output-panel-failed {
+    border-color: color-mix(in srgb, var(--color-error) 40%, var(--color-border));
+  }
+  .tool-output-panel > header,
+  .tool-output-command,
+  .tool-output-step {
+    border-color: var(--color-border);
+  }
+  .tool-output-panel > header {
+    background: var(--color-surface-2);
+  }
+  .tool-output-kicker {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+  .tool-output-meta {
+    font-size: 10.5px;
+    color: var(--color-text-muted);
+  }
+  .tool-output-chip {
+    font-size: 10.5px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 6px;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-0);
+    border: 1px solid var(--color-border);
+  }
+  .tool-output-action {
+    display: inline-flex;
+    height: 1.5rem;
+    width: 1.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    color: var(--color-text-muted);
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+  .tool-output-action:hover,
+  .tool-output-action:focus-visible {
+    color: var(--color-text-primary);
+    background: var(--color-surface-3);
+    outline: none;
+  }
+  .tool-output-command {
+    background: var(--color-surface-0);
+  }
+  .tool-output-pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    tab-size: 4;
+    color: var(--color-text-secondary);
+    background: var(--color-surface-0);
+  }
+  .tool-output-step .tool-output-pre {
+    border: 1px solid var(--color-border);
+    font-size: 10.5px;
+  }
+  .tool-output-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-surface-4) transparent;
+  }
+
   /* Web search: globe spins while searching, then settles. */
   :global(.globe-spin) {
     animation: globe-rotate 1.4s linear infinite;

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConflictError, PayloadTooLargeError, ValidationError } from '../../errors/types';
@@ -23,7 +23,9 @@ const NOW = '2026-08-30T12:00:00.000Z';
 let fixtureRoot = '';
 
 beforeAll(() => {
-  fixtureRoot = mkdtempSync(join(tmpdir(), 'kory-vault-archive-'));
+  // Restore canonicalizes the project root, so the fixture root must already be
+  // canonical (macOS resolves /var → /private/var).
+  fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kory-vault-archive-')));
 });
 
 afterAll(() => {
