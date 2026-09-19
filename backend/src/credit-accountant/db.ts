@@ -35,7 +35,13 @@ export function initCreditDb(dataDir: string): void {
       session_id TEXT,
       tokens_in INTEGER NOT NULL DEFAULT 0,
       tokens_out INTEGER NOT NULL DEFAULT 0,
-      cost_usd REAL NOT NULL DEFAULT 0
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_savings_usd REAL NOT NULL DEFAULT 0,
+      ttft_ms REAL,
+      latency_ms REAL,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      cost_known INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_credit_usage_ts ON credit_usage(ts);
   `);
@@ -44,6 +50,12 @@ export function initCreditDb(dataDir: string): void {
   for (const sql of [
     'ALTER TABLE credit_usage ADD COLUMN account_id TEXT',
     'ALTER TABLE credit_usage ADD COLUMN session_id TEXT',
+    'ALTER TABLE credit_usage ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE credit_usage ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE credit_usage ADD COLUMN cache_savings_usd REAL NOT NULL DEFAULT 0',
+    'ALTER TABLE credit_usage ADD COLUMN ttft_ms REAL',
+    'ALTER TABLE credit_usage ADD COLUMN latency_ms REAL',
+    'ALTER TABLE credit_usage ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0',
   ]) {
     try {
       db.exec(sql);
@@ -57,6 +69,15 @@ export function initCreditDb(dataDir: string): void {
   db.exec(
     'CREATE INDEX IF NOT EXISTS idx_credit_usage_account_ts ON credit_usage(account_id, ts);',
   );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_credit_usage_session_provider_model ON credit_usage(session_id, provider, model);',
+  );
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_credit_usage_cost_known_ts ON credit_usage(cost_known, ts);',
+  );
+  // Legacy non-zero rows necessarily came from a resolved numeric price.
+  // Legacy zero rows remain unknown until repricing can prove zero or a cost.
+  db.exec('UPDATE credit_usage SET cost_known = 1 WHERE cost_usd != 0 AND cost_known = 0;');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS cloud_snapshots (
@@ -93,10 +114,22 @@ export function recordUsage(
   tokensOut: number,
   costUsd: number,
   attribution?: { accountId?: string; sessionId?: string },
+  cacheUsage?: {
+    costKnown?: boolean;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    cacheSavingsUsd?: number;
+    ttftMs?: number;
+    latencyMs?: number;
+  },
 ): void {
   const d = getCreditDb();
   d.run(
-    `INSERT INTO credit_usage (ts, model, provider, account_id, session_id, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO credit_usage (
+      ts, model, provider, account_id, session_id, tokens_in, tokens_out,
+      cache_read_tokens, cache_write_tokens, cache_savings_usd, ttft_ms, latency_ms, cost_usd,
+      cost_known
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       Date.now(),
       model,
@@ -105,9 +138,221 @@ export function recordUsage(
       attribution?.sessionId ?? null,
       tokensIn,
       tokensOut,
+      Math.max(0, Math.floor(cacheUsage?.cacheReadTokens ?? 0)),
+      Math.max(0, Math.floor(cacheUsage?.cacheWriteTokens ?? 0)),
+      Number.isFinite(cacheUsage?.cacheSavingsUsd) ? (cacheUsage?.cacheSavingsUsd ?? 0) : 0,
+      Number.isFinite(cacheUsage?.ttftMs) ? Math.max(0, cacheUsage?.ttftMs ?? 0) : null,
+      Number.isFinite(cacheUsage?.latencyMs) ? Math.max(0, cacheUsage?.latencyMs ?? 0) : null,
       costUsd,
+      (cacheUsage?.costKnown ?? (costUsd !== 0)) ? 1 : 0,
     ],
   );
+}
+
+export interface UsageCostBreakdownRow {
+  sessionId: string | null;
+  provider: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  knownCostUsd: number;
+  knownRows: number;
+  unknownRows: number;
+}
+
+type UsageCostBreakdownDbRow = {
+  session_id: string | null;
+  provider: string;
+  model: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  known_cost_usd: number;
+  known_rows: number;
+  unknown_rows: number;
+};
+
+/** Provider/model/session billing truth without collapsing unknown price to zero. */
+export function getUsageCostBreakdown(sessionId?: string): UsageCostBreakdownRow[] {
+  const d = getCreditDb();
+  const projection = `SELECT session_id, provider, model,
+      SUM(tokens_in) AS tokens_in,
+      SUM(tokens_out) AS tokens_out,
+      SUM(cache_read_tokens) AS cache_read_tokens,
+      SUM(cache_write_tokens) AS cache_write_tokens,
+      SUM(CASE WHEN cost_known = 1 THEN cost_usd ELSE 0 END) AS known_cost_usd,
+      SUM(CASE WHEN cost_known = 1 THEN 1 ELSE 0 END) AS known_rows,
+      SUM(CASE WHEN cost_known = 0 THEN 1 ELSE 0 END) AS unknown_rows
+    FROM credit_usage`;
+  const suffix = `AND (tokens_in > 0 OR tokens_out > 0)
+    GROUP BY session_id, provider, model
+    ORDER BY known_cost_usd DESC, provider, model`;
+  const rows = sessionId === undefined
+    ? d.query<UsageCostBreakdownDbRow, []>(`${projection} WHERE 1 = 1 ${suffix}`).all()
+    : d.query<UsageCostBreakdownDbRow, [string]>(`${projection} WHERE session_id = ? ${suffix}`).all(sessionId);
+
+  return rows.map((row) => ({
+    sessionId: row.session_id,
+    provider: row.provider,
+    model: row.model,
+    tokensIn: row.tokens_in ?? 0,
+    tokensOut: row.tokens_out ?? 0,
+    cacheReadTokens: row.cache_read_tokens ?? 0,
+    cacheWriteTokens: row.cache_write_tokens ?? 0,
+    knownCostUsd: row.known_cost_usd ?? 0,
+    knownRows: row.known_rows ?? 0,
+    unknownRows: row.unknown_rows ?? 0,
+  }));
+}
+
+export interface UnknownCostUsageRow {
+  id: number;
+  provider: string;
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export function getUnknownCostUsage(limit = 1_000): UnknownCostUsageRow[] {
+  const d = getCreditDb();
+  const safeLimit = Math.max(1, Math.min(10_000, Math.floor(limit)));
+  return d.query<{
+      id: number; provider: string; model: string; tokens_in: number; tokens_out: number;
+      cache_read_tokens: number; cache_write_tokens: number;
+    }, [number]>(
+      `SELECT id, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
+       FROM credit_usage
+       WHERE cost_known = 0 AND (tokens_in > 0 OR tokens_out > 0)
+       ORDER BY ts DESC LIMIT ?`,
+    ).all(safeLimit).map((row) => ({
+      id: row.id, provider: row.provider, model: row.model,
+      tokensIn: row.tokens_in ?? 0, tokensOut: row.tokens_out ?? 0,
+      cacheReadTokens: row.cache_read_tokens ?? 0, cacheWriteTokens: row.cache_write_tokens ?? 0,
+    }));
+}
+
+export function setUsageKnownCost(id: number, costUsd: number, cacheSavingsUsd = 0): void {
+  getCreditDb().run(
+    `UPDATE credit_usage SET cost_usd = ?, cost_known = 1, cache_savings_usd = ? WHERE id = ?`,
+    [costUsd, cacheSavingsUsd, id],
+  );
+}
+
+export interface PromptCacheUsageSummary {
+  requests: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  hitRate: number;
+  savingsUsd: number;
+  averageTtftMs: number | null;
+  averageLatencyMs: number | null;
+  byProvider: Array<{
+    provider: string;
+    requests: number;
+    inputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    hitRate: number;
+    savingsUsd: number;
+    averageTtftMs: number | null;
+    averageLatencyMs: number | null;
+  }>;
+}
+
+/** Durable prompt-cache accounting for Cost Center / diagnostics surfaces. */
+export function getPromptCacheUsageSummary(
+  since = Date.now() - 30 * 24 * 60 * 60 * 1000,
+): PromptCacheUsageSummary {
+  const d = getCreditDb();
+  const rows = d
+    .query<
+      {
+        provider: string;
+        requests: number;
+        input_tokens: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        savings_usd: number;
+        average_ttft_ms: number | null;
+        average_latency_ms: number | null;
+      },
+      [number]
+    >(
+      `SELECT provider,
+        COUNT(*) AS requests,
+        SUM(tokens_in) AS input_tokens,
+        SUM(cache_read_tokens) AS cache_read_tokens,
+        SUM(cache_write_tokens) AS cache_write_tokens,
+        SUM(cache_savings_usd) AS savings_usd,
+        AVG(ttft_ms) AS average_ttft_ms,
+        AVG(latency_ms) AS average_latency_ms
+       FROM credit_usage
+       WHERE ts >= ? AND (tokens_in > 0 OR tokens_out > 0)
+       GROUP BY provider
+       ORDER BY savings_usd DESC`,
+    )
+    .all(since);
+
+  const byProvider = rows.map((row) => {
+    const inputTokens = Math.max(0, row.input_tokens ?? 0);
+    const cacheReadTokens = Math.max(0, row.cache_read_tokens ?? 0);
+    return {
+      provider: row.provider,
+      requests: Math.max(0, row.requests ?? 0),
+      inputTokens,
+      cacheReadTokens,
+      cacheWriteTokens: Math.max(0, row.cache_write_tokens ?? 0),
+      hitRate: inputTokens > 0 ? cacheReadTokens / inputTokens : 0,
+      savingsUsd: row.savings_usd ?? 0,
+      averageTtftMs: row.average_ttft_ms ?? null,
+      averageLatencyMs: row.average_latency_ms ?? null,
+    };
+  });
+  const totals = byProvider.reduce(
+    (acc, row) => ({
+      requests: acc.requests + row.requests,
+      inputTokens: acc.inputTokens + row.inputTokens,
+      cacheReadTokens: acc.cacheReadTokens + row.cacheReadTokens,
+      cacheWriteTokens: acc.cacheWriteTokens + row.cacheWriteTokens,
+      savingsUsd: acc.savingsUsd + row.savingsUsd,
+      weightedTtftMs:
+        acc.weightedTtftMs + (row.averageTtftMs ?? 0) * (row.averageTtftMs === null ? 0 : row.requests),
+      weightedLatencyMs:
+        acc.weightedLatencyMs +
+        (row.averageLatencyMs ?? 0) * (row.averageLatencyMs === null ? 0 : row.requests),
+      ttftRequests: acc.ttftRequests + (row.averageTtftMs === null ? 0 : row.requests),
+      latencyRequests: acc.latencyRequests + (row.averageLatencyMs === null ? 0 : row.requests),
+    }),
+    {
+      requests: 0,
+      inputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      savingsUsd: 0,
+      weightedTtftMs: 0,
+      weightedLatencyMs: 0,
+      ttftRequests: 0,
+      latencyRequests: 0,
+    },
+  );
+  return {
+    requests: totals.requests,
+    inputTokens: totals.inputTokens,
+    cacheReadTokens: totals.cacheReadTokens,
+    cacheWriteTokens: totals.cacheWriteTokens,
+    savingsUsd: totals.savingsUsd,
+    hitRate: totals.inputTokens > 0 ? totals.cacheReadTokens / totals.inputTokens : 0,
+    averageTtftMs: totals.ttftRequests > 0 ? totals.weightedTtftMs / totals.ttftRequests : null,
+    averageLatencyMs:
+      totals.latencyRequests > 0 ? totals.weightedLatencyMs / totals.latencyRequests : null,
+    byProvider,
+  };
 }
 
 export function getKoryAccountUsage(since = Date.now() - 30 * 24 * 60 * 60 * 1000): Array<{

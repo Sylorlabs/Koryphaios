@@ -1,17 +1,18 @@
 import { Elysia } from 'elysia';
 import {
-  getLocalTotalsByProvider,
   getReconciliation,
   getSubscriptionStatuses,
   getKoryAccountUsage,
+  getUsageCostBreakdown,
+  repriceUnknownUsage,
 } from '../../credit-accountant';
-import { getLocalTotals } from '../../credit-accountant/db';
+import { summarizeBillingSpend, summarizeSessionCosts } from '../../billing/cost-summary';
 import { getCliUsageReports } from '../../billing/cli-usage';
 import type { CliUsageReport } from '../../billing/cli-usage';
 import { getProviderBalances } from '../../billing/provider-balances';
 import type { ProviderBalance } from '../../billing/provider-balances';
 import { getContext } from '../../context';
-import { resolvePricing, SUBSCRIPTION_PROVIDERS } from '../../pricing';
+import { SUBSCRIPTION_PROVIDERS } from '../../pricing';
 import { refreshModelsDevCache } from '../../providers/models-dev';
 import { discoverCliAccounts } from '../../providers/cli-accounts';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -21,13 +22,21 @@ import { AuthenticationError } from '../../errors/types';
 
 const LOCAL_USER_ID = 'local-user';
 const credentialsService = createUserCredentialsService();
-// The settings drawer must be useful immediately. Local CLI logs can be large
-// and balance endpoints are outside our control, so do not let either make a
-// navigation request hang indefinitely. Their work continues and is picked up
-// by the next short client poll.
 const LIVE_BILLING_BUDGET_MS = 2_400;
-let latestCliUsage: CliUsageReport[] = [];
-let latestBalances: ProviderBalance[] = [];
+const LIVE_SOURCE_FRESH_MS = 15_000;
+const LIVE_SOURCE_FAILURE_BACKOFF_MS = 10_000;
+const LIVE_SOURCE_ATTEMPTS = 2;
+
+interface LiveSourceState<T> {
+  value: T;
+  updatedAt?: number;
+  lastAttemptAt?: number;
+  lastFailureAt?: number;
+  inFlight?: Promise<T>;
+}
+
+const cliUsageState: LiveSourceState<CliUsageReport[]> = { value: [] };
+const balanceState: LiveSourceState<ProviderBalance[]> = { value: [] };
 
 function withinBillingBudget<T>(
   work: Promise<T>,
@@ -39,6 +48,7 @@ function withinBillingBudget<T>(
       () => resolve({ value: fallback, refreshing: true }),
       LIVE_BILLING_BUDGET_MS,
     );
+    timer.unref?.();
   });
   return Promise.race([work.then((value) => ({ value, refreshing: false })), budget]).finally(
     () => {
@@ -47,11 +57,117 @@ function withinBillingBudget<T>(
   );
 }
 
+async function retryLiveSource<T>(name: string, loader: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= LIVE_SOURCE_ATTEMPTS; attempt += 1) {
+    try {
+      return await loader();
+    } catch (err: unknown) {
+      lastError = err;
+      serverLog.warn(
+        { err, source: name, attempt },
+        `Billing live source attempt ${attempt} failed`,
+      );
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${name} refresh failed`);
+}
+
+function beginLiveRefresh<T>(
+  name: string,
+  state: LiveSourceState<T>,
+  loader: () => Promise<T>,
+  forceRefresh: boolean,
+): Promise<T> | null {
+  if (state.inFlight) return state.inFlight;
+  const now = Date.now();
+  if (!forceRefresh && state.updatedAt && now - state.updatedAt < LIVE_SOURCE_FRESH_MS) return null;
+  if (
+    !forceRefresh &&
+    state.lastFailureAt &&
+    now - state.lastFailureAt < LIVE_SOURCE_FAILURE_BACKOFF_MS
+  ) {
+    return null;
+  }
+
+  state.lastAttemptAt = now;
+  const work = retryLiveSource(name, loader)
+    .then((value) => {
+      state.value = value;
+      state.updatedAt = Date.now();
+      state.lastFailureAt = undefined;
+      return value;
+    })
+    .catch((err: unknown) => {
+      state.lastFailureAt = Date.now();
+      serverLog.error({ err, source: name }, 'Billing live source refresh exhausted retries');
+      return state.value;
+    })
+    .finally(() => {
+      state.inFlight = undefined;
+    });
+  state.inFlight = work;
+  return work;
+}
+
+function liveSourceHealth<T>(state: LiveSourceState<T>, refreshing: boolean) {
+  const now = Date.now();
+  const status = refreshing
+    ? 'refreshing'
+    : state.updatedAt && now - state.updatedAt < LIVE_SOURCE_FRESH_MS
+      ? 'fresh'
+      : state.updatedAt
+        ? 'stale'
+        : state.lastFailureAt
+          ? 'error'
+          : 'idle';
+  return {
+    status,
+    updatedAt: state.updatedAt ?? null,
+    lastAttemptAt: state.lastAttemptAt ?? null,
+    lastFailureAt: state.lastFailureAt ?? null,
+  };
+}
+
+async function readLiveSource<T>(
+  name: string,
+  state: LiveSourceState<T>,
+  loader: () => Promise<T>,
+  forceRefresh: boolean,
+) {
+  const work = beginLiveRefresh(name, state, loader, forceRefresh);
+  if (!work) {
+    return { value: state.value, refreshing: false, health: liveSourceHealth(state, false) };
+  }
+  const result = await withinBillingBudget(work, state.value);
+  return { ...result, health: liveSourceHealth(state, result.refreshing) };
+}
+
+async function safeBillingResult<T>(name: string, work: () => Promise<T> | T, fallback: T): Promise<T> {
+  try {
+    return await work();
+  } catch (err: unknown) {
+    serverLog.error({ err }, `Billing route failed while collecting ${name}`);
+    return fallback;
+  }
+}
+
+function excludedProviders(request: Request): Set<string> {
+  return new Set(
+    new URL(request.url).searchParams
+      .getAll('excludeProvider')
+      .map((provider) => provider.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function providerAllowed(provider: string, excluded: Set<string>): boolean {
+  return !excluded.has(provider.trim().toLowerCase());
+}
+
 /**
  * The dashboard headline is deliberately derived from the same live provider
- * probes shown below it.  The previous implementation only used a separately
- * polled OpenAI snapshot, so a successfully fetched OpenRouter (or other
- * supported provider) balance still appeared as "Not reported".
+ * probes shown below it. A failed refresh keeps the last known good values.
  */
 export function summarizeProviderBalances(balances: ProviderBalance[]) {
   const reported = balances.filter((balance) => balance.availableUsd != null);
@@ -74,7 +190,6 @@ function credentialMetadata(credential: UserCredential): { accountId?: string; l
     try {
       return JSON.parse(credential.metadata) as { accountId?: string; label?: string };
     } catch (err: unknown) {
-      // Metadata is not required to be JSON; non-JSON strings are expected.
       serverLog.debug({ err }, 'Credential metadata is not valid JSON, returning empty');
       return {};
     }
@@ -131,9 +246,6 @@ export function withDetectedCliAccounts(
     counts.set(account.provider, (counts.get(account.provider) ?? 0) + 1);
   const existing = new Set(accounts.map((account) => `${account.provider}:${account.id}`));
   const cliAccounts = detected
-    // A single implicit CLI login is normal provider configuration, not a
-    // useful Billing "accounts" section. Surface autodetection here only when
-    // the user genuinely has multiple identities to distinguish.
     .filter((account) => (counts.get(account.provider) ?? 0) > 1)
     .filter((account) => !existing.has(`${account.provider}:${account.id}`))
     .map((account) => ({
@@ -154,96 +266,113 @@ export function withDetectedCliAccounts(
   return [...accounts, ...cliAccounts];
 }
 
-export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
-  '/credits',
-  async ({ request, set }) => {
-    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
-    const forceRefresh = new URL(request.url).searchParams.get('refresh') === '1';
-    const safeResult = async <T>(name: string, work: () => Promise<T>, fallback: T): Promise<T> => {
-      try {
-        return await work();
-      } catch (err: unknown) {
-        serverLog.error({ err }, `Billing route failed while collecting ${name}`);
-        return fallback;
-      }
-    };
-    // Pricing reads the last known catalog synchronously. Refresh it for a
-    // later visit, rather than blocking Billing on an unrelated network call.
-    refreshModelsDevCache();
+function refreshPricingCatalogInBackground(): void {
+  try {
+    void Promise.resolve(refreshModelsDevCache())
+      .then(() => {
+        repriceUnknownUsage(1_000);
+      })
+      .catch((err: unknown) => {
+        serverLog.debug({ err }, 'Could not refresh models.dev pricing');
+      });
+  } catch (err: unknown) {
+    serverLog.debug({ err }, 'Could not schedule models.dev pricing refresh');
+  }
+}
 
-    const reconciliation = await safeResult('reconciliation', async () => getReconciliation(), {
+export const billingRoutes = new Elysia({ prefix: '/api/billing' })
+  .get('/session-costs', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const excluded = excludedProviders(request);
+    await safeBillingResult('repricing', () => repriceUnknownUsage(1_000), {
+      scanned: 0,
+      repriced: 0,
+    });
+    refreshPricingCatalogInBackground();
+    const rows = (await safeBillingResult('session-costs', () => getUsageCostBreakdown(), [])).filter(
+      (row) => providerAllowed(row.provider, excluded),
+    );
+    const detailed = summarizeSessionCosts(rows);
+    const sessions = Object.fromEntries(
+      Object.entries(detailed).map(([sessionId, summary]) => [
+        sessionId,
+        {
+          spendUsd: summary.spendUsd,
+          spendCents: summary.spendCents,
+          hasKnownCost: summary.hasKnownCost,
+          pricingIncomplete: summary.pricingIncomplete,
+          hasMeteredUsage: summary.hasMeteredUsage,
+          hasSubscriptionUsage: summary.hasSubscriptionUsage,
+        },
+      ]),
+    );
+    return { ok: true, sessions };
+  })
+  .get('/session/:sessionId', async ({ params, request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const excluded = excludedProviders(request);
+    await safeBillingResult('repricing', () => repriceUnknownUsage(1_000), {
+      scanned: 0,
+      repriced: 0,
+    });
+    refreshPricingCatalogInBackground();
+    const rows = (
+      await safeBillingResult('session-cost-detail', () => getUsageCostBreakdown(params.sessionId), [])
+    ).filter((row) => providerAllowed(row.provider, excluded));
+    const summary = summarizeSessionCosts(rows)[params.sessionId] ?? null;
+    return { ok: true, summary };
+  })
+  .get('/credits', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const requestUrl = new URL(request.url);
+    const forceRefresh = requestUrl.searchParams.get('refresh') === '1';
+    const excluded = excludedProviders(request);
+
+    // Use the last known catalog synchronously, then refresh it for a later
+    // pass. Unknown historical rows are retried in bounded local batches.
+    const repricing = await safeBillingResult('repricing', () => repriceUnknownUsage(1_000), {
+      scanned: 0,
+      repriced: 0,
+    });
+    refreshPricingCatalogInBackground();
+
+    const reconciliation = await safeBillingResult('reconciliation', () => getReconciliation(), {
       localEstimate: { totalCostUsd: 0, tokensIn: 0, tokensOut: 0, byModel: [] },
       cloudReality: [],
       driftPercent: null,
       highlightDrift: false,
     });
-    const totals = await safeResult('totals', async () => getLocalTotals(), {
-      totalCostUsd: 0,
-      tokensIn: 0,
-      tokensOut: 0,
-      byModel: [],
-    });
-    // `gemini` was previously emitted by an obsolete provider path even though
-    // it is a model family, not a configured provider. Do not resurrect those
-    // stale rows; Google providers are google, aistudio, vertexai, and jules.
-    const providerTotals = (
-      await safeResult('providerTotals', async () => getLocalTotalsByProvider(), [])
-    ).filter((entry) => entry.provider !== 'gemini');
-    const byProvider = providerTotals
-      .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
-      .map((entry) => ({
-        name: entry.provider,
-        spendCents: Math.round(entry.costUsd * 100),
-        tokensIn: entry.tokensIn,
-        tokensOut: entry.tokensOut,
-      }));
-    const meteredSpendUsd = providerTotals
-      .filter((entry) => !SUBSCRIPTION_PROVIDERS.has(entry.provider))
-      .reduce((sum, entry) => sum + entry.costUsd, 0);
-    const byModel = totals.byModel.map((m) => ({
-      model: m.model,
-      spendCents: Math.round(m.costUsd * 100),
-      tokensIn: m.tokensIn,
-      tokensOut: m.tokensOut,
-      // cost 0 with real tokens = we had no verified price when it was recorded
-      unpriced:
-        m.costUsd === 0 &&
-        (m.tokensIn > 0 || m.tokensOut > 0) &&
-        resolvePricing('', m.model) == null,
-    }));
+    const allUsageRows = await safeBillingResult('usage-cost-breakdown', () => getUsageCostBreakdown(), []);
+    const visibleUsageRows = allUsageRows.filter((row) => providerAllowed(row.provider, excluded));
+    const spend = summarizeBillingSpend(visibleUsageRows);
 
-    // Live balances for the providers that expose one to a normal API key.
-    const configs = await safeResult(
+    const configs = await safeBillingResult(
       'providerConfig',
-      async () => getContext().providers.getConfigs(),
+      () => getContext().providers.getConfigs(),
       {},
     );
     const keys: Record<string, string | undefined> = {};
-    for (const [name, cfg] of Object.entries(configs))
-      keys[name] = (cfg as { apiKey?: string }).apiKey;
-    const cliUsageWork = safeResult(
+    for (const [name, cfg] of Object.entries(configs)) {
+      if (providerAllowed(name, excluded)) keys[name] = (cfg as { apiKey?: string }).apiKey;
+    }
+
+    const cliUsageResultPromise = readLiveSource(
       'cliUsage',
+      cliUsageState,
       () =>
         getCliUsageReports({
           githubToken: (configs as Record<string, { authToken?: string }>).copilot?.authToken,
           forceRefresh,
         }),
-      latestCliUsage,
-    ).then((value) => {
-      latestCliUsage = value;
-      return value;
-    });
-    const balanceWork = safeResult(
+      forceRefresh,
+    );
+    const balancesResultPromise = readLiveSource(
       'providerBalances',
+      balanceState,
       () => getProviderBalances(keys, { forceRefresh }),
-      latestBalances,
-    ).then((value) => {
-      latestBalances = value;
-      return value;
-    });
-    // Discovery is local and synchronous. Return the complete inventory even
-    // while the slower usage readers are still running so the loading state
-    // and the settled state describe the same set of CLI profiles.
+      forceRefresh,
+    );
+
     const providerStates = new Map(
       getContext()
         .providers.getStatus()
@@ -253,8 +382,6 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
       const providerState = providerStates.get(account.provider);
       return {
         ...account,
-        // Discovery is local evidence only. "connected" is reserved for a
-        // provider probe that actually succeeded during this backend run.
         connectionState:
           providerState?.connectionState === 'verified'
             ? ('connected' as const)
@@ -263,56 +390,69 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' }).get(
               : ('detected' as const),
       };
     });
+
     const [cliUsageResult, balancesResult, savedCredentials, koryAccountUsage] = await Promise.all([
-      withinBillingBudget(cliUsageWork, latestCliUsage),
-      withinBillingBudget(balanceWork, latestBalances),
-      safeResult(
+      cliUsageResultPromise,
+      balancesResultPromise,
+      safeBillingResult(
         'savedCredentials',
         () => credentialsService.list(LOCAL_USER_ID, { isActive: true }),
         [],
       ),
-      safeResult('koryAccountUsage', async () => getKoryAccountUsage(), []),
+      safeBillingResult('koryAccountUsage', () => getKoryAccountUsage(), []),
     ]);
-    const cliUsage = cliUsageResult.value;
-    const balances = balancesResult.value;
+
+    const rawCliUsage = cliUsageResult.value;
+    const rawBalances = balancesResult.value;
+    const cliUsage = rawCliUsage.filter((entry) => providerAllowed(entry.provider, excluded));
+    const balances = rawBalances.filter((entry) => providerAllowed(entry.provider, excluded));
     const providerBalance = summarizeProviderBalances(balances);
-    const subscriptions = getSubscriptionStatuses().map((s) => ({
-      provider: s.provider,
-      status: s.status,
-      rateLimitType: s.rateLimitType,
-      resetsAt: s.resetsAt,
-      resetsAtMs: s.resetsAt != null ? s.resetsAt * 1000 : undefined,
-      updatedAt: s.updatedAt,
-    }));
+    const subscriptions = getSubscriptionStatuses()
+      .filter((status) => providerAllowed(status.provider, excluded))
+      .map((status) => ({
+        provider: status.provider,
+        status: status.status,
+        rateLimitType: status.rateLimitType,
+        resetsAt: status.resetsAt,
+        resetsAtMs: status.resetsAt != null ? status.resetsAt * 1000 : undefined,
+        updatedAt: status.updatedAt,
+      }));
+
+    const availableBillingProviders = [
+      ...new Set([
+        ...allUsageRows.map((row) => row.provider),
+        ...Object.keys(configs),
+        ...rawCliUsage.map((entry) => entry.provider),
+        ...rawBalances.map((entry) => entry.provider),
+        ...detectedCliAccounts.map((entry) => entry.provider),
+      ]),
+    ]
+      .filter((provider) => provider && provider !== 'gemini')
+      .sort((a, b) => a.localeCompare(b));
 
     return {
       ok: true,
-      totalSpendCents: Math.round(meteredSpendUsd * 100),
-      // This is an aggregate only across providers that returned a current,
-      // queryable API-key balance on this request. Subscription OAuth/CLI
-      // accounts are intentionally excluded: they do not publish a reliable
-      // dollar balance through these credentials.
+      totalSpendUsd: spend.totalSpendUsd,
+      totalSpendCents: spend.totalSpendCents,
+      hasKnownSpend: spend.hasKnownSpend,
+      pricingIncomplete: spend.pricingIncomplete,
       remainingCents: providerBalance.availableCents,
       balanceProviders: providerBalance.providers,
-      byProvider,
-      byModel,
+      byProvider: spend.byProvider,
+      byModel: spend.byModel,
       subscriptions,
-      // Real local usage parsed from each CLI's own session logs: token
-      // windows (hour/day/week/month) and quota % + resets. Subscription
-      // tokens are never converted into a made-up dollar charge.
       cliUsage,
       balances,
-      // Koryphaios-owned, future-only attribution. This never reads or writes
-      // external CLI histories and is the only safe per-account usage source
-      // when a user shares CODEX_HOME session storage.
       koryAccountUsage,
       accounts: withDetectedCliAccounts(configuredAccounts(savedCredentials), detectedCliAccounts),
       detectedCliAccounts,
       reconciliation,
-      // Signals the desktop client to make a lightweight follow-up request.
-      // This keeps initial navigation under three seconds without pretending
-      // an unfinished provider probe is a current balance.
+      availableBillingProviders,
+      repricing,
+      sourceHealth: {
+        cliUsage: cliUsageResult.health,
+        providerBalances: balancesResult.health,
+      },
       refreshing: cliUsageResult.refreshing || balancesResult.refreshing,
     };
-  },
-);
+  });

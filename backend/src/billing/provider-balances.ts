@@ -18,9 +18,11 @@ export interface ProviderBalance {
   fetchedAt: number;
 }
 
-const cache = new Map<string, { at: number; value: ProviderBalance | null }>();
+const cache = new Map<string, { at: number; value: ProviderBalance }>();
 const inFlight = new Map<string, Promise<ProviderBalance | null>>();
+const failures = new Map<string, { at: number; error: string }>();
 const CACHE_TTL_MS = 5 * 60_000;
+const FAILURE_BACKOFF_MS = 15_000;
 const TIMEOUT_MS = 6_000;
 
 async function getJson(url: string, headers: Record<string, string>): Promise<unknown> {
@@ -152,18 +154,29 @@ export async function getProviderBalances(
   const jobs = Object.entries(FETCHERS)
     .filter(([name]) => keys[name])
     .map(async ([name, fetcher]) => {
+      const now = Date.now();
       const hit = cache.get(name);
-      if (!opts?.forceRefresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+      if (!opts?.forceRefresh && hit && now - hit.at < CACHE_TTL_MS) return hit.value;
+
+      const failure = failures.get(name);
+      if (!opts?.forceRefresh && failure && now - failure.at < FAILURE_BACKOFF_MS) {
+        return hit?.value ?? null;
+      }
+
       let request = inFlight.get(name);
       if (!request) {
         request = fetcher(keys[name]!)
           .then((value) => {
             cache.set(name, { at: Date.now(), value });
+            failures.delete(name);
             return value;
           })
-          .catch(() => {
-            cache.set(name, { at: Date.now(), value: null });
-            return null;
+          .catch((err: unknown) => {
+            failures.set(name, {
+              at: Date.now(),
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return cache.get(name)?.value ?? null;
           })
           .finally(() => {
             inFlight.delete(name);

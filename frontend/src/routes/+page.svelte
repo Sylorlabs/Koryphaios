@@ -119,6 +119,88 @@
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
   let contextBarHover = $state(false);
+  type CacheDiagnostics = {
+    prompt: {
+      dispatches: number;
+      cold: number;
+      warmCandidates: number;
+      workspaceWarmCandidates: number;
+      providerOutcomes: number;
+      providerWarmHits: number;
+      providerUnexpectedMisses: number;
+      providerUnexpectedMissWriteTokens: number;
+      breaks: Record<string, number>;
+    };
+    recent: Array<{
+      state: 'cold' | 'warm-candidate' | 'workspace-warm-candidate';
+      laneKind: string;
+      reasons: string[];
+      details?: {
+        toolsAdded: string[];
+        toolsRemoved: string[];
+        toolSchemasChanged: boolean;
+        stableComponentsChanged: string[];
+        historyRewriteAt?: number;
+      };
+      warmCandidateStreak: number;
+      workspaceReuseCount: number;
+      observedAt: number;
+    }>;
+    evidence: {
+      hits: number;
+      misses: number;
+      waits: number;
+      loads: number;
+      invalidations: number;
+      evictions: number;
+      size: number;
+      inFlight: number;
+    };
+    maintenance: {
+      observations: number;
+      scheduled: number;
+      refreshes: number;
+      skippedEconomics: number;
+      skippedInactive: number;
+      skippedUnsupported: number;
+      skippedUnknownPricing: number;
+      cancelledIdentityChanges: number;
+      failures: number;
+      prewarms: number;
+      prewarmSkips: number;
+      estimatedSavingsUsd: number;
+    };
+    deferredTools: {
+      selections: number;
+      fullSchemaChars: number;
+      residentSchemaChars: number;
+      schemaCharsDeferred: number;
+      schemasRequested: number;
+      invocations: number;
+    };
+    durable: {
+      requests: number;
+      inputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      hitRate: number;
+      savingsUsd: number;
+      averageTtftMs: number | null;
+      averageLatencyMs: number | null;
+      byProvider: Array<{
+        provider: string;
+        requests: number;
+        inputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        hitRate: number;
+        savingsUsd: number;
+        averageTtftMs: number | null;
+        averageLatencyMs: number | null;
+      }>;
+    };
+  };
+  let cacheDiagnostics = $state<CacheDiagnostics | null>(null);
   // Set when the user tries to send without a project open — holds the pending
   // message so it can be dispatched after they pick a project or opt into home.
   let noProjectPrompt = $state<{
@@ -130,37 +212,45 @@
     imageInputMode?: ImageInputMode;
   } | null>(null);
 
-  // Segmented context bar: what's occupying the window (system prompt, memory
-  // notes, tool defs, chat history). Segment ratios come from the backend's
-  // dispatch-time estimate; the TOTAL width stays pinned to the provider's real
-  // token count so estimates can't overstate usage.
+  // Segmented context bar: what's occupying the window (system prompt,
+  // memory notes, skill guidance, tool defs, chat history, generated
+  // output). Segment ratios come from the backend's dispatch-time estimate
+  // (output is patched in from the provider usage report); the TOTAL width
+  // stays pinned to the provider's real token count so estimates can't
+  // overstate usage.
   const CONTEXT_SEGMENTS = [
     { key: 'system', label: 'System', color: '#8b5cf6' },
     { key: 'memory', label: 'Memory', color: '#14b8a6' },
+    { key: 'skills', label: 'Skills', color: '#a78bfa' },
     { key: 'tools', label: 'Tools', color: '#f59e0b' },
     { key: 'chat', label: 'Chat', color: '#3b82f6' },
+    { key: 'output', label: 'Output', color: '#f472b6' },
   ] as const;
   let contextSegments = $derived.by(() => {
     const usage = wsStore.contextUsage;
     const b = usage.breakdown;
     if (!b || !usage.isReliable || usage.max <= 0) return null;
-    const sum = b.system + b.memory + b.tools + b.chat;
+    // ?? 0 tolerates durable snapshots persisted before skills/output existed.
+    const sum =
+      b.system + b.memory + (b.skills ?? 0) + b.tools + b.chat + (b.output ?? 0);
     if (sum <= 0) return null;
     // Unrounded percent — the store's integer percent collapses small
     // sessions' segments to zero width.
     const percentFloat = Math.min(100, (usage.used / usage.max) * 100);
     if (usage.used > sum) {
       // The provider reports more tokens than our chars/4 category estimate.
-      // That gap may be a CLI harness, tokenizer variance, hidden formatting,
-      // or output tokens. Keep it visible without inventing provider-specific
+      // That gap may be a CLI harness, tokenizer variance, or hidden
+      // formatting. (Generated output is its own segment once the usage
+      // report lands.) Keep it visible without inventing provider-specific
       // provenance that the backend did not report.
       const remainder = usage.used - sum;
       const perToken = percentFloat / usage.used;
       return [
         ...CONTEXT_SEGMENTS.map((s) => ({
           ...s,
-          tokens: b[s.key],
-          widthPercent: b[s.key] * perToken,
+          // ?? 0 tolerates durable snapshots from before skills/output existed.
+          tokens: (b[s.key] ?? 0),
+          widthPercent: (b[s.key] ?? 0) * perToken,
         })),
         {
           key: 'provider-remainder',
@@ -172,7 +262,7 @@
       ].filter((s) => s.tokens > 0);
     }
     return CONTEXT_SEGMENTS.map((s) => {
-      const share = b[s.key] / sum;
+      const share = (b[s.key] ?? 0) / sum;
       return {
         ...s,
         tokens: Math.round(usage.used * share),
@@ -189,8 +279,77 @@
     return `${provider} reused ${formatTokenCount(cached)} cached input tokens. They are already included in the total, still occupy the model window, and are not extra chat messages. Provider usage arrives during or at the end of a turn, so this meter can jump when that report lands.`;
   });
 
+  let cacheTurnReceipt = $derived.by(() => {
+    const usage = wsStore.contextUsage;
+    const read = Math.max(0, usage.cachedInputTokens ?? 0);
+    const write = Math.max(0, usage.cacheWriteInputTokens ?? 0);
+    const cost = usage.estimatedCostUsd;
+    const savings = usage.cacheSavingsUsd;
+    if (read <= 0 && write <= 0 && cost === undefined && savings === undefined) return '';
+    const parts = [`${formatTokenCount(read)} read`, `${formatTokenCount(write)} write`];
+    if (cost !== undefined) parts.push(`$${cost.toFixed(4)} est. turn`);
+    if (savings !== undefined) {
+      parts.push(
+        savings >= 0
+          ? `$${savings.toFixed(4)} cache saved`
+          : `$${Math.abs(savings).toFixed(4)} cache premium`,
+      );
+    }
+    return `Cache receipt: ${parts.join(' · ')}`;
+  });
+
+  let cacheDiagnosticsNotice = $derived.by(() => {
+    const diagnostics = cacheDiagnostics;
+    if (!diagnostics) return '';
+    const prompt = diagnostics.prompt;
+    const warm = prompt.warmCandidates + prompt.workspaceWarmCandidates;
+    const evidence = diagnostics.evidence;
+    const evidenceTotal = evidence.hits + evidence.misses;
+    const evidenceHitRate = evidenceTotal > 0 ? Math.round((evidence.hits / evidenceTotal) * 100) : 0;
+    const last = diagnostics.recent.at(-1);
+    const breakDetails: string[] = [];
+    if (last?.details?.toolsAdded.length) breakDetails.push(`tools added: ${last.details.toolsAdded.join(', ')}`);
+    if (last?.details?.toolsRemoved.length) breakDetails.push(`tools removed: ${last.details.toolsRemoved.join(', ')}`);
+    if (last?.details?.toolSchemasChanged) breakDetails.push('tool schema changed');
+    if (last?.details?.stableComponentsChanged.length) breakDetails.push(`system sections: ${last.details.stableComponentsChanged.join(', ')}`);
+    if (last?.details?.historyRewriteAt !== undefined) breakDetails.push(`history rewritten at message ${last.details.historyRewriteAt + 1}`);
+    const lastBreak = last?.state === 'cold' && last.reasons.length > 0
+      ? ` Last cold reason: ${last.reasons.join(', ')}${breakDetails.length ? ` (${breakDetails.join('; ')})` : ''}.`
+      : '';
+    const maintenance = diagnostics.maintenance;
+    const deferred = diagnostics.deferredTools;
+    const durable = diagnostics.durable;
+    const deferredKb = Math.round(deferred.schemaCharsDeferred / 102.4) / 10;
+    const durableHitRate = Math.round(durable.hitRate * 1000) / 10;
+    const durableValue = durable.savingsUsd >= 0
+      ? `$${durable.savingsUsd.toFixed(4)} net saved`
+      : `$${Math.abs(durable.savingsUsd).toFixed(4)} net cache premium`;
+    const providerOutcome = prompt.providerOutcomes > 0
+      ? ` Provider-confirmed warm hits: ${prompt.providerWarmHits}; unexpected warm misses: ${prompt.providerUnexpectedMisses}${prompt.providerUnexpectedMisses > 0 ? ` (${formatTokenCount(prompt.providerUnexpectedMissWriteTokens)} rewritten tokens)` : ''}.`
+      : '';
+    return `Harness cache: ${warm}/${prompt.dispatches} warm candidates.${providerOutcome} Evidence cache: ${evidence.hits} hits, ${evidence.waits} concurrent waits, ${evidenceHitRate}% hit rate. Cache maintenance: ${maintenance.refreshes}/${maintenance.scheduled} economical refreshes, ${maintenance.prewarms} typing prewarms. Durable 30-day provider cache: ${durableHitRate}% hit rate, ${durableValue}. Deferred tool schemas: ${deferredKb} KB avoided across ${deferred.selections} dispatches.${lastBreak}`;
+  });
+
+  let cacheProviderScorecard = $derived.by(() =>
+    (cacheDiagnostics?.durable.byProvider ?? [])
+      .filter((row) => row.requests > 0)
+      .slice(0, 4),
+  );
+
   function formatTokenCount(n: number): string {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  }
+
+  async function refreshCacheDiagnostics() {
+    if (isDemoMode || !authStore.isAuthenticated) return;
+    try {
+      const res = await apiFetch(apiUrl('/api/providers/cache-diagnostics'));
+      if (!res.ok) return;
+      const payload = await res.json();
+      cacheDiagnostics = payload?.data ?? null;
+    } catch {
+      // Diagnostics are best-effort and must never interrupt the chat surface.
+    }
   }
 
   const agentRail = useAgentRail();
@@ -308,27 +467,42 @@
   ];
 
   // Active composer model (bound from CommandInput) so we can surface the
-  // active CLI provider's own /commands in the slash picker.
+  // active CLI provider's own /commands in the slash picker. The model itself
+  // is chat-scoped inside CommandInput; worker tabs pin it via forcedModel.
   let activeComposerModel = $state<string>('');
-  let lastComposerTarget = $state('');
+  let activeComposerReasoning = $state<string>('');
   let nativeCommands = $state<{ label: string; commands: NativeSlashCommand[] } | null>(null);
 
-  // A worker tab is a direct conversation with that worker. Keep the composer
-  // identity truthful when the tab changes so a Gemini/Claude worker never
-  // appears to be running the manager's Codex model. A manual model choice is
-  // preserved until the user changes tabs again.
+
+  async function prewarmCacheForTyping(
+    sessionId: string,
+    model: string,
+    reasoningLevel: string,
+    mode: 'act' | 'plan',
+  ) {
+    try {
+      await apiFetch(apiUrl('/api/providers/cache-prewarm'), {
+        method: 'POST',
+        body: JSON.stringify({ sessionId, model, reasoningLevel, interactionMode: mode }),
+      });
+    } catch {
+      // Prewarm is opportunistic. It must never interrupt composing a message.
+    }
+  }
+
+  // Warm the last verified provider prefix after a brief typing pause. The
+  // draft itself is never sent; the backend replays only its stored cache lane.
   $effect(() => {
-    const agent = agentRail.selectedAgent;
-    const target = agent
-      ? `agent:${agent.identity.id}:${agent.identity.provider}:${agent.identity.model}`
-      : 'manager';
-    if (target === lastComposerTarget) return;
-    lastComposerTarget = target;
-    activeComposerModel = agent
-      ? `${agent.identity.provider}:${agent.identity.model}`
-      : isDemoMode
-        ? 'codex:gpt-5.6-sol'
-        : '';
+    const sessionId = sessionStore.activeSessionId;
+    const model = activeComposerModel;
+    const reasoningLevel = activeComposerReasoning;
+    const mode = interactionMode;
+    if (!sessionId || !model || !composerDraft.trim() || isDemoMode || !authStore.isAuthenticated) return;
+    const timer = window.setTimeout(
+      () => void prewarmCacheForTyping(sessionId, model, reasoningLevel, mode),
+      350,
+    );
+    return () => window.clearTimeout(timer);
   });
 
   // Fetch native commands whenever the active provider is a CLI harness.
@@ -437,6 +611,11 @@
     });
     loadLayoutPrefs();
 
+    void refreshCacheDiagnostics();
+    const cacheDiagnosticsTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshCacheDiagnostics();
+    }, 10_000);
+
     window.addEventListener('keydown', handleGlobalKeydown);
 
     const handleOpenNote = async (e: Event) => {
@@ -465,6 +644,8 @@
 
     const handleFocusInput = () => inputRef?.focus();
     window.addEventListener('kory:focus-input', handleFocusInput);
+
+    window.addEventListener('kory:open-project-folder', openProjectFolderPicker);
 
     const handleWorkspaceSnapshot = (event: Event) => {
       const snapshot = (event as CustomEvent).detail as WorkspaceNavigationSnapshot | undefined;
@@ -512,9 +693,11 @@
       );
       window.removeEventListener('open-team-settings', handleOpenTeamSettings);
       window.removeEventListener('kory:focus-input', handleFocusInput);
+      window.removeEventListener('kory:open-project-folder', openProjectFolderPicker);
       window.removeEventListener('kory-workspace-snapshot', handleWorkspaceSnapshot);
       window.removeEventListener('kory-workspace-refresh', handleWorkspaceRefresh);
       window.clearInterval(workspaceRefreshTimer);
+      window.clearInterval(cacheDiagnosticsTimer);
       window.removeEventListener('focus', handleWorkspaceFocus);
       window.removeEventListener('visibilitychange', handleWorkspaceFocus);
       window.removeEventListener('kory-project-unavailable', handleProjectUnavailable);
@@ -1136,6 +1319,8 @@
   // Themed replacement for the old native prompt() when naming a new project.
   let newProjectPrompt = $state<{ parentPath: string } | null>(null);
   let newProjectNameInput = $state('New Project');
+  let newWorkspacePrompt = $state<{ parentPath: string } | null>(null);
+  let newWorkspaceNameInput = $state('New Workspace');
 
   async function confirmNewProjectName() {
     const pending = newProjectPrompt;
@@ -1155,6 +1340,75 @@
           path: projectPath,
         });
       }
+    } catch (error) {
+      toastStore.error(String(error));
+    }
+  }
+
+  async function openWorkspaceAtPath(selectedPath: string) {
+    const response = await apiFetch(apiUrl('/api/workspace/open'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ root: selectedPath }),
+    });
+    const body = (await response.json()) as {
+      ok?: boolean;
+      data?: WorkspaceNavigationSnapshot;
+      error?: string;
+    };
+    if (!response.ok || !body.ok || !body.data) {
+      toastStore.error(body.error || 'Workspace folder is unavailable');
+      return false;
+    }
+    reconcileWorkspaceSnapshot(body.data);
+    workspace.setLastReconciledSessionId('');
+    sessionStore.activeSessionId = '';
+    toastStore.success(
+      `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders — choose a project to start chatting`,
+    );
+    return true;
+  }
+
+  async function confirmNewWorkspaceName() {
+    const pending = newWorkspacePrompt;
+    const workspaceName = newWorkspaceNameInput.trim();
+    if (!pending || !workspaceName) return;
+    newWorkspacePrompt = null;
+    try {
+      const workspacePath = await invoke<string>('create_project_folder', {
+        parentPath: pending.parentPath,
+        projectName: workspaceName,
+      });
+      await openWorkspaceAtPath(workspacePath);
+    } catch (error) {
+      toastStore.error(String(error));
+    }
+  }
+
+  /** Folder picker for "choose the folder you work in" (sidebar "+" and menu). */
+  async function openProjectFolderPicker() {
+    const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+    if (!inTauri) {
+      projectFolderInput?.click();
+      return;
+    }
+
+    try {
+      const selectedPath = await invoke<string | null>('select_folder_dialog');
+      if (!selectedPath) return;
+
+      const result = await readFolderFromTauri(selectedPath);
+      if (!result) {
+        toastStore.error('Failed to open folder');
+        return;
+      }
+
+      await openProjectAtPath(selectedPath, {
+        title: result.title,
+        text: result.text,
+        fileName: result.folderName,
+      });
     } catch (error) {
       toastStore.error(String(error));
     }
@@ -1205,34 +1459,9 @@
       case 'open_project_file':
         projectFileInput?.click();
         break;
-      case 'open_project_folder': {
-        const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-        if (!inTauri) {
-          projectFolderInput?.click();
-          break;
-        }
-
-        try {
-          const selectedPath = await invoke<string | null>('select_folder_dialog');
-          if (!selectedPath) break;
-
-          const result = await readFolderFromTauri(selectedPath);
-          if (!result) {
-            toastStore.error('Failed to open folder');
-            break;
-          }
-
-          await openProjectAtPath(selectedPath, {
-            title: result.title,
-            text: result.text,
-            fileName: result.folderName,
-          });
-        } catch (error) {
-          toastStore.error(String(error));
-        }
+      case 'open_project_folder':
+        await openProjectFolderPicker();
         break;
-      }
       case 'open_workspace': {
         const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
         if (!inTauri) {
@@ -1242,31 +1471,23 @@
         try {
           const selectedPath = await invoke<string | null>('select_folder_dialog');
           if (!selectedPath) break;
-          const response = await apiFetch(apiUrl('/api/workspace/open'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ root: selectedPath }),
-          });
-          const body = (await response.json()) as {
-            ok?: boolean;
-            data?: WorkspaceNavigationSnapshot;
-            error?: string;
-          };
-          if (!response.ok || !body.ok || !body.data) {
-            toastStore.error(body.error || 'Workspace folder is unavailable');
-            break;
-          }
-          reconcileWorkspaceSnapshot(body.data);
-          workspace.setLastReconciledSessionId('');
-          sessionStore.activeSessionId = '';
-          // Stay on the workspace chooser: the welcome screen lists the
-          // workspace root and its project folders ("Choose a project for
-          // this chat"), and picking one creates a correctly scoped chat.
-          // Auto-creating a chat here flashed the chooser for a split
-          // second before yanking the user into an empty session.
-          toastStore.success(
-            `Opened workspace ${projectDisplayName(selectedPath)} with ${body.data.projects.length} project folders — choose a project to start chatting`,
-          );
+          await openWorkspaceAtPath(selectedPath);
+        } catch (error) {
+          toastStore.error(String(error));
+        }
+        break;
+      }
+      case 'new_workspace': {
+        const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+        if (!inTauri) {
+          toastStore.error('Workspace folders require the desktop app');
+          break;
+        }
+        try {
+          const parentPath = await invoke<string | null>('select_folder_dialog');
+          if (!parentPath) break;
+          newWorkspaceNameInput = 'New Workspace';
+          newWorkspacePrompt = { parentPath };
         } catch (error) {
           toastStore.error(String(error));
         }
@@ -1556,6 +1777,8 @@
   {connectionDot}
   {connectionStatusLabel}
   {connectedProviders}
+  {recentProjects}
+  onSidebarAction={handleMenuAction}
   onHideSidebar={() => (showSidebar = false)}
   onShowSidebar={() => (showSidebar = true)}
   onCloseNotes={() => (showNotes = false)}
@@ -1605,12 +1828,23 @@
     {#if collaborationStore.activeJoinedSession}
       <TeamWorkspace />
     {:else if !projectStore.currentPath && !sessionStore.activeSessionId}
-      <div class="flex-1" style="background: var(--color-surface-1);">
-        <!-- Fixed to the viewport center so the banner never shifts with the
-             sidebar or other panels — it stays in the true middle. -->
+      <!--
+        Welcome screen: centered within the FEED AREA, not the viewport.
+        The previous `position: fixed; top: 50%` anchored to the viewport, so
+        the card visually overlapped the menubar (top, 52px) and the composer
+        (bottom, ~150px) as the window shrunk. Centering inside the feed
+        container (flex items-center justify-center) makes the card respect
+        the available area; overflow-y-auto lets it scroll when too tall, and
+        min-h-0 ensures the flex item can actually shrink below its content
+        height on very short windows.
+      -->
+      <div
+        class="flex-1 flex items-center justify-center overflow-y-auto min-h-0 p-4 sm:p-6"
+        style="background: var(--color-surface-1);"
+      >
         <div
-          class="max-w-xl w-full text-center rounded-[24px] border px-8 py-10 overflow-y-auto"
-          style="position: fixed; left: 50vw; top: 50%; transform: translate(-50%, -50%); max-height: calc(100vh - 200px); background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.1), rgba(var(--color-accent-rgb), 0.03)); border-color: rgba(var(--color-accent-rgb), 0.22);"
+          class="w-full max-w-xl text-center rounded-[24px] border px-6 sm:px-8 py-8 sm:py-10"
+          style="background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.1), rgba(var(--color-accent-rgb), 0.03)); border-color: rgba(var(--color-accent-rgb), 0.22);"
         >
           <div class="mb-8">
             <img
@@ -1920,17 +2154,60 @@
             </span>
           </div>
         {/if}
-        {#if cachedContextNotice}
+        {#if cacheTurnReceipt}
           <div
             class="pt-1"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
-            title={cachedContextNotice}
+            title={cachedContextNotice || cacheTurnReceipt}
           >
-            {wsStore.contextUsage.provider === 'codex' ? 'Codex' : 'Provider'} reused
-            {formatTokenCount(wsStore.contextUsage.cachedInputTokens ?? 0)} cached input tokens
-            <span class="opacity-60"
-              >· already included, not extra messages · meter updates when usage arrives</span
-            >
+            {cacheTurnReceipt}
+          </div>
+        {/if}
+        {#if cacheDiagnosticsNotice && (contextBarHover || cacheTurnReceipt)}
+          <div
+            class="pt-1"
+            style="font-size: var(--text-xs); color: var(--color-text-muted);"
+            title={cacheDiagnosticsNotice}
+          >
+            {#if cacheDiagnostics}
+              {@const promptWarm =
+                cacheDiagnostics.prompt.warmCandidates +
+                cacheDiagnostics.prompt.workspaceWarmCandidates}
+              {@const evidenceTotal =
+                cacheDiagnostics.evidence.hits + cacheDiagnostics.evidence.misses}
+              Cache fabric {promptWarm}/{cacheDiagnostics.prompt.dispatches} warm
+              <span class="opacity-60">·</span>
+              evidence {cacheDiagnostics.evidence.hits}/{evidenceTotal} hits
+              {#if cacheDiagnostics.evidence.waits > 0}
+                <span class="opacity-60">·</span>
+                {cacheDiagnostics.evidence.waits} duplicate reads avoided
+              {/if}
+              {#if cacheDiagnostics.recent.at(-1)?.state === 'cold' && cacheDiagnostics.recent.at(-1)?.reasons.length}
+                <span class="opacity-60">· last bust:</span>
+                {cacheDiagnostics.recent.at(-1)?.reasons.join(', ')}
+              {/if}
+
+              {#if cacheDiagnostics.durable.requests > 0}
+                <div
+                  class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 border-t pt-1.5"
+                  style="border-color: var(--color-border);"
+                >
+                  <span class="font-medium" style="color: var(--color-text-secondary);">
+                    30d provider cache
+                  </span>
+                  {#each cacheProviderScorecard as row (row.provider)}
+                    <span class="tabular-nums" title={`${row.requests} requests · ${formatTokenCount(row.cacheReadTokens)} cache-read tokens · ${formatTokenCount(row.cacheWriteTokens)} cache-write tokens${row.averageTtftMs === null ? '' : ` · ${Math.round(row.averageTtftMs)}ms TTFT`}${row.averageLatencyMs === null ? '' : ` · ${Math.round(row.averageLatencyMs)}ms total`}`}>
+                      {row.provider}
+                      {Math.round(row.hitRate * 1000) / 10}%
+                      {row.savingsUsd >= 0 ? `· +$${row.savingsUsd.toFixed(4)}` : `· -$${Math.abs(row.savingsUsd).toFixed(4)}`}
+                      {#if row.averageTtftMs !== null}
+                        · {Math.round(row.averageTtftMs)}ms TTFT
+                      {/if}
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
           </div>
         {/if}
       </div>
@@ -1978,6 +2255,10 @@
         initialModel={isDemoMode ? 'codex:gpt-5.6-sol' : ''}
         disableModelPreviewRequests={isDemoMode}
         bind:selectedModel={activeComposerModel}
+        bind:selectedReasoningLevel={activeComposerReasoning}
+        forcedModel={agentRail.selectedAgent
+          ? `${agentRail.selectedAgent.identity.provider}:${agentRail.selectedAgent.identity.model}`
+          : ''}
         {interactionMode}
         {planReady}
         onInteractionModeChange={async (mode) => {
@@ -2136,6 +2417,56 @@
           onclick={() => void confirmNewProjectName()}
         >
           Create Project
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if newWorkspacePrompt}
+  <div
+    class="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+  >
+    <div
+      class="w-full max-w-md rounded-2xl border p-6 shadow-2xl"
+      style="background: var(--color-surface-2); border-color: var(--color-border);"
+      role="dialog"
+      aria-label="Name your workspace"
+    >
+      <h3 class="mb-2 text-base font-semibold" style="color: var(--color-text-primary);">
+        Name your workspace
+      </h3>
+      <p class="mb-4 text-sm leading-relaxed" style="color: var(--color-text-secondary);">
+        A workspace folder with this name will be created in {newWorkspacePrompt.parentPath}.
+      </p>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        type="text"
+        class="input mb-4 w-full text-sm"
+        bind:value={newWorkspaceNameInput}
+        autofocus
+        onkeydown={(e) => {
+          if (e.key === 'Enter') void confirmNewWorkspaceName();
+          if (e.key === 'Escape') newWorkspacePrompt = null;
+        }}
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
+          style="color: var(--color-text-muted);"
+          onclick={() => (newWorkspacePrompt = null)}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl px-4 py-2 text-sm font-semibold transition-colors disabled:opacity-50"
+          style="background: var(--color-accent); color: var(--color-surface-0);"
+          disabled={!newWorkspaceNameInput.trim()}
+          onclick={() => void confirmNewWorkspaceName()}
+        >
+          Create Workspace
         </button>
       </div>
     </div>

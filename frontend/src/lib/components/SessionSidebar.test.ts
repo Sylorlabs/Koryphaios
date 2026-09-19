@@ -11,6 +11,7 @@ const session = {
 };
 
 const mocks = vi.hoisted(() => ({
+  billingApiFetch: vi.fn(),
   sessionStore: {
     activeSessionId: 'session-1',
     sessions: [] as (typeof session)[],
@@ -31,11 +32,19 @@ const mocks = vi.hoisted(() => ({
     // component crashed on first render, so add a default empty result here.
     sessionsForProject: vi.fn(() => [] as (typeof session)[]),
   },
+  projectStore: {
+    currentPath: '/tmp/project',
+    displayName: 'project',
+    scope: 'project' as const,
+    workspaceRoot: null as string | null,
+    workspaceProjects: [] as Array<{ path: string; name: string; modifiedAt: number }>,
+    setScope: vi.fn(),
+  },
 }));
 
 vi.mock('$lib/stores/sessions.svelte', () => ({ sessionStore: mocks.sessionStore }));
+vi.mock('$lib/api.svelte', () => ({ apiFetch: mocks.billingApiFetch, parseJsonResponse: vi.fn() }));
 vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path }));
-vi.mock('$lib/api.svelte', () => ({ apiFetch: vi.fn(), parseJsonResponse: vi.fn() }));
 vi.mock('$lib/stores/websocket.svelte', () => ({
   wsStore: {
     pendingPermissions: [],
@@ -46,12 +55,7 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
   },
 }));
 vi.mock('$lib/stores/project.svelte', () => ({
-  projectStore: {
-    currentPath: '/tmp/project',
-    displayName: 'project',
-    scope: 'project',
-    setScope: vi.fn(),
-  },
+  projectStore: mocks.projectStore,
   projectDisplayName: (path: string) => path.split('/').at(-1) ?? path,
 }));
 vi.mock('$lib/stores/collaboration.svelte', () => ({
@@ -79,6 +83,8 @@ import SessionSidebar from './SessionSidebar.svelte';
 describe('SessionSidebar session controls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The archive/delete warnings remember "Don't show again" in localStorage.
+    localStorage.clear();
     mocks.sessionStore.activeSessionId = 'session-1';
     mocks.sessionStore.sessions = [session];
     mocks.sessionStore.groupedSessions = [{ label: 'Today', sessions: [session] }];
@@ -86,6 +92,45 @@ describe('SessionSidebar session controls', () => {
     mocks.sessionStore.archivedSessions = [];
     mocks.sessionStore.archivedError = null;
     mocks.sessionStore.fetchArchivedSessions.mockResolvedValue(true);
+    mocks.billingApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, sessions: {} }),
+    } as Response);
+    mocks.projectStore.currentPath = '/tmp/project';
+    mocks.projectStore.displayName = 'project';
+    mocks.projectStore.workspaceRoot = null;
+    mocks.projectStore.workspaceProjects = [];
+  });
+
+  it('renders workspace, project, and chat as a collapsible three-level tree', async () => {
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+    ];
+
+    render(SessionSidebar);
+
+    const workspace = screen.getByRole('button', { name: /Collapse workspace workspace/i });
+    expect(screen.getByRole('button', { name: /Collapse project\./i })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Open session Accessibility review' })).toBeVisible();
+
+    await fireEvent.click(workspace);
+    expect(screen.queryByRole('button', { name: /Collapse project\./i })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open session Accessibility review' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Expand workspace workspace/i })).toBeVisible();
+  });
+
+  it('hides the Teams shortcut by default and restores it from the Teams preference', () => {
+    const first = render(SessionSidebar);
+    expect(screen.queryByText('Join or host a team workspace')).toBeNull();
+    first.unmount();
+
+    localStorage.setItem(
+      'koryphaios-team-ui-preferences-v1',
+      JSON.stringify({ showTeamSidebarShortcut: true }),
+    );
+    render(SessionSidebar);
+    expect(screen.getByText('Join or host a team workspace')).toBeVisible();
   });
 
   it('keeps the full-row session action and row utilities as sibling controls', async () => {
@@ -108,7 +153,7 @@ describe('SessionSidebar session controls', () => {
     expect(container.querySelector('button button, [role="button"] button')).toBeNull();
   });
 
-  it('places Archive between Rename and Delete and archives without a confirmation', async () => {
+  it('places Archive between Rename and Delete and warns before archiving', async () => {
     render(SessionSidebar);
 
     const rename = screen.getByRole('button', { name: 'Rename session' });
@@ -118,8 +163,82 @@ describe('SessionSidebar session controls', () => {
     expect(archive.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     await fireEvent.click(archive);
+
+    // Nothing is archived until the warning is accepted.
+    expect(mocks.sessionStore.archiveSession).not.toHaveBeenCalled();
+    const warning = screen.getByRole('alertdialog');
+    expect(warning).toHaveTextContent(
+      'Archiving this session will stop the current agent and all of its sub-agents',
+    );
+    expect(screen.getByRole('button', { name: "Don't show again" })).toBeVisible();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive Session' }));
     expect(mocks.sessionStore.archiveSession).toHaveBeenCalledWith('session-2');
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('shows the same warning with delete wording before deleting', async () => {
+    render(SessionSidebar);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+
+    expect(mocks.sessionStore.deleteSession).not.toHaveBeenCalled();
+    const warning = screen.getByRole('alertdialog');
+    expect(warning).toHaveTextContent(
+      'Deleting this session will stop the current agent and all of its sub-agents',
+    );
+    expect(warning).toHaveTextContent("Don't show again");
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete Session' }));
+    expect(mocks.sessionStore.deleteSession).toHaveBeenCalledWith('session-2');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('keeps the archive and delete warnings identical apart from the verb', async () => {
+    render(SessionSidebar);
+    const warningText = () => screen.getByRole('alertdialog').querySelector('p')?.textContent ?? '';
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    const archiveWarning = warningText();
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+    const deleteWarning = warningText();
+
+    expect(archiveWarning).toContain('Archiving');
+    expect(archiveWarning.replace('Archiving', 'Deleting')).toBe(deleteWarning);
+  });
+
+  it('remembers "Don\'t show again" per action', async () => {
+    render(SessionSidebar);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await fireEvent.click(screen.getByRole('button', { name: "Don't show again" }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive Session' }));
+    expect(mocks.sessionStore.archiveSession).toHaveBeenCalledWith('session-2');
+
+    // Archiving no longer stops to warn.
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(mocks.sessionStore.archiveSession).toHaveBeenCalledTimes(2);
+
+    // Dismissing the reversible archive warning must not dismiss the
+    // destructive delete warning.
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete session' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Deleting this session');
+    expect(mocks.sessionStore.deleteSession).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a cancelled warning as "Don\'t show again"', async () => {
+    render(SessionSidebar);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    await fireEvent.click(screen.getByRole('button', { name: "Don't show again" }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(mocks.sessionStore.archiveSession).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Archive chat' }));
+    expect(screen.getByRole('alertdialog')).toBeVisible();
   });
 
   it('verifies hidden archives and states exact counts before Delete All can proceed', async () => {

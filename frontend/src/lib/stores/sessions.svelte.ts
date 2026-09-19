@@ -11,6 +11,7 @@ import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 import { wsStore } from './websocket.svelte';
 import { loadLastSessionId, saveLastSessionId } from './navigation-preferences';
+import { homeDir } from '@tauri-apps/api/path';
 import {
   parseMessageDisplayProjection,
   type DisplayMessage,
@@ -316,19 +317,17 @@ async function fetchArchivedSessions(): Promise<boolean> {
   }
 }
 
-/** Resolve the working directory a brand-new chat should be scoped to.
- *  - Inside a workspace: scope='all' → no workingDirectory (workspace-level chat);
- *    scope='project' → use the active project's path. Falls back to workspace-level
- *    if no project is open.
- *  - Outside a workspace: use the active project if one is open, otherwise none. */
-function resolveNewChatWorkingDirectory(): string | undefined {
-  if (projectStore.workspaceRoot) {
-    if (projectStore.scope === 'project' && projectStore.currentPath) {
-      return projectStore.currentPath;
-    }
-    return projectStore.workspaceRoot ?? undefined;
+/** Plain New Chat behaves like opening a fresh terminal: start at the OS home directory. */
+async function resolveNewChatWorkingDirectory(): Promise<string | undefined> {
+  if (!browser) return undefined;
+  const inTauri = '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+  if (!inTauri) return undefined;
+  try {
+    const home = await homeDir();
+    return home.trim() || undefined;
+  } catch {
+    return undefined;
   }
-  return projectStore.currentPath ?? undefined;
 }
 
 /** User-initiated "new chat".
@@ -337,13 +336,11 @@ function resolveNewChatWorkingDirectory(): string | undefined {
  *  - shift=true → always create a brand-new session.
  *  - Always create is the default behavior for this app: no untouched composer
  *    reuse is performed from the new-chat control.
- *  - Inside a workspace: opens a session scoped to either the workspace root
- *    (scope='all') or the active project (scope='project'), based on the
- *    sidebar slider.
- *  - Outside a workspace: opens a session scoped to the active project (or
- *    unscoped if no project is open). */
+ *  - Starts from the user's normal OS home directory when the desktop runtime
+ *    exposes it, matching a fresh terminal window.
+ *  - Browser fallback stays unscoped because browsers cannot read the OS home path. */
 async function newChat(_opts: { shift?: boolean } = {}): Promise<string | null> {
-  return createSession({ workingDirectory: resolveNewChatWorkingDirectory() });
+  return createSession({ workingDirectory: await resolveNewChatWorkingDirectory() });
 }
 
 async function createSession(

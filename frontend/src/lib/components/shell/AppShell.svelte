@@ -6,6 +6,7 @@
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import SessionSidebar from '$lib/components/SessionSidebar.svelte';
   import FileEditPreview from '$lib/components/FileEditPreview.svelte';
+  import type { RecentProject } from '$lib/utils/projectManager';
 
   let {
     showSidebar = true,
@@ -15,6 +16,8 @@
     connectionDot = 'bg-red-500',
     connectionStatusLabel = 'Realtime offline',
     connectedProviders = 0,
+    recentProjects = [],
+    onSidebarAction,
     onHideSidebar,
     onShowSidebar,
     onCloseNotes,
@@ -34,6 +37,8 @@
     connectionDot?: string;
     connectionStatusLabel?: string;
     connectedProviders?: number;
+    recentProjects?: RecentProject[];
+    onSidebarAction?: (action: string) => void | Promise<void>;
     onHideSidebar?: () => void;
     onShowSidebar?: () => void;
     onCloseNotes?: () => void;
@@ -164,30 +169,34 @@
       </div>
 
       <div class="flex-1 min-h-0 overflow-hidden">
-        <SessionSidebar currentSessionId={activeSessionId ?? undefined} />
+        <SessionSidebar
+          currentSessionId={activeSessionId ?? undefined}
+          {recentProjects}
+          onAction={onSidebarAction}
+        />
       </div>
 
       <div
-        class="px-4 py-3 border-t flex items-center justify-between shrink-0"
+        class="px-4 py-3 border-t flex items-center justify-between gap-2 shrink-0"
         style="border-color: var(--color-border); background: var(--color-surface-2);"
       >
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 min-w-0">
           <div
-            class="rounded-full {connectionDot}"
+            class="rounded-full {connectionDot} shrink-0"
             style="width: var(--size-2); height: var(--size-2);"
           ></div>
           <span
-            class="leading-none"
+            class="truncate leading-none"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
             title={connectionStatusLabel}
           >
             {connectionStatusLabel}
           </span>
         </div>
-        <div class="flex items-center gap-1">
+        <div class="flex items-center gap-1 shrink-0">
           {#if connectedProviders > 0}
             <span
-              class="px-1.5 py-0.5 rounded leading-none"
+              class="px-1.5 py-0.5 rounded leading-none whitespace-nowrap"
               style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
             >
               {connectedProviders} providers
@@ -197,9 +206,12 @@
       </div>
     </nav>
   {/if}
-  <!-- Desktop sidebar: persistent mount, width transition avoids remount jank -->
+  <!-- Desktop sidebar: persistent mount, width transition avoids remount jank.
+       min-h-0 lets the inner overflow-y-auto session tree actually shrink on
+       short windows instead of inheriting the viewport height and pushing
+       the status bar past the bottom edge. -->
   <nav
-    class="hidden md:flex shrink-0 border-r flex-col overflow-hidden transition-[width,opacity] duration-150 ease-out will-change-[width]"
+    class="hidden md:flex shrink-0 border-r flex-col overflow-hidden min-h-0 transition-[width,opacity] duration-150 ease-out will-change-[width]"
     data-testid="session-sidebar"
     style="
       width: {desktopSidebar ? 'var(--sidebar-width)' : '0px'};
@@ -261,30 +273,34 @@
     </div>
 
     <div class="flex-1 min-h-0 overflow-hidden">
-      <SessionSidebar currentSessionId={activeSessionId ?? undefined} />
+      <SessionSidebar
+        currentSessionId={activeSessionId ?? undefined}
+        {recentProjects}
+        onAction={onSidebarAction}
+      />
     </div>
 
     <div
-      class="px-4 py-3 border-t flex items-center justify-between shrink-0"
+      class="px-4 py-3 border-t flex items-center justify-between gap-2 shrink-0"
       style="border-color: var(--color-border); background: var(--color-surface-2);"
     >
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 min-w-0">
         <div
-          class="rounded-full {connectionDot}"
+          class="rounded-full {connectionDot} shrink-0"
           style="width: var(--size-2); height: var(--size-2);"
         ></div>
         <span
-          class="leading-none"
+          class="truncate leading-none"
           style="font-size: var(--text-xs); color: var(--color-text-muted);"
           title={connectionStatusLabel}
         >
           {connectionStatusLabel}
         </span>
       </div>
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1 shrink-0">
         {#if connectedProviders > 0}
           <span
-            class="px-1.5 py-0.5 rounded leading-none"
+            class="px-1.5 py-0.5 rounded leading-none whitespace-nowrap"
             style="font-size: var(--text-xs); background: var(--color-surface-3); color: var(--color-text-muted);"
           >
             {connectedProviders} providers
@@ -326,8 +342,6 @@
         {@render agentRailSlot?.()}
       {/if}
 
-      <FileEditPreview />
-
       {#if showNotes}
         <div
           class="absolute inset-0 z-30 flex min-h-0 min-w-0 flex-col"
@@ -354,27 +368,53 @@
             </button>
           </div>
           <div class="flex-1 min-h-0">
-            {#if NotesPanelComponent}
-              <NotesPanelComponent />
-            {:else if notesPanelLoadError}
-              <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-                <p class="text-sm" style="color: var(--color-error);">{notesPanelLoadError}</p>
-                <button
-                  type="button"
-                  class="rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
-                  style="border-color: var(--color-border); color: var(--color-text-primary);"
-                  onclick={() => void loadNotesPanel()}>Retry loading Notes</button
+            <!-- Contain a Notes Network failure to this region. An exception
+                 thrown inside an `$effect` escapes Svelte's reactive flush
+                 unless a boundary catches it, which would otherwise freeze the
+                 entire window — including "Back to chat". -->
+            <svelte:boundary>
+              {#if NotesPanelComponent}
+                <NotesPanelComponent />
+              {:else if notesPanelLoadError}
+                <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                  <p class="text-sm" style="color: var(--color-error);">{notesPanelLoadError}</p>
+                  <button
+                    type="button"
+                    class="rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+                    style="border-color: var(--color-border); color: var(--color-text-primary);"
+                    onclick={() => void loadNotesPanel()}>Retry loading Notes</button
+                  >
+                </div>
+              {:else}
+                <div
+                  class="flex h-full items-center justify-center gap-2 text-xs"
+                  style="color: var(--color-text-muted);"
+                  role="status"
                 >
-              </div>
-            {:else}
-              <div
-                class="flex h-full items-center justify-center gap-2 text-xs"
-                style="color: var(--color-text-muted);"
-                role="status"
-              >
-                <StickyNote size={14} /> Loading Notes…
-              </div>
-            {/if}
+                  <StickyNote size={14} /> Loading Notes…
+                </div>
+              {/if}
+
+              {#snippet failed(error, reset)}
+                <div
+                  class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+                  role="alert"
+                >
+                  <p class="text-sm" style="color: var(--color-text-primary);">
+                    The Notes Network hit an unexpected error
+                  </p>
+                  <p class="text-xs" style="color: var(--color-text-muted); overflow-wrap: anywhere;">
+                    {error instanceof Error ? error.message : String(error)}
+                  </p>
+                  <button
+                    type="button"
+                    class="rounded-lg border px-3 py-1.5 text-xs transition-colors hover:bg-[var(--color-surface-3)]"
+                    style="border-color: var(--color-border); color: var(--color-text-primary);"
+                    onclick={reset}>Try again</button
+                  >
+                </div>
+              {/snippet}
+            </svelte:boundary>
           </div>
         </div>
       {/if}
@@ -386,6 +426,14 @@
       >
         {@render feed?.()}
       </section>
+
+      <!-- Live agent file-edit preview. Anchored just above the context bar, next
+           to the composer: edits belong with the turn that is producing them, and
+           at the top it pushed the feed down and stole reading room. Height is
+           capped and scrolls so a long edit list can never displace the composer. -->
+      <div class="shrink-0 max-h-[38vh] overflow-y-auto">
+        <FileEditPreview />
+      </div>
 
       {@render contextBar?.()}
 

@@ -18,6 +18,10 @@ import {
   getLatestCloudSnapshots,
   getKoryAccountUsage,
   getUsageSamplesByProvider,
+  getPromptCacheUsageSummary,
+  getUsageCostBreakdown,
+  getUnknownCostUsage,
+  setUsageKnownCost,
 } from './db';
 import {
   startCreditPolling,
@@ -36,6 +40,8 @@ export {
   getLatestCloudSnapshots,
   getKoryAccountUsage,
   getUsageSamplesByProvider,
+  getPromptCacheUsageSummary,
+  getUsageCostBreakdown,
   getCreditDbPath,
 } from './db';
 export {
@@ -56,7 +62,12 @@ export function recordUsage(
   tokensIn: number,
   tokensOut: number,
   attribution?: { accountId?: string; sessionId?: string },
-  cacheUsage?: { cacheReadTokens?: number; cacheWriteTokens?: number },
+  cacheUsage?: {
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    ttftMs?: number;
+    latencyMs?: number;
+  },
 ): void {
   if (!model.trim() || !provider.trim() || (tokensIn <= 0 && tokensOut <= 0)) return;
   // Real prices: models.dev live catalog → static ModelDef catalog. Unpriced
@@ -66,8 +77,44 @@ export function recordUsage(
     ? null
     : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0, cacheUsage);
   const costUsd = priced?.costUsd ?? 0;
-  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd, attribution);
+  // Subscription usage is classified, but never counted as metered per-turn spend.
+  const costKnown = SUBSCRIPTION_PROVIDERS.has(provider) || priced != null;
+  const baseline = SUBSCRIPTION_PROVIDERS.has(provider)
+    ? null
+    : computeCostUsd(provider, model, tokensIn ?? 0, tokensOut ?? 0);
+  const cacheSavingsUsd = baseline && priced ? baseline.costUsd - priced.costUsd : 0;
+  dbRecordUsage(model, provider, tokensIn ?? 0, tokensOut ?? 0, costUsd, attribution, {
+    costKnown,
+    cacheReadTokens: cacheUsage?.cacheReadTokens,
+    cacheWriteTokens: cacheUsage?.cacheWriteTokens,
+    cacheSavingsUsd,
+    ttftMs: cacheUsage?.ttftMs,
+    latencyMs: cacheUsage?.latencyMs,
+  });
   markCreditUsage();
+}
+
+/** Retry a bounded batch of historical rows after pricing catalogs improve. */
+export function repriceUnknownUsage(limit = 1_000): { scanned: number; repriced: number } {
+  const rows = getUnknownCostUsage(limit);
+  let repriced = 0;
+  for (const row of rows) {
+    if (SUBSCRIPTION_PROVIDERS.has(row.provider)) {
+      setUsageKnownCost(row.id, 0, 0);
+      repriced += 1;
+      continue;
+    }
+    const priced = computeCostUsd(row.provider, row.model, row.tokensIn, row.tokensOut, {
+      cacheReadTokens: row.cacheReadTokens,
+      cacheWriteTokens: row.cacheWriteTokens,
+    });
+    if (!priced) continue;
+    const baseline = computeCostUsd(row.provider, row.model, row.tokensIn, row.tokensOut);
+    const cacheSavingsUsd = baseline ? Math.max(0, baseline.costUsd - priced.costUsd) : 0;
+    setUsageKnownCost(row.id, priced.costUsd, cacheSavingsUsd);
+    repriced += 1;
+  }
+  return { scanned: rows.length, repriced };
 }
 
 /**

@@ -31,6 +31,7 @@
   import Save from 'lucide-svelte/icons/save';
   import GripVertical from 'lucide-svelte/icons/grip-vertical';
   import Plus from 'lucide-svelte/icons/plus';
+  import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import FolderOpen from 'lucide-svelte/icons/folder-open';
@@ -44,6 +45,7 @@
   import Clock3 from 'lucide-svelte/icons/clock-3';
   import House from 'lucide-svelte/icons/house';
   import MemoryEditor from './MemoryEditor.svelte';
+  import KorySelect from './KorySelect.svelte';
   import AgentSettings from './AgentSettings.svelte';
   import ExperimentalSettings from './ExperimentalSettings.svelte';
   import ProviderIcon from './icons/ProviderIcon.svelte';
@@ -68,7 +70,6 @@
   import NumberStepper from './NumberStepper.svelte';
   import KorySlider from './KorySlider.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
-  import KorySelect from './KorySelect.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import ImageSettings from './ImageSettings.svelte';
   import WelcomeSettings from './WelcomeSettings.svelte';
@@ -452,6 +453,8 @@
   }
 
   const isBedrock = (name: string): boolean => name === 'bedrock';
+  // Notion credentials are Personal Access Tokens (ntn_…), not API keys.
+  const isNotion = (name: string): boolean => name === 'notion';
 
   // ─── AWS system-credential banner (Bedrock) ─────────────────────────────
   // The backend scans for credential *sources* on the machine (env vars,
@@ -626,6 +629,7 @@
   ): string | null {
     if (AUTH_PROVIDER_KEYS.has(providerKey)) return 'OpenAI Codex';
     if (deployment === 'cloud') return 'Cloud agent';
+    if (deployment === 'hybrid') return 'Cloud + local';
     if (deployment === 'local')
       return isCliExecutionProvider(providerKey) ? 'CLI' : 'Local endpoint';
     return null;
@@ -639,6 +643,9 @@
       return 'OpenAI Codex sign-in · managed by local Codex app-server';
     if (deployment === 'cloud') {
       return 'Cloud agent · sync via git pull / gh pr checkout';
+    }
+    if (deployment === 'hybrid') {
+      return 'Cloud sandboxes or a local agent · chosen per thread';
     }
     if (deployment === 'local') {
       return isCliExecutionProvider(providerKey)
@@ -668,8 +675,16 @@
 
   let expandedProvider = $state<string | null>(null);
   let showAddCustom = $state(false);
-  let customForm = $state({ label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' });
+  let customForm = $state({
+    label: '',
+    baseUrl: '',
+    apiKey: '',
+    models: '',
+    headers: '',
+    adapter: '',
+  });
   let showNewCustomIconEditor = $state(false);
+  let showCustomAdvanced = $state(false);
   let newCustomIconSelection = $state.raw<CustomProviderIconSelection | null>(null);
   let customAddError = $state('');
   let customCanSaveUnverified = $state(false);
@@ -684,19 +699,47 @@
   let pendingDeleteProvider = $state<{ id: string; label: string } | null>(null);
 
   function resetCustomProviderForm() {
-    customForm = { label: '', kind: 'openai', baseUrl: '', apiKey: '', models: '' };
+    customForm = {
+      label: '',
+      baseUrl: '',
+      apiKey: '',
+      models: '',
+      headers: '',
+      adapter: '',
+    };
     showNewCustomIconEditor = false;
     newCustomIconSelection = null;
+    showCustomAdvanced = false;
     customAddError = '';
     customCanSaveUnverified = false;
     customRequiresManualModels = false;
+  }
+
+  // "Name: Value" per line; malformed lines are skipped, case-insensitive
+  // duplicate names resolve last-wins. Empty input means no headers.
+  function parseCustomHeaders(raw: string): Record<string, string> | undefined {
+    const parsed = new Map<string, { name: string; value: string }>();
+    for (const line of raw.split('\n')) {
+      const text = line.trim();
+      const colon = text.indexOf(':');
+      if (colon <= 0) continue;
+      const name = text.slice(0, colon).trim();
+      if (!/^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$/.test(name)) continue;
+      parsed.set(name.toLowerCase(), { name, value: text.slice(colon + 1).trim() });
+    }
+    if (parsed.size === 0) return undefined;
+    return Object.fromEntries([...parsed.values()].map(({ name, value }) => [name, value]));
   }
 
   async function addCustomProvider(allowUnverified = false) {
     customAddError = '';
     customCanSaveUnverified = false;
     customRequiresManualModels = false;
-    const result = await addCustomProviderToStore({ ...customForm, allowUnverified });
+    const result = await addCustomProviderToStore({
+      ...customForm,
+      headers: parseCustomHeaders(customForm.headers),
+      allowUnverified,
+    });
     if (result.normalizedBaseUrl) customForm.baseUrl = result.normalizedBaseUrl;
     if (result.ok) {
       if (result.id && newCustomIconSelection?.blob) {
@@ -983,6 +1026,103 @@
   let expandedSubscriptionTrends = $state<Record<string, boolean>>({});
   let subscriptionTrendRanges = $state<Record<string, number>>({});
   let activeSubscriptionTrendPoints = $state<Record<string, number | undefined>>({});
+  const BILLING_PREFERENCES_STORAGE_KEY = 'koryphaios-billing-preferences-v1';
+  let billingExcludedProviders = $state<string[]>([]);
+  let showSubscriptionApiEquivalent = $state(true);
+  let expandedBillingProviders = $state<Record<string, boolean>>({});
+  const TEAM_UI_PREFERENCES_STORAGE_KEY = 'koryphaios-team-ui-preferences-v1';
+  let showTeamSidebarShortcut = $state(false);
+
+  function loadTeamUiPreferences() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(TEAM_UI_PREFERENCES_STORAGE_KEY) ?? '{}') as {
+        showTeamSidebarShortcut?: boolean;
+      };
+      showTeamSidebarShortcut = parsed.showTeamSidebarShortcut === true;
+    } catch {
+      showTeamSidebarShortcut = false;
+    }
+  }
+
+  function toggleTeamSidebarShortcut() {
+    showTeamSidebarShortcut = !showTeamSidebarShortcut;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(
+        TEAM_UI_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({ showTeamSidebarShortcut }),
+      );
+    }
+    window.dispatchEvent(new CustomEvent('kory:team-ui-preferences-changed'));
+  }
+
+  function loadBillingPreferences() {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const parsed = JSON.parse(localStorage.getItem(BILLING_PREFERENCES_STORAGE_KEY) ?? '{}') as {
+        excludedProviders?: string[];
+        showSubscriptionApiEquivalent?: boolean;
+      };
+      billingExcludedProviders = Array.isArray(parsed.excludedProviders)
+        ? parsed.excludedProviders.filter((provider) => typeof provider === 'string')
+        : [];
+      showSubscriptionApiEquivalent = parsed.showSubscriptionApiEquivalent !== false;
+    } catch {
+      billingExcludedProviders = [];
+      showSubscriptionApiEquivalent = true;
+    }
+  }
+
+  function saveBillingPreferences() {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(
+        BILLING_PREFERENCES_STORAGE_KEY,
+        JSON.stringify({
+          excludedProviders: billingExcludedProviders,
+          showSubscriptionApiEquivalent,
+        }),
+      );
+    }
+    window.dispatchEvent(new CustomEvent('kory:billing-preferences-changed'));
+  }
+
+  function billingProviderIncluded(provider: string): boolean {
+    return !billingExcludedProviders.includes(provider.toLowerCase());
+  }
+
+  function billingApiPath(path: string, forceRefresh = false): string {
+    const params = new URLSearchParams();
+    if (forceRefresh) params.set('refresh', '1');
+    for (const provider of billingExcludedProviders) params.append('excludeProvider', provider);
+    const query = params.toString();
+    return `${path}${query ? `?${query}` : ''}`;
+  }
+
+  async function toggleBillingProvider(provider: string) {
+    const normalized = provider.toLowerCase();
+    billingExcludedProviders = billingProviderIncluded(normalized)
+      ? [...billingExcludedProviders, normalized]
+      : billingExcludedProviders.filter((item) => item !== normalized);
+    saveBillingPreferences();
+    await loadBillingCredits();
+  }
+
+  function toggleSubscriptionApiEquivalent() {
+    showSubscriptionApiEquivalent = !showSubscriptionApiEquivalent;
+    saveBillingPreferences();
+  }
+
+  function formatBillingUsd(value: number | null | undefined, minimumDigits = 2): string {
+    if (value == null || !Number.isFinite(value)) return '$?.??';
+    if (value === 0) return '$0.00';
+    const digits = value >= 100 ? Math.max(minimumDigits, 2) : value >= 1 ? Math.max(minimumDigits, 4) : 6;
+    return `$${value.toFixed(digits)}`;
+  }
+
+  onMount(() => {
+    loadBillingPreferences();
+    loadTeamUiPreferences();
+  });
 
   function formatTokens(n: number): string {
     if (!Number.isFinite(n) || n <= 0) return '0';
@@ -1057,13 +1197,13 @@
     billingLoading = true;
     billingError = null;
     try {
-      const requestUrl = `/api/billing/credits${forceRefresh ? '?refresh=1' : ''}`;
+      const requestUrl = billingApiPath('/api/billing/credits', forceRefresh);
       let res = await apiFetch(apiUrl(requestUrl), {}, 3_000);
       if (!res.ok) {
         if ((res.status === 500 || res.status === 408) && forceRefresh) {
           // Some environments stall during refresh work (provider APIs, heavy log
           // scans); drop to cached mode and keep the UI usable.
-          res = await apiFetch(apiUrl('/api/billing/credits'), {}, 3_000);
+          res = await apiFetch(apiUrl(billingApiPath('/api/billing/credits')), {}, 3_000);
         }
         if (!res.ok) {
           const text = await res.text().catch(() => '');
@@ -1548,8 +1688,9 @@
                 <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
                   Bring your own endpoint — works with any OpenAI-compatible API (vLLM, LiteLLM, LM
                   Studio, self-hosted gateways, OpenRouter-style services), plus Anthropic- and
-                  Gemini-compatible servers. Koryphaios repairs common pasted endpoint paths, then
-                  checks <code>/models</code> before anything is saved. Catalog access does not claim
+                  Gemini-compatible servers. Koryphaios detects the wire format automatically from
+                  the endpoint, repairs common pasted endpoint paths, then checks
+                  <code>/models</code> before anything is saved. Catalog access does not claim
                   that inference, entitlement, or quota works; the first real response establishes that.
                   If discovery is unsupported, you can explicitly save with manual model IDs.
                 </p>
@@ -1564,30 +1705,6 @@
                     placeholder="My LLM"
                     bind:value={customForm.label}
                     class="input w-full text-xs"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <label
-                    class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                    for="custom-kind">API format</label
-                  >
-                  <KorySelect
-                    value={customForm.kind}
-                    label="Custom provider API format"
-                    options={[
-                      {
-                        value: 'openai',
-                        label: 'OpenAI-compatible',
-                        description: '/v1/chat/completions',
-                      },
-                      {
-                        value: 'anthropic',
-                        label: 'Anthropic-compatible',
-                        description: '/v1/messages',
-                      },
-                      { value: 'gemini', label: 'Gemini-compatible' },
-                    ]}
-                    onchange={(value) => (customForm.kind = value as typeof customForm.kind)}
                   />
                 </div>
                 <div class="space-y-1">
@@ -1608,9 +1725,7 @@
                     class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
                     for="custom-key"
                     >API key <span class="opacity-60 normal-case"
-                      >{customForm.kind === 'gemini'
-                        ? '(required for Gemini-compatible)'
-                        : '(optional — leave blank if not required)'}</span
+                      >(optional — leave blank if not required)</span
                     ></label
                   >
                   <div class="relative">
@@ -1649,6 +1764,80 @@
                     bind:value={customForm.models}
                     class="input w-full text-xs"
                   />
+                </div>
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  <button
+                    type="button"
+                    onclick={() => (showCustomAdvanced = !showCustomAdvanced)}
+                    aria-expanded={showCustomAdvanced}
+                    aria-controls="custom-advanced-section"
+                    class="flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50 rounded-xl"
+                  >
+                    <span
+                      class="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]"
+                    >
+                      <Terminal size={14} /> Advanced
+                    </span>
+                    <ChevronDown
+                      size={15}
+                      class="text-[var(--color-text-muted)] transition-transform duration-200 ease-out"
+                      style={showCustomAdvanced ? 'transform: rotate(180deg);' : 'transform: rotate(0deg);'}
+                    />
+                  </button>
+                  <div
+                    id="custom-advanced-section"
+                    class="grid transition-[grid-template-rows] duration-200 ease-out"
+                    style={showCustomAdvanced
+                      ? 'grid-template-rows: 1fr;'
+                      : 'grid-template-rows: 0fr;'}
+                  >
+                    <div class="overflow-hidden" inert={!showCustomAdvanced}>
+                      <div class="space-y-1 px-3 pb-3">
+                        <KorySelect
+                          value={customForm.adapter}
+                          label="Wire adapter"
+                          description="Overrides auto-detection for endpoints outside the standard OpenAI/Anthropic/Gemini formats."
+                          options={[
+                            {
+                              value: '',
+                              label: 'Auto-detect (recommended)',
+                              description: 'Probe the endpoint and pick the best match',
+                            },
+                            {
+                              value: 'ollama',
+                              label: 'Ollama (native)',
+                              description: '/api/chat protocol with native tool calls',
+                            },
+                            {
+                              value: 'cohere',
+                              label: 'Cohere (v2 native)',
+                              description: '/v2/chat protocol with SSE events',
+                            },
+                          ]}
+                          onchange={(value) => (customForm.adapter = value)}
+                        />
+                        <label
+                          class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
+                          for="custom-headers"
+                          >Custom headers <span class="opacity-60 normal-case"
+                            >(optional)</span
+                          ></label
+                        >
+                        <textarea
+                          id="custom-headers"
+                          rows="3"
+                          placeholder="x-openclaw-model: my-model"
+                          bind:value={customForm.headers}
+                          class="input w-full text-xs"
+                        ></textarea>
+                        <p
+                          class="text-[10px] text-[var(--color-text-muted)] leading-relaxed"
+                        >
+                          One per line, Name: Value — sent with every request to this endpoint.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 {#if showNewCustomIconEditor}
                   <CustomProviderIconEditor
@@ -1747,7 +1936,7 @@
             </div>
           {:else}
             <div
-              class="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              class="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
             >
               {#each filteredProviderList as prov (prov.key)}
                 {@const status = getProviderStatus(prov.key)}
@@ -1756,7 +1945,7 @@
                 {@const deployment = deploymentDescription(status?.deployment, prov.key)}
                 {@const badge = deploymentLabel(status?.deployment, prov.key)}
                 <div
-                  class="rounded-xl border border-[var(--color-border)] p-4 transition-all {expandedProvider ===
+                  class="flex h-full flex-col rounded-xl border border-[var(--color-border)] p-4 transition-all {expandedProvider ===
                   prov.key
                     ? 'bg-[var(--color-surface-2)] ring-1 ring-[var(--color-accent)]/30'
                     : 'bg-[var(--color-surface-1)] hover:bg-[var(--color-surface-2)] shadow-sm'}"
@@ -1765,7 +1954,7 @@
                     type="button"
                     onclick={() =>
                       (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
-                    class="w-full flex items-center justify-between text-left group"
+                    class="flex min-h-[4.75rem] w-full items-center justify-between gap-3 text-left group"
                   >
                     <div class="flex items-center gap-3">
                       <div
@@ -1773,12 +1962,14 @@
                       >
                         <ProviderIcon provider={prov.key} size={20} class="w-full h-full" />
                       </div>
-                      <div>
-                        <span class="text-sm font-semibold text-[var(--color-text-primary)]"
+                      <div class="min-w-0">
+                        <span
+                          class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                          title={status?.label ?? prov.label}
                           >{status?.label ?? prov.label}</span
                         >
                         <p
-                          class="text-[10px] text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+                          class="line-clamp-2 text-[10px] leading-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
                         >
                           {#if status?.configurationBlocked}
                             Unavailable in this build
@@ -1880,9 +2071,11 @@
                           class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide ${
                             status?.deployment === 'cloud'
                               ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
-                              : status?.deployment === 'local'
-                                ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
-                                : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
+                              : status?.deployment === 'hybrid'
+                                ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)]'
+                                : status?.deployment === 'local'
+                                  ? 'bg-[var(--color-success-bg)] text-[var(--color-success)]'
+                                  : 'bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
                           }`}
                         >
                           {badge}
@@ -2078,7 +2271,11 @@
                               <label
                                 class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
                                 for={`provider-key-${prov.key}`}
-                                >{isBedrock(prov.key) ? 'AWS Access Key ID' : 'API Key'}</label
+                                >{isBedrock(prov.key)
+                                  ? 'AWS Access Key ID'
+                                  : isNotion(prov.key)
+                                    ? 'Personal Access Token'
+                                    : 'API Key'}</label
                               >
                               {#if status?.credentialUrl}
                                 <a
@@ -2086,7 +2283,7 @@
                                   target="_blank"
                                   rel="noreferrer"
                                   class="text-[10px] text-[var(--color-accent)] hover:underline"
-                                  >Get API key</a
+                                  >{isNotion(prov.key) ? 'Get PAT' : 'Get API key'}</a
                                 >
                               {/if}
                             </div>
@@ -2096,7 +2293,9 @@
                                 type={secretInputType(`provider-key-${prov.key}`)}
                                 placeholder={isBedrock(prov.key)
                                   ? 'AKIA… (access key ID)'
-                                  : prov.placeholder}
+                                  : isNotion(prov.key)
+                                    ? 'ntn_… (personal access token)'
+                                    : prov.placeholder}
                                 bind:value={providersStore.keyInputs[prov.key]}
                                 class="input w-full text-xs"
                                 style="padding-right: 2.75rem;"
@@ -2108,11 +2307,19 @@
                                 class="secret-visibility absolute inset-y-0 right-1 my-auto z-10"
                                 onclick={() => toggleSecretVisibility(`provider-key-${prov.key}`)}
                                 aria-label={visibleSecrets[`provider-key-${prov.key}`]
-                                  ? 'Hide API key'
-                                  : 'Show API key'}
+                                  ? isNotion(prov.key)
+                                    ? 'Hide token'
+                                    : 'Hide API key'
+                                  : isNotion(prov.key)
+                                    ? 'Show token'
+                                    : 'Show API key'}
                                 title={visibleSecrets[`provider-key-${prov.key}`]
-                                  ? 'Hide API key'
-                                  : 'Show API key'}
+                                  ? isNotion(prov.key)
+                                    ? 'Hide token'
+                                    : 'Hide API key'
+                                  : isNotion(prov.key)
+                                    ? 'Show token'
+                                    : 'Show API key'}
                               >
                                 {#if visibleSecrets[`provider-key-${prov.key}`]}<EyeOff
                                     size={15}
@@ -3004,14 +3211,19 @@
                   <span class="text-xl text-[var(--color-text-muted)] font-semibold"
                     >Calculating…</span
                   >
+                {:else if billingCredits?.hasKnownSpend === false}
+                  <span class="text-2xl font-semibold text-[var(--color-text-muted)]">$?.??</span>
                 {:else}
-                  <span class="text-2xl opacity-50">$</span>{(
-                    (billingCredits?.totalSpendCents ?? 0) / 100
-                  ).toFixed(2)}
+                  <span>{formatBillingUsd(
+                    billingCredits?.totalSpendUsd ?? (billingCredits?.totalSpendCents ?? 0) / 100,
+                    2,
+                  )}</span>
                 {/if}
               </div>
               <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
-                Computed from recorded metered tokens at verified model prices
+                {billingCredits?.pricingIncomplete
+                  ? 'Known spend shown. Some usage still has no verified price.'
+                  : 'Computed from recorded metered tokens at verified model prices'}
               </p>
             </div>
 
@@ -3047,6 +3259,35 @@
                   : 'No configured API-key provider returned a queryable balance'}
               </p>
             </div>
+          </div>
+
+          <div class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+            <div>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Billing controls</h3>
+              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                Choose which providers contribute to Billing totals and live balance probes.
+              </p>
+            </div>
+            <SettingsSwitch
+              compact
+              checked={showSubscriptionApiEquivalent}
+              label="Show subscription API-equivalent values"
+              description="Comparison value only. It is never added to tracked API spend."
+              onchange={toggleSubscriptionApiEquivalent}
+            />
+            {#if billingCredits?.availableBillingProviders?.length}
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {#each billingCredits.availableBillingProviders as provider (provider)}
+                  <SettingsSwitch
+                    compact
+                    checked={billingProviderIncluded(provider)}
+                    label={getProviderDisplayLabel(provider)}
+                    description="Include this provider in Billing"
+                    onchange={() => void toggleBillingProvider(provider)}
+                  />
+                {/each}
+              </div>
+            {/if}
           </div>
 
           <!-- CLI subscriptions: account-separated local usage + quota burn -->
@@ -3155,7 +3396,7 @@
                           >
                         </div>
                       {/if}
-                      {#if cli.apiValueMinUsd !== undefined && cli.apiValueMaxUsd !== undefined}
+                      {#if showSubscriptionApiEquivalent && cli.apiValueMinUsd !== undefined && cli.apiValueMaxUsd !== undefined}
                         <div
                           class="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
                         >
@@ -3188,7 +3429,7 @@
                           and cache-write scenarios when available.{#if cli.cacheAccounting === 'provider-reported'}
                             The observed-cache figure applies the CLI’s reported cache-read tokens.{/if}
                         </div>
-                      {:else if cli.apiValueUsd !== undefined}
+                      {:else if showSubscriptionApiEquivalent && cli.apiValueUsd !== undefined}
                         <div
                           class="flex items-center justify-between rounded-xl bg-[var(--color-surface-1)] px-3 py-2 text-[11px]"
                         >
@@ -3372,7 +3613,7 @@
                                   {formatTokens(m.tokensIn + m.tokensOut)} tokens
                                 </span>
                               </div>
-                              {#if m.apiEquivalent || m.apiProvider}
+                              {#if showSubscriptionApiEquivalent && (m.apiEquivalent || m.apiProvider)}
                                 <div
                                   class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
                                 >
@@ -3402,7 +3643,7 @@
                                       ></span
                                     >
                                   {/if}
-                                  {#if m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
+                                  {#if showSubscriptionApiEquivalent && m.apiValueMinUsd !== undefined && m.apiValueMaxUsd !== undefined}
                                     <span
                                       >OpenRouter {m.apiValueCoverage === 'full'
                                         ? 'inference'
@@ -3413,7 +3654,7 @@
                                         )}</span
                                       ></span
                                     >
-                                  {:else if m.apiValueUsd !== undefined}
+                                  {:else if showSubscriptionApiEquivalent && m.apiValueUsd !== undefined}
                                     <span
                                       >API input value
                                       <span class="font-mono text-[var(--color-text-secondary)]"
@@ -3421,7 +3662,7 @@
                                       ></span
                                     >
                                   {/if}
-                                  {#if m.apiCacheAdjustedValueUsd !== undefined}
+                                  {#if showSubscriptionApiEquivalent && m.apiCacheAdjustedValueUsd !== undefined}
                                     <span
                                       >Observed cache
                                       <span class="font-mono text-[var(--color-text-secondary)]"
@@ -3431,7 +3672,7 @@
                                   {/if}
                                 </div>
                               {/if}
-                              {#if m.promptUsdPerMillion !== undefined}
+                              {#if showSubscriptionApiEquivalent && m.promptUsdPerMillion !== undefined}
                                 <div
                                   class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
                                   title={m.pricingHasThresholds
@@ -3464,7 +3705,7 @@
                           <div
                             class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
                           >
-                            Installed model context and OpenRouter rates
+                            Installed model context{showSubscriptionApiEquivalent ? ' and OpenRouter rates' : ''}
                           </div>
                           {#each cli.modelCatalog as model (model.model)}
                             <div
@@ -3489,7 +3730,7 @@
                                     : 'Not reported'}
                                 </span>
                               </div>
-                              {#if model.promptUsdPerMillion !== undefined}
+                              {#if showSubscriptionApiEquivalent && model.promptUsdPerMillion !== undefined}
                                 <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
                                   OpenRouter
                                   {#if model.apiEquivalent && model.apiEquivalent !== model.model}
@@ -3597,51 +3838,60 @@
           {/if}
 
           <div class="space-y-4">
-            <h3 class="text-sm font-bold text-[var(--color-text-primary)] ml-1">
-              API Consumption by Provider
-            </h3>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="ml-1">
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Tracked API spend by provider</h3>
+              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                Expand a provider for exact model-level tracked spend. Unknown pricing stays unknown.
+              </p>
+            </div>
+            <div class="space-y-2">
               {#if billingCredits?.byProvider?.length}
                 {#each billingCredits.byProvider as prov (prov.name)}
-                  <div
-                    class="flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)]"
-                  >
-                    <div class="flex items-center gap-3">
-                      <div
-                        class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0"
-                      >
-                        <ProviderIcon provider={prov.name} size={20} class="w-full h-full" />
+                  <div class="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--color-surface-3)]"
+                      aria-expanded={expandedBillingProviders[prov.name] ?? false}
+                      onclick={() => (expandedBillingProviders[prov.name] = !(expandedBillingProviders[prov.name] ?? false))}
+                    >
+                      <span class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]" aria-hidden="true">
+                        {expandedBillingProviders[prov.name] ? '▼' : '▶'}
+                      </span>
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-1.5">
+                        <ProviderIcon provider={prov.name} size={20} class="h-full w-full" />
+                      </span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">{getProviderDisplayLabel(prov.name)}</span>
+                        <span class="text-[10px] font-mono text-[var(--color-text-muted)]">{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span>
+                      </span>
+                      <span class="text-right">
+                        <span class="block text-xs font-mono font-bold text-[var(--color-text-secondary)]">
+                          {prov.hasKnownCost === false ? '$?.??' : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
+                        </span>
+                        {#if prov.pricingIncomplete}<span class="text-[9px] text-[var(--color-warning)]">pricing incomplete</span>{/if}
+                      </span>
+                    </button>
+                    {#if expandedBillingProviders[prov.name]}
+                      <div class="border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2">
+                        {#each prov.models ?? [] as model (model.model)}
+                          <div class="flex items-center justify-between gap-3 py-2 text-[11px]">
+                            <div class="min-w-0">
+                              <div class="truncate font-mono text-[var(--color-text-secondary)]">{model.model}</div>
+                              <div class="text-[9px] text-[var(--color-text-muted)]">{formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens</div>
+                            </div>
+                            <div class="shrink-0 text-right font-mono font-semibold text-[var(--color-text-primary)]">
+                              {model.hasKnownCost === false ? '$?.??' : formatBillingUsd(model.spendUsd ?? (model.spendCents ?? 0) / 100)}
+                              {#if model.pricingIncomplete}<div class="text-[9px] font-sans font-normal text-[var(--color-warning)]">incomplete</div>{/if}
+                            </div>
+                          </div>
+                        {/each}
                       </div>
-                      <div>
-                        <span class="text-xs font-semibold"
-                          >{getProviderDisplayLabel(prov.name)}</span
-                        >
-                        <div class="text-[10px] text-[var(--color-text-muted)] font-mono">
-                          {formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens
-                        </div>
-                      </div>
-                    </div>
-                    <div class="text-right">
-                      <div class="text-xs font-mono font-bold text-[var(--color-text-secondary)]">
-                        ${((prov.spendCents ?? 0) / 100).toFixed(3)} spent
-                      </div>
-                      {#if billingCredits?.balances?.find((b: any) => b.provider === prov.name)?.availableUsd != null}
-                        <div class="text-[10px] font-mono text-[var(--color-success)]">
-                          ${billingCredits.balances
-                            .find((b: any) => b.provider === prov.name)
-                            .availableUsd.toFixed(2)} left
-                        </div>
-                      {/if}
-                    </div>
+                    {/if}
                   </div>
                 {/each}
               {:else}
-                <div
-                  class="col-span-full py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl"
-                >
-                  <p class="text-xs text-[var(--color-text-muted)]">
-                    No API usage recorded yet — chats through metered providers will appear here
-                  </p>
+                <div class="py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl">
+                  <p class="text-xs text-[var(--color-text-muted)]">No tracked API usage recorded yet</p>
                 </div>
               {/if}
             </div>
@@ -3704,6 +3954,18 @@
               <p class="text-sm text-[var(--color-text-muted)] mt-2">
                 The host controls what guests can see, submit, and which models are available
               </p>
+            </div>
+
+            <div
+              class="mx-auto mb-8 w-full max-w-5xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+            >
+              <SettingsSwitch
+                checked={showTeamSidebarShortcut}
+                label="Show Teams shortcut in sidebar"
+                description="Restore the Join or host a team workspace shortcut above your workspace tree."
+                onchange={toggleTeamSidebarShortcut}
+                flat
+              />
             </div>
 
             {#if collaborationStore.activeCollab}
