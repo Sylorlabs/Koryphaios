@@ -17,11 +17,18 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs';
-import { mkdir, readFile, writeFile, appendFile, readdir, symlink } from 'node:fs/promises';
-import { join, resolve, relative } from 'node:path';
+import { mkdir, readFile, writeFile, appendFile, readdir, symlink, rename } from 'node:fs/promises';
+import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
+
+const canonicalPath =
+  process.platform === 'win32' ? (realpathSync.native ?? realpathSync) : realpathSync;
+
+/** Koryphaios' own per-project state directory. Excluded from Git because it
+ *  holds the worktree manifest, snapshots, and credential material. */
+const STATE_DIR_NAME = '.koryphaios';
 
 export interface WorktreeInfo {
   id: string;
@@ -32,16 +39,79 @@ export interface WorktreeInfo {
   agentId?: string;
   /** Commit the worktree branched from — used to diff the worker's changes. */
   baseSha?: string;
+  /** Branch that was checked out when the worktree was created. Reconcile
+   *  targets this ref specifically instead of re-resolving "whatever is checked
+   *  out now", so a user who switches branches mid-task cannot silently move
+   *  worker output onto a different branch. */
+  destinationBranch: string;
 }
 
 export interface WorktreeStatus {
   active: WorktreeInfo[];
   availableSlots: number;
   maxAllowed: number;
+  /** Worktrees whose merge could not land. Their commits are preserved on
+   *  `recoveryBranch`; nothing was written to the destination. */
+  pendingResolutions: PendingResolution[];
+}
+
+/** A repo-relative path Git could not merge automatically. */
+export interface WorktreeConflict {
+  path: string;
+}
+
+export type ReconcileOutcome = 'merged' | 'conflict' | 'noop' | 'error';
+
+export interface ReconcileResult {
+  success: boolean;
+  message: string;
+  outcome: ReconcileOutcome;
+  conflicts: WorktreeConflict[];
+  /** Branch still holding the worker's commits when the merge could not land. */
+  recoveryBranch?: string;
+}
+
+/** A worktree whose changes did not merge cleanly, or whose worker did not
+ *  finish. The branch is retained and the working tree is left untouched. */
+export interface PendingResolution {
+  taskId: string;
+  taskName: string;
+  branchName: string;
+  destinationBranch: string;
+  conflicts: WorktreeConflict[];
+  /** 'conflict' = the merge had unresolved content. 'incomplete' = the worker
+   *  did not pass review, so the work is preserved but unverified. */
+  reason: 'conflict' | 'incomplete';
+  recordedAt: number;
 }
 
 interface WorktreeManifest {
   worktrees: WorktreeInfo[];
+  resolutions?: PendingResolution[];
+}
+
+/** Outcome of an in-memory `git merge-tree` dry run. */
+type MergePreflight =
+  | { status: 'clean'; tree: string }
+  | { status: 'conflict'; conflicts: WorktreeConflict[] }
+  | { status: 'unsupported' }
+  | { status: 'error'; message: string };
+
+function reconcileError(message: string): ReconcileResult {
+  return { success: false, outcome: 'error', conflicts: [], message };
+}
+
+/** A branch name is interpolated into `refs/heads/<name>` and passed to Git as
+ *  an argument, so anything Git would read as an option, a traversal, or a
+ *  revision expression must be rejected before it reaches a command line. */ function isSafeRefName(
+  ref: string,
+): boolean {
+  if (!ref || ref.length > 255) return false;
+  if (ref.startsWith('-') || ref.startsWith('/') || ref.endsWith('/')) return false;
+  if (ref.includes('..') || ref.includes('//') || ref.includes('@{')) return false;
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f ~^:?*[\\]/.test(ref)) return false;
+  return true;
 }
 
 type WorkspaceGitOperation =
@@ -50,10 +120,17 @@ type WorkspaceGitOperation =
   | 'checkout'
   | 'merge-squash'
   | 'merge'
+  | 'merge-abort'
+  | 'reset-hard'
+  | 'merge-tree'
+  | 'commit-tree'
+  | 'update-ref'
   | 'stash-apply'
   | 'stash-drop'
   | 'worktree-remove'
-  | 'worktree-prune';
+  | 'worktree-prune'
+  | 'branch-delete'
+  | 'config-identity';
 
 /** Git output can contain repository-controlled hook/helper text, filenames,
  * and credential-shaped values. Logs retain only bounded structural facts;
@@ -70,18 +147,29 @@ export function workspaceGitLogMetadata(
 }
 
 export class WorkspaceManager {
+  private initialization?: Promise<void>;
+  private closing = false;
+  private operations: Promise<unknown> = Promise.resolve();
+
+  private exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.operations.then(operation);
+    this.operations = pending.catch(() => undefined);
+    return pending;
+  }
+
   private worktrees: Map<string, WorktreeInfo> = new Map();
+  private resolutions: Map<string, PendingResolution> = new Map();
   private worktreeDir: string;
   private maxConcurrent: number;
   private copyEnvFiles: boolean;
   private skipHooks: boolean;
+  private modifyGitignore: boolean;
   private repoRoot: string;
   private git: GitExecutor;
-  private gitignoreUpdated = false;
+  private excludeUpdated = false;
   private manifestPath: string;
-  /** Explicit branch to reconcile worker changes into. null = use the branch the user
-   *  currently has checked out (i.e. "whatever branch was selected on the user's system"). */
-  private targetBranch: string | null = null;
+  /** Cached result of the `git merge-tree --write-tree` capability probe. */
+  private mergeTreeSupport?: boolean;
 
   constructor(repoRoot: string, config?: KoryphaiosConfig['workspace']) {
     this.repoRoot = resolve(repoRoot);
@@ -89,8 +177,9 @@ export class WorkspaceManager {
     this.maxConcurrent = config?.worktreeLimit ?? 4;
     this.copyEnvFiles = config?.copyEnvFiles ?? false;
     this.skipHooks = config?.skipHooks ?? true;
+    this.modifyGitignore = config?.modifyGitignore ?? false;
     this.git = new GitExecutor(this.repoRoot);
-    this.manifestPath = join(this.repoRoot, '.koryphaios', 'worktrees.json');
+    this.manifestPath = join(this.repoRoot, STATE_DIR_NAME, 'worktrees.json');
   }
 
   /**
@@ -98,12 +187,32 @@ export class WorkspaceManager {
    * Validates the git repo, ensures .gitignore, and recovers worktrees from persisted
    * metadata cross-referenced with `git worktree list`.
    */
-  async init(): Promise<void> {
+  init(): Promise<void> {
+    return (this.initialization ??= this.initialize());
+  }
+
+  private async initialize(): Promise<void> {
+    const root = canonicalPath(this.repoRoot);
+    const base = resolve(root, this.worktreeDir);
+    const rel = relative(root, base);
+    if (
+      !rel ||
+      rel === '..' ||
+      rel.startsWith(`..${sep}`) ||
+      isAbsolute(rel) ||
+      rel.split(sep)[0] === '.git'
+    ) {
+      throw new WorkspaceError('Worktree directory must be inside the project');
+    }
     if (!(await this.isGitRepo())) {
       throw new WorkspaceError('Not a valid Git repository');
     }
-
-    await this.ensureGitignoreEntry();
+    this.repoRoot = root;
+    await mkdir(base, { recursive: true });
+    if (canonicalPath(base) !== base) {
+      throw new WorkspaceError('Worktree directory must not redirect through a symlink');
+    }
+    await this.ensureWorktreeDirIgnored();
     await this.recover();
 
     koryLog.info(
@@ -112,7 +221,10 @@ export class WorkspaceManager {
         maxConcurrent: this.maxConcurrent,
         copyEnvFiles: this.copyEnvFiles,
         skipHooks: this.skipHooks,
+        modifyGitignore: this.modifyGitignore,
         recoveredCount: this.worktrees.size,
+        pendingResolutions: this.resolutions.size,
+        mergeTreePreflight: await this.supportsMergeTree(),
       },
       'WorkspaceManager initialized',
     );
@@ -121,15 +233,28 @@ export class WorkspaceManager {
   /**
    * Recover existing worktrees from persisted metadata, cross-referenced with
    * `git worktree list`. Metadata is loaded from .koryphaios/worktrees.json so
-   * recovery is lossless — taskName, createdAt, agentId, baseSha are all preserved.
-   * Worktrees that git no longer lists are pruned from the manifest. Orphan worktrees
-   * (in our directory but not in the manifest) are cleaned up.
+   * recovery is lossless — taskName, createdAt, agentId, baseSha, and the pinned
+   * destination branch are all preserved. Worktrees that git no longer lists
+   * are pruned from the manifest. Orphan worktrees (in our directory but not in
+   * the manifest) are cleaned up. Unmerged branches recorded as pending
+   * resolutions are restored so a conflict survives a restart.
    */
   private async recover(): Promise<void> {
     const allWorktrees = await this.listAllWorktrees();
     const worktreeBaseDir = resolve(this.repoRoot, this.worktreeDir);
     const manifest = await this.loadManifest();
     const manifestById = new Map(manifest.worktrees.map((wt) => [wt.id, wt]));
+
+    for (const resolution of manifest.resolutions ?? []) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(resolution.taskId) || !/^ai\/.+/.test(resolution.branchName)) {
+        koryLog.warn(
+          { taskId: resolution.taskId },
+          'Discarding malformed pending resolution from the manifest',
+        );
+        continue;
+      }
+      this.resolutions.set(resolution.taskId, resolution);
+    }
 
     for (const wt of allWorktrees) {
       // On Windows, `git worktree list --porcelain` may report paths using
@@ -156,7 +281,7 @@ export class WorkspaceManager {
         // worktreeBaseDir may not exist yet on first run; fall back to the
         // resolved path.
       }
-      if (!absoluteWtPath.startsWith(canonicalBaseDir)) continue;
+      if (canonicalBaseDir !== worktreeBaseDir || absoluteWtPath === this.repoRoot) continue;
 
       const taskId = relative(canonicalBaseDir, absoluteWtPath);
       if (!taskId || taskId.includes('/') || taskId.includes('\\') || taskId.includes('..'))
@@ -167,8 +292,12 @@ export class WorkspaceManager {
       if (persisted) {
         this.worktrees.set(taskId, {
           ...persisted,
-          branchName: wt.branch || persisted.branchName,
+          id: taskId,
+          branchName: wt.branch ?? 'unknown',
           path: absoluteWtPath,
+          // Manifests written before destinations were pinned have no value;
+          // fall back to the current branch so reconcile still has a target.
+          destinationBranch: persisted.destinationBranch ?? (await this.getCurrentBranch()) ?? '',
         });
       } else {
         // Orphan from a pre-manifest version or a crash before manifest write.
@@ -179,8 +308,34 @@ export class WorkspaceManager {
           branchName: wt.branch || 'unknown',
           path: absoluteWtPath,
           createdAt: Date.now(),
+          destinationBranch: (await this.getCurrentBranch()) ?? '',
         });
       }
+    }
+
+    for (const taskId of this.worktrees.keys()) {
+      try {
+        await this.validateWorktree(taskId);
+      } catch {
+        this.worktrees.delete(taskId);
+      }
+    }
+
+    // A worktree whose destination was lost to a pre-pinning manifest cannot be
+    // reconciled safely (we would not know which ref to target). Retain its
+    // branch as a resolution instead of guessing.
+    for (const [taskId, worktree] of [...this.worktrees]) {
+      if (worktree.destinationBranch) continue;
+      this.resolutions.set(taskId, {
+        taskId,
+        taskName: worktree.taskName,
+        branchName: worktree.branchName,
+        destinationBranch: '',
+        conflicts: [],
+        reason: 'incomplete',
+        recordedAt: Date.now(),
+      });
+      await this.releaseWorktree(taskId, { keepBranch: true }).catch(() => undefined);
     }
 
     // Persist the reconciled manifest (drops entries for worktrees git no longer has)
@@ -195,7 +350,13 @@ export class WorkspaceManager {
       active: Array.from(this.worktrees.values()),
       availableSlots: this.maxConcurrent - this.worktrees.size,
       maxAllowed: this.maxConcurrent,
+      pendingResolutions: this.listPendingResolutions(),
     };
+  }
+
+  /** Worktrees whose changes did not merge cleanly, oldest first. */
+  listPendingResolutions(): PendingResolution[] {
+    return [...this.resolutions.values()].sort((a, b) => a.recordedAt - b.recordedAt);
   }
 
   /**
@@ -213,6 +374,23 @@ export class WorkspaceManager {
    * @returns WorktreeInfo on success, null if at capacity
    */
   async spawn(taskId: string, taskName: string, agentId?: string): Promise<WorktreeInfo | null> {
+    if (this.closing) throw new WorkspaceError('WorkspaceManager is shutting down');
+    if (!this.initialization) throw new WorkspaceError('WorkspaceManager is not initialized');
+    await this.initialization;
+    return this.exclusive(() => this.spawnWorktree(taskId, taskName, agentId));
+  }
+
+  private async spawnWorktree(
+    taskId: string,
+    taskName: string,
+    agentId?: string,
+  ): Promise<WorktreeInfo | null> {
+    if (this.closing) throw new WorkspaceError('WorkspaceManager is shutting down');
+    if (!/^[a-zA-Z0-9_-]+$/.test(taskId) || this.worktrees.has(taskId)) {
+      throw new WorkspaceError('Invalid or already active worktree task ID');
+    }
+    const base = resolve(this.repoRoot, this.worktreeDir);
+    if (canonicalPath(base) !== base) throw new WorkspaceError('Worktree directory was redirected');
     // Resource Guard: Check concurrent limit
     if (!this.canSpawn()) {
       koryLog.warn(
@@ -231,6 +409,11 @@ export class WorkspaceManager {
     const branchName = `ai/${sanitizedTaskName}-${taskId}`;
     const worktreePath = join(this.repoRoot, this.worktreeDir, taskId);
 
+    // Pin the reconcile destination now, while the user's branch selection is
+    // known. Reconcile later targets this exact ref, so switching branches
+    // mid-task cannot redirect worker output somewhere unintended.
+    const destinationBranch = (await this.getCurrentBranch()) ?? (await this.getMainBranch());
+
     // Create worktree directory if it doesn't exist
     const worktreeBaseDir = join(this.repoRoot, this.worktreeDir);
     if (!existsSync(worktreeBaseDir)) {
@@ -239,7 +422,10 @@ export class WorkspaceManager {
 
     // Record the base commit so we can later diff exactly what the worker changed.
     const baseResult = await this.git.execCombined(['rev-parse', 'HEAD']);
-    const baseSha = baseResult.output.trim() || undefined;
+    if (!baseResult.success || !/^[0-9a-f]{40,64}$/.test(baseResult.output.trim())) {
+      throw new WorkspaceError('Worktree baseline is unavailable');
+    }
+    const baseSha = baseResult.output.trim();
 
     // Create the worktree with a new branch
     const result = await this.git.execCombined([
@@ -258,16 +444,6 @@ export class WorkspaceManager {
       return null;
     }
 
-    // Handle .env file copying based on security policy
-    if (this.copyEnvFiles) {
-      await this.copyEnvToWorktree(worktreePath);
-    }
-
-    // Make dependencies resolvable in the worktree so the Critic's hard check (`bun test`)
-    // can exercise the worker's actual diff. A fresh worktree has no node_modules (gitignored),
-    // so symlink the repo's installed deps in — fast, zero-copy, and ignored by git.
-    await this.linkDependencies(worktreePath);
-
     const worktree: WorktreeInfo = {
       id: taskId,
       taskName,
@@ -276,10 +452,31 @@ export class WorkspaceManager {
       createdAt: Date.now(),
       agentId,
       baseSha,
+      destinationBranch,
     };
 
     this.worktrees.set(taskId, worktree);
-    await this.saveManifest();
+    try {
+      await this.validateWorktree(taskId, agentId);
+      // Handle .env file copying based on security policy
+      if (this.copyEnvFiles) {
+        await this.copyEnvToWorktree(worktreePath);
+      }
+
+      // Make dependencies resolvable in the worktree so the Critic's hard check (`bun test`)
+      // can exercise the worker's actual diff. A fresh worktree has no node_modules (gitignored),
+      // so symlink the repo's installed deps in — fast, zero-copy, and ignored by git.
+      await this.linkDependencies(worktreePath);
+
+      await this.saveManifest();
+    } catch (error) {
+      try {
+        await this.cleanupWorktree(taskId);
+      } catch {
+        /* Retain tracked entry for recovery. */
+      }
+      throw error;
+    }
 
     koryLog.info(
       {
@@ -294,15 +491,6 @@ export class WorkspaceManager {
     return worktree;
   }
 
-  /**
-   * Set an explicit branch to reconcile worker changes into. Pass null to revert
-   * to "merge into whatever branch the user currently has checked out".
-   */
-  setTargetBranch(branch: string | null): void {
-    this.targetBranch = branch && branch.trim() ? branch.trim() : null;
-    koryLog.info({ targetBranch: this.targetBranch }, 'Reconcile target branch updated');
-  }
-
   /** The branch the user currently has checked out in the main repo. */
   async getCurrentBranch(): Promise<string | null> {
     const result = await this.git.execCombined(['rev-parse', '--abbrev-ref', 'HEAD']);
@@ -311,23 +499,86 @@ export class WorkspaceManager {
   }
 
   /**
-   * Reconcile changes from a worktree back into the target branch and clean up.
-   * The target is the explicitly-set branch, else the user's currently checked-out
-   * branch, else a conventional main branch — so worker output lands on the branch
-   * the user actually selected rather than always on main.
-   * @param taskId The task/worktree ID to reconcile
-   * @param squash Whether to squash commits (true) or preserve history (false)
-   * @returns Success status and details
+   * True when this Git build understands `merge-tree --write-tree` (2.38+),
+   * which performs a real three-way merge entirely in memory. Cached after the
+   * first probe. `merge-tree` has no side effects, so merging a commit with
+   * itself is a safe capability check.
    */
-  async reconcile(taskId: string, squash = true): Promise<{ success: boolean; message: string }> {
-    const worktree = this.worktrees.get(taskId);
-    if (!worktree) {
-      return { success: false, message: `Worktree ${taskId} not found` };
+  private async supportsMergeTree(): Promise<boolean> {
+    if (this.mergeTreeSupport !== undefined) return this.mergeTreeSupport;
+    // With no commit yet there is nothing to merge, so the probe cannot run.
+    // Reconcile already refuses an unborn destination earlier; assume support
+    // rather than recording a false negative that would needlessly downgrade
+    // every later reconcile to the in-place path.
+    const head = await this.git.exec(['rev-parse', '--verify', 'HEAD']);
+    if (!head.success) {
+      this.mergeTreeSupport = true;
+      return true;
     }
+    const tip = head.stdout.trim();
+    const probe = await this.git.exec(['merge-tree', '--write-tree', '--name-only', tip, tip]);
+    this.mergeTreeSupport = probe.success;
+    if (!this.mergeTreeSupport) {
+      koryLog.warn(
+        'Git predates `merge-tree --write-tree`; reconcile falls back to guarded in-place merge',
+      );
+    }
+    return this.mergeTreeSupport;
+  }
 
-    const commitArgs = this.skipHooks ? ['--no-verify'] : [];
+  /**
+   * Dry-run the merge without touching the index, working tree, or any ref.
+   *
+   * This is what makes a conflicting reconcile harmless: the conflict is
+   * discovered *before* the user's checkout is modified, so there is no state
+   * to roll back and no way to leave conflict markers behind.
+   */
+  private async preflightMerge(destinationTip: string, branch: string): Promise<MergePreflight> {
+    if (!(await this.supportsMergeTree())) return { status: 'unsupported' };
+    const result = await this.git.exec([
+      'merge-tree',
+      '--write-tree',
+      '--name-only',
+      destinationTip,
+      branch,
+    ]);
+    // Layout: "<tree oid>\n<conflicted path>...\n\n<human-readable summary>".
+    // Everything after the blank line is Git's console summary, not paths, so
+    // the conflicted-path list must stop at the first empty line.
+    const rawLines = result.stdout.split('\n');
+    const summaryStart = rawLines.findIndex((line) => line.trim() === '');
+    const pathLines = (summaryStart === -1 ? rawLines : rawLines.slice(0, summaryStart))
+      .slice(1)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const tree = (rawLines[0] ?? '').trim();
 
-    // Check for uncommitted changes in the worktree
+    if (result.exitCode === 0) {
+      if (!/^[0-9a-f]{40,64}$/.test(tree)) {
+        return { status: 'error', message: 'Git merge preflight returned an unusable tree' };
+      }
+      return { status: 'clean', tree };
+    }
+    if (result.exitCode === 1) {
+      const conflicts = pathLines.map((path) => ({ path }));
+      koryLog.warn(
+        { branch, conflictCount: conflicts.length },
+        'Reconcile preflight found unresolved conflicts',
+      );
+      return {
+        status: 'conflict',
+        conflicts: conflicts.length > 0 ? conflicts : [{ path: '(unknown)' }],
+      };
+    }
+    return { status: 'error', message: 'Git merge preflight could not be evaluated' };
+  }
+
+  /** Commit whatever the worker left uncommitted so its branch is a complete,
+   *  self-contained record of the work. Returns false on failure. */
+  private async commitPendingWorktreeChanges(
+    worktree: WorktreeInfo,
+    commitArgs: string[],
+  ): Promise<boolean> {
     // Ignore node_modules in the change check — a symlinked node_modules isn't matched by
     // the dir-only gitignore pattern, so it would otherwise look like a pending change.
     const statusResult = await this.git.execCombined([
@@ -336,43 +587,231 @@ export class WorkspaceManager {
       'status',
       '--porcelain',
     ]);
+    if (!statusResult.success) return false;
     const hasChanges = statusResult.output
       .split('\n')
       .some((line) => line.trim() && !line.includes('node_modules'));
+    if (!hasChanges) return true;
 
-    if (hasChanges) {
-      // Auto-commit any pending changes, explicitly excluding dependency dirs so the
-      // symlinked node_modules never get committed onto the user's branch.
-      await this.git.execCombined([
-        '-C',
-        worktree.path,
-        'add',
-        '-A',
-        '--',
-        '.',
-        ':(exclude)node_modules',
-        ':(exclude)**/node_modules',
-      ]);
-      const commitResult = await this.git.execCombined([
-        '-C',
-        worktree.path,
-        'commit',
-        '-m',
-        `[AI] Changes from ${worktree.taskName}`,
-        ...commitArgs,
-      ]);
+    // Auto-commit any pending changes, explicitly excluding dependency dirs so the
+    // symlinked node_modules never get committed onto the user's branch.
+    const addResult = await this.git.execCombined([
+      '-C',
+      worktree.path,
+      'add',
+      '-A',
+      '--',
+      '.',
+      ':(exclude)node_modules',
+      ':(exclude)**/node_modules',
+    ]);
+    if (!addResult.success) return false;
+    const commitResult = await this.git.execCombined([
+      '-C',
+      worktree.path,
+      'commit',
+      '-m',
+      `[AI] Changes from ${worktree.taskName}`,
+      ...commitArgs,
+    ]);
+    return commitResult.success;
+  }
 
-      if (!commitResult.success) {
-        return { success: false, message: 'Failed to commit changes in worktree' };
-      }
+  /**
+   * Reconcile a worktree's changes into the destination branch pinned at spawn.
+   *
+   * The merge is preflighted in memory first, so a conflict never modifies the
+   * user's checkout. When the destination is not the checked-out branch the
+   * merge is landed with plumbing (`commit-tree` + `update-ref`) and the working
+   * tree is not touched at all. When it is, the working tree must be updated, so
+   * the guarded in-place path runs with an unconditional abort on failure.
+   */
+  async reconcile(taskId: string, squash = true): Promise<ReconcileResult> {
+    return this.exclusive(() => this.git.withLock(() => this.reconcileWorktree(taskId, squash)));
+  }
+
+  private async reconcileWorktree(taskId: string, squash: boolean): Promise<ReconcileResult> {
+    const worktree = this.worktrees.get(taskId);
+    if (!worktree) {
+      return reconcileError(`Worktree ${taskId} not found`);
     }
 
-    // Return to the selected branch and merge the worktree branch into it.
-    const mainBranch =
-      this.targetBranch ?? (await this.getCurrentBranch()) ?? (await this.getMainBranch());
+    await this.validateWorktree(taskId);
 
-    // Check if main repository has uncommitted changes that might block checkout
+    const commitArgs = this.skipHooks ? ['--no-verify'] : [];
+
+    // The branch must be a complete record of the work before it is retained as
+    // a recovery artifact or merged.
+    if (!(await this.commitPendingWorktreeChanges(worktree, commitArgs))) {
+      return reconcileError('Failed to commit changes in worktree');
+    }
+
+    const destination = worktree.destinationBranch;
+    if (!destination) {
+      return this.recordPendingResolution(worktree, [{ path: '(destination branch unknown)' }]);
+    }
+
+    const tipResult = await this.git.exec(['rev-parse', '--verify', `refs/heads/${destination}`]);
+    if (!tipResult.success || !/^[0-9a-f]{40,64}$/.test(tipResult.stdout.trim())) {
+      return reconcileError(
+        `Reconcile destination branch '${destination}' no longer exists. Switch to it or reconcile manually.`,
+      );
+    }
+    const destinationTip = tipResult.stdout.trim();
+
+    // A branch with no commits beyond the destination has nothing to land.
+    const ahead = await this.git.exec([
+      'rev-list',
+      '--count',
+      `${destinationTip}..${worktree.branchName}`,
+    ]);
+    if (ahead.success && ahead.stdout.trim() === '0') {
+      const cleanupResult = await this.cleanupWorktree(taskId);
+      return {
+        success: cleanupResult.success,
+        outcome: 'noop',
+        conflicts: [],
+        message: cleanupResult.success
+          ? 'Worker produced no changes; worktree cleaned up'
+          : `Worker produced no changes; cleanup failed: ${cleanupResult.message}`,
+      };
+    }
+
+    const preflight = await this.preflightMerge(destinationTip, worktree.branchName);
+    if (preflight.status === 'conflict') {
+      return this.recordPendingResolution(worktree, preflight.conflicts);
+    }
+    if (preflight.status === 'error') {
+      return reconcileError(preflight.message);
+    }
+
+    return this.landMerge({
+      worktree,
+      destination,
+      destinationTip,
+      tree: preflight.status === 'clean' ? preflight.tree : null,
+      squash,
+      commitArgs,
+    });
+  }
+
+  /**
+   * Land a preflighted merge.
+   *
+   * `tree` is the in-memory merge result when preflight succeeded. When it is
+   * null (older Git without `merge-tree`) the caller has no proof the merge is
+   * clean, so the guarded in-place path is used and must abort on any failure.
+   */
+  private async landMerge(input: {
+    worktree: WorktreeInfo;
+    destination: string;
+    destinationTip: string;
+    tree: string | null;
+    squash: boolean;
+    commitArgs: string[];
+  }): Promise<ReconcileResult> {
+    const { worktree, destination, destinationTip, tree, squash, commitArgs } = input;
+    const taskId = worktree.id;
+    const message = `feat: ${worktree.taskName} [ai-${taskId}]`;
+
+    const currentBranch = await this.getCurrentBranch();
+    if (currentBranch === destination) {
+      return this.mergeInPlace(worktree, destination, squash, commitArgs);
+    }
+
+    // The destination is not checked out here. Refuse if the user has it checked
+    // out in another worktree: moving that ref would desync their working tree
+    // the same way, and we must not silently modify a tree we cannot see.
+    const foreign = await this.branchCheckedOutElsewhere(destination);
+    if (foreign) {
+      return reconcileError(
+        `Reconcile destination branch '${destination}' is checked out in another worktree (${foreign}). Switch or reconcile manually.`,
+      );
+    }
+
+    if (tree === null) {
+      // Without a preflight result we cannot use plumbing safely — building a
+      // tree we never verified would be a guess. Use the guarded in-place path.
+      return this.mergeInPlace(worktree, destination, squash, commitArgs);
+    }
+
+    // The merge result is identical to the destination. Creating a commit here
+    // would add an empty change, and `update-ref` would still move the ref.
+    const destTree = await this.git.exec(['rev-parse', '--verify', `${destinationTip}^{tree}`]);
+    if (destTree.success && destTree.stdout.trim() === tree) {
+      const noopCleanup = await this.cleanupWorktree(taskId);
+      return {
+        success: noopCleanup.success,
+        outcome: 'noop',
+        conflicts: [],
+        message: noopCleanup.success
+          ? 'Destination already contains these changes'
+          : `Destination already contains these changes; cleanup failed: ${noopCleanup.message}`,
+      };
+    }
+
+    // Plumbing path: never touches the index, working tree, or HEAD, so the
+    // user's uncommitted work needs no stash and cannot be disturbed.
+    const identity = await this.resolveCommitIdentity();
+    const commitResult = await this.git.exec(
+      ['commit-tree', tree, '-p', destinationTip, '-m', message],
+      { env: identity },
+    );
+    const newCommit = commitResult.stdout.trim();
+    if (!commitResult.success || !/^[0-9a-f]{40,64}$/.test(newCommit)) {
+      return reconcileError('Failed to create the reconcile commit');
+    }
+
+    // Compare-and-swap: if anything moved the destination since the preflight,
+    // refuse rather than clobber it.
+    const updateResult = await this.git.exec([
+      'update-ref',
+      `refs/heads/${destination}`,
+      newCommit,
+      destinationTip,
+    ]);
+    if (!updateResult.success) {
+      koryLog.error(
+        { taskId, ...workspaceGitLogMetadata('update-ref', updateResult) },
+        'Reconcile ref update lost a compare-and-set race',
+      );
+      return reconcileError(
+        `The '${destination}' branch changed while the worker's changes were being merged. Retry the merge.`,
+      );
+    }
+
+    const cleanupResult = await this.cleanupWorktree(taskId);
+    return {
+      success: true,
+      outcome: 'merged',
+      conflicts: [],
+      message: cleanupResult.success
+        ? 'Changes reconciled and worktree cleaned up'
+        : `Changes reconciled but cleanup failed: ${cleanupResult.message}`,
+    };
+  }
+
+  /**
+   * Merge into the branch the user currently has checked out.
+   *
+   * The working tree has to reflect the merge, so unlike the plumbing path this
+   * one must stage and commit in place. Every failure path therefore unwinds:
+   * `merge --abort` clears any in-progress merge and `reset --hard HEAD` drops
+   * staged squash content. Both are safe here because the tree was provably
+   * clean before the merge (uncommitted work was stashed first) and a squash
+   * merge does not move HEAD until the commit succeeds.
+   */
+  private async mergeInPlace(
+    worktree: WorktreeInfo,
+    destination: string,
+    squash: boolean,
+    commitArgs: string[],
+  ): Promise<ReconcileResult> {
+    const taskId = worktree.id;
+    const branch = worktree.branchName;
+
     const mainStatus = await this.git.execCombined(['status', '--porcelain']);
+    if (!mainStatus.success) return reconcileError('Destination status is unavailable');
     const mainHasChanges = mainStatus.output.trim() !== '';
     let autoStashHash: string | null = null;
 
@@ -398,88 +837,356 @@ export class WorkspaceManager {
           { taskId, ...workspaceGitLogMetadata('stash-push', stashResult) },
           'Failed to create a verifiable reconcile stash',
         );
-        return {
-          success: false,
-          message: 'Could not safely preserve main-repository changes before reconcile.',
-        };
+        return reconcileError(
+          'Could not safely preserve main-repository changes before reconcile.',
+        );
       }
     }
 
-    try {
-      // Checkout main
-      const checkoutResult = await this.git.execCombined(['checkout', mainBranch]);
-      if (!checkoutResult.success) {
-        koryLog.error(
-          { taskId, ...workspaceGitLogMetadata('checkout', checkoutResult) },
-          'Failed to checkout selected reconcile branch',
+    const unwind = async (): Promise<void> => {
+      const abort = await this.git.exec(['merge', '--abort']);
+      if (!abort.success) {
+        // No merge was in progress (e.g. the commit itself failed). `reset` is
+        // still required to clear staged squash content.
+        koryLog.debug(
+          { taskId, ...workspaceGitLogMetadata('merge-abort', abort) },
+          'No in-progress merge to abort',
         );
-        return {
-          success: false,
-          message: 'Failed to check out the selected reconcile branch.',
-        };
       }
+      const reset = await this.git.exec(['reset', '--hard', 'HEAD']);
+      if (!reset.success) {
+        koryLog.error(
+          {
+            taskId,
+            ...workspaceGitLogMetadata('reset-hard', reset),
+            recovery: 'git status --short && git merge --abort',
+          },
+          'Failed to unwind the destination tree after a reconcile failure',
+        );
+      }
+    };
 
+    try {
       if (squash) {
         // Squash merge: Combine all worktree changes into one commit
-        const mergeResult = await this.git.execCombined(['merge', '--squash', worktree.branchName]);
-
+        const mergeResult = await this.git.execCombined(['merge', '--squash', branch]);
         if (!mergeResult.success) {
           koryLog.error(
             { taskId, ...workspaceGitLogMetadata('merge-squash', mergeResult) },
             'Squash merge failed',
           );
-          return {
-            success: false,
-            message: 'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
-          };
+          await unwind();
+          return reconcileError(
+            'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
+          );
         }
 
-        // Commit the squashed changes
         const commitResult = await this.git.execCombined([
           'commit',
           '-m',
           `feat: ${worktree.taskName} [ai-${taskId}]`,
           ...commitArgs,
         ]);
-
         if (!commitResult.success) {
-          return { success: false, message: 'Failed to commit squashed changes' };
+          // `merge --squash` reports "Already up to date" and stages nothing when
+          // the destination already contains the branch's content, so the commit
+          // has nothing to record. That is a successful no-op, not a failure.
+          if (await this.indexIsClean()) {
+            return {
+              success: true,
+              outcome: 'noop',
+              conflicts: [],
+              message: 'Destination already contains these changes',
+            };
+          }
+          await unwind();
+          return reconcileError('Failed to commit squashed changes');
         }
       } else {
         // Regular merge: Preserve all commits from worktree
         const mergeResult = await this.git.execCombined([
           'merge',
-          worktree.branchName,
+          branch,
           '-m',
-          `Merge ${worktree.branchName} into ${mainBranch}`,
+          `Merge ${branch} into ${destination}`,
         ]);
-
         if (!mergeResult.success) {
           koryLog.error(
             { taskId, ...workspaceGitLogMetadata('merge', mergeResult) },
             'Merge failed',
           );
-          return {
-            success: false,
-            message: 'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
-          };
+          await unwind();
+          return reconcileError(
+            'Merge failed. Resolve the reported Git conflict or hook failure, then retry.',
+          );
         }
       }
-
-      // Cleanup: Remove worktree and branch
-      const cleanupResult = await this.cleanup(taskId);
-
-      return {
-        success: true,
-        message: cleanupResult.success
-          ? `Changes reconciled and worktree cleaned up`
-          : `Changes reconciled but cleanup failed: ${cleanupResult.message}`,
-      };
     } finally {
       // Restore the exact object Kory created. Never `stash pop` the mutable
       // stack head: another/pre-existing user stash must not be consumed.
       if (autoStashHash) await this.restoreAutoStash(taskId, autoStashHash);
     }
+
+    const cleanupResult = await this.cleanupWorktree(taskId);
+    return {
+      success: true,
+      outcome: 'merged',
+      conflicts: [],
+      message: cleanupResult.success
+        ? 'Changes reconciled and worktree cleaned up'
+        : `Changes reconciled but cleanup failed: ${cleanupResult.message}`,
+    };
+  }
+
+  /**
+   * Retain a conflicting worktree's work instead of corrupting the destination.
+   *
+   * The worker's commits are already on its branch, so the working copy is
+   * released to reclaim the concurrency slot while the branch — the actual
+   * work — is kept and recorded as a pending resolution.
+   */
+  private async recordPendingResolution(
+    worktree: WorktreeInfo,
+    conflicts: WorktreeConflict[],
+    reason: PendingResolution['reason'] = 'conflict',
+  ): Promise<ReconcileResult> {
+    this.resolutions.set(worktree.id, {
+      taskId: worktree.id,
+      taskName: worktree.taskName,
+      branchName: worktree.branchName,
+      destinationBranch: worktree.destinationBranch,
+      conflicts,
+      reason,
+      recordedAt: Date.now(),
+    });
+    try {
+      await this.releaseWorktree(worktree.id, { keepBranch: true });
+    } catch (err: unknown) {
+      koryLog.warn(
+        { taskId: worktree.id, err: String(err) },
+        'Could not release a conflicted worktree; retained for recovery',
+      );
+    }
+    await this.saveManifest();
+
+    koryLog.warn(
+      { taskId: worktree.id, branch: worktree.branchName, conflictCount: conflicts.length },
+      'Worker changes conflicted; destination left untouched',
+    );
+    return {
+      success: false,
+      outcome: 'conflict',
+      conflicts,
+      recoveryBranch: worktree.branchName,
+      message:
+        (reason === 'conflict'
+          ? worktree.destinationBranch
+            ? `Changes conflicted with '${worktree.destinationBranch}' in ` +
+              `${conflicts.length} file(s) and were not applied. Your checkout is unchanged. `
+            : 'Changes could not be applied because the destination branch is unknown. ' +
+              'Your checkout is unchanged. '
+          : `The worker did not finish, so its changes were not applied. Your checkout is ` +
+            `unchanged. `) + `The work is preserved on branch '${worktree.branchName}'.`,
+    };
+  }
+
+  /**
+   * Retry a previously conflicted merge now that the destination may have moved.
+   * Re-runs the full preflight, so an unresolved conflict is still refused
+   * without touching the working tree.
+   */
+  async applyResolution(taskId: string, squash = true): Promise<ReconcileResult> {
+    return this.exclusive(() =>
+      this.git.withLock(async () => {
+        const resolution = this.resolutions.get(taskId);
+        if (!resolution) return reconcileError(`No pending resolution for ${taskId}`);
+
+        // The manifest is local state a tampered process could edit, and both
+        // names are interpolated into refspecs. Re-validate before use.
+        if (
+          !/^[a-zA-Z0-9_-]+$/.test(taskId) ||
+          !isSafeRefName(resolution.branchName) ||
+          !isSafeRefName(resolution.destinationBranch) ||
+          !resolution.branchName.startsWith('ai/')
+        ) {
+          this.resolutions.delete(taskId);
+          await this.saveManifest();
+          return reconcileError(
+            'The recorded resolution is malformed and was dropped; rebuild the branch manually.',
+          );
+        }
+
+        const exists = await this.git.exec([
+          'rev-parse',
+          '--verify',
+          `refs/heads/${resolution.branchName}`,
+        ]);
+        if (!exists.success) {
+          this.resolutions.delete(taskId);
+          await this.saveManifest();
+          return reconcileError(
+            `Branch '${resolution.branchName}' no longer exists; the pending resolution was dropped.`,
+          );
+        }
+
+        const tipResult = await this.git.exec([
+          'rev-parse',
+          '--verify',
+          `refs/heads/${resolution.destinationBranch}`,
+        ]);
+        if (!tipResult.success) {
+          return reconcileError(
+            `Destination branch '${resolution.destinationBranch}' no longer exists.`,
+          );
+        }
+        const destinationTip = tipResult.stdout.trim();
+
+        const preflight = await this.preflightMerge(destinationTip, resolution.branchName);
+        if (preflight.status === 'conflict') {
+          resolution.conflicts = preflight.conflicts;
+          await this.saveManifest();
+          return {
+            success: false,
+            outcome: 'conflict',
+            conflicts: preflight.conflicts,
+            recoveryBranch: resolution.branchName,
+            message: `Branch '${resolution.branchName}' still conflicts with '${resolution.destinationBranch}'.`,
+          };
+        }
+        if (preflight.status === 'error') return reconcileError(preflight.message);
+
+        const synthetic: WorktreeInfo = {
+          id: resolution.taskId,
+          taskName: resolution.taskName,
+          branchName: resolution.branchName,
+          path: '',
+          createdAt: resolution.recordedAt,
+          destinationBranch: resolution.destinationBranch,
+        };
+        const result = await this.landMerge({
+          worktree: synthetic,
+          destination: resolution.destinationBranch,
+          destinationTip,
+          tree: preflight.status === 'clean' ? preflight.tree : null,
+          squash,
+          commitArgs: this.skipHooks ? ['--no-verify'] : [],
+        });
+        if (result.success) {
+          this.resolutions.delete(taskId);
+          await this.deleteBranch(resolution.branchName);
+          await this.saveManifest();
+        }
+        return result;
+      }),
+    );
+  }
+
+  /**
+   * Abandon a worktree whose worker did not finish, without merging anything.
+   *
+   * Uncommitted work is committed to the branch first so it is not lost with
+   * the working copy, the directory is released to reclaim the slot, and the
+   * branch is recorded as an `incomplete` resolution when it still carries work
+   * the destination does not have. Branches with nothing to show are deleted.
+   */
+  async abandon(taskId: string): Promise<ReconcileResult> {
+    return this.exclusive(() =>
+      this.git.withLock(async () => {
+        const worktree = this.worktrees.get(taskId);
+        if (!worktree) return reconcileError(`Worktree ${taskId} not found`);
+        await this.validateWorktree(taskId);
+
+        if (!(await this.commitPendingWorktreeChanges(worktree, ['--no-verify']))) {
+          koryLog.warn({ taskId }, 'Could not commit incomplete worker work; retaining worktree');
+          return reconcileError('Failed to commit incomplete worker work; worktree retained');
+        }
+
+        const hasWork = await this.branchHasUnmergedWork(worktree);
+        const result = await this.releaseWorktree(taskId, { keepBranch: hasWork });
+        if (!result.success) return reconcileError(result.message);
+
+        if (!hasWork) {
+          return {
+            success: true,
+            outcome: 'noop',
+            conflicts: [],
+            message: 'Worker produced no changes; worktree discarded',
+          };
+        }
+
+        this.resolutions.set(taskId, {
+          taskId,
+          taskName: worktree.taskName,
+          branchName: worktree.branchName,
+          destinationBranch: worktree.destinationBranch,
+          conflicts: [],
+          reason: 'incomplete',
+          recordedAt: Date.now(),
+        });
+        await this.saveManifest();
+        koryLog.info(
+          { taskId, branch: worktree.branchName },
+          'Incomplete worker work preserved on its branch',
+        );
+        return {
+          success: true,
+          outcome: 'noop',
+          conflicts: [],
+          recoveryBranch: worktree.branchName,
+          message: `Incomplete worker work preserved on branch '${worktree.branchName}'.`,
+        };
+      }),
+    );
+  }
+
+  /** Drop a pending resolution and delete the branch holding its work. */
+  async discardResolution(taskId: string): Promise<{ success: boolean; message: string }> {
+    return this.exclusive(async () => {
+      const resolution = this.resolutions.get(taskId);
+      if (!resolution) return { success: false, message: `No pending resolution for ${taskId}` };
+      this.resolutions.delete(taskId);
+      const deleted = await this.deleteBranch(resolution.branchName);
+      await this.saveManifest();
+      return deleted.success
+        ? { success: true, message: `Discarded ${resolution.branchName}` }
+        : { success: false, message: deleted.message };
+    });
+  }
+
+  /** True when nothing is staged in the destination index. */
+  private async indexIsClean(): Promise<boolean> {
+    const staged = await this.git.execCombined(['diff', '--cached', '--name-only']);
+    return staged.success && staged.output.trim() === '';
+  }
+
+  /** Resolve the commit identity for plumbing-created commits, falling back to a
+   *  Koryphaios identity so `commit-tree` cannot fail on an unconfigured repo. */
+  private async resolveCommitIdentity(): Promise<Record<string, string>> {
+    const name = await this.git.exec(['config', '--get', 'user.name']);
+    const email = await this.git.exec(['config', '--get', 'user.email']);
+    const authorName = name.success && name.stdout.trim() ? name.stdout.trim() : 'Koryphaios';
+    const authorEmail =
+      email.success && email.stdout.trim() ? email.stdout.trim() : 'agent@koryphaios.invalid';
+    koryLog.debug(
+      { ...workspaceGitLogMetadata('config-identity', { success: true, output: '' }) },
+      'Resolved reconcile commit identity',
+    );
+    return {
+      GIT_AUTHOR_NAME: authorName,
+      GIT_AUTHOR_EMAIL: authorEmail,
+      GIT_COMMITTER_NAME: authorName,
+      GIT_COMMITTER_EMAIL: authorEmail,
+    };
+  }
+
+  /** Path of another worktree that has `branch` checked out, if any. */
+  private async branchCheckedOutElsewhere(branch: string): Promise<string | null> {
+    for (const wt of await this.listAllWorktrees()) {
+      if (wt.branch !== branch) continue;
+      if (canonicalPath(wt.path) === this.repoRoot) continue;
+      return wt.path;
+    }
+    return null;
   }
 
   private async restoreAutoStash(taskId: string, stashHash: string): Promise<void> {
@@ -523,10 +1230,33 @@ export class WorkspaceManager {
    * @returns Success status
    */
   async cleanup(taskId: string): Promise<{ success: boolean; message: string }> {
+    return this.exclusive(() => this.cleanupWorktree(taskId));
+  }
+
+  private async cleanupWorktree(taskId: string): Promise<{ success: boolean; message: string }> {
+    // A pending resolution has already released its worktree, so there is
+    // nothing left to remove. Treat it as done rather than as a failure.
+    if (!this.worktrees.has(taskId)) {
+      return { success: true, message: 'Worktree already released' };
+    }
+    return this.releaseWorktree(taskId, { keepBranch: false });
+  }
+
+  /**
+   * Remove a worktree's working copy and, unless the caller is retaining the
+   * work, its branch. Releasing the directory reclaims a concurrency slot;
+   * keeping the branch preserves every commit the worker produced.
+   */
+  private async releaseWorktree(
+    taskId: string,
+    { keepBranch }: { keepBranch: boolean },
+  ): Promise<{ success: boolean; message: string }> {
     const worktree = this.worktrees.get(taskId);
     if (!worktree) {
       return { success: false, message: `Worktree ${taskId} not found` };
     }
+
+    await this.validateWorktree(taskId);
 
     // Remove the worktree
     const removeResult = await this.git.execCombined([
@@ -546,8 +1276,12 @@ export class WorkspaceManager {
       };
     }
 
-    // Delete the branch
-    await this.git.execCombined(['branch', '-D', worktree.branchName]);
+    if (keepBranch) {
+      koryLog.info({ taskId, branch: worktree.branchName }, 'Worktree released; branch retained');
+    } else {
+      const deleted = await this.deleteBranch(worktree.branchName);
+      if (!deleted.success) return deleted;
+    }
 
     // Remove from tracking
     this.worktrees.delete(taskId);
@@ -555,7 +1289,63 @@ export class WorkspaceManager {
 
     koryLog.info({ taskId, branch: worktree.branchName }, 'Worktree cleaned up');
 
-    return { success: true, message: 'Worktree and branch removed' };
+    return {
+      success: true,
+      message: keepBranch ? 'Worktree removed' : 'Worktree and branch removed',
+    };
+  }
+
+  private async deleteBranch(branch: string): Promise<{ success: boolean; message: string }> {
+    const result = await this.git.execCombined(['branch', '-D', branch]);
+    if (result.success) return { success: true, message: `Branch ${branch} removed` };
+    // A branch that is already gone is the desired end state.
+    const verify = await this.git.exec(['rev-parse', '--verify', `refs/heads/${branch}`]);
+    if (!verify.success) return { success: true, message: `Branch ${branch} already absent` };
+    koryLog.error(
+      { branch, ...workspaceGitLogMetadata('branch-delete', result) },
+      'Failed to delete branch',
+    );
+    return { success: false, message: `Failed to delete branch ${branch}. Delete it manually.` };
+  }
+
+  /** Revalidate live Git identity; missing .git must never make Git use a parent repository. */
+  async validateWorktree(taskId: string, agentId?: string): Promise<string> {
+    const worktree = this.worktrees.get(taskId);
+    if (!worktree || !/^[a-zA-Z0-9_-]+$/.test(taskId)) {
+      throw new WorkspaceError('Worker has no managed worktree');
+    }
+    const base = resolve(this.repoRoot, this.worktreeDir);
+    const expected = resolve(base, taskId);
+    const path = canonicalPath(worktree.path);
+    if (
+      canonicalPath(base) !== base ||
+      path !== expected ||
+      path === this.repoRoot ||
+      (agentId !== undefined && worktree.agentId !== agentId)
+    ) {
+      throw new WorkspaceError('Worktree path or session ownership is unsafe');
+    }
+    const top = await this.git.exec(['-C', path, 'rev-parse', '--show-toplevel']);
+    const common = await this.git.exec(['-C', path, 'rev-parse', '--git-common-dir']);
+    const projectCommon = await this.git.exec(['rev-parse', '--git-common-dir']);
+    const branch = await this.git.exec(['-C', path, 'symbolic-ref', '--short', 'HEAD']);
+    if (
+      !top.success ||
+      canonicalPath(top.stdout.trim()) !== path ||
+      !common.success ||
+      !projectCommon.success ||
+      canonicalPath(resolve(path, common.stdout.trim())) !==
+        canonicalPath(resolve(this.repoRoot, projectCommon.stdout.trim())) ||
+      !branch.success ||
+      branch.stdout.trim() !== worktree.branchName ||
+      !worktree.branchName.startsWith('ai/') ||
+      !worktree.branchName.endsWith(`-${taskId}`) ||
+      (worktree.baseSha !== undefined && !/^[0-9a-f]{40,64}$/.test(worktree.baseSha)) ||
+      !isSafeRefName(worktree.destinationBranch)
+    ) {
+      throw new WorkspaceError('Worktree Git identity is unsafe or unavailable');
+    }
+    return path;
   }
 
   /**
@@ -574,6 +1364,7 @@ export class WorkspaceManager {
   async getChangedFiles(taskId: string): Promise<string[]> {
     const worktree = this.worktrees.get(taskId);
     if (!worktree) return [];
+    await this.validateWorktree(taskId);
     const base = worktree.baseSha ?? 'HEAD';
     const files = new Set<string>();
     // Tracked changes (committed or working-tree) since the base commit.
@@ -660,28 +1451,140 @@ export class WorkspaceManager {
   }
 
   /**
-   * Shutdown — clean up all active worktrees. Called during server shutdown
-   * to prevent worktree/branch leaks across restarts.
+   * Shutdown — release all active worktrees. Called during server shutdown.
+   *
+   * Un-reconciled work is never destroyed: pending changes are committed to the
+   * worktree's branch and the branch is retained, so a restart (or a crash)
+   * leaves the work recoverable instead of silently discarded.
    */
   async shutdown(): Promise<void> {
+    this.closing = true;
+    await this.initialization?.catch(() => undefined);
+    return this.exclusive(() => this.drainWorktrees());
+  }
+
+  private async drainWorktrees(): Promise<void> {
     koryLog.info({ activeCount: this.worktrees.size }, 'WorkspaceManager shutting down');
-    for (const taskId of this.worktrees.keys()) {
+    for (const [taskId, worktree] of [...this.worktrees]) {
       try {
-        await this.cleanup(taskId);
+        if (!(await this.commitPendingWorktreeChanges(worktree, ['--no-verify']))) {
+          koryLog.warn(
+            { taskId },
+            'Could not commit pending worktree changes before shutdown; branch retained as-is',
+          );
+        }
+        const result = await this.releaseWorktree(taskId, { keepBranch: true });
+        if (!result.success) {
+          koryLog.warn({ taskId, msg: result.message }, 'Worktree retained for recovery');
+          continue;
+        }
+        if (await this.branchHasUnmergedWork(worktree)) {
+          this.resolutions.set(taskId, {
+            taskId,
+            taskName: worktree.taskName,
+            branchName: worktree.branchName,
+            destinationBranch: worktree.destinationBranch,
+            conflicts: [],
+            reason: 'incomplete',
+            recordedAt: Date.now(),
+          });
+          koryLog.info(
+            { taskId, branch: worktree.branchName },
+            'Shutdown preserved unmerged worker work as a pending resolution',
+          );
+        } else {
+          await this.deleteBranch(worktree.branchName);
+        }
       } catch (err: unknown) {
         koryLog.warn(
           { taskId, err: err instanceof Error ? err.message : String(err) },
-          'Failed to clean up worktree during shutdown',
+          'Failed to release worktree during shutdown',
         );
       }
     }
+    await this.saveManifest();
     // Prune stale refs as a final sweep
     try {
       await this.prune();
     } catch {
       // best-effort
     }
-    koryLog.info('WorkspaceManager shutdown complete');
+    koryLog.info({ preserved: this.resolutions.size }, 'WorkspaceManager shutdown complete');
+  }
+
+  /**
+   * Delete `ai/*` branches that hold nothing: either fully merged into every
+   * plausible destination or pointing at a commit that no longer exists.
+   * Branches that still carry unmerged work are always kept.
+   */
+  async reapMergedBranches(): Promise<{ success: boolean; message: string }> {
+    return this.exclusive(() =>
+      this.git.withLock(async () => {
+        const listed = await this.git.exec([
+          'for-each-ref',
+          '--format=%(refname:short)',
+          'refs/heads/ai/',
+        ]);
+        if (!listed.success) {
+          return { success: false, message: 'Could not enumerate Koryphaios branches' };
+        }
+        const protectedBranches = new Set([
+          ...this.resolutions.values().map((r) => r.branchName),
+          ...this.worktrees.values().map((w) => w.branchName),
+        ]);
+        const candidates = [...this.worktrees.values()].map((w) => w.destinationBranch);
+        let removed = 0;
+        for (const branch of listed.stdout
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)) {
+          if (protectedBranches.has(branch)) continue;
+          if (
+            await this.branchHasUnmergedWork(
+              { branchName: branch, destinationBranch: '' },
+              candidates,
+            )
+          ) {
+            continue;
+          }
+          const deleted = await this.deleteBranch(branch);
+          if (deleted.success) removed += 1;
+        }
+        return { success: true, message: `Removed ${removed} fully merged Koryphaios branch(es)` };
+      }),
+    );
+  }
+
+  /** True when `branch` has commits not reachable from its destination (or from
+   *  any candidate destination, when supplied). */
+  private async branchHasUnmergedWork(
+    branch: Pick<WorktreeInfo, 'branchName' | 'destinationBranch'>,
+    extraCandidates: string[] = [],
+  ): Promise<boolean> {
+    const targets = [branch.destinationBranch, ...extraCandidates].filter(isSafeRefName);
+    const aheadAgainst = async (target: string): Promise<boolean> => {
+      const result = await this.git.exec([
+        'rev-list',
+        '--count',
+        `${target}..${branch.branchName}`,
+      ]);
+      return result.success && result.stdout.trim() !== '0';
+    };
+    for (const target of targets) {
+      if (await aheadAgainst(target)) return true;
+    }
+    if (targets.length === 0) {
+      // No known destination: only reap branches already contained in HEAD.
+      const contained = await this.git.exec([
+        'branch',
+        '--contains',
+        branch.branchName,
+        '--format=%(refname:short)',
+      ]);
+      const names = new Set(contained.stdout.split('\n').map((l) => l.trim()));
+      return !names.has(branch.branchName);
+    }
+    return false;
   }
 
   // ─── Private Helper Methods ───────────────────────────────────────────────
@@ -699,37 +1602,67 @@ export class WorkspaceManager {
       .slice(0, 50); // Keep it reasonable
   }
 
-  private async ensureGitignoreEntry(): Promise<void> {
-    if (this.gitignoreUpdated) return;
+  /**
+   * Keep the worktree directory out of the repository's tracked view.
+   *
+   * By default this writes to `.git/info/exclude`, which is local to the clone
+   * and never appears in a commit — Koryphaios does not silently edit a tracked
+   * `.gitignore` on the user's behalf. `workspace.modifyGitignore` opts into the
+   * tracked-file behaviour for users who want the entry shared with teammates.
+   */
+  private async ensureWorktreeDirIgnored(): Promise<void> {
+    if (this.excludeUpdated) return;
 
-    const gitignorePath = join(this.repoRoot, '.gitignore');
-    const entry = `${this.worktreeDir}/`;
-
-    if (!existsSync(gitignorePath)) {
-      await writeFile(gitignorePath, `${entry}\n`, 'utf-8');
-      this.gitignoreUpdated = true;
-      koryLog.info('Created .gitignore with worktree directory entry');
-      return;
+    // `.koryphaios/` holds Koryphaios' own state (worktree manifest, snapshots,
+    // credentials). Leaving it visible pollutes the user's `git status` and lets
+    // a `git add -A` commit credential material, so it is excluded as well.
+    const entries = [`${this.worktreeDir}/`, `${STATE_DIR_NAME}/`];
+    if (this.modifyGitignore) {
+      for (const entry of entries) {
+        await this.appendIgnoreEntry(join(this.repoRoot, '.gitignore'), entry, true);
+      }
+    } else {
+      // Resolve through --git-common-dir so a linked worktree's own .git file
+      // never becomes the exclude target.
+      const common = await this.git.exec(['rev-parse', '--git-common-dir']);
+      if (!common.success) {
+        koryLog.warn('Could not resolve the common Git directory; worktree dir not excluded');
+        return;
+      }
+      const infoDir = join(resolve(this.repoRoot, common.stdout.trim()), 'info');
+      await mkdir(infoDir, { recursive: true });
+      for (const entry of entries) {
+        await this.appendIgnoreEntry(join(infoDir, 'exclude'), entry, false);
+      }
     }
+    this.excludeUpdated = true;
+  }
 
-    const content = await readFile(gitignorePath, 'utf-8');
-    const lines = content.split('\n');
-
-    // Check if already ignored (handle various formats)
-    const isIgnored = lines.some((line) => {
+  private async appendIgnoreEntry(path: string, entry: string, tracked: boolean): Promise<void> {
+    let content = '';
+    if (existsSync(path)) {
+      try {
+        content = await readFile(path, 'utf-8');
+      } catch (err: unknown) {
+        koryLog.warn({ err: String(err) }, 'Could not read ignore file; leaving it untouched');
+        return;
+      }
+    }
+    const dir = this.worktreeDir;
+    const isIgnored = content.split('\n').some((line) => {
       const trimmed = line.trim();
       return (
-        trimmed === entry ||
-        trimmed === this.worktreeDir ||
-        trimmed === `${this.worktreeDir}**` ||
-        trimmed === `${this.worktreeDir}/**`
+        trimmed === entry || trimmed === dir || trimmed === `${dir}**` || trimmed === `${dir}/**`
       );
     });
-
-    if (!isIgnored) {
-      await appendFile(gitignorePath, `\n# Koryphaios AI worktrees\n${entry}\n`, 'utf-8');
-      this.gitignoreUpdated = true;
+    if (isIgnored) return;
+    if (tracked) {
+      await appendFile(path, `\n# Koryphaios AI worktrees\n${entry}\n`, 'utf-8');
       koryLog.info('Added worktree directory to .gitignore');
+    } else {
+      const prefix = content.length === 0 || content.endsWith('\n') ? '' : '\n';
+      await appendFile(path, `${prefix}# Koryphaios AI worktrees\n${entry}\n`, 'utf-8');
+      koryLog.info('Added worktree directory to .git/info/exclude');
     }
   }
 
@@ -813,22 +1746,41 @@ export class WorkspaceManager {
         return JSON.parse(raw) as WorktreeManifest;
       }
     } catch (err: unknown) {
-      koryLog.warn(
-        { err: err instanceof Error ? err.message : String(err) },
-        'Failed to load worktree manifest — starting fresh',
-      );
+      // Do not silently discard ownership data. A corrupt manifest degrades
+      // every entry to an orphan — losing baseSha and agentId — so keep the
+      // damaged file for inspection and start from a known-empty state.
+      const quarantined = `${this.manifestPath}.corrupt`;
+      try {
+        await rename(this.manifestPath, quarantined);
+        koryLog.error(
+          { quarantined, err: err instanceof Error ? err.message : String(err) },
+          'Worktree manifest was unreadable; moved aside. Worktree ownership must be re-established manually.',
+        );
+      } catch {
+        koryLog.error(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Worktree manifest was unreadable and could not be moved aside',
+        );
+      }
     }
     return { worktrees: [] };
   }
 
+  /**
+   * Persist the manifest atomically. A torn write would drop `baseSha` and
+   * `agentId`, weakening the ownership checks that `validateWorktree` relies on.
+   */
   private async saveManifest(): Promise<void> {
     try {
-      const dir = join(this.repoRoot, '.koryphaios');
+      const dir = join(this.repoRoot, STATE_DIR_NAME);
       if (!existsSync(dir)) await mkdir(dir, { recursive: true });
       const manifest: WorktreeManifest = {
         worktrees: Array.from(this.worktrees.values()),
+        resolutions: this.listPendingResolutions(),
       };
-      await writeFile(this.manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+      const tmpPath = `${this.manifestPath}.${process.pid}.tmp`;
+      await writeFile(tmpPath, JSON.stringify(manifest, null, 2), 'utf-8');
+      await rename(tmpPath, this.manifestPath);
     } catch (err: unknown) {
       koryLog.warn(
         { err: err instanceof Error ? err.message : String(err) },

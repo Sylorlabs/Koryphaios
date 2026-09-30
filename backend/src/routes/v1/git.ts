@@ -2,6 +2,7 @@ import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { GitManager } from '../../kory/git-manager';
 import { getRequestProjectRoot } from '../../runtime/request-project';
+import { getContext } from '../../context';
 
 const requestGit = (request: Request) => new GitManager(getRequestProjectRoot(request));
 
@@ -143,6 +144,45 @@ export const gitRoutes = new Elysia({ prefix: '/api/git' })
     {
       body: t.Object({
         branch: t.String(),
+      }),
+    },
+  )
+  .get('/worktrees', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: getContext().kory.getWorkspaceStatus() };
+  })
+  .post(
+    '/worktrees/resolve',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const result = await getContext().kory.applyWorktreeResolution(body.taskId);
+      return {
+        ok: result.success,
+        data: {
+          outcome: result.outcome,
+          message: result.message,
+          conflicts: result.conflicts,
+          recoveryBranch: result.recoveryBranch,
+        },
+      };
+    },
+    {
+      body: t.Object({
+        taskId: t.String(),
+      }),
+    },
+  )
+  .post(
+    '/worktrees/discard',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const result = await getContext().kory.discardWorktreeResolution(body.taskId);
+      if (!result.success) set.status = 400;
+      return { ok: result.success, data: { message: result.message } };
+    },
+    {
+      body: t.Object({
+        taskId: t.String(),
       }),
     },
   )

@@ -26,6 +26,7 @@
  *   Used by `hash-object --stdin` etc. so callers don't need temp files.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { gitMutex } from './git-mutex';
 import { koryLog } from '../logger';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
@@ -44,6 +45,10 @@ const STREAM_ABORT_GRACE_MS = 100;
  *  that write indefinitely. Per-call limits may be stricter, never larger. */
 export const GIT_STDOUT_HARD_LIMIT_BYTES = 16 * 1024 * 1024;
 export const GIT_STDERR_HARD_LIMIT_BYTES = 4 * 1024 * 1024;
+
+/** Marks an async scope that already owns `gitMutex`. `AsyncMutex` is not
+ *  reentrant, so nested `exec()` calls consult this instead of deadlocking. */
+const gitLockScope = new AsyncLocalStorage<true>();
 
 export interface GitExecResult {
   success: boolean;
@@ -87,6 +92,33 @@ export class GitExecutor {
     private cwd: string,
     private baseEnv: Record<string, string> = {},
   ) {}
+
+  /**
+   * Run a multi-command Git transaction while holding the global git mutex for
+   * its entire duration.
+   *
+   * The mutex is otherwise acquired per command, so a sequence like
+   * `checkout` → `merge` → `commit` releases it in between and other subsystems
+   * (GitManager, CheckpointStore, another WorkspaceManager) can interleave
+   * against a half-applied transaction. Anything that must be observed as one
+   * atomic step — notably worktree reconcile — belongs inside this scope.
+   */
+  async withLock<T>(transaction: () => Promise<T>): Promise<T> {
+    if (gitLockScope.getStore()) return transaction();
+    return gitLockScope.run(true, async () => {
+      const release = await gitMutex.acquire();
+      try {
+        return await transaction();
+      } finally {
+        release();
+      }
+    });
+  }
+
+  /** True when the caller already owns the global git mutex. */
+  static holdsLock(): boolean {
+    return gitLockScope.getStore() === true;
+  }
 
   /**
    * Run a git command and return a structured result.
@@ -160,7 +192,8 @@ export class GitExecutor {
     maxStderrBytes: number,
     stdin?: string,
   ): Promise<GitExecResult> {
-    const release = await gitMutex.acquire();
+    // Nested calls inside withLock() already own the mutex.
+    const release = GitExecutor.holdsLock() ? () => {} : await gitMutex.acquire();
     try {
       const proc = Bun.spawn(['git', ...args], {
         cwd,
