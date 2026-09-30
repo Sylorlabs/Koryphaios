@@ -10,8 +10,10 @@
 //   - Windows / unsupported: unavailable. Sandbox-required callers must
 //     reject the command instead of silently running it without confinement.
 //
-// Set KORYPHAIOS_OS_SANDBOX=1 to activate. Both the opt-in and a concrete,
-// executable platform engine are required; this module fails closed otherwise.
+// Set KORYPHAIOS_OS_SANDBOX=0 to force-disable confinement process-wide.
+// A concrete, executable platform engine is always required; this module fails
+// closed otherwise. Whether a given call *requires* confinement is decided by
+// `workspace.sandbox` in the permission policy, not by an environment variable.
 
 import { spawn } from 'node:child_process';
 import {
@@ -23,7 +25,7 @@ import {
   writeFileSync,
   rmSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve, relative, isAbsolute, delimiter } from 'node:path';
 import { serverLog } from '../logger';
 
@@ -81,9 +83,12 @@ export function osSandboxAvailable(): boolean {
   return false;
 }
 
-/** True when path confinement was explicitly enabled and can actually bind. */
+/** True when a sandbox-required call can actually be confined. A concrete
+ *  engine must be installed. `KORYPHAIOS_OS_SANDBOX=0` is an explicit
+ *  process-wide kill switch for users who need to run without confinement. */
 export function osSandboxEnabled(): boolean {
-  return process.env.KORYPHAIOS_OS_SANDBOX === '1' && osSandboxAvailable();
+  if (process.env.KORYPHAIOS_OS_SANDBOX === '0') return false;
+  return osSandboxAvailable();
 }
 
 /** Resolve a path to its canonical form, tolerating non-existent files. */
@@ -128,7 +133,7 @@ export function spawnSandboxed(
   }
   if (!osSandboxEnabled()) {
     throw new Error(
-      'OS sandbox enforcement is unavailable. Enable KORYPHAIOS_OS_SANDBOX=1 and install bubblewrap on Linux, or use sandbox-exec on macOS.',
+      'OS sandbox enforcement is unavailable. Install bubblewrap on Linux, or use macOS, which provides sandbox-exec. Set workspace.sandbox to "off" to run commands without kernel confinement.',
     );
   }
 
@@ -340,16 +345,19 @@ function spawnMacSandbox(
   env: NodeJS.ProcessEnv,
   cwd: string,
 ): { proc: ReturnType<typeof spawn>; cleanup: () => void } {
-  // Build a sandbox-exec profile. The profile allows file reads/writes
-  // under each root, denies network when requested, and allows subprocess
-  // execution (sandbox-exec's process model is per-line, not a hard block).
+  // Build a sandbox-exec profile. Writes are permitted only under the granted
+  // roots. Reads are broad — see the note below — minus an explicit deny list of
+  // credential stores.
   const allowFile = (root: string) =>
     `(allow file-read* (subpath "${root}"))\n` + `  (allow file-write* (subpath "${root}"))\n`;
-  // Use a deny-default profile with broad allows for system operations
-  // and per-root file-write allows. The key insight is that `touch` and
-  // similar commands need broad read and metadata access across the
-  // system (dynamic linker, system frameworks, etc.) but only need
-  // content write access to the granted roots.
+  //
+  // Why reads stay broad on macOS: a profile built solely from filtered
+  // `(allow file-read* (subpath ...))` rules aborts the child during dynamic
+  // linking on current macOS releases — the loader must read system paths that
+  // no allowlist we can express covers. A bare `(allow file-read*)` is therefore
+  // load-bearing, not laziness. The exposure that creates is closed with
+  // explicit deny rules below, which take precedence and leave the toolchain
+  // config agents legitimately need (~/.gitconfig, ~/.npmrc) readable.
   const profileLines: string[] = [
     '(version 1)',
     '(deny default)',
@@ -364,9 +372,6 @@ function spawnMacSandbox(
     '(allow iokit*)',
     '(allow signal)',
     '(allow sysctl-read)',
-    // Allow ALL file reads system-wide. Commands need to read system
-    // libraries, frameworks, and config files from arbitrary locations.
-    // file-read* includes metadata reads.
     '(allow file-read*)',
     '(allow file-ioctl)',
     // IPC primitives needed by the C runtime and system frameworks.
@@ -375,6 +380,18 @@ function spawnMacSandbox(
     // Note: file-write* is NOT in the broad allows above. It's denied by
     // `(deny default)` and only re-allowed per-root below.
   ];
+
+  // Explicit read denies for credential material. Without these, a confined
+  // agent could read SSH keys, cloud credentials, and Koryphaios's own stored
+  // secrets and exfiltrate them over the network. Paths are canonicalized
+  // because sandbox profiles match the path the child observes, and macOS
+  // rewrites /var -> /private/var (a non-canonical rule would silently not match).
+  for (const secretPath of macOsCredentialPaths()) {
+    const canonical = safeRealpath(secretPath);
+    if (existsSync(canonical)) {
+      profileLines.push(`(deny file-read* (subpath "${canonical}"))`);
+    }
+  }
 
   // Per-root file write allows. file-write* is not in the broad allows
   // above, so writes are denied by default and only permitted within
@@ -424,6 +441,35 @@ function spawnMacSandbox(
   proc.on('error', () => cleanup());
 
   return { proc, cleanup };
+}
+
+/**
+ * Host paths a confined macOS agent must not be able to read.
+ *
+ * Covers SSH keys, cloud/registry credentials, package-publish tokens, and
+ * Koryphaios's own stored secrets. Toolchain configuration that agents
+ * legitimately need (gitconfig, npmrc, bunfig) is deliberately absent.
+ */
+function macOsCredentialPaths(): string[] {
+  const home = homedir();
+  if (!home || !isAbsolute(home)) return [];
+  const dataDir = process.env.KORYPHAIOS_DATA_DIR?.trim();
+  return [
+    join(home, '.ssh'),
+    join(home, '.gnupg'),
+    join(home, '.aws'),
+    join(home, '.kube'),
+    join(home, '.docker'),
+    join(home, '.config', 'gcloud'),
+    join(home, '.config', 'gh'),
+    join(home, '.config', 'koryphaios'),
+    join(home, '.netrc'),
+    join(home, '.npmrc'),
+    join(home, '.pypirc'),
+    join(home, '.git-credentials'),
+    // Koryphaios session data and provider credentials.
+    ...(dataDir && isAbsolute(dataDir) ? [dataDir] : []),
+  ];
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────

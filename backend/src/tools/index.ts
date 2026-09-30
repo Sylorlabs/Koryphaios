@@ -6,6 +6,15 @@ export {
   type ToolCallOutput,
 } from './registry';
 export {
+  STUB_INPUT_SCHEMA,
+  buildExposedToolset,
+  toolExposureHint,
+  toolSchemaGuidance,
+  validateToolInputAgainstSchema,
+  type ExposedToolDefinition,
+  type ToolInputValidation,
+} from './tool-exposure';
+export {
   decideToolPermission,
   resolveToolPermissionPolicy,
   resolveSandboxOptions,
@@ -18,6 +27,7 @@ export {
   type ToolPermissionDecision,
   type ResolvedSandboxOptions,
   type SubAgentApprovalMode,
+  type WorkspaceSandboxMode,
 } from './permission-policy';
 export { BashTool } from './bash';
 export { ShellManageTool } from './shell-manage';
@@ -37,6 +47,7 @@ export {
 export { WebSearchTool, WebFetchTool } from './web';
 export { ViewImageTool } from './image';
 export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction';
+export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
 export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { ManageMcpServerTool } from './manage-mcp';

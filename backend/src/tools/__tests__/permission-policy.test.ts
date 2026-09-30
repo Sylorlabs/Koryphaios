@@ -204,16 +204,30 @@ describe('resolveSandboxOptions', () => {
     expect(resolved.metacharacters).toBe(true);
   });
 
-  it('YOLO permission mode bypasses the sandbox for sub-agents', () => {
-    // Even with sandbox.mode='always' and a naturally-sandboxed worker/critic
-    // path, YOLO forces isSandboxed=false so sub-agents run unconstrained.
-    const settings = {
-      ...DEFAULT_AGENT_SETTINGS,
-      permissionMode: 'yolo' as const,
+  it('YOLO permission mode does NOT disable the sandbox', () => {
+    // Approval and confinement are independent. YOLO removes prompts, not the
+    // kernel boundary — a worker running autonomously is exactly when the
+    // worktree grant must still be enforced.
+    const yolo = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo' as const };
+    expect(resolveSandboxOptions(yolo, true).isSandboxed).toBe(true);
+    // The direct manager path is naturally unsandboxed, so YOLO changes nothing.
+    expect(resolveSandboxOptions(yolo, false).isSandboxed).toBe(false);
+
+    // sandbox.mode='always' still overrides the natural state, as it always did.
+    const yoloAlways = {
+      ...yolo,
       sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const },
     };
-    expect(resolveSandboxOptions(settings, true).isSandboxed).toBe(false);
-    expect(resolveSandboxOptions(settings, false).isSandboxed).toBe(false);
+    expect(resolveSandboxOptions(yoloAlways, true).isSandboxed).toBe(true);
+    expect(resolveSandboxOptions(yoloAlways, false).isSandboxed).toBe(true);
+  });
+
+  it('workspace.sandbox=off disables confinement even for a naturally sandboxed agent', () => {
+    expect(resolveSandboxOptions(DEFAULT_AGENT_SETTINGS, true, 'off').isSandboxed).toBe(false);
+  });
+
+  it("workspace.sandbox='always' confines even the direct manager path", () => {
+    expect(resolveSandboxOptions(DEFAULT_AGENT_SETTINGS, false, 'always').isSandboxed).toBe(true);
   });
 });
 
@@ -250,12 +264,22 @@ describe('sub-agent approval policy', () => {
     expect(resolveSubAgentPermissionPolicy(guarded, undefined).mode).toBe('guarded');
   });
 
-  it('auto mode bypasses the sandbox for workers', () => {
+  it('auto mode keeps workers confined regardless of approval mode', () => {
+    // The sub-agent approval mode governs prompts only. A worker always keeps
+    // its worktree jail, including under 'auto' (YOLO-equivalent) approval.
     const settings = {
       ...DEFAULT_AGENT_SETTINGS,
       sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' as const },
     };
-    expect(resolveSubAgentSandboxOptions(settings, 'auto', true).isSandboxed).toBe(false);
+    expect(resolveSubAgentSandboxOptions(settings, 'auto', true).isSandboxed).toBe(true);
+    expect(resolveSubAgentSandboxOptions(settings, 'manager', true).isSandboxed).toBe(true);
+    expect(resolveSubAgentSandboxOptions(settings, 'user', true).isSandboxed).toBe(true);
+  });
+
+  it("workspace.sandbox='off' leaves workers unconfined", () => {
+    expect(
+      resolveSubAgentSandboxOptions(DEFAULT_AGENT_SETTINGS, 'auto', true, 'off').isSandboxed,
+    ).toBe(false);
   });
 
   it('user mode honors the sandbox settings', () => {
@@ -406,13 +430,14 @@ describe('sub-agent approval integration with ToolRegistry', () => {
     expect(riskyResult.isError).toBe(true);
   });
 
-  it('auto mode bypasses the sandbox for bash commands', () => {
+  it('auto approval still confines bash commands', () => {
     const ctx = workerCtx('auto', {
       permissionMode: 'ask',
       sandbox: { ...DEFAULT_AGENT_SETTINGS.sandbox, mode: 'always' },
     });
-    // sandboxOptions should have isSandboxed=false even with mode='always'.
-    expect(ctx.sandboxOptions?.isSandboxed).toBe(false);
+    // Approval is bypassed; the kernel boundary is not.
+    expect(ctx.permissionPolicy?.mode).toBe('yolo');
+    expect(ctx.sandboxOptions?.isSandboxed).toBe(true);
   });
 
   it('user mode keeps the sandbox active', () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BashTool } from './bash';
 import { defaultAllowedRoots, osSandboxAvailable, spawnSandboxed } from '../security/os-sandbox';
@@ -20,8 +20,11 @@ async function kernelSandboxOperational(): Promise<boolean> {
   if (!osSandboxAvailable()) return false;
   const root = temporaryPath('kory-sandbox-probe');
   mkdirSync(root, { recursive: true });
+  // /bin/echo, not /bin/true: macOS has no /bin/true, and a missing binary
+  // would make the probe report a broken sandbox when confinement is fine.
+  const probeBinary = existsSync('/bin/echo') ? '/bin/echo' : '/usr/bin/echo';
   try {
-    const { proc, cleanup } = spawnSandboxed(['/bin/true'], {
+    const { proc, cleanup } = spawnSandboxed([probeBinary, 'probe'], {
       allowedRoots: [root],
       cwd: root,
       blockNetwork: true,
@@ -93,8 +96,10 @@ describe('Bash kernel sandbox boundary', () => {
     const root = temporaryPath('kory-sandbox-root');
     const outside = temporaryPath('kory-sandbox-outside');
     mkdirSync(root, { recursive: true });
+    // Confinement is requested by policy, not an env opt-in, so "enforcement
+    // is off" is now expressed by the KORYPHAIOS_OS_SANDBOX=0 kill switch.
     const previous = process.env.KORYPHAIOS_OS_SANDBOX;
-    delete process.env.KORYPHAIOS_OS_SANDBOX;
+    process.env.KORYPHAIOS_OS_SANDBOX = '0';
     try {
       const result = await runSandboxed(root, `touch ${outside}`);
       expect(result.isError).toBe(true);
@@ -124,7 +129,7 @@ describe('Bash kernel sandbox boundary', () => {
       mkdirSync(root, { recursive: true });
       const previousEnabled = process.env.KORYPHAIOS_OS_SANDBOX;
       const previousSecret = process.env.KORY_SANDBOX_TEST_SECRET;
-      process.env.KORYPHAIOS_OS_SANDBOX = '1';
+      delete process.env.KORYPHAIOS_OS_SANDBOX;
       process.env.KORY_SANDBOX_TEST_SECRET = 'must-not-cross-the-boundary';
       try {
         const inside = await runSandboxed(root, 'touch inside.txt');
@@ -160,4 +165,44 @@ describe('Bash kernel sandbox boundary', () => {
     // so compare against the canonical form.
     expect(defaultAllowedRoots(root)).toEqual([realpathSync(root)]);
   });
+
+  test.skipIf(!KERNEL_SANDBOX_OPERATIONAL)(
+    'a confined agent cannot read host credential stores',
+    async () => {
+      // macOS needs a system-wide read allow to complete dynamic linking, so the
+      // boundary is enforced with explicit deny rules instead. These are the
+      // paths a prompt-injected agent would target for exfiltration.
+      const home = homedir();
+      const sshDir = join(home, '.ssh');
+      const created: string[] = [];
+      try {
+        if (!existsSync(sshDir)) mkdirSync(sshDir, { recursive: true });
+        const probe = join(sshDir, 'koryphaios-sandbox-probe');
+        writeFileSync(probe, 'PRIVATE-KEY-MATERIAL');
+        created.push(probe);
+
+        const root = temporaryPath('kory-sandbox-cred-root');
+        mkdirSync(root, { recursive: true });
+        const result = await runSandboxed(root, `cat ${probe}`);
+        expect(result.isError).toBe(true);
+        expect(result.output).not.toContain('PRIVATE-KEY-MATERIAL');
+      } finally {
+        for (const path of created) rmSync(path, { force: true });
+      }
+    },
+  );
+
+  test.skipIf(!KERNEL_SANDBOX_OPERATIONAL)(
+    'toolchain configuration stays readable inside a confined agent',
+    async () => {
+      // The credential denies must not break the config agents legitimately
+      // need to build and test a project.
+      const root = temporaryPath('kory-sandbox-config-root');
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, 'toolchain.conf'), 'readable-by-agents\n');
+      const result = await runSandboxed(root, 'cat toolchain.conf');
+      expect(result.isError).toBe(false);
+      expect(result.output).toContain('readable-by-agents');
+    },
+  );
 });

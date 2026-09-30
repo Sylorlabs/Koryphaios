@@ -567,7 +567,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         callId: call.id,
         name: this.name,
         output:
-          'Sandboxed command blocked: kernel path confinement is unavailable. Enable KORYPHAIOS_OS_SANDBOX=1 with bubblewrap on Linux or sandbox-exec on macOS; Koryphaios will not fall back to an unconfined process.',
+          'Sandboxed command blocked: kernel path confinement is unavailable. Install bubblewrap on Linux (macOS provides sandbox-exec), or set workspace.sandbox to "always" to refuse unconfined commands; Koryphaios will not fall back to an unconfined process.',
         isError: true,
         durationMs: 0,
       };

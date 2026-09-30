@@ -1,7 +1,12 @@
 import type { AgentSettings, SandboxSettings } from '../agent-settings';
 import { DEFAULT_SANDBOX_SETTINGS } from '../agent-settings';
+import { osSandboxAvailable } from '../security/os-sandbox';
+import { serverLog } from '../logger';
 
 export type PermissionMode = AgentSettings['permissionMode'] | 'sub-agent-user';
+
+/** Kernel sandbox policy for delegated agents, from `workspace.sandbox`. */
+export type WorkspaceSandboxMode = 'auto' | 'always' | 'off';
 
 /** Effective sandbox flags handed to ToolContext. `isSandboxed` is the
  *  master switch; the granular flags only suppress checks while it is true. */
@@ -12,9 +17,21 @@ export interface ResolvedSandboxOptions {
   pathConfinement: boolean;
   network: boolean;
   containerTools: boolean;
+  /** True when sandboxing was requested but no engine can enforce it. The
+   *  command still runs unconfined, so callers should report the turn as
+   *  unverified rather than claiming isolation. */
+  degraded: boolean;
 }
 
+let warnedSandboxUnavailable = false;
+
 /** Resolve the effective sandbox flags for a tool execution context.
+ *
+ *  Confinement and approval are deliberately independent. A permission mode
+ *  controls *whether the user is asked*; `workspace.sandbox` controls *what the
+ *  process can reach*. YOLO therefore no longer disables the sandbox: a worker
+ *  running autonomously is exactly the case where kernel confinement matters
+ *  most, and the worktree grant is only meaningful if it is enforced.
  *
  *  `naturalSandboxed` is whether the execution path would normally be
  *  sandboxed (plan/critic/worker = true, direct manager = false). The
@@ -23,25 +40,39 @@ export interface ResolvedSandboxOptions {
  *  - 'always' → sandbox every agent bash call
  *  - 'auto'   → honor the natural per-path behavior
  *
- *  YOLO permission mode bypasses the sandbox entirely — including for
- *  sub-agents (workers, critic) — so nothing prompts or blocks while the
- *  user has opted into full autonomy. Catastrophic-command hard floors in
- *  the bash validator still apply, but the sandbox confinement checks do not.
+ *  `workspaceSandbox` is the user's delegated-agent policy:
+ *  - 'off'    → workers are never confined
+ *  - 'always' → confinement is required; a command is refused if it cannot bind
+ *  - 'auto'   → confine when a real engine is installed, and report the turn as
+ *               degraded (not silently "isolated") when one is not
  *
  *  Granular toggles are taken from settings but only matter while sandboxed. */
 export function resolveSandboxOptions(
   settings: Pick<AgentSettings, 'sandbox' | 'permissionMode'> | undefined,
   naturalSandboxed: boolean,
+  workspaceSandbox: WorkspaceSandboxMode = 'auto',
 ): ResolvedSandboxOptions {
   const sandbox: SandboxSettings = settings?.sandbox ?? DEFAULT_SANDBOX_SETTINGS;
-  const isYolo = settings?.permissionMode === 'yolo';
-  const isSandboxed = isYolo
-    ? false
-    : sandbox.mode === 'off'
-      ? false
-      : sandbox.mode === 'always'
-        ? true
-        : naturalSandboxed;
+
+  let requested: boolean;
+  if (workspaceSandbox === 'off') requested = false;
+  else if (sandbox.mode === 'off') requested = false;
+  else if (workspaceSandbox === 'always' || sandbox.mode === 'always') requested = true;
+  else requested = naturalSandboxed;
+
+  // 'always' keeps requesting confinement even without an engine; the bash tool
+  // refuses those commands rather than running them unconfined.
+  const degraded = requested && workspaceSandbox === 'auto' && !osSandboxAvailable();
+  const isSandboxed = requested && (workspaceSandbox === 'always' || !degraded);
+
+  if (degraded && !warnedSandboxUnavailable) {
+    warnedSandboxUnavailable = true;
+    serverLog.warn(
+      'No OS sandbox engine detected; delegated agents run without kernel confinement. ' +
+        'Install bubblewrap on Linux, or set workspace.sandbox to "always" to refuse unconfined commands instead.',
+    );
+  }
+
   return {
     isSandboxed,
     commandWhitelist: sandbox.commandWhitelist,
@@ -49,6 +80,7 @@ export function resolveSandboxOptions(
     pathConfinement: sandbox.pathConfinement,
     network: sandbox.network,
     containerTools: sandbox.containerTools,
+    degraded,
   };
 }
 
@@ -64,6 +96,8 @@ export interface ToolPermissionPolicy {
   toolAllowlist: string[];
   /** Tool names that are always denied (checked before everything else). */
   toolBlocklist: string[];
+  /** Tool names that always prompt, even when the mode default is Allow. */
+  toolAsklist: string[];
 }
 
 export type SubAgentApprovalMode = 'manager' | 'user' | 'auto';
@@ -74,6 +108,9 @@ export type SubAgentApprovalMode = 'manager' | 'user' | 'auto';
  *  - 'user'    → use the dedicated sub-agent-user mode: reads and searches are
  *                free, but file edits, risky tools, and bash prompt the user
  *  - 'auto'    → force YOLO mode so workers run with no approval prompts
+ *
+ *  This governs approval only. Kernel confinement for workers is resolved
+ *  separately by `resolveSubAgentSandboxOptions` and is independent of it.
  *
  *  The returned policy is what the worker's ToolContext should carry. */
 export function resolveSubAgentPermissionPolicy(
@@ -96,31 +133,21 @@ export function resolveSubAgentPermissionPolicy(
 
 /** Resolve the effective sandbox options for a sub-agent (worker).
  *
- *  'auto' approval bypasses the sandbox (YOLO-equivalent), regardless of the
- *  sandbox.mode setting. 'user' and 'manager' honor the sandbox settings.
+ *  The sub-agent's approval mode governs prompts only. It is intentionally NOT
+ *  folded into the permission mode here: rewriting it to `yolo` used to
+ *  short-circuit `resolveSandboxOptions` and strip kernel confinement from
+ *  workers, which is precisely backwards — the more autonomous the run, the
+ *  more the worktree grant needs to be enforced rather than merely intended.
  *
- *  The permissionMode is rewritten to match the effective policy mode so that
- *  resolveSandboxOptions's YOLO bypass fires naturally for 'auto', keeping the
- *  two sub-agent resolvers consistent. 'sub-agent-user' is not YOLO, so the
- *  sandbox stays active for 'user' mode. */
+ *  `subAgentApproval` is accepted so callers can keep passing their resolved
+ *  approval posture, but it does not affect confinement. */
 export function resolveSubAgentSandboxOptions(
   baseSettings: AgentSettings,
-  subAgentApproval: SubAgentApprovalMode | undefined,
+  _subAgentApproval: SubAgentApprovalMode | undefined,
   naturalSandboxed: boolean,
+  workspaceSandbox: WorkspaceSandboxMode = 'auto',
 ): ResolvedSandboxOptions {
-  const effectiveMode =
-    subAgentApproval === 'user'
-      ? 'sub-agent-user'
-      : subAgentApproval === 'auto'
-        ? 'yolo'
-        : baseSettings.permissionMode;
-  return resolveSandboxOptions(
-    {
-      ...baseSettings,
-      permissionMode: effectiveMode as unknown as AgentSettings['permissionMode'],
-    },
-    naturalSandboxed,
-  );
+  return resolveSandboxOptions(baseSettings, naturalSandboxed, workspaceSandbox);
 }
 
 export type ToolPermissionDecision =
@@ -191,6 +218,7 @@ export function resolveToolPermissionPolicy(
     approvalThresholdLines: settings.approvalThresholdLines,
     toolAllowlist: tierEntry?.allow ?? fallbackAllow,
     toolBlocklist: tierEntry?.block ?? fallbackBlock,
+    toolAsklist: tierEntry?.ask ?? [],
   };
 }
 
@@ -207,6 +235,12 @@ export function decideToolPermission(
   // regardless of permissionMode or allowlist membership.
   if (policy.toolBlocklist?.includes(toolName)) {
     return { action: 'deny', reason: `Tool '${toolName}' is blocked by the tool blocklist` };
+  }
+
+  // Explicit per-tier Ask beats the mode default (e.g. forcing a read-only
+  // tool to prompt in Ask mode) but never overrides an explicit block.
+  if (policy.toolAsklist?.includes(toolName)) {
+    return { action: 'ask', reason: `Tool '${toolName}' is set to ask for approval` };
   }
 
   // Allowlist bypasses all mode-based approval prompts. A tool here always

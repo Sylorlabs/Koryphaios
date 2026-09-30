@@ -4,7 +4,12 @@
 
 import { describe, it, expect } from 'bun:test';
 import { tokenizeCommand, resolveCommandPath } from '../../runtime/shell-argv';
-import { osSandboxEnabled, detectOsSandbox, defaultAllowedRoots } from '../os-sandbox';
+import {
+  osSandboxEnabled,
+  osSandboxAvailable,
+  detectOsSandbox,
+  defaultAllowedRoots,
+} from '../os-sandbox';
 
 describe('shell-argv tokenizer', () => {
   it('tokenizes a simple command', () => {
@@ -167,9 +172,28 @@ describe('OS sandbox detection', () => {
     expect(typeof avail.sandboxExec).toBe('boolean');
   });
 
-  it('osSandboxEnabled is false by default (opt-in)', () => {
-    // KORYPHAIOS_OS_SANDBOX is not set in the test env.
-    expect(osSandboxEnabled()).toBe(false);
+  it('osSandboxEnabled tracks engine availability, not an opt-in env var', () => {
+    // Confinement is now requested by policy (`workspace.sandbox`) rather than
+    // an environment flag, so this reports whether a real engine exists.
+    const previous = process.env.KORYPHAIOS_OS_SANDBOX;
+    delete process.env.KORYPHAIOS_OS_SANDBOX;
+    try {
+      expect(osSandboxEnabled()).toBe(osSandboxAvailable());
+    } finally {
+      if (previous === undefined) delete process.env.KORYPHAIOS_OS_SANDBOX;
+      else process.env.KORYPHAIOS_OS_SANDBOX = previous;
+    }
+  });
+
+  it('KORYPHAIOS_OS_SANDBOX=0 is an explicit process-wide kill switch', () => {
+    const previous = process.env.KORYPHAIOS_OS_SANDBOX;
+    process.env.KORYPHAIOS_OS_SANDBOX = '0';
+    try {
+      expect(osSandboxEnabled()).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.KORYPHAIOS_OS_SANDBOX;
+      else process.env.KORYPHAIOS_OS_SANDBOX = previous;
+    }
   });
 
   it('defaultAllowedRoots includes the working directory', () => {
