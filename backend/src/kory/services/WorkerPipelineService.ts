@@ -4,7 +4,12 @@
  * Extracted from manager.ts runWorkerPipeline() and routeToWorker() methods.
  */
 
-import type { ChangeSummary, ProviderName, WorkerDomain } from '@koryphaios/shared';
+import type {
+  ChangeSummary,
+  KoryphaiosConfig,
+  ProviderName,
+  WorkerDomain,
+} from '@koryphaios/shared';
 import { DOMAIN } from '../../constants';
 import type { ProviderRegistry, Provider } from '../../providers';
 import type { ProviderMessage } from '../../providers/types';
@@ -23,6 +28,11 @@ import { classifyTask, createTaskContract, type TaskContract, type TaskKind } fr
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
 import { computeCostUsd } from '../../pricing';
 import type { CheckpointStore } from '../checkpoint-store';
+import {
+  normalizeSkillAssignment,
+  type SkillAssignment,
+  type SkillReviewContext,
+} from '../skill-assignment';
 
 // Keep the provider-native block form intact. Image/tool blocks are valid
 // worker context and must not be narrowed to text merely to cross the service
@@ -30,7 +40,9 @@ import type { CheckpointStore } from '../checkpoint-store';
 type InternalMessage = ProviderMessage;
 
 /** Task kinds that mutate the repository and therefore cannot skip the
- *  completion-blocking critic review, regardless of user policy. */
+ *  completion-blocking critic review, regardless of user policy. Read-only
+ *  answer/research kinds (question, research-docs) are advisory-tolerant:
+ *  one worker attempt, then advisory reporting instead of forced retries. */
 const ALWAYS_STRICT: ReadonlySet<TaskKind> = new Set([
   'bug',
   'mechanical-edit',
@@ -40,16 +52,26 @@ const ALWAYS_STRICT: ReadonlySet<TaskKind> = new Set([
   'security-infra',
 ]);
 
+/** Read-only answer/research kinds never justify forced multi-attempt
+ *  critic retries — they get a single worker attempt. */
+export function isReadOnlyTaskKind(kind: TaskKind): boolean {
+  return !ALWAYS_STRICT.has(kind);
+}
+
 /**
  * Resolve the effective gate strictness for a task kind given the user's
- * configured policy. Repository-mutating tasks are always strict; answer and
- * research tasks honor the user's setting.
+ * configured policy and how many critic reviews have already failed.
+ * Repository-mutating tasks are always strict; answer and research tasks
+ * honor the user's setting, except that a configured strict policy degrades
+ * to advisory after the first failed review instead of forcing retries.
  */
 export function resolveGateStrictness(
   kind: TaskKind,
   configured: 'strict' | 'advisory' | 'off',
+  failedReviews = 0,
 ): 'strict' | 'advisory' | 'off' {
   if (ALWAYS_STRICT.has(kind)) return 'strict';
+  if (configured === 'strict' && failedReviews >= 1) return 'advisory';
   return configured;
 }
 
@@ -83,12 +105,18 @@ interface ProjectExecutionResources {
  * reasoned about without reading the manager.
  */
 export interface WorkerPipelineHost {
-  getIsYoloMode(): boolean;
+  /** Whether *this session* is running YOLO. Approval posture is per chat, so
+   *  this must be resolved against the session rather than a process-wide flag
+   *  that one chat's composer toggle would flip for every other chat. */
+  getIsYoloMode(sessionId: string): boolean;
   getWorkingDirectory(): string;
   /** Resolve the project bound to this exact session, or reject if unavailable. */
   resolveSessionWorkingDirectoryPublic(sessionId: string): Promise<string>;
   getWorkerReasoningLevel(): string;
-  getQualityPolicy(workingDirectory?: string): {
+  getQualityPolicy(
+    workingDirectory?: string,
+    sessionId?: string,
+  ): {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   };
@@ -123,6 +151,7 @@ export interface WorkerPipelineHost {
     success: boolean;
     error?: string;
     workerMessages?: InternalMessage[];
+    skillReviewContext?: SkillReviewContext;
     usage?: { tokensIn: number; tokensOut: number };
   }>;
   runCriticGate(
@@ -132,11 +161,17 @@ export interface WorkerPipelineHost {
     task?: string,
     reviewDirectory?: string,
     producerIdentity?: { provider: ProviderName; model: string },
-  ): Promise<{ passed: boolean; feedback?: string }>;
+    skillReviewContext?: SkillReviewContext,
+  ): Promise<{ passed: boolean; skipped?: boolean; feedback?: string }>;
   runDestinationChecks(
     sessionId: string,
     workingDirectory: string,
   ): Promise<{ passed: boolean; output: string }>;
+  /** Accumulate worker spend into the manager turn so chat totals include subagents. */
+  recordWorkerUsage?(
+    sessionId: string,
+    usage: { provider?: string; model?: string; tokensIn?: number; tokensOut?: number },
+  ): void;
 }
 
 export interface WorkerPipelineServiceDependencies {
@@ -149,6 +184,13 @@ export interface WorkerPipelineServiceDependencies {
   host: WorkerPipelineHost;
   /** Publisher injection keeps durable acknowledgement failures testable. */
   checkpointStoreFactory?: (workingDirectory: string) => Pick<CheckpointStore, 'createGhostCommit'>;
+  /**
+   * Workspace settings applied to every project this service builds a
+   * WorkspaceManager for. Without this, a session whose project differs from
+   * the backend's working directory silently fell back to hard-coded defaults
+   * instead of the user's configured worktree limit and directory.
+   */
+  workspaceConfig?: KoryphaiosConfig['workspace'];
 }
 
 export class WorkerPipelineService {
@@ -161,6 +203,8 @@ export class WorkerPipelineService {
   private host: WorkerPipelineHost;
   private alternateProjectResources = new Map<string, Promise<ProjectExecutionResources>>();
   private checkpointStoreFactory?: WorkerPipelineServiceDependencies['checkpointStoreFactory'];
+  private workspaceConfig?: KoryphaiosConfig['workspace'];
+  private disposed = false;
 
   constructor(deps: WorkerPipelineServiceDependencies) {
     this.providers = deps.providers;
@@ -171,6 +215,7 @@ export class WorkerPipelineService {
     this.tasks = deps.tasks;
     this.host = deps.host;
     this.checkpointStoreFactory = deps.checkpointStoreFactory;
+    this.workspaceConfig = deps.workspaceConfig;
   }
 
   private async canonicalDirectory(path: string, label: string): Promise<string> {
@@ -195,18 +240,47 @@ export class WorkerPipelineService {
     const snapshotManager = git.isGitRepo() ? new SnapshotManager(root) : null;
     let workspaceManager: WorkspaceManager | null = null;
     if (git.isGitRepo()) {
-      const candidate = new WorkspaceManager(root);
+      // Honour the user's configured workspace settings here too; previously this
+      // manager was built with no config and silently used the defaults.
+      const candidate = new WorkspaceManager(root, this.workspaceConfig);
       try {
         await candidate.init();
         workspaceManager = candidate;
       } catch (err: unknown) {
         koryLog.warn(
           { root, err: err instanceof Error ? err.message : String(err) },
-          'Session project worktree isolation is unavailable; using that project directly',
+          'Session project worktree isolation is unavailable; delegation refused',
         );
+        throw new Error('Session project worktree initialization failed', { cause: err });
       }
     }
     return { root, git, workspaceManager, snapshotManager };
+  }
+
+  /**
+   * Release every per-session-project WorkspaceManager this service created.
+   * The primary manager is owned and drained by KoryManager; these alternates
+   * were previously never shut down, so their worktrees and slots leaked.
+   */
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    const pending = [...this.alternateProjectResources.values()];
+    this.alternateProjectResources.clear();
+    await Promise.allSettled(
+      pending.map(async (resourcesPromise) => {
+        const resources = await resourcesPromise.catch(() => null);
+        if (!resources?.workspaceManager) return;
+        try {
+          await resources.workspaceManager.shutdown();
+        } catch (err: unknown) {
+          koryLog.warn(
+            { project: resources.root, err: String(err) },
+            'Failed to drain an alternate session project workspace during shutdown',
+          );
+        }
+      }),
+    );
   }
 
   private async prepareRecoveryBaseline(
@@ -415,6 +489,7 @@ export class WorkerPipelineService {
     preferredModel?: string,
     reasoningLevel?: string,
     domainHint?: string,
+    skillAssignment?: SkillAssignment,
   ): Promise<string> {
     this.host.emitThought(
       sessionId,
@@ -460,28 +535,35 @@ export class WorkerPipelineService {
     }
 
     const workspaceManager = project.workspaceManager;
-    let workerDir = project.root;
-    let worktreeSpawned = false;
-    if (workspaceManager) {
-      try {
-        const worktree = await workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
-        if (worktree) {
-          workerDir = worktree.path;
-          worktreeSpawned = true;
-          koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
-        }
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        koryLog.warn({ err: message }, 'Worktree spawn failed — using main directory');
+    let workerDir: string;
+    try {
+      if (!workspaceManager)
+        throw new Error('Worktree isolation is unavailable or not initialized.');
+      const worktree = await workspaceManager.spawn(taskId, task.slice(0, 60), sessionId);
+      if (!worktree)
+        throw new Error('An isolated worktree could not be created (unavailable or at capacity).');
+      workerDir = await workspaceManager.validateWorktree(taskId, sessionId);
+      if (workerDir === project.root || !this.isWithinProject(project.root, workerDir)) {
+        throw new Error('Worker worktree does not belong to the resolved session project.');
       }
-    } else {
-      // WorkspaceManager is null — either git is unavailable, or init() hasn't
-      // completed yet (async init in sync constructor). Warn so the user knows
-      // parallel workers will share the main directory and may clobber each other.
-      koryLog.warn(
-        { taskId },
-        'WorkspaceManager not ready — worker shares main directory (no isolation)',
-      );
+      koryLog.info({ taskId, path: workerDir }, 'Worker running in isolated worktree');
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // A spawn can fail after registering a worktree. Cleanup is best effort;
+      // unsafe or unrecoverable entries remain tracked for explicit recovery.
+      try {
+        await workspaceManager?.cleanup(taskId);
+      } catch (cleanupError) {
+        koryLog.warn(
+          { taskId, err: String(cleanupError) },
+          'Failed spawn cleanup retained for recovery',
+        );
+      }
+      return this.finishPipeline(sessionId, taskId, {
+        success: false,
+        verification: 'unverified',
+        criticFeedback: `Worker was not started because worktree isolation failed: ${reason}`,
+      });
     }
 
     let result: WorkerPipelineResult;
@@ -496,6 +578,7 @@ export class WorkerPipelineService {
         taskId,
         project,
         true,
+        normalizeSkillAssignment(skillAssignment),
       );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -508,14 +591,27 @@ export class WorkerPipelineService {
     }
 
     let worktreePaths: string[] = [];
-    if (worktreeSpawned && workspaceManager) {
+    if (workspaceManager) {
       try {
         if (result.success) {
           if (typeof workspaceManager.getChangedFiles === 'function') {
             worktreePaths = await workspaceManager.getChangedFiles(taskId);
           }
           const reconcileResult = await workspaceManager.reconcile(taskId);
-          if (!reconcileResult.success) {
+          if (reconcileResult.outcome === 'conflict') {
+            // The user's checkout was never modified — the work is parked on its
+            // branch and reported so it can be resolved or discarded explicitly.
+            koryLog.warn(
+              { taskId, recoveryBranch: reconcileResult.recoveryBranch },
+              'Worker changes conflicted; destination untouched',
+            );
+            result = {
+              success: false,
+              verification: 'unverified',
+              workerTranscript: result.workerTranscript,
+              criticFeedback: reconcileResult.message,
+            };
+          } else if (!reconcileResult.success) {
             koryLog.warn({ taskId, msg: reconcileResult.message }, 'Worktree reconcile failed');
             result = {
               success: false,
@@ -535,7 +631,9 @@ export class WorkerPipelineService {
             }
           }
         } else {
-          await workspaceManager.cleanup(taskId);
+          // The worker failed. Discarding its worktree also destroyed whatever it
+          // had written, so preserve it on the branch and surface it instead.
+          await this.preserveIncompleteWork(workspaceManager, taskId);
         }
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -570,6 +668,7 @@ export class WorkerPipelineService {
       });
     }
 
+    this.reportWorkerUsage(sessionId, result);
     await this.host.updateWorkflowState(sessionId, 'idle');
 
     if (result.success) {
@@ -580,7 +679,41 @@ export class WorkerPipelineService {
     }
     return result.workerTranscript
       ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-      : 'Worker failed.';
+      : (result.criticFeedback ?? 'Worker failed.');
+  }
+
+  /**
+   * Preserve the output of a worker that did not pass review.
+   *
+   * The branch keeps every commit; the working copy is released so the
+   * concurrency slot is reclaimed. Recorded as an `incomplete` resolution so
+   * the work is discoverable instead of being destroyed with the worktree.
+   * Nothing is merged — the work never passed review.
+   */
+  private async preserveIncompleteWork(manager: WorkspaceManager, taskId: string): Promise<void> {
+    try {
+      const abandoned = await manager.abandon(taskId);
+      koryLog.info(
+        { taskId, outcome: abandoned.outcome, recoveryBranch: abandoned.recoveryBranch },
+        'Incomplete worker work handled',
+      );
+    } catch (err: unknown) {
+      koryLog.warn({ taskId, err: String(err) }, 'Failed to preserve incomplete worker work');
+    }
+  }
+
+  private reportWorkerUsage(sessionId: string, result: WorkerPipelineResult): void {
+    try {
+      if (!result.tokensIn && !result.tokensOut) return;
+      this.host.recordWorkerUsage?.(sessionId, {
+        provider: result.provider,
+        model: result.model,
+        tokensIn: result.tokensIn,
+        tokensOut: result.tokensOut,
+      });
+    } catch {
+      // Usage accounting must never fail the worker result.
+    }
   }
 
   private async finishPipeline(
@@ -595,12 +728,13 @@ export class WorkerPipelineService {
         error: !result.success ? result.criticFeedback || 'Worker failed' : undefined,
       });
     }
+    this.reportWorkerUsage(sessionId, result);
     await this.host.updateWorkflowState(sessionId, 'idle');
     return result.success
       ? (result.criticFeedback ?? 'Done.')
       : result.workerTranscript
         ? `Worker did not pass review. ${result.criticFeedback ?? ''}`
-        : 'Worker failed.';
+        : (result.criticFeedback ?? 'Worker failed.');
   }
 
   private async _routeToWorker(
@@ -613,6 +747,7 @@ export class WorkerPipelineService {
     taskId?: string,
     executionProject?: ProjectExecutionResources,
     recoveryBaselinePrepared = false,
+    skillAssignment?: SkillAssignment,
   ): Promise<WorkerPipelineResult> {
     let domain: WorkerDomain;
     if (domainOverride) domain = domainOverride;
@@ -627,7 +762,11 @@ export class WorkerPipelineService {
         domain = 'general';
       }
 
-    const isSandboxed = this.host.getIsYoloMode() ? false : !this.requiresSystemAccess(userMessage);
+    // A worker's natural posture is confined: it holds a single worktree grant,
+    // so kernel enforcement is what makes that grant real. This is independent
+    // of approval — a YOLO chat still confines its workers, it just does not
+    // prompt. Tasks that genuinely need host access are routed elsewhere.
+    const isSandboxed = !this.requiresSystemAccess(userMessage);
     let project: ProjectExecutionResources;
     try {
       project = executionProject ?? (await this.resolveProjectResources(sessionId));
@@ -643,25 +782,28 @@ export class WorkerPipelineService {
     const workingDirectory = project.root;
     let effectivePaths: string[];
     try {
+      if (!taskId || !project.workspaceManager) {
+        throw new Error('A managed isolated worktree is required.');
+      }
+      const workerDirectory = await project.workspaceManager.validateWorktree(taskId, sessionId);
       effectivePaths = await Promise.all(
-        (allowedPaths.length > 0 ? allowedPaths : [workingDirectory]).map((path, index) =>
+        allowedPaths.map((path, index) =>
           this.canonicalDirectory(path, `Worker filesystem grant ${index + 1}`),
         ),
       );
+      if (
+        effectivePaths.length !== 1 ||
+        effectivePaths[0] !== workerDirectory ||
+        workerDirectory === workingDirectory ||
+        !this.isWithinProject(workingDirectory, workerDirectory)
+      ) {
+        throw new Error('Worker filesystem grants must match its isolated worktree.');
+      }
     } catch (err: unknown) {
       return {
         success: false,
         verification: 'unverified',
-        criticFeedback: `Worker filesystem grant is unavailable: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      };
-    }
-    if (effectivePaths.some((path) => !this.isWithinProject(workingDirectory, path))) {
-      return {
-        success: false,
-        verification: 'unverified',
-        criticFeedback: 'Worker filesystem grants escaped the resolved session project.',
+        criticFeedback: `Worker isolation is unavailable: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
 
@@ -680,6 +822,7 @@ export class WorkerPipelineService {
       taskKind: undefined,
       scope: effectivePaths,
       constraints: isSandboxed ? ['Stay within the granted filesystem paths'] : [],
+      skillAssignment,
     });
     const immutableObjective = `IMMUTABLE TASK CONTRACT:\n${JSON.stringify(immutableContract, null, 2)}`;
     let workerTask = immutableObjective;
@@ -689,13 +832,30 @@ export class WorkerPipelineService {
     }
 
     let attempts = 0;
-    const configuredPolicy = this.host.getQualityPolicy(workingDirectory);
-    const gateStrictness = resolveGateStrictness(
-      classifyTask(userMessage, domain),
-      configuredPolicy.gateStrictness,
-    );
-    const maxAttempts = Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
+    const configuredPolicy = this.host.getQualityPolicy(workingDirectory, sessionId);
+    const taskKind = classifyTask(userMessage, domain);
+    const gateStrictness = resolveGateStrictness(taskKind, configuredPolicy.gateStrictness);
+    // Read-only answer/research turns get a single worker attempt — a failed
+    // review falls back to advisory reporting instead of forced retries.
+    const maxAttempts = isReadOnlyTaskKind(taskKind)
+      ? 1
+      : Math.max(1, Math.min(10, configuredPolicy.maxCriticIterations));
+    let failedReviews = 0;
     while (attempts < maxAttempts) {
+      try {
+        if (
+          (await project.workspaceManager!.validateWorktree(taskId!, sessionId)) !==
+          effectivePaths[0]
+        ) {
+          throw new Error('Worker worktree changed between attempts');
+        }
+      } catch (error) {
+        return {
+          success: false,
+          verification: 'unverified',
+          criticFeedback: `Worker isolation was lost: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
       attempts++;
       this.host.emitThought(sessionId, 'delegating', `Delegating to ${domain} worker...`);
       const routing = this.host.resolveActiveRouting(
@@ -742,6 +902,7 @@ export class WorkerPipelineService {
             userMessage,
             effectivePaths[0],
             { provider: alt.name, model: routing.model },
+            res.skillReviewContext ?? { taskContract: immutableContract },
           );
           if (criticResult.passed) {
             const harness = getProviderHarnessCapabilities(alt.name);
@@ -758,7 +919,11 @@ export class WorkerPipelineService {
                 : `UNVERIFIED: ${alt.name} completed the worker role without OS filesystem isolation.\n${criticResult.feedback ?? ''}`,
             };
           }
-          if (gateStrictness === 'advisory') {
+          failedReviews += 1;
+          if (
+            resolveGateStrictness(taskKind, configuredPolicy.gateStrictness, failedReviews) ===
+            'advisory'
+          ) {
             return {
               success: true,
               provider: alt.name,
@@ -807,6 +972,7 @@ export class WorkerPipelineService {
           userMessage,
           effectivePaths[0],
           { provider: provider.name, model: routing.model },
+          result.skillReviewContext ?? { taskContract: immutableContract },
         );
         if (criticResult.passed) {
           const harness = getProviderHarnessCapabilities(provider.name);
@@ -823,7 +989,11 @@ export class WorkerPipelineService {
               : `UNVERIFIED: ${provider.name} completed the worker role without OS filesystem isolation.\n${criticResult.feedback ?? ''}`,
           };
         }
-        if (gateStrictness === 'advisory') {
+        failedReviews += 1;
+        if (
+          resolveGateStrictness(taskKind, configuredPolicy.gateStrictness, failedReviews) ===
+          'advisory'
+        ) {
           return {
             success: true,
             provider: provider.name,
@@ -837,7 +1007,15 @@ export class WorkerPipelineService {
         }
         workerTask = `${immutableObjective}\n\nREVIEW FINDINGS FROM ATTEMPT ${attempts}:\n${criticResult.feedback ?? 'Critic rejected the attempt without valid findings.'}\n\nAddress the findings without changing or narrowing the original objective.`;
       }
-      if (!this.providers.isQuotaError(result.error)) return { success: false };
+      const quota = this.providers.isQuotaError(result.error);
+      const retriable =
+        typeof (this.providers as { isRetriableProviderError?: (e: unknown) => boolean })
+          .isRetriableProviderError === 'function'
+          ? (
+              this.providers as { isRetriableProviderError: (e: unknown) => boolean }
+            ).isRetriableProviderError(result.error)
+          : false;
+      if (!quota && !retriable) return { success: false };
     }
     return { success: false };
   }

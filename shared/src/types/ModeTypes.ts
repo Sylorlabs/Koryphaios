@@ -21,8 +21,6 @@ export interface ModeConfig {
   explanations: 'verbose' | 'minimal';
   /** Enable shadow logger UI */
   enableShadowLoggerUI: boolean;
-  /** Enable git worktrees */
-  enableWorktrees: boolean;
   /** Enable critic gate */
   enableCriticGate: boolean;
   /** Show agent cards and technical details */

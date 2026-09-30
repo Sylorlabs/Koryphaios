@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'bun';
+import { WorkspaceManager } from '../workspace-manager';
 import { GitManager } from '../git-manager';
 import { SnapshotManager } from '../snapshot-manager';
 import { CheckpointStore } from '../checkpoint-store';
 import { SessionStateService } from './SessionStateService';
 import {
   WorkerPipelineService,
+  isReadOnlyTaskKind,
   resolveGateStrictness,
   type WorkerPipelineHost,
 } from './WorkerPipelineService';
@@ -152,6 +154,36 @@ describe('resolveGateStrictness', () => {
     expect(resolveGateStrictness('question', 'off')).toBe('off');
     expect(resolveGateStrictness('research-docs', 'advisory')).toBe('advisory');
   });
+
+  test('critic strict policy stays strict for read-only kinds until the first review fails', () => {
+    expect(resolveGateStrictness('question', 'strict')).toBe('strict');
+    expect(resolveGateStrictness('research-docs', 'strict')).toBe('strict');
+  });
+
+  test('critic strict policy falls back to advisory for read-only kinds after one failed review', () => {
+    expect(resolveGateStrictness('question', 'strict', 1)).toBe('advisory');
+    expect(resolveGateStrictness('research-docs', 'strict', 2)).toBe('advisory');
+  });
+
+  test('critic stays strict for mutating kinds no matter how many reviews failed', () => {
+    for (const kind of [
+      'bug',
+      'mechanical-edit',
+      'refactor',
+      'feature',
+      'ui',
+      'security-infra',
+    ] as const) {
+      expect(resolveGateStrictness(kind, 'strict', 3)).toBe('strict');
+    }
+  });
+
+  test('critic read-only kinds are the non-mutating answer and research tasks', () => {
+    expect(isReadOnlyTaskKind('question')).toBe(true);
+    expect(isReadOnlyTaskKind('research-docs')).toBe(true);
+    expect(isReadOnlyTaskKind('feature')).toBe(false);
+    expect(isReadOnlyTaskKind('bug')).toBe(false);
+  });
 });
 
 describe('WorkerPipelineService project ownership and checkpoint acknowledgement', () => {
@@ -292,11 +324,13 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
     const workflowStates: string[] = [];
     const host = createHost(repo, repo, workflowStates);
     const publish = mock(async () => null);
+    const workspaceManager = new WorkspaceManager(repo);
+    await workspaceManager.init();
     const service = new WorkerPipelineService({
       providers: createProviders(),
       state,
       git: new GitManager(repo),
-      workspaceManager: null,
+      workspaceManager,
       snapshotManager: new SnapshotManager(repo),
       host,
       checkpointStoreFactory: () => ({ createGhostCommit: publish }),
@@ -315,5 +349,290 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
     expect(state.getToolCalls('session-null')).toHaveLength(1);
     expect(state.getCommands('session-null')).toHaveLength(1);
     expect(workflowStates.at(-1)).toBe('idle');
+  });
+});
+
+describe('WorkerPipelineService fails closed on isolation failure', () => {
+  for (const failure of [
+    'unavailable',
+    'not initialized',
+    'init rejected',
+    'capacity',
+    'spawn null',
+    'spawn throws',
+  ] as const) {
+    test(`${failure} prevents providers and completes failed task lifecycle`, async () => {
+      const repo = makeRepo('kory-worker-isolation');
+      const workflowStates: string[] = [];
+      const host = createHost(repo, repo, workflowStates);
+      const execute = mock(host.executeWithProvider);
+      host.executeWithProvider = execute;
+      const manager =
+        failure === 'unavailable'
+          ? null
+          : new WorkspaceManager(
+              repo,
+              failure === 'init rejected'
+                ? { worktreeDir: '..' }
+                : failure === 'capacity'
+                  ? { worktreeLimit: 0 }
+                  : undefined,
+            );
+      if (manager && failure === 'init rejected') await expect(manager.init()).rejects.toThrow();
+      else if (manager && failure !== 'not initialized') await manager.init();
+      const spawn =
+        manager && (failure === 'spawn null' || failure === 'spawn throws')
+          ? spyOn(manager, 'spawn').mockImplementation(async () => {
+              if (failure === 'spawn throws') throw new Error('deterministic spawn failure');
+              return null;
+            })
+          : undefined;
+      const create = mock(async () => undefined);
+      const update = mock(async () => undefined);
+      const state = new SessionStateService();
+      state.recordCommand('isolation-session', { command: 'retained evidence', exitCode: 0 });
+      const service = new WorkerPipelineService({
+        providers: createProviders(),
+        state,
+        git: new GitManager(repo),
+        workspaceManager: manager,
+        snapshotManager: new SnapshotManager(repo),
+        host,
+        tasks: { create, update } as any,
+      });
+      try {
+        const result = await service.runWorkerPipeline('isolation-session', 'Implement safely');
+        expect(result).toContain('Worker was not started');
+        expect(result).toContain('worktree isolation failed');
+        expect(execute).not.toHaveBeenCalled();
+        expect(create).toHaveBeenCalledTimes(1);
+        expect(update).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ status: 'failed' }),
+        );
+        expect(workflowStates).toEqual(['executing', 'idle']);
+        expect(state.getCommands('isolation-session')).toHaveLength(1);
+        expect(gitOutput(repo, 'status', '--porcelain')).toBe('');
+      } finally {
+        spawn?.mockRestore();
+      }
+    });
+  }
+
+  test('alternate project initialization failure never falls back to either project', async () => {
+    const repoA = makeRepo('kory-init-a');
+    const repoB = makeRepo('kory-init-b');
+    writeFileSync(join(repoB, '.trees'), 'not a directory');
+    const workflowStates: string[] = [];
+    const host = createHost(repoA, repoB, workflowStates);
+    const execute = mock(host.executeWithProvider);
+    host.executeWithProvider = execute;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(repoA),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(repoA),
+      host,
+    });
+    expect(await service.runWorkerPipeline('init-fail', 'Implement safely')).toContain(
+      'Worker was not started',
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(workflowStates).toEqual(['executing', 'idle']);
+    // Failed initialization must not poison the per-project resource cache.
+    rmSync(join(repoB, '.trees'));
+    expect(await service.runWorkerPipeline('init-retry', 'Implement safely')).toContain('PASS');
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(repoA, 'worker-output.txt'))).toBe(false);
+  });
+
+  test('partial spawn failure cleans up the registered worktree before returning', async () => {
+    const repo = makeRepo('kory-partial-spawn');
+    const manager = new WorkspaceManager(repo);
+    await manager.init();
+    const originalSpawn = manager.spawn.bind(manager);
+    const spawn = spyOn(manager, 'spawn').mockImplementation(async (...args) => {
+      await originalSpawn(...args);
+      throw new Error('post-spawn failure');
+    });
+    const workflowStates: string[] = [];
+    const host = createHost(repo, repo, workflowStates);
+    const execute = mock(host.executeWithProvider);
+    host.executeWithProvider = execute;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(repo),
+      workspaceManager: manager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+    try {
+      expect(await service.runWorkerPipeline('partial', 'Implement safely')).toContain(
+        'Worker was not started',
+      );
+      expect(execute).not.toHaveBeenCalled();
+      expect(manager.getStatus().active).toHaveLength(0);
+      expect(await manager.listAllWorktrees()).toHaveLength(1);
+      expect(workflowStates).toEqual(['executing', 'idle']);
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
+  test('a manager bound to another project cannot execute a session worker', async () => {
+    const repo = makeRepo('kory-session-project');
+    const otherRepo = makeRepo('kory-wrong-manager');
+    const manager = new WorkspaceManager(otherRepo);
+    await manager.init();
+    const host = createHost(repo, repo, []);
+    const execute = mock(host.executeWithProvider);
+    host.executeWithProvider = execute;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(repo),
+      workspaceManager: manager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+    expect(await service.runWorkerPipeline('wrong-manager', 'Implement safely')).toContain(
+      'Worker was not started',
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(manager.getStatus().active).toHaveLength(0);
+    expect(gitOutput(repo, 'status', '--porcelain')).toBe('');
+    expect(gitOutput(otherRepo, 'status', '--porcelain')).toBe('');
+  });
+
+  test('direct routing cannot grant the project root', async () => {
+    const repo = makeRepo('kory-root-grant');
+    const manager = new WorkspaceManager(repo);
+    await manager.init();
+    await manager.spawn('root-grant', 'task', 'session');
+    const host = createHost(repo, repo, []);
+    const execute = mock(host.executeWithProvider);
+    host.executeWithProvider = execute;
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(repo),
+      workspaceManager: manager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+    const result = await service.routeToWorker(
+      'session',
+      'Implement safely',
+      undefined,
+      undefined,
+      [repo],
+      undefined,
+      'root-grant',
+    );
+    expect(result.success).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+    await manager.cleanup('root-grant');
+  });
+
+  test('concurrent providers receive distinct worktrees and failures clean up both', async () => {
+    const repo = makeRepo('kory-concurrent-workers');
+    const manager = new WorkspaceManager(repo);
+    await manager.init();
+    const host = createHost(repo, repo, []);
+    const directories: string[] = [];
+    let release!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    host.executeWithProvider = async (...args) => {
+      const directory = args[7][0];
+      directories.push(directory);
+      writeFileSync(join(directory, 'private.txt'), args[0]);
+      if (directories.length === 2) release();
+      await bothStarted;
+      expect(readFileSync(join(directory, 'private.txt'), 'utf8')).toBe(args[0]);
+      return { success: false };
+    };
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(repo),
+      workspaceManager: manager,
+      snapshotManager: new SnapshotManager(repo),
+      host,
+    });
+    await Promise.all(
+      ['one', 'two'].map((id) => service.runWorkerPipeline(id, 'Implement safely')),
+    );
+    expect(new Set(directories).size).toBe(2);
+    expect(directories).not.toContain(realpathSync(repo));
+    expect(existsSync(join(repo, 'private.txt'))).toBe(false);
+    expect(manager.getStatus().active).toHaveLength(0);
+    expect(await manager.listAllWorktrees()).toHaveLength(1);
+  });
+});
+
+describe('WorkerPipelineService workspace configuration', () => {
+  test('a session project uses the configured workspace settings, not hard-coded defaults', async () => {
+    // A chat bound to a project other than the backend's working directory
+    // builds its own WorkspaceManager. That manager previously received no
+    // config, so it silently used limit 4 / ".trees" regardless of the user's
+    // workspace.worktreeLimit and workspace.worktreeDir.
+    const configuredRoot = makeRepo('kory-ws-configured');
+    const sessionRoot = makeRepo('kory-ws-session');
+    const workflowStates: string[] = [];
+    const host = createHost(configuredRoot, sessionRoot, workflowStates);
+
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(configuredRoot),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(configuredRoot),
+      host,
+      workspaceConfig: { worktreeLimit: 1, worktreeDir: '.agent-trees' },
+    });
+
+    const results = await Promise.all([
+      service.runWorkerPipeline('session-limit', 'Implement safely'),
+      service.runWorkerPipeline('session-limit-2', 'Implement safely'),
+    ]);
+
+    // With worktreeLimit: 1 the second task must be refused at capacity rather
+    // than quietly receiving a second slot from the default of 4.
+    expect(results.some((r) => r.includes('at capacity'))).toBe(true);
+    // And the worktrees live in the configured directory, not the default.
+    expect(existsSync(join(sessionRoot, '.agent-trees'))).toBe(true);
+    expect(existsSync(join(sessionRoot, '.trees'))).toBe(false);
+
+    await service.dispose();
+  });
+
+  test('dispose drains the per-session-project managers it created', async () => {
+    const configuredRoot = makeRepo('kory-ws-dispose-configured');
+    const sessionRoot = makeRepo('kory-ws-dispose-session');
+    const workflowStates: string[] = [];
+    const host = createHost(configuredRoot, sessionRoot, workflowStates);
+
+    const service = new WorkerPipelineService({
+      providers: createProviders(),
+      state: new SessionStateService(),
+      git: new GitManager(configuredRoot),
+      workspaceManager: null,
+      snapshotManager: new SnapshotManager(configuredRoot),
+      host,
+    });
+
+    // A delegation that fails after spawn still leaves a worktree behind.
+    await service.runWorkerPipeline('session-dispose', 'Implement safely');
+    await service.dispose();
+
+    // The alternate project's worktree directory is released, so no stale
+    // worktrees survive the manager's lifetime.
+    expect(
+      gitOutput(sessionRoot, 'worktree', 'list', '--porcelain').match(/^worktree /gm),
+    ).toHaveLength(1);
   });
 });

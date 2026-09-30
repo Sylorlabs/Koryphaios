@@ -5,6 +5,7 @@
 import type {
   AgentIdentity,
   AgentStatus,
+  AgentMessage,
   WorkerDomain,
   WSMessage,
   ProviderName,
@@ -22,10 +23,12 @@ import type {
   StoredMessage,
 } from '@koryphaios/shared';
 import { SANDBOX_PRESETS, SessionRunTransitionError } from '@koryphaios/shared';
+import type { SessionAgentOverrides } from '@koryphaios/shared';
 import { normalizeReasoningLevel, determineAutoReasoningLevel } from '@koryphaios/shared';
-import { AGENT, DOMAIN, SESSION } from '../constants';
+import { AGENT, DOMAIN, SESSION, WORKSPACE } from '../constants';
 import {
   ProviderRegistry,
+  applyContextWindowOverride,
   resolveTrustedContextWindow,
   isLegacyModel,
   getNonLegacyModels,
@@ -43,13 +46,18 @@ import {
   omitImageInputs,
   type ImageInputMode,
 } from '../providers/attachment-admission';
+import { promptCacheMaintenance } from '../providers/cache-maintenance';
+import { createPromptCachePlan, derivePromptCacheLane } from '../providers/prompt-cache';
 import {
   ToolRegistry,
+  READ_ONLY_TOOLS,
   decideToolPermission,
   resolveToolPermissionPolicy,
   resolveSandboxOptions,
   resolveSubAgentPermissionPolicy,
   resolveSubAgentSandboxOptions,
+  type WorkspaceSandboxMode,
+  buildExposedToolset,
   type ToolCallInput,
   type ToolContext,
   type ToolCallOutput,
@@ -64,7 +72,6 @@ import {
 import { nanoid } from 'nanoid';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { redactSecretsInText, sanitizeForPrompt } from '../security';
-import { logBackgroundRegistrationFailure } from '../security/bash-sandbox';
 import {
   checkNoteToolPermission,
   filterToolDefsForNotesPermissions,
@@ -72,7 +79,7 @@ import {
   hasAnyVisibleNoteTools,
   formatNoteToolApprovalSummary,
 } from '../notes/notes-settings';
-import { isNoteToolName } from '@koryphaios/shared';
+import { NOTE_TOOL_DEFINITIONS, isNoteToolName } from '@koryphaios/shared';
 import {
   cpSync,
   existsSync,
@@ -90,6 +97,7 @@ import { join, resolve } from 'node:path';
 import { db, sessions } from '../db';
 import { eq } from 'drizzle-orm';
 import type { ISessionStore } from '../stores/session-store';
+import { syncSessionAgentOverrides } from '../stores/session-agent-overrides';
 import type { IMessageStore, RegenerationBranchReservation } from '../stores/message-store';
 import type { ITaskStore } from '../stores/task-store';
 import { SnapshotManager } from './snapshot-manager';
@@ -105,7 +113,7 @@ import {
   type SessionRunRestartHandoff,
 } from '../runs/session-run-store';
 import { GitManager } from './git-manager';
-import { WorkspaceManager } from './workspace-manager';
+import { WorkspaceManager, type ReconcileResult, type WorktreeStatus } from './workspace-manager';
 import {
   EventEmitterService,
   WorkerLifecycleService,
@@ -126,14 +134,23 @@ import type { WorkerPipelineHost } from './services/WorkerPipelineService';
 import type { UIMode } from '@koryphaios/shared';
 import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
 import { ManagerRunLifecycle, type ManagerRunHandle } from './services/ManagerRunLifecycle';
+import { TurnRuntime } from './services/TurnRuntime';
+import {
+  TurnOwnershipLostError,
+  TurnStreamFailure,
+  type CompletedToolCall,
+  type TurnStreamResult,
+} from './services/TurnRuntime.types';
 import { ConflictError } from '../errors/types';
 import {
   CRITIC_OUTPUT_TOKEN_LIMIT,
   MANAGER_OUTPUT_TOKEN_LIMIT,
+  TOKEN_CHARS,
   WORKER_OUTPUT_TOKEN_LIMIT,
   compilePrompt,
   createTaskContract,
   estimateOccupiedContextTokenUpperBound,
+  nonSkillTokensForCompaction,
   requiresMultiAgentDelegation,
   textTokenUpperBound,
 } from './prompts';
@@ -147,6 +164,7 @@ import { collaborationManager } from '../collaboration/manager';
 import {
   assembleAgentContext,
   loadAgentSettings,
+  loadAgentSettingsForSession,
   rememberExplicitPreference,
   saveAgentSettings,
   type AgentSettings,
@@ -166,9 +184,44 @@ import {
   type SessionReviewRollback,
 } from '../stores/session-review-store';
 import { ensurePlanNote, syncPlanNote } from './plan-mode';
+import { parseCheckpointJson } from './compaction-json';
+import { resolveLiveOccupancy } from './context-occupancy';
+import { isAutoCompactCoolingDown, withAutoCompactRetry } from './auto-compact';
 import { automaticMemoryPrompt } from './settings-contract';
-import { resolveSkills } from './skills';
+import { isPersonalSkillPinnable, resolveSkills } from './skills';
+import { MIN_SKILL_CONTEXT_BUDGET } from './skills';
+import { isContextLimitFailureMessage } from '../providers/provider-diagnostics';
+import { collectProviderEvents } from '../providers/provider-retry';
+import { RESPONSE_STYLE_SKILL_NAME } from './response-style-skill';
+
+/**
+ * Skills pinned on every manager turn regardless of prompt routing. The
+ * user's response style is a voice contract, not a task heuristic, so it is
+ * always in the bundle when the personal copy is readable. Plan mode adds its
+ * operating contract on top.
+ */
+function alwaysPinnedSkills(interactionMode: string | undefined): string[] {
+  const pins: string[] = [];
+  if (isPersonalSkillPinnable(RESPONSE_STYLE_SKILL_NAME)) pins.push(RESPONSE_STYLE_SKILL_NAME);
+  if (interactionMode === 'plan') pins.push('plan-mode');
+  return pins;
+}
 import { rankHarnessCandidates, type QualificationRole } from './skill-qualifications';
+import {
+  declineRelayRequest,
+  fileRelayRequest,
+  sendAgentMessage,
+} from './services/agent-mail-service';
+import { recordSkillUsage } from './skill-usage';
+import {
+  normalizeSkillAssignment,
+  persistSkillDeliveryEvidence,
+  validateSkillDeliveryEvidence,
+  type SkillAssignment,
+  type SkillDeliveryEvidence,
+  type SkillReviewContext,
+} from './skill-assignment';
+import { parseCriticReport, type CriticReport } from './critic-util';
 import {
   setCollaborationToolPolicy,
   clearCollaborationToolPolicy,
@@ -176,14 +229,27 @@ import {
 } from '../collaboration/tool-policy';
 import { checkAndEnforceCaps } from '../security/spend-caps-enforced';
 import { getCliConversationRevision } from '../providers/cli-session-state';
+import {
+  buildProjectionCheckpointMessage,
+  chunkProjectionTranscript,
+  planContextWindowProjection,
+  type ContextWindowProjectionPlan,
+  type ProjectableContextMessage,
+} from '../cache/context-window-projection';
+import {
+  pruneContextProjectionStore,
+  readContextProjectionCheckpoint,
+  touchContextProjectionCheckpoint,
+  writeContextProjectionCheckpoint,
+} from '../cache/context-projection-store';
 
 // ─── Internal Types ─────────────────────────────────────────────────────────
 
-interface CompletedToolCall {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-}
+/** Note tools whose calls are pure retrieval — safe to auto-allow under the
+ *  permissive presets without parking for an approval round-trip. */
+const READ_ONLY_NOTE_TOOL_NAMES: ReadonlySet<string> = new Set(
+  NOTE_TOOL_DEFINITIONS.filter((def) => def.category === 'read').map((def) => def.name),
+);
 
 interface InternalMessage {
   role: 'user' | 'assistant' | 'tool' | 'system';
@@ -192,16 +258,35 @@ interface InternalMessage {
   tool_calls?: CompletedToolCall[];
 }
 
+interface CachedContextProjectionCheckpoint {
+  summary: string;
+  sourceTokens: number;
+  checkpointTokens: number;
+  lastUsedAt: number;
+}
+
 interface LLMTurnResult {
   success: boolean;
+  failure?: Error;
   content?: string;
   usage?: {
     tokensIn: number;
     tokensOut: number;
     usageKnown: boolean;
+    /** True when tokensIn is approximate (cumulative agentic-harness total
+     *  or clamped to the trusted window). Withheld from auto-compact. */
+    estimated?: boolean;
     cachedInputTokens?: number;
     cacheWriteInputTokens?: number;
     breakdown?: ContextBreakdown;
+    /**
+     * Injected skill prompt chars for the turn (manifest `skillContextCost`,
+     * including manifest overhead). Provider-reported `tokensIn` already
+     * includes these chars, so the auto-compact trigger subtracts them via
+     * nonSkillTokensForCompaction — otherwise skill-heavy turns self-trigger
+     * compaction that pruning cannot relieve.
+     */
+    skillContextCostChars?: number;
   };
   completedToolCalls?: CompletedToolCall[];
   /** A native CLI harness performed work, even though it did not request a Kory tool call. */
@@ -214,6 +299,9 @@ interface CriticGateResult {
   feedback?: string;
   model?: string;
   provider?: string;
+  report?: CriticReport;
+  skillDelivery?: SkillDeliveryEvidence;
+  hardChecks?: { passed: boolean; output: string };
 }
 
 export interface AgentThreadEntry {
@@ -233,7 +321,9 @@ interface AgentThreadState {
   systemPrompt: string;
   promptManifestHash: string;
   taskContractHash: string;
+  skillDelivery?: SkillDeliveryEvidence;
   promptCache: StreamRequest['promptCache'];
+  cacheLaneKind?: StreamRequest['cacheLaneKind'];
   toolRole: 'worker' | 'critic';
   reasoningLevel?: string;
   maxTurns: number;
@@ -255,6 +345,12 @@ interface AgentThreadState {
 // history belongs in the session/message stores, not this live UI cache.
 const AGENT_THREAD_IDLE_TTL_MS = 30 * 60 * 1000;
 const MAX_COMPLETED_AGENT_THREADS_PER_SESSION = 24;
+
+// A run that used tools and then ended without a user-facing answer is
+// unfinished, not complete. Kory hands the turn back to the model this many
+// times so the model finishes the work itself; past this the run is reported
+// as unfinished rather than being marked done on the model's behalf.
+const MAX_FINAL_ANSWER_CONTINUATIONS = 2;
 
 // ─── Default Model Assignments per Domain ───────────────────────────────────
 // Model definitions are now resolved at runtime via live provider discovery,
@@ -282,21 +378,6 @@ function koryIdentityWithModel(model: string, provider: ProviderName): AgentIden
 }
 
 // ─── System Prompts ──────────────────────────────────────────────────────────
-
-/** Parse a JSON string into an object, tolerating malformed input (returns {}). */
-function safeParseJson(s?: string): Record<string, unknown> {
-  if (!s) return {};
-  try {
-    const o = JSON.parse(s);
-    return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : {};
-  } catch (err: unknown) {
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err) },
-      'Failed to parse JSON string in safeParseJson',
-    );
-    return {};
-  }
-}
 
 // ─── Kory Manager Class ─────────────────────────────────────────────────────
 
@@ -363,6 +444,9 @@ export interface AdmittedTaskInput {
   userMessage: string;
   preferredModel?: string;
   reasoningLevel?: string;
+  /** Client-side session context budget (tokens). Clamped against the
+   *  provider-verified window server-side; never sent to any provider API. */
+  contextWindow?: number;
   attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>;
   collaborationToolPolicy?: CollaborationToolPolicy;
   responseVariant?: { groupId: string; index: number };
@@ -390,7 +474,11 @@ interface AdmissionRecord {
 export class KoryManager implements WorkerPipelineHost {
   private memoryDir: string;
   private isProcessing = false;
-  private isYoloMode = false;
+  /** Per-chat mirror of the composer's YOLO pill, keyed by session. Nothing
+   *  enforces from this map — approval comes from the durable per-chat preset
+   *  (see getIsYoloMode) — but keying it per session means one chat can no
+   *  longer publish a process-wide posture for every other chat. */
+  private yoloModeMirrorBySession = new Map<string, boolean>();
   private snapshotManager: SnapshotManager;
   public readonly git: GitManager;
   private workspaceManager: WorkspaceManager | null = null;
@@ -409,6 +497,12 @@ export class KoryManager implements WorkerPipelineHost {
   private readonly runControllerByHandle = new WeakMap<ManagerRunHandle, AbortController>();
   private shutdownPromise: Promise<void> | null = null;
   private sessionMutationBarriers = new Set<string>();
+  /** Worker token spend accumulated during the current manager turn, folded
+   * into the assistant message cost so chat totals include subagents. */
+  private pendingWorkerUsage = new Map<
+    string,
+    { tokensIn: number; tokensOut: number; cost: number }
+  >();
   /** Permanent process-lifetime tombstones stop stale callbacks from reviving
    * a session after its durable row and archives have been erased. */
   private erasedSessions = new Set<string>();
@@ -449,7 +543,26 @@ export class KoryManager implements WorkerPipelineHost {
     string,
     { model: string; provider: ProviderName | undefined }
   >();
+  /** Client-side session context budget (tokens) from the composer's
+   *  context-window picker, threaded in with each admitted turn. A valid
+   *  override is stored for the turn; a null/undefined/invalid one clears it.
+   *  Budgeting-only — never forwarded as a provider API parameter. */
+  private contextWindowOverrideBySession = new Map<string, number>();
+  /** Last shrink level that succeeded per session+provider+model. Small-route
+   *  gateways (e.g. custom conduit routes with a tiny verified window) 413 on
+   *  the full prompt even for a one-word message — the next turn starts at the
+   *  remembered level instead of failing the same way again. Cleared when the
+   *  session is cleaned up. */
+  private contextShrinkHintBySession = new Map<string, number>();
+  private cachePrewarmBySession = new Map<string, { key: string; at: number }>();
+  /** Reusable model-independent downshift checkpoints. Canonical history stays
+   * in the message store and is never replaced by these derived views. */
+  private contextProjectionCheckpointByKey = new Map<string, CachedContextProjectionCheckpoint>();
   private compactingSessions = new Map<string, AbortController>();
+  /** Last automatic-compaction failure per session. While cooling down after
+   *  a failure, post-turn turns do not re-trigger (prevents a crash loop
+   *  that re-fires every turn while session_compactions stays empty). */
+  private lastAutoCompactFailureBySession = new Map<string, number>();
   private readonly restartHandoffOwner = `kory-manager-${crypto.randomUUID()}`;
   private readonly restartHandoffTasks = new Map<string, Promise<void>>();
   private readonly restartHandoffConsumers = new Map<
@@ -462,6 +575,38 @@ export class KoryManager implements WorkerPipelineHost {
     string,
     NonNullable<import('./prompts').TaskContract['goalContext']>
   >();
+  /** Guard: at most one automatic 25-turn-cap continuation per session run chain. */
+  private autoContinuationIssuedBySession = new Set<string>();
+  /** Unverified-context warnings are emitted once per session+model. Without
+   *  this, every manager/worker/critic compilePrompt re-broadcasts the same
+   *  `system.info` row each turn, spamming the feed for custom models whose
+   *  window is not (yet) verified. */
+  private warnedUnverifiedContextWindowBySession = new Map<string, Set<string>>();
+
+  /** Emit prompt-compilation warnings, deduplicating the repetitive
+   *  "Context window unverified" notice per session+model. Other warnings
+   *  (skill collisions, etc.) still emit every time. */
+  private emitCompilationWarnings(
+    sessionId: string,
+    warnings: readonly string[] | undefined,
+    provider: string,
+    model: string | undefined,
+  ): void {
+    if (!warnings?.length) return;
+    for (const w of warnings) {
+      if (typeof w === 'string' && w.startsWith('Context window unverified for')) {
+        const key = `${provider}/${model ?? 'unknown model'}`;
+        let seen = this.warnedUnverifiedContextWindowBySession.get(sessionId);
+        if (!seen) {
+          seen = new Set<string>();
+          this.warnedUnverifiedContextWindowBySession.set(sessionId, seen);
+        }
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+      this.emitWSMessage(sessionId, 'system.info', { message: w });
+    }
+  }
 
   /** Extend lifecycle policy without embedding provider-specific behavior in prompts. */
   public registerWorkflowHook(event: WorkflowHookEvent, hook: WorkflowHook): () => void {
@@ -541,12 +686,13 @@ export class KoryManager implements WorkerPipelineHost {
       snapshotManager: this.snapshotManager,
       tasks: this.tasks,
       host: this,
+      workspaceConfig: config.workspace,
     });
 
     // Initialize WorkspaceManager if git is available.
     // init() is async (git repo check, worktree recovery) so we fire-and-forget
-    // it the same way recoverState() is launched below. Until init completes,
-    // workspaceManager stays null and workers fall back to the main directory.
+    // it the same way recoverState() is launched below. Workspace availability
+    // and worker isolation are enforced by WorkerPipelineService.
     try {
       if (this.git.isGitRepo()) {
         const wm = new WorkspaceManager(workingDirectory, config.workspace);
@@ -586,6 +732,14 @@ export class KoryManager implements WorkerPipelineHost {
     }
     const session = await this.sessions.get(sessionId);
     return session?.archivedAt === undefined ? session : undefined;
+  }
+
+  /** Refresh the per-chat override mirror from a durable session projection. */
+  private hydrateSessionAgentOverrides(
+    sessionId: string,
+    overrides: SessionAgentOverrides | undefined,
+  ): void {
+    syncSessionAgentOverrides(sessionId, overrides);
   }
 
   private async wakeForProcessCompletions(
@@ -638,8 +792,10 @@ export class KoryManager implements WorkerPipelineHost {
           resumed.expectedBoundary,
         );
       } catch (error) {
-        const aborted =
-          ownerController.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+        // Only this continuation's controller can establish user cancellation.
+        // A provider or stale-generation AbortError is a failed recovery and
+        // must not be relabeled as a user stop.
+        const aborted = ownerController.signal.aborted;
         await this.runLifecycle.finish(
           resumed.handle!,
           aborted ? 'cancel' : 'fail',
@@ -906,27 +1062,36 @@ export class KoryManager implements WorkerPipelineHost {
     }
   }
 
-  setYoloMode(enabled: boolean) {
-    this.isYoloMode = enabled;
-    koryLog.info({ enabled }, 'YOLO mode state updated');
+  setYoloMode(enabled: boolean, sessionId?: string) {
+    if (sessionId) this.yoloModeMirrorBySession.set(sessionId, enabled);
+    koryLog.info({ enabled, sessionId }, 'YOLO mode mirror updated');
   }
 
   // ─── WorkerPipelineHost accessors ────────────────────────────────────────
   // These expose manager state/behavior to WorkerPipelineService via the
   // WorkerPipelineHost interface, replacing the prior closure bag.
-  getIsYoloMode(): boolean {
-    return this.isYoloMode;
+  getIsYoloMode(sessionId: string): boolean {
+    // Derived from the durable per-chat approval preset, never from the
+    // process-wide `toggle_yolo` mirror: that mirror is a UI echo of whichever
+    // chat was last focused, and using it here would let one chat's YOLO pill
+    // un-sandbox another chat's workers.
+    return loadAgentSettingsForSession(this.workingDirectory, sessionId).permissionMode === 'yolo';
   }
 
   getWorkingDirectory(): string {
     return this.workingDirectory;
   }
 
-  getQualityPolicy(workingDirectory = this.workingDirectory): {
+  getQualityPolicy(
+    workingDirectory = this.workingDirectory,
+    sessionId?: string,
+  ): {
     gateStrictness: 'strict' | 'advisory' | 'off';
     maxCriticIterations: number;
   } {
-    const settings = loadAgentSettings(workingDirectory);
+    // Session-scoped so a chat that turned the critic off (or on) is not
+    // overridden by — and does not override — any other chat in the project.
+    const settings = loadAgentSettingsForSession(workingDirectory, sessionId);
     return {
       gateStrictness: settings.criticGateEnabled ? (settings.gateStrictness ?? 'strict') : 'off',
       maxCriticIterations: settings.maxCriticIterations,
@@ -969,13 +1134,16 @@ export class KoryManager implements WorkerPipelineHost {
     const prompt = `Identify paths to modify or read. PLAN: ${plan}. Return ONLY JSON array.`;
     let result = '';
     try {
-      const stream = provider.streamResponse({
+      // Retried on a transient provider failure: an empty path list reads to the
+      // user as "the agent decided to touch nothing".
+      const collected = await collectProviderEvents(provider, {
         model: routing.model,
         systemPrompt: 'JSON only.',
         messages: [{ role: 'user', content: prompt }],
         maxTokens: 300,
       });
-      for await (const event of stream)
+      if (collected.failed) throw new Error(collected.error ?? 'Affected-path scan failed');
+      for (const event of collected.events)
         if (event.type === 'content_delta') result += event.content ?? '';
       return JSON.parse(result.trim().match(/\[.*\]/s)?.[0] || '[]');
     } catch (err: unknown) {
@@ -1031,8 +1199,7 @@ export class KoryManager implements WorkerPipelineHost {
       });
     } catch (error) {
       if (handle) {
-        const cancelled =
-          abort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+        const cancelled = abort.signal.aborted;
         await this.runLifecycle.finish(
           handle,
           cancelled ? 'cancel' : 'fail',
@@ -1109,9 +1276,9 @@ export class KoryManager implements WorkerPipelineHost {
         (message) => message.role !== 'system' || message.content.startsWith('[KORY_COMPACTION]'),
       );
       if (conversational.length < 2) throw new Error('There is not enough conversation to compact');
-      const transcript = conversational
-        .map((message) => `${message.role.toUpperCase()}: ${message.content}`)
-        .join('\n\n');
+      const buildTranscript = (messages: typeof conversational) =>
+        messages.map((message) => `${message.role.toUpperCase()}: ${message.content}`).join('\n\n');
+      const transcript = buildTranscript(conversational);
       const sourceTokens = Math.ceil(transcript.length / 4);
       emit('summarizing', 30, 'Summarizing with a fresh selected-model context', {
         sourceMessages: conversational.length,
@@ -1121,30 +1288,78 @@ export class KoryManager implements WorkerPipelineHost {
       const projectRoot = await this.resolveSessionWorkingDirectory(input.sessionId);
       const priorMemoryFile = readSessionMemory(projectRoot, input.sessionId);
       const priorMemory = priorMemoryFile.content;
-      const prompt = `Return one JSON object and nothing else. Preserve concrete truth; never invent completion or verification.\n\nRequired keys:\nprojectBrief (string)\ndecisions (string[])\nfilesAndCodeState (string[])\ncompletedWork (string[])\nactiveWork (string[])\nopenIssues (string[])\nnextActions (string[])\ncriticalContext (string[])\nconfidenceAndRisk (string)\ndurableMemory (string)\n\nEXISTING SESSION MEMORY:\n${priorMemory || '[none]'}\n\nTRANSCRIPT TO COMPACT:\n${transcript}`;
-      let raw = '';
+      // A single 8192-token summarizer call cannot hold a transcript that
+      // already exceeds the trusted window (or hit the 1000-message fetch
+      // cap). Summarize halves independently, then merge the partial
+      // checkpoints — instead of one giant call that fails.
+      const compactionWindow = this.resolveEffectiveSessionContextWindow(
+        input.sessionId,
+        model,
+        providerName,
+      );
+      const needsChunking =
+        conversational.length >= 1000 ||
+        (compactionWindow.contextKnown &&
+          typeof compactionWindow.contextWindow === 'number' &&
+          sourceTokens > compactionWindow.contextWindow);
+      const summarizerBase = {
+        provider,
+        model,
+        reasoningLevel: input.reasoningLevel,
+        projectRoot,
+        sessionId: input.sessionId,
+        compactionId,
+        priorMemory,
+        sourceTokensFloor: sourceTokens,
+        abort,
+      };
+      let raw: string;
       let tokensIn = sourceTokens;
       let tokensOut = 0;
-      const stream = provider.streamResponse({
-        model,
-        systemPrompt:
-          'You are a loss-averse conversation compactor. Produce valid JSON only. This is a fresh, read-only context boundary.',
-        messages: [{ role: 'user', content: prompt }],
-        maxTokens: 8192,
-        reasoningLevel: input.reasoningLevel,
-        signal: abort.signal,
-        workingDirectory: projectRoot,
-        sessionId: `${input.sessionId}:compaction:${compactionId}`,
-        harnessRole: 'manager',
-        sandbox: SANDBOX_PRESETS.readonly,
-      });
-      for await (const event of stream) {
-        if (event.type === 'error') throw new Error(event.error ?? 'Compaction model failed');
-        if (event.type === 'content_delta') raw += event.content ?? '';
-        if (event.type === 'usage_update') {
-          tokensIn = Math.max(tokensIn, (event.tokensIn ?? 0) + (event.tokensCache ?? 0));
-          tokensOut = Math.max(tokensOut, event.tokensOut ?? 0);
-        }
+      if (!needsChunking) {
+        const single = await this.runCompactionSummarizer({
+          ...summarizerBase,
+          transcript,
+        });
+        raw = single.raw;
+        tokensIn = single.tokensIn;
+        tokensOut = single.tokensOut;
+      } else {
+        emit(
+          'summarizing',
+          35,
+          'Transcript exceeds a single summarizer call; compacting in halves then merging',
+          { sourceMessages: conversational.length, sourceTokens },
+        );
+        const midpoint = Math.ceil(conversational.length / 2);
+        const firstHalf = await this.runCompactionSummarizer({
+          ...summarizerBase,
+          transcript: buildTranscript(conversational.slice(0, midpoint)),
+        });
+        abort.signal.throwIfAborted();
+        const secondHalf = await this.runCompactionSummarizer({
+          ...summarizerBase,
+          transcript: buildTranscript(conversational.slice(midpoint)),
+        });
+        abort.signal.throwIfAborted();
+        // Each half must be a valid checkpoint before merging; otherwise fail
+        // closed with history preserved instead of merging garbage.
+        const firstCheckpoint = parseCheckpointJson(firstHalf.raw);
+        const secondCheckpoint = parseCheckpointJson(secondHalf.raw);
+        this.validateCompactionCheckpoint(firstCheckpoint);
+        this.validateCompactionCheckpoint(secondCheckpoint);
+        emit('summarizing', 60, 'Merging half-checkpoints into a single continuation checkpoint', {
+          sourceMessages: conversational.length,
+          sourceTokens,
+        });
+        const merged = await this.runCompactionSummarizer({
+          ...summarizerBase,
+          priorMemory: '',
+          transcript: `Merge the following two partial session checkpoints into ONE checkpoint with exactly the required keys. Preserve concrete truth from both halves; never invent completion or verification.\n\nPARTIAL CHECKPOINT A:\n${JSON.stringify(firstCheckpoint)}\n\nPARTIAL CHECKPOINT B:\n${JSON.stringify(secondCheckpoint)}`,
+        });
+        raw = merged.raw;
+        tokensIn = Math.max(sourceTokens, firstHalf.tokensIn, secondHalf.tokensIn, merged.tokensIn);
+        tokensOut = merged.tokensOut;
       }
       abort.signal.throwIfAborted();
 
@@ -1152,30 +1367,8 @@ export class KoryManager implements WorkerPipelineHost {
         sourceMessages: conversational.length,
         sourceTokens,
       });
-      const jsonText = raw
-        .trim()
-        .replace(/^```(?:json)?\s*/i, '')
-        .replace(/\s*```$/, '');
-      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
-      const requiredArrays = [
-        'decisions',
-        'filesAndCodeState',
-        'completedWork',
-        'activeWork',
-        'openIssues',
-        'nextActions',
-        'criticalContext',
-      ];
-      if (
-        typeof parsed.projectBrief !== 'string' ||
-        typeof parsed.confidenceAndRisk !== 'string' ||
-        typeof parsed.durableMemory !== 'string' ||
-        requiredArrays.some((key) => !Array.isArray(parsed[key]))
-      ) {
-        throw new Error(
-          'The compactor returned an invalid checkpoint; original history was preserved',
-        );
-      }
+      const parsed = parseCheckpointJson(raw);
+      this.validateCompactionCheckpoint(parsed);
       const section = (title: string, values: unknown) =>
         `## ${title}\n${(values as unknown[]).map((value) => `- ${String(value)}`).join('\n') || '- None recorded'}`;
       const summary = [
@@ -1208,7 +1401,7 @@ export class KoryManager implements WorkerPipelineHost {
         summary,
         sourceMessageCount: conversational.length,
         sourceTokens: tokensIn,
-        checkpointTokens: tokensOut || Math.ceil(summary.length / 4),
+        checkpointTokens: tokensOut || Math.ceil(summary.length / TOKEN_CHARS),
       });
       // The authoritative durable memory is inside the atomically committed
       // checkpoint above. Keep memory.md as a convenient mirror; a filesystem
@@ -1227,13 +1420,16 @@ export class KoryManager implements WorkerPipelineHost {
           'Compaction memory mirror could not be updated',
         );
       }
-      const checkpointTokens = tokensOut || Math.ceil(summary.length / 4);
+      const checkpointTokens = tokensOut || Math.ceil(summary.length / TOKEN_CHARS);
       emit(
         'complete',
         100,
         'Compaction complete — the next manager turn starts from this checkpoint',
         { sourceMessages: conversational.length, sourceTokens: tokensIn, checkpointTokens },
       );
+      // A fresh checkpoint resets the automatic-failure backoff for both
+      // manual and automatic compactions.
+      this.lastAutoCompactFailureBySession.delete(input.sessionId);
       return { compactionId, sourceMessages: conversational.length, checkpointTokens };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1251,6 +1447,398 @@ export class KoryManager implements WorkerPipelineHost {
         );
       }
     }
+  }
+
+  /** Validate a decoded compactor checkpoint against the required contract.
+   *  Throws (history preserved) when the model invented shape instead. */
+  private validateCompactionCheckpoint(parsed: Record<string, unknown>): void {
+    const requiredArrays = [
+      'decisions',
+      'filesAndCodeState',
+      'completedWork',
+      'activeWork',
+      'openIssues',
+      'nextActions',
+      'criticalContext',
+    ];
+    if (
+      typeof parsed.projectBrief !== 'string' ||
+      typeof parsed.confidenceAndRisk !== 'string' ||
+      typeof parsed.durableMemory !== 'string' ||
+      requiredArrays.some((key) => !Array.isArray(parsed[key]))
+    ) {
+      throw new Error(
+        'The compactor returned an invalid checkpoint; original history was preserved',
+      );
+    }
+  }
+
+  /** Single summarizer call in a fresh selected-model context. Chunked
+   *  compactions call this once per half plus once to merge. */
+  private async runCompactionSummarizer(input: {
+    provider: Provider;
+    model: string;
+    reasoningLevel?: string;
+    projectRoot: string;
+    sessionId: string;
+    compactionId: string;
+    transcript: string;
+    priorMemory: string;
+    sourceTokensFloor: number;
+    abort: AbortController;
+  }): Promise<{ raw: string; tokensIn: number; tokensOut: number }> {
+    const compactionSystemPrompt =
+      'You are a loss-averse conversation compactor. Produce valid JSON only. This is a fresh, read-only context boundary.';
+    const prompt = `Return one JSON object and nothing else. Preserve concrete truth; never invent completion or verification.\n\nRequired keys:\nprojectBrief (string)\ndecisions (string[])\nfilesAndCodeState (string[])\ncompletedWork (string[])\nactiveWork (string[])\nopenIssues (string[])\nnextActions (string[])\ncriticalContext (string[])\nconfidenceAndRisk (string)\ndurableMemory (string)\n\nEXISTING SESSION MEMORY:\n${input.priorMemory || '[none]'}\n\nTRANSCRIPT TO COMPACT:\n${input.transcript}`;
+    let raw = '';
+    let tokensIn = input.sourceTokensFloor;
+    let tokensOut = 0;
+    // Retried on a transient provider failure: compaction is the one auxiliary
+    // call whose failure is visible to the user, and losing a whole session's
+    // summary to a single upstream blip is the worst possible outcome.
+    const collected = await collectProviderEvents(
+      input.provider,
+      {
+        model: input.model,
+        systemPrompt: compactionSystemPrompt,
+        messages: [{ role: 'user', content: prompt }],
+        maxTokens: 8192,
+        reasoningLevel: input.reasoningLevel,
+        signal: input.abort.signal,
+        workingDirectory: input.projectRoot,
+        sessionId: `${input.sessionId}:compaction:${input.compactionId}`,
+        harnessRole: 'manager',
+        promptCache: createPromptCachePlan({
+          stableSystemPrompt: compactionSystemPrompt,
+          providerAdapter: input.provider.name,
+          role: 'compaction',
+          workspaceScope: input.projectRoot,
+        }),
+        promptCacheKeepaliveMode: 'off',
+        cacheLaneKind: 'compaction',
+        sandbox: SANDBOX_PRESETS.readonly,
+      },
+      {
+        signal: input.abort.signal,
+        onRetry: (attempt, reason) =>
+          koryLog.warn(
+            { sessionId: input.sessionId, provider: input.provider.name, attempt, reason },
+            'Compaction hit a transient provider error — retrying',
+          ),
+      },
+    );
+    if (collected.failed) throw new Error(collected.error ?? 'Compaction model failed');
+    for (const event of collected.events) {
+      if (event.type === 'content_delta') raw += event.content ?? '';
+      if (event.type === 'usage_update') {
+        tokensIn = Math.max(tokensIn, (event.tokensIn ?? 0) + (event.tokensCache ?? 0));
+        tokensOut = Math.max(tokensOut, event.tokensOut ?? 0);
+      }
+    }
+    input.abort.signal.throwIfAborted();
+    return { raw, tokensIn, tokensOut };
+  }
+
+  /**
+   * Build a non-destructive view when the selected model cannot admit the
+   * canonical conversation. The old lineage remains authoritative in the
+   * message store; the destination gets a reusable checkpoint plus exact
+   * recent tail sized to its verified window.
+   */
+  private async projectMessagesForTargetWindow(input: {
+    sessionId: string;
+    modelId: string;
+    provider: Provider;
+    reasoningLevel?: string;
+    messages: InternalMessage[];
+    abort: AbortController;
+    sourceBoundaryMessageId?: string;
+  }): Promise<InternalMessage[]> {
+    const window = this.resolveEffectiveSessionContextWindow(
+      input.sessionId,
+      input.modelId,
+      input.provider.name,
+    );
+    if (
+      !window.contextKnown ||
+      typeof window.contextWindow !== 'number' ||
+      window.contextWindow <= 0 ||
+      input.messages.length === 0
+    ) {
+      return input.messages;
+    }
+    // Tool-loop turns already use this derived in-memory history. Avoid
+    // recursively summarizing the projection marker on every tool call.
+    if (
+      input.messages.some(
+        (message) =>
+          message.role === 'system' &&
+          typeof message.content === 'string' &&
+          message.content.startsWith('[KORY_CONTEXT_PROJECTION'),
+      )
+    ) {
+      return input.messages;
+    }
+
+    const targetWindow = window.contextWindow;
+    const reservedOutputTokens = Math.min(
+      MANAGER_OUTPUT_TOKEN_LIMIT,
+      Math.max(2_048, Math.floor(targetWindow * 0.2)),
+    );
+    const stableOverheadTokens = Math.min(48_000, Math.max(8_000, Math.floor(targetWindow * 0.15)));
+    const boundary = input.sourceBoundaryMessageId
+      ? undefined
+      : await this.messages?.getActiveBoundary(input.sessionId);
+    const sourceContextKey = input.sourceBoundaryMessageId
+      ? `${input.sessionId}:boundary:${input.sourceBoundaryMessageId}`
+      : `${input.sessionId}:revision:${boundary?.contextRevision ?? 0}:message:${boundary?.messageId ?? 'root'}`;
+    const projectRoot = await this.resolveSessionWorkingDirectory(input.sessionId);
+    const plan = planContextWindowProjection({
+      sourceContextKey,
+      messages: input.messages,
+      targetModel: `${input.provider.name}:${input.modelId}`,
+      targetWindow,
+      reservedOutputTokens,
+      stableOverheadTokens,
+      universalContextKey: `kory-context-v1:${projectRoot}`,
+    });
+    if (!plan.required) return input.messages;
+    if (plan.checkpointSource.length === 0 || plan.recentTailTokens > plan.targetInputBudget) {
+      throw new Error(
+        `The latest context alone exceeds the ${targetWindow.toLocaleString()}-token window for ${input.modelId}. Choose a larger-context model or shorten the latest input.`,
+      );
+    }
+
+    let cached = this.contextProjectionCheckpointByKey.get(plan.checkpointKey);
+    let checkpointSource: 'memory' | 'disk' | 'new' = cached ? 'memory' : 'new';
+    if (!cached) {
+      try {
+        const persisted = readContextProjectionCheckpoint(plan.checkpointKey);
+        if (persisted) {
+          cached = {
+            summary: persisted.summary,
+            sourceTokens: persisted.sourceTokens,
+            checkpointTokens: persisted.checkpointTokens,
+            lastUsedAt: Date.now(),
+          };
+          this.contextProjectionCheckpointByKey.set(plan.checkpointKey, cached);
+          checkpointSource = 'disk';
+          try {
+            touchContextProjectionCheckpoint(persisted);
+          } catch (error) {
+            koryLog.debug(
+              { error, checkpointKey: plan.checkpointKey.slice(0, 16) },
+              'Could not update context projection checkpoint access time',
+            );
+          }
+        }
+      } catch (error) {
+        koryLog.warn(
+          { error, checkpointKey: plan.checkpointKey.slice(0, 16) },
+          'Could not read durable context projection checkpoint',
+        );
+      }
+    }
+    const checkpointReused = cached !== undefined;
+    if (!cached) {
+      const priorMemory = readSessionMemory(projectRoot, input.sessionId).content;
+      const summarizerChunkBudget = Math.max(
+        4_096,
+        Math.min(64_000, Math.floor(targetWindow * 0.45)),
+      );
+      const transcripts = chunkProjectionTranscript(plan.checkpointSource, summarizerChunkBudget);
+      if (transcripts.length === 0) return input.messages;
+      const projectionId = plan.checkpointKey.slice(0, 16);
+      const partials: Record<string, unknown>[] = [];
+      let observedSourceTokens = 0;
+      let observedCheckpointTokens = 0;
+      for (let index = 0; index < transcripts.length; index++) {
+        input.abort.signal.throwIfAborted();
+        const transcript = transcripts[index]!;
+        const summarized = await this.runCompactionSummarizer({
+          provider: input.provider,
+          model: input.modelId,
+          reasoningLevel: input.reasoningLevel,
+          projectRoot,
+          sessionId: input.sessionId,
+          compactionId: `projection-${projectionId}-${index}`,
+          transcript,
+          priorMemory: index === 0 ? priorMemory : '',
+          sourceTokensFloor: Math.ceil(transcript.length / TOKEN_CHARS),
+          abort: input.abort,
+        });
+        observedSourceTokens += summarized.tokensIn;
+        observedCheckpointTokens += summarized.tokensOut;
+        const parsed = parseCheckpointJson(summarized.raw);
+        this.validateCompactionCheckpoint(parsed);
+        partials.push(parsed);
+      }
+
+      // Pairwise merges keep each summarizer request bounded even for very
+      // large source histories.
+      let mergeRound = 0;
+      let current = partials;
+      while (current.length > 1) {
+        const next: Record<string, unknown>[] = [];
+        for (let index = 0; index < current.length; index += 2) {
+          const left = current[index]!;
+          const right = current[index + 1];
+          if (!right) {
+            next.push(left);
+            continue;
+          }
+          const mergeTranscript =
+            `Merge the following two partial session checkpoints into ONE checkpoint with exactly the required keys. ` +
+            `Preserve concrete truth from both; never invent completion or verification.\n\n` +
+            `PARTIAL CHECKPOINT A:\n${JSON.stringify(left)}\n\n` +
+            `PARTIAL CHECKPOINT B:\n${JSON.stringify(right)}`;
+          const merged = await this.runCompactionSummarizer({
+            provider: input.provider,
+            model: input.modelId,
+            reasoningLevel: input.reasoningLevel,
+            projectRoot,
+            sessionId: input.sessionId,
+            compactionId: `projection-${projectionId}-merge-${mergeRound}-${index / 2}`,
+            transcript: mergeTranscript,
+            priorMemory: '',
+            sourceTokensFloor: Math.ceil(mergeTranscript.length / TOKEN_CHARS),
+            abort: input.abort,
+          });
+          observedCheckpointTokens += merged.tokensOut;
+          const parsed = parseCheckpointJson(merged.raw);
+          this.validateCompactionCheckpoint(parsed);
+          next.push(parsed);
+        }
+        current = next;
+        mergeRound++;
+      }
+
+      const parsed = current[0]!;
+      const section = (title: string, values: unknown) =>
+        `## ${title}\n${(values as unknown[]).map((value) => `- ${String(value)}`).join('\n') || '- None recorded'}`;
+      const summary = [
+        '# Model-Switch Context Checkpoint',
+        String(parsed.projectBrief),
+        section('Decisions', parsed.decisions),
+        section('Files and Code State', parsed.filesAndCodeState),
+        section('Completed Work', parsed.completedWork),
+        section('Active Work', parsed.activeWork),
+        section('Open Issues', parsed.openIssues),
+        section('Next Actions', parsed.nextActions),
+        section('Critical Context', parsed.criticalContext),
+        `## Confidence and Risk\n${String(parsed.confidenceAndRisk)}`,
+        `## Durable Session Memory\n${String(parsed.durableMemory)}`,
+      ].join('\n\n');
+      if (summary.length < 200) {
+        throw new Error(
+          'The model-switch checkpoint was too small; canonical history was preserved',
+        );
+      }
+      cached = {
+        summary,
+        sourceTokens: Math.max(plan.checkpointSourceTokens, observedSourceTokens),
+        checkpointTokens: observedCheckpointTokens || Math.ceil(summary.length / TOKEN_CHARS),
+        lastUsedAt: Date.now(),
+      };
+      this.contextProjectionCheckpointByKey.set(plan.checkpointKey, cached);
+      try {
+        writeContextProjectionCheckpoint({
+          checkpointKey: plan.checkpointKey,
+          summary: cached.summary,
+          sourceTokens: cached.sourceTokens,
+          checkpointTokens: cached.checkpointTokens,
+          lastUsedAt: cached.lastUsedAt,
+        });
+        pruneContextProjectionStore();
+      } catch (error) {
+        koryLog.warn(
+          { error, checkpointKey: plan.checkpointKey.slice(0, 16) },
+          'Could not persist context projection checkpoint',
+        );
+      }
+      if (this.contextProjectionCheckpointByKey.size > 24) {
+        const oldest = [...this.contextProjectionCheckpointByKey.entries()].sort(
+          (a, b) => a[1].lastUsedAt - b[1].lastUsedAt,
+        )[0]?.[0];
+        if (oldest) this.contextProjectionCheckpointByKey.delete(oldest);
+      }
+    } else {
+      cached.lastUsedAt = Date.now();
+    }
+
+    const checkpointMessage = buildProjectionCheckpointMessage(
+      plan as ContextWindowProjectionPlan<ProjectableContextMessage>,
+      cached.summary,
+    );
+    koryLog.info(
+      {
+        sessionId: input.sessionId,
+        model: input.modelId,
+        provider: input.provider.name,
+        sourceTokens: plan.sourceTokens,
+        targetWindow,
+        checkpointSourceTokens: plan.checkpointSourceTokens,
+        recentTailTokens: plan.recentTailTokens,
+        checkpointTokens: cached.checkpointTokens,
+        checkpointReused,
+        checkpointSource,
+        checkpointKey: plan.checkpointKey.slice(0, 16),
+      },
+      'Projected oversized canonical context into the selected model window',
+    );
+    return [checkpointMessage as InternalMessage, ...(plan.recentTail as InternalMessage[])];
+  }
+
+  /** Fire-and-forget automatic compaction with bounded retries and a
+   *  per-session failure cooldown. Retries use exponential backoff; a final
+   *  failure cools the session down so the next turns do not re-trigger
+   *  while the compactor keeps failing. */
+  private scheduleAutoCompaction(
+    sessionId: string,
+    selectedModel: string,
+    reasoningLevel: string | undefined,
+    deps: { sleep?: (ms: number) => Promise<void> } = {},
+  ): void {
+    if (isAutoCompactCoolingDown(this.lastAutoCompactFailureBySession.get(sessionId))) {
+      koryLog.debug(
+        { sessionId },
+        'Skipping automatic compaction while a recent failure cools down',
+      );
+      return;
+    }
+    void (async () => {
+      if (this.erasedSessions.has(sessionId)) return;
+      const outcome = await withAutoCompactRetry(
+        () =>
+          this.compactSession({
+            sessionId,
+            selectedModel,
+            reasoningLevel,
+            automatic: true,
+          }),
+        ...(deps.sleep ? [{ sleep: deps.sleep }] : []),
+      );
+      if (outcome.ok) {
+        this.lastAutoCompactFailureBySession.delete(sessionId);
+      } else {
+        this.lastAutoCompactFailureBySession.set(sessionId, Date.now());
+        const msg = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+        koryLog.warn(
+          { error: outcome.error, sessionId, attempts: outcome.attempts },
+          'Automatic compaction did not complete',
+        );
+        // The automatic path is fire-and-forget: surface the final failure
+        // as a UI banner (system.error) instead of silent idle, after
+        // retries are exhausted — not once per attempt. The original
+        // conversation remains active in every failure branch.
+        this.emitError(
+          sessionId,
+          `Automatic compaction failed (${msg}). You can keep chatting; try compacting manually later.`,
+        );
+      }
+    })().catch((error) =>
+      koryLog.warn({ error, sessionId }, 'Automatic compaction scheduler failed'),
+    );
   }
 
   async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
@@ -1642,7 +2230,16 @@ export class KoryManager implements WorkerPipelineHost {
         }
         throw new Error('There is no pending change review for this session.');
       }
-      if (review.projectRoot !== projectRoot) {
+      // Older persisted reviews may use a filesystem alias (on macOS,
+      // /var and /private/var). Compare physical directories on both sides.
+      // Missing/unresolvable review roots still fail closed.
+      let reviewProjectRoot: string | null = null;
+      try {
+        if (review.projectRoot) reviewProjectRoot = realpathSync(review.projectRoot);
+      } catch {
+        // Terminalize below without attempting a rollback.
+      }
+      if (reviewProjectRoot !== projectRoot) {
         const terminalized = await terminalizeSessionReview(
           review,
           'The session project changed after this review was created. Koryphaios refused to apply a decision against a different project.',
@@ -1753,7 +2350,7 @@ export class KoryManager implements WorkerPipelineHost {
 
     let decision = 'ANSWER';
     try {
-      const stream = provider.streamResponse({
+      const collected = await collectProviderEvents(provider, {
         model: routing.model,
         systemPrompt:
           'You are helping route an inquiry. You must call exactly one tool to indicate your choice.',
@@ -1771,8 +2368,9 @@ export class KoryManager implements WorkerPipelineHost {
         ],
         maxTokens: 50,
       });
+      if (collected.failed) throw new Error(collected.error ?? 'Inquiry routing failed');
 
-      for await (const event of stream) {
+      for (const event of collected.events) {
         if (event.type === 'tool_use_stop' && event.toolName === 'route_inquiry') {
           try {
             const args = JSON.parse(event.toolInput || '{}');
@@ -1799,6 +2397,115 @@ export class KoryManager implements WorkerPipelineHost {
       return `MANAGER ADVICE: ${searchResult.output}`;
     }
     return `MANAGER ANSWER: I recommend proceeding with the current task.`;
+  }
+
+  /**
+   * Handle a worker's request_manager_relay call. The worker can never reach
+   * another project's manager directly; this records the request, asks the
+   * manager (as a quick routing decision) whether to forward it, and either
+   * sends the cross-project message on the manager's behalf or declines with
+   * a reason the worker sees inline.
+   */
+  private async handleRelayRequest(
+    sessionId: string,
+    workerId: string,
+    toProject: string,
+    subject: string,
+    body: string,
+  ): Promise<string> {
+    const workerLabel = workerId === 'kory-manager' ? 'worker agent' : `${workerId} (worker)`;
+    let relay: AgentMessage | null = null;
+    try {
+      relay = await fileRelayRequest({
+        sessionId,
+        workerId,
+        workerLabel,
+        toProject,
+        subject,
+        body,
+      });
+    } catch (err: unknown) {
+      return `RELAY FAILED: ${err instanceof Error ? err.message : String(err)}`;
+    }
+
+    if (!toProject.trim()) {
+      await declineRelayRequest(relay.id, 'No target project supplied');
+      return 'RELAY DECLINED: no target project was supplied. Provide the project name whose manager should receive the request.';
+    }
+
+    this.emitThought(sessionId, 'analyzing', `Relay request for (${toProject}): "${subject}"`);
+    const workingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    let decision = 'FORWARD';
+    let reason = '';
+    try {
+      const routing = this.resolveActiveRouting(
+        undefined,
+        'general',
+        true,
+        body,
+        undefined,
+        workingDirectory,
+      );
+      const provider = await this.providers.resolveProvider(routing.model, routing.provider);
+      if (!provider) throw new Error('no provider available');
+      const collected = await collectProviderEvents(provider, {
+        model: routing.model,
+        systemPrompt:
+          "You are the manager deciding whether to forward a sub-agent request to another project's manager. Call exactly one tool to indicate your decision. Forward when the request is legitimate project-to-project coordination; decline when it is out of scope, unsafe, or better handled locally.",
+        messages: [
+          {
+            role: 'user',
+            content: `Target project: ${toProject}\nSubject: ${subject}\n\nRequest:\n${body}`,
+          },
+        ],
+        tools: [
+          {
+            name: 'decide_relay',
+            description: 'Decide whether to forward the request',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                decision: { type: 'string', enum: ['FORWARD', 'DECLINE'] },
+                reason: { type: 'string' },
+              },
+              required: ['decision'],
+            },
+          },
+        ],
+        maxTokens: 200,
+      });
+      if (collected.failed) throw new Error(collected.error ?? 'Relay decision failed');
+      for (const event of collected.events) {
+        if (event.type === 'tool_use_stop' && event.toolName === 'decide_relay') {
+          try {
+            const args = JSON.parse(event.toolInput || '{}');
+            if (args.decision) decision = String(args.decision);
+            if (args.reason) reason = String(args.reason);
+          } catch {
+            // keep defaults
+          }
+        }
+      }
+    } catch (err: unknown) {
+      koryLog.warn({ err }, 'Relay decision routing failed; defaulting to FORWARD');
+    }
+
+    if (decision !== 'FORWARD') {
+      await declineRelayRequest(relay.id, reason || 'Manager declined to relay');
+      return `RELAY DECLINED by your manager: ${reason || 'the request was judged out of scope for cross-project messaging.'}`;
+    }
+
+    const message = await sendAgentMessage({
+      fromSessionId: sessionId,
+      fromAgentId: 'kory-manager',
+      fromRole: 'manager',
+      fromLabel: 'Kory manager',
+      toProject,
+      subject,
+      body: `[Relayed for ${workerLabel}]\n\n${body}`,
+      replyToMessageId: relay.replyToMessageId,
+    });
+    return `RELAY FORWARDED: your request was sent to ${message.toLabel} as message ${message.id} (${message.status}). Check list_agent_messages later for the reply.`;
   }
 
   /** Public WorkerPipelineHost entry point — delegates to the internal impl. */
@@ -1962,8 +2669,7 @@ export class KoryManager implements WorkerPipelineHost {
         await this.finishRunAndProject(handle, 'complete', completeReason, 'idle');
         return result;
       } catch (error) {
-        const aborted =
-          controller.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+        const aborted = controller.signal.aborted;
         await this.finishRunAndProject(
           handle,
           aborted ? 'cancel' : 'fail',
@@ -2121,6 +2827,7 @@ export class KoryManager implements WorkerPipelineHost {
       userMessage: input.userMessage,
       preferredModel: input.preferredModel ?? null,
       reasoningLevel: input.reasoningLevel ?? null,
+      contextWindow: input.contextWindow ?? null,
       attachments: (input.attachments ?? []).map((attachment) => ({
         type: attachment.type,
         data: attachment.data,
@@ -2430,11 +3137,11 @@ export class KoryManager implements WorkerPipelineHost {
           intentAbort,
           input.regenerationBranch,
           input.responseMessageId,
+          input.contextWindow,
         ),
       );
     } catch (error) {
-      const aborted =
-        intentAbort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+      const aborted = intentAbort.signal.aborted;
       this.stopHeartbeat(sessionId);
       this.isProcessing = false;
       let terminalError: unknown;
@@ -2512,6 +3219,7 @@ export class KoryManager implements WorkerPipelineHost {
     intentAbort?: AbortController,
     regenerationBranch?: RegenerationBranchReservation,
     responseMessageId?: string,
+    contextWindow?: number,
   ): Promise<void> {
     if (!intentAbort) throw new Error('Session execution is missing its abort controller');
     const handle = this.requireRunHandle(sessionId);
@@ -2522,6 +3230,10 @@ export class KoryManager implements WorkerPipelineHost {
     }
     this.assertRunHandleActive(handle);
     interactionMode = interactionMode ?? session?.interactionMode ?? 'act';
+    // Re-read this chat's approval preset, agent mode, and critic toggle from
+    // the durable row so a restart (or a second window) enforces the same
+    // per-chat posture the composer is showing.
+    this.hydrateSessionAgentOverrides(sessionId, session?.agentOverrides);
     this.isProcessing = true;
     this.startHeartbeat(sessionId);
     this.setHeartbeatPhase(sessionId, 'analyzing');
@@ -2682,6 +3394,7 @@ export class KoryManager implements WorkerPipelineHost {
           imageInputMode,
           regenerationBranch,
           responseMessageId,
+          contextWindow,
         );
       } finally {
         clearTimeout(processTimeout);
@@ -2832,6 +3545,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'unorouter') return 'UnoRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
@@ -2869,6 +3583,38 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   /**
+   * Accumulate worker spend into the current manager turn. Called by
+   * WorkerPipelineService after each worker completes; folded into the next
+   * persisted assistant message so session totals include subagent cost.
+   */
+  recordWorkerUsage(
+    sessionId: string,
+    usage: { provider?: string; model?: string; tokensIn?: number; tokensOut?: number },
+  ): void {
+    try {
+      const tokensIn = Math.max(0, Math.floor(usage.tokensIn ?? 0));
+      const tokensOut = Math.max(0, Math.floor(usage.tokensOut ?? 0));
+      if (!tokensIn && !tokensOut) return;
+      let cost = 0;
+      try {
+        if (usage.provider && usage.model) {
+          cost = computeCostUsd(usage.provider, usage.model, tokensIn, tokensOut)?.costUsd ?? 0;
+        }
+      } catch {
+        cost = 0;
+      }
+      const prev = this.pendingWorkerUsage.get(sessionId);
+      this.pendingWorkerUsage.set(sessionId, {
+        tokensIn: (prev?.tokensIn ?? 0) + tokensIn,
+        tokensOut: (prev?.tokensOut ?? 0) + tokensOut,
+        cost: (prev?.cost ?? 0) + cost,
+      });
+    } catch {
+      // Accounting must never break delegation.
+    }
+  }
+
+  /**
    * Run the worker pipeline (confirm if needed, routeToWorker, return summary).
    * Used when the manager explicitly calls delegate_to_worker. Only the manager LLM decides to spawn a worker.
    */
@@ -2878,6 +3624,7 @@ export class KoryManager implements WorkerPipelineHost {
     preferredModel?: string,
     reasoningLevel?: string,
     domainHint?: string,
+    skillAssignment?: SkillAssignment,
   ): Promise<string> {
     const managerOwnsLifecycle = this.hasActiveSessionExecution(sessionId);
     const lifecycleLease = managerOwnsLifecycle
@@ -2939,6 +3686,7 @@ export class KoryManager implements WorkerPipelineHost {
         workerChoice,
         reasoningLevel,
         domainHint,
+        normalizeSkillAssignment(skillAssignment),
       );
       const after = await this.events.runWorkflowHooks('after-worker', sessionId, { task, result });
       return after.decision === 'deny'
@@ -3052,14 +3800,19 @@ export class KoryManager implements WorkerPipelineHost {
 
     let out = '';
     try {
-      const stream = provider.streamResponse({
-        model: routing.model,
-        systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-        maxTokens: 32,
-        signal,
-      });
-      for await (const event of stream) {
+      const collected = await collectProviderEvents(
+        provider,
+        {
+          model: routing.model,
+          systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          maxTokens: 32,
+          signal,
+        },
+        { signal },
+      );
+      if (collected.failed) throw new Error(collected.error ?? 'title LLM stream failed');
+      for (const event of collected.events) {
         if (event.type === 'content_delta') out += event.content ?? '';
       }
     } catch (err) {
@@ -3104,8 +3857,21 @@ export class KoryManager implements WorkerPipelineHost {
     task?: string,
     reviewDirectory = this.workingDirectory,
     producerIdentity?: { provider: ProviderName; model: string },
+    skillReviewContext?: SkillReviewContext,
   ): Promise<CriticGateResult> {
-    if (!loadAgentSettings(reviewDirectory).criticGateEnabled) {
+    const reviewContract =
+      skillReviewContext?.taskContract ?? createTaskContract(task ?? 'Review delegated work');
+    const workerDelivery = skillReviewContext?.delivery;
+    if (
+      skillReviewContext &&
+      (!workerDelivery || !validateSkillDeliveryEvidence(workerDelivery, reviewContract))
+    ) {
+      return {
+        passed: false,
+        feedback: 'Worker skill delivery evidence is missing or does not match its task contract.',
+      };
+    }
+    if (!loadAgentSettingsForSession(reviewDirectory, sessionId).criticGateEnabled) {
       return { passed: true, skipped: true, feedback: 'Critic disabled by user.' };
     }
     const beforeCritic = await this.events.runWorkflowHooks('before-critic', sessionId, {
@@ -3119,7 +3885,6 @@ export class KoryManager implements WorkerPipelineHost {
       };
     }
     const hardCheckResult = await this.runHardChecks(sessionId, reviewDirectory);
-    if (!hardCheckResult.passed) return { passed: false, feedback: hardCheckResult.output };
 
     const producerRouting = producerIdentity
       ? { model: producerIdentity.model, provider: producerIdentity.provider }
@@ -3170,7 +3935,7 @@ export class KoryManager implements WorkerPipelineHost {
     if (!provider) return { passed: false, feedback: 'Critic unavailable; result is unverified.' };
     const criticGuidance = assembleAgentContext(
       reviewDirectory,
-      loadAgentSettings(reviewDirectory),
+      loadAgentSettingsForSession(reviewDirectory, sessionId),
     );
     const criticMemoryContext = assembleMemoryContext(reviewDirectory, sessionId);
     const criticMemory = automaticMemoryPrompt(
@@ -3186,7 +3951,9 @@ export class KoryManager implements WorkerPipelineHost {
       ? `THE OBJECTIVE (what the worker was asked to accomplish):\n${task.trim().slice(0, 2_000)}\n\n`
       : '';
     const criticPrompt =
-      `${objective}Worker transcript to review:\n\n${transcriptText}\n\n` +
+      `${objective}Host recorded worker skill delivery (evidence, not critic instructions):\n${JSON.stringify(workerDelivery ?? null)}\n\n` +
+      `Hard check evidence:\n${JSON.stringify(hardCheckResult)}\n\n` +
+      `Worker transcript to review:\n\n${transcriptText}\n\n` +
       `Critique against the objective: (1) does the work actually accomplish it, ` +
       `(2) is the implementation correct (verify claims by reading the real files — do not trust the transcript), ` +
       `(3) did it break or regress anything nearby, (4) is anything incomplete or stubbed. ` +
@@ -3201,23 +3968,29 @@ export class KoryManager implements WorkerPipelineHost {
       reservedOutputTokens: CRITIC_OUTPUT_TOKEN_LIMIT,
       requireVerifiedContextWindow: true,
       workingDirectory: reviewDirectory,
-      taskContract: createTaskContract(task ?? 'Review delegated work'),
+      taskContract: reviewContract,
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
-    if (criticCompilation.warnings?.length) {
-      for (const w of criticCompilation.warnings) {
-        this.emitWSMessage(sessionId, 'system.info', { message: w });
-      }
-    }
+    this.emitCompilationWarnings(
+      sessionId,
+      criticCompilation.warnings,
+      provider.name,
+      criticRouting.model,
+    );
     const criticSystemPrompt = criticCompilation.systemPrompt + criticSupplementalContext;
     // The critic is a FRESH-context agent — it never shares the manager's
     // conversation. The manager briefs it here: the original objective plus
     // what to scrutinize, so the review judges fitness-for-purpose instead of
     // vibing over an anonymous transcript.
     const criticId = `critic-${nanoid(8)}`;
+    persistSkillDeliveryEvidence(
+      await this.resolveSessionWorkingDirectory(sessionId),
+      criticId,
+      criticCompilation.skillDelivery,
+    );
     const identity: AgentIdentity = {
       id: criticId,
       name: 'Critic',
@@ -3262,8 +4035,15 @@ export class KoryManager implements WorkerPipelineHost {
       workingDirectory: criticSessionWd,
       allowedPaths: [criticSessionWd],
       isSandboxed: true,
-      sandboxOptions: resolveSandboxOptions(loadAgentSettings(criticSessionWd), true),
-      permissionPolicy: resolveToolPermissionPolicy(loadAgentSettings(criticSessionWd), 'plan'),
+      sandboxOptions: resolveSandboxOptions(
+        loadAgentSettingsForSession(criticSessionWd, sessionId),
+        true,
+        this.workspaceSandboxMode(),
+      ),
+      permissionPolicy: resolveToolPermissionPolicy(
+        loadAgentSettingsForSession(criticSessionWd, sessionId),
+        'plan',
+      ),
       signal: criticAbort.signal,
     };
 
@@ -3277,7 +4057,9 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt: criticSystemPrompt,
       promptManifestHash: criticCompilation.manifest.hash,
       taskContractHash: criticCompilation.manifest.taskContractHash,
+      skillDelivery: criticCompilation.skillDelivery,
       promptCache: criticCompilation.promptCache,
+      cacheLaneKind: 'critic',
       toolRole: 'critic',
       maxTurns: 5,
       maxTokens: CRITIC_OUTPUT_TOKEN_LIMIT,
@@ -3326,12 +4108,22 @@ export class KoryManager implements WorkerPipelineHost {
     const lastContent =
       [...thread.threadEntries].reverse().find((entry) => entry.role === 'assistant')?.content ??
       '';
-    const passed = parseCriticVerdict(lastContent);
+    const report = parseCriticReport(lastContent, workerDelivery?.skills ?? []);
+    const passed = hardCheckResult.passed && report?.verdict === 'PASS';
+    const feedback = [
+      ...(hardCheckResult.passed
+        ? []
+        : [`Hard checks failed and remain blocking:\n${hardCheckResult.output}`]),
+      ...(report ? [] : ['Critic report is malformed or omits required skill review evidence.']),
+      lastContent.trim(),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     rmSync(criticSessionWd, { recursive: true, force: true });
     const afterCritic = await this.events.runWorkflowHooks('after-critic', sessionId, {
       task: task ?? 'Review delegated work',
       passed,
-      feedback: lastContent.trim(),
+      feedback,
     });
     if (afterCritic.decision === 'deny') {
       return {
@@ -3343,9 +4135,12 @@ export class KoryManager implements WorkerPipelineHost {
     }
     return {
       passed,
-      feedback: lastContent.trim(),
+      feedback,
       model: criticRouting.model,
       provider: provider.name,
+      report: report ?? undefined,
+      skillDelivery: criticCompilation.skillDelivery,
+      hardChecks: hardCheckResult,
     };
   }
 
@@ -3484,8 +4279,22 @@ export class KoryManager implements WorkerPipelineHost {
     imageInputMode: ImageInputMode = 'reject',
     regenerationBranch?: RegenerationBranchReservation,
     responseMessageId?: string,
+    contextWindow?: number,
   ): Promise<void> {
     const handle = this.requireRunHandle(sessionId);
+    // Bind the composer's context-window budget to this turn's session. A
+    // valid positive integer is stored; anything else (including a turn
+    // submitted without one) clears any previous session override so a
+    // stale budget cannot outlive the selection that produced it.
+    if (
+      typeof contextWindow === 'number' &&
+      Number.isSafeInteger(contextWindow) &&
+      contextWindow > 0
+    ) {
+      this.contextWindowOverrideBySession.set(sessionId, contextWindow);
+    } else {
+      this.contextWindowOverrideBySession.delete(sessionId);
+    }
     koryLog.debug(
       { sessionId, reasoningLevel, preferredModel, fastMode },
       'Entering handleDirectly',
@@ -3554,9 +4363,41 @@ export class KoryManager implements WorkerPipelineHost {
       let tokensIn = 0;
       let tokensOut = 0;
       let usageKnown = false;
+      // True when the latest provider usage sample is approximate (cumulative
+      // agentic-harness total or clamped to the window). Withheld from the
+      // auto-compact trigger; reset whenever a turn reports no usage.
+      let usageEstimated = false;
       let cachedInputTokens: number | undefined;
       let cacheWriteInputTokens: number | undefined;
       let usageBreakdown: ContextBreakdown | undefined;
+      // Injected skill prompt chars for the latest turn (see LLMTurnResult).
+      // Provider-reported tokensIn includes these; the auto-compact trigger
+      // subtracts them so skill-heavy turns don't self-trigger compaction.
+      let lastSkillContextCostChars = 0;
+      const reconcileUsage = (result: LLMTurnResult) => {
+        // Only the most recent provider turn can describe the completed
+        // context exactly. If it omits usage, fail closed instead of carrying
+        // an earlier tool-loop turn's occupancy onto the final boundary.
+        usageKnown = result.usage?.usageKnown === true;
+        if (usageKnown && result.usage) {
+          tokensIn = result.usage.tokensIn;
+          tokensOut = result.usage.tokensOut;
+          usageEstimated = result.usage.estimated === true;
+          cachedInputTokens = result.usage.cachedInputTokens;
+          cacheWriteInputTokens = result.usage.cacheWriteInputTokens;
+          usageBreakdown = result.usage.breakdown;
+          lastSkillContextCostChars = result.usage.skillContextCostChars ?? 0;
+        } else {
+          tokensIn = 0;
+          tokensOut = 0;
+          usageEstimated = false;
+          cachedInputTokens = undefined;
+          cacheWriteInputTokens = undefined;
+          usageBreakdown = undefined;
+          lastSkillContextCostChars = 0;
+        }
+      };
+      let turnFailure: Error | undefined;
       this.emitUsageUpdate(
         sessionId,
         KORY_IDENTITY.id,
@@ -3565,6 +4406,10 @@ export class KoryManager implements WorkerPipelineHost {
         tokensIn,
         tokensOut,
         usageKnown,
+        undefined,
+        undefined,
+        undefined,
+        this.contextWindowOverrideBySession.get(sessionId),
       );
 
       const directGit = new GitManager(directWorkingDirectory);
@@ -3573,6 +4418,7 @@ export class KoryManager implements WorkerPipelineHost {
       const managerCtx: ToolContext = {
         sessionId,
         agentId: KORY_IDENTITY.id,
+        callerRole: 'manager',
         activeProvider: providerName,
         activeModel: routing.model,
         reasoningLevel,
@@ -3597,13 +4443,14 @@ export class KoryManager implements WorkerPipelineHost {
         recordChange: (c) => {
           this.state.recordChange(sessionId, c);
         },
-        delegateToWorker: (task: string, domainHint?: string) =>
+        delegateToWorker: (task: string, domainHint?: string, skills?: SkillAssignment) =>
           this.runWorkerPipeline(
             sessionId,
             task,
             preferredModel,
             this.getWorkerReasoningLevel(),
             domainHint,
+            skills,
           ),
         delegateToJules: (task: string, opts) => this.runJulesDelegation(sessionId, task, opts),
       } as ToolContext;
@@ -3611,7 +4458,7 @@ export class KoryManager implements WorkerPipelineHost {
         permissionPolicy: {
           get() {
             return resolveToolPermissionPolicy(
-              loadAgentSettings(directWorkingDirectory),
+              loadAgentSettingsForSession(directWorkingDirectory, sessionId),
               permissionInteractionMode,
             );
           },
@@ -3621,8 +4468,9 @@ export class KoryManager implements WorkerPipelineHost {
         sandboxOptions: {
           get() {
             return resolveSandboxOptions(
-              loadAgentSettings(directWorkingDirectory),
+              loadAgentSettingsForSession(directWorkingDirectory, sessionId),
               directNaturalSandboxed,
+              this.workspaceSandboxMode(),
             );
           },
           enumerable: true,
@@ -3631,8 +4479,9 @@ export class KoryManager implements WorkerPipelineHost {
         isSandboxed: {
           get() {
             return resolveSandboxOptions(
-              loadAgentSettings(directWorkingDirectory),
+              loadAgentSettingsForSession(directWorkingDirectory, sessionId),
               directNaturalSandboxed,
+              this.workspaceSandboxMode(),
             ).isSandboxed;
           },
           enumerable: true,
@@ -3677,18 +4526,41 @@ export class KoryManager implements WorkerPipelineHost {
       if (imageInputMode === 'omit') messages = omitImageInputs(messages);
       const attachmentError = imageAttachmentAdmissionError(provider, routing.model, messages);
       if (attachmentError) throw new Error(attachmentError);
+      messages = await this.projectMessagesForTargetWindow({
+        sessionId,
+        modelId: routing.model,
+        provider,
+        reasoningLevel,
+        messages,
+        abort,
+        ...(regenerationBranch?.promptMessageId
+          ? { sourceBoundaryMessageId: regenerationBranch.promptMessageId }
+          : {}),
+      });
       let turnCount = 0;
       let stoppedByUser = false;
       const observeCancellation = (): boolean => {
         if (abort.signal.aborted) stoppedByUser = true;
         return stoppedByUser;
       };
-      // Track whether the run produced anything user-visible — so an empty LLM response
-      // surfaces a clear message instead of a silent "weird stop".
-      let streamedAnyContent = false;
+      // Track whether the provider (or a native harness) ran any of its own
+      // tools. A run that ends without a user-facing answer is unfinished, so
+      // this decides whether the host keeps the model going.
       let observedNativeTool = false;
+      // Kory tool calls actually executed in this run (control-plane tools such
+      // as bash/read_file/request_tools, not just a native harness's own tools).
+      // A run that did tool work and then stopped without a user-facing answer
+      // is unfinished — it must never be reported as a completion.
+      let executedToolCallCount = 0;
       let delegatedWorkerCount = 0;
       let multiModeRetryIssued = false;
+      // Guard: a turn that used tools but returned no final answer gets a
+      // bounded number of "finish the task" continuations before the host
+      // reports the run as unfinished.
+      let finalAnswerAttempts = 0;
+      // 25-turn cap: remember the last turn's tool volume so a cap exit with
+      // pending tool work can request continuation instead of silently stopping.
+      let lastTurnToolCallCount = 0;
       const providerConversationRevision = regenerationBranch
         ? regenerationBranch.expectedProviderConversationRevision
         : await getCliConversationRevision(sessionId);
@@ -3733,37 +4605,25 @@ export class KoryManager implements WorkerPipelineHost {
               ? { message: err.message, name: err.name, stack: err.stack, cause: err.cause }
               : { raw: String(err), typeof: typeof err };
           koryLog.error({ err, errDetail }, 'Error in processManagerTurn');
-          if (err instanceof DOMException && err.name === 'AbortError') {
+          if (abort.signal.aborted) {
             stoppedByUser = true;
             break;
           }
           throw err;
         }
-        // Only the most recent provider turn can describe the completed
-        // context exactly. If it omits usage, fail closed instead of carrying
-        // an earlier tool-loop turn's occupancy onto the final boundary.
-        usageKnown = result.usage?.usageKnown === true;
-        if (usageKnown && result.usage) {
-          tokensIn = result.usage.tokensIn;
-          tokensOut = result.usage.tokensOut;
-          cachedInputTokens = result.usage.cachedInputTokens;
-          cacheWriteInputTokens = result.usage.cacheWriteInputTokens;
-          usageBreakdown = result.usage.breakdown;
-        } else {
-          tokensIn = 0;
-          tokensOut = 0;
-          cachedInputTokens = undefined;
-          cacheWriteInputTokens = undefined;
-          usageBreakdown = undefined;
-        }
-        if (result.content && result.content.trim()) streamedAnyContent = true;
+        reconcileUsage(result);
+        turnFailure = result.failure;
         observedNativeTool ||= result.observedNativeTool === true;
 
-        if (!result.success) break;
+        if (!result.success) {
+          lastTurnToolCallCount = result.completedToolCalls?.length ?? 0;
+          break;
+        }
 
         const { completedToolCalls } = result;
+        lastTurnToolCallCount = completedToolCalls?.length ?? 0;
         if (!completedToolCalls || completedToolCalls.length === 0) {
-          const runSettings = loadAgentSettings(managerCtx.workingDirectory);
+          const runSettings = loadAgentSettingsForSession(managerCtx.workingDirectory, sessionId);
           const multiRequired =
             interactionMode !== 'plan' &&
             runSettings.agentExecutionMode === 'multi' &&
@@ -3816,6 +4676,7 @@ export class KoryManager implements WorkerPipelineHost {
                 return sequential;
               })();
           for (const { tc, toolResult } of executedCalls) {
+            executedToolCallCount++;
             if (tc.name === 'delegate_to_worker' && !toolResult.isError) delegatedWorkerCount++;
             // Persist a bounded, redacted activity preview before pruning.
             const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
@@ -3872,12 +4733,32 @@ export class KoryManager implements WorkerPipelineHost {
       // must still be reported as user-stopped, not a normal completion.
       observeCancellation();
 
+      // 25-turn cap: if the loop exhausted its budget with tool work still
+      // pending (or session tasks/goals still open), the turn is incomplete.
+      // Record it so the terminal transition can request continuation instead
+      // of silently marking done and forcing a manual "continue".
+      const hitTurnCap = turnCount >= 25 && !stoppedByUser;
+      let hasOpenSessionTasks = false;
+      if (hitTurnCap) {
+        try {
+          const active = await this.tasks?.listActive();
+          hasOpenSessionTasks =
+            (active ?? []).some(
+              (t) => t.sessionId === sessionId && (t.status === 'active' || t.status === 'pending'),
+            ) || this.goalContextBySession.get(sessionId) !== undefined;
+        } catch {
+          hasOpenSessionTasks = this.goalContextBySession.get(sessionId) !== undefined;
+        }
+        if (!hasOpenSessionTasks && lastTurnToolCallCount > 0) hasOpenSessionTasks = true;
+      }
+      const capIncomplete = hitTurnCap && hasOpenSessionTasks;
+
       // Direct manager edits must pass the same gate as delegated work. This
       // happens before the final response is persisted so a model's optimistic
       // self-assessment cannot become the authoritative completion state.
       const directChanges = this.state.getChanges(sessionId);
-      if (!stoppedByUser && directChanges.length > 0) {
-        const settingsForGate = loadAgentSettings(managerCtx.workingDirectory);
+      if (!stoppedByUser && !turnFailure && directChanges.length > 0) {
+        const settingsForGate = loadAgentSettingsForSession(managerCtx.workingDirectory, sessionId);
         const hardBoundaryTask = createTaskContract(userMessage).taskKind === 'security-infra';
         const strictness = hardBoundaryTask
           ? 'strict'
@@ -3912,13 +4793,22 @@ export class KoryManager implements WorkerPipelineHost {
             { provider: providerName, model: routing.model },
           );
           if (!gate.passed) {
+            const gateMessage =
+              strictness === 'strict'
+                ? `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`
+                : `UNVERIFIED: Advisory quality checks found issues.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`;
             messages.push({
               role: 'assistant',
-              content:
-                strictness === 'strict'
-                  ? `QUALITY GATE FAILED: The edits remain available for inspection, but the task is not complete.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`
-                  : `UNVERIFIED: Advisory quality checks found issues.\n\n${gate.feedback ?? 'Verification failed without usable evidence.'}`,
+              content: gateMessage,
             });
+            // Surface gate failures as a UI banner instead of silent idle:
+            // the persisted assistant text alone does not trigger error UI.
+            this.emitError(
+              sessionId,
+              strictness === 'strict'
+                ? `Quality gate failed — edits preserved for inspection. ${gate.feedback ?? 'Verification failed without usable evidence.'} Say "continue" to retry or adjust and resend.`
+                : `Advisory quality check found issues. ${gate.feedback ?? 'Review failed without structured findings.'}`,
+            );
           } else {
             const harness = getProviderHarnessCapabilities(providerName);
             messages.push({
@@ -3936,18 +4826,25 @@ export class KoryManager implements WorkerPipelineHost {
       // observed when the provider loop ended is not a commit decision.
       observeCancellation();
 
-      const beforeComplete = await this.events.runWorkflowHooks('before-complete', sessionId, {
-        stoppedByUser,
-        changedFiles: directChanges.map((change) => change.path),
-        lastAssistant:
-          messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '',
-      });
+      const beforeComplete = turnFailure
+        ? { decision: 'allow' as const }
+        : await this.events.runWorkflowHooks('before-complete', sessionId, {
+            stoppedByUser,
+            changedFiles: directChanges.map((change) => change.path),
+            lastAssistant:
+              messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '',
+          });
       observeCancellation();
       if (!stoppedByUser && beforeComplete.decision === 'deny') {
+        const hookMessage = `QUALITY GATE FAILED: Completion was rejected by a lifecycle hook.\n\n${beforeComplete.reason ?? 'No reason supplied.'}`;
         messages.push({
           role: 'assistant',
-          content: `QUALITY GATE FAILED: Completion was rejected by a lifecycle hook.\n\n${beforeComplete.reason ?? 'No reason supplied.'}`,
+          content: hookMessage,
         });
+        this.emitError(
+          sessionId,
+          `Completion rejected by a lifecycle hook. ${beforeComplete.reason ?? 'No reason supplied.'} Say "continue" to retry.`,
+        );
       }
 
       const assistants = messages.filter((m) => m.role === 'assistant');
@@ -3955,20 +4852,112 @@ export class KoryManager implements WorkerPipelineHost {
         { assistantCount: assistants.length },
         'Filtering assistant messages for persistence',
       );
-      const lastAssistant = assistants.pop();
-      const rawContent = lastAssistant?.content ?? '';
-      const content = (
+      let lastAssistant = assistants.pop();
+      let rawContent: string | import('../providers/types').ProviderContentBlock[] =
+        lastAssistant?.content ?? '';
+      let content = (
         typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
       ).trim();
 
-      // A native harness can inspect the project using its own tools and then
-      // exit without ever returning a user-facing answer. That is a failed
-      // turn, not a successful "tool-only" completion. Surface it plainly so
-      // a user never has to infer the outcome from raw CLI activity.
-      const missingFinalResponse = !stoppedByUser && !streamedAnyContent && !content;
-      const EMPTY_NOTICE = observedNativeTool
-        ? 'The CLI provider completed tool activity but did not return a final answer. Nothing was claimed as complete. Retry the request; if it repeats, reconnect that CLI provider.'
-        : 'The model returned an empty response. Please resend or rephrase your request.';
+      const deriveFinalContent = (): void => {
+        const assistantsNow = messages.filter((m) => m.role === 'assistant');
+        lastAssistant = assistantsNow.pop();
+        rawContent = lastAssistant?.content ?? '';
+        content = (typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)).trim();
+      };
+
+      // A run can execute tools — through Kory's own control plane or a native
+      // harness — and then stop without ever returning a user-facing answer.
+      // That is an unfinished turn, not a "tool-only" completion. Instead of
+      // declaring the task done on the model's behalf, hand the turn back to
+      // the model (bounded, so a persistently-silent provider cannot loop
+      // forever) and let it finish the work and answer for itself.
+      while (
+        shouldRequestFinalAnswer({
+          noFinalContent: !content,
+          toolActivity: executedToolCallCount > 0 || observedNativeTool,
+          attempts: finalAnswerAttempts,
+          maxAttempts: MAX_FINAL_ANSWER_CONTINUATIONS,
+          stoppedByUser,
+          turnFailure: turnFailure !== undefined,
+        })
+      ) {
+        finalAnswerAttempts++;
+        koryLog.debug(
+          { sessionId, finalAnswerAttempts },
+          'Run ended without a final answer after tool activity — continuing the model',
+        );
+        try {
+          messages.push({
+            role: 'system',
+            content:
+              'HOST CONTINUE: Your previous turn performed tool activity but stopped without a user-facing answer, so the task is NOT complete. Continue working from the tool results already in context and finish the task. Do not stop, summarize your intent, or ask whether you should continue — either keep using tools until the work is done, or give the real final answer describing what you did and what remains. Never report a completion you have not made.',
+          });
+          const retryResult = await this.processManagerTurn(
+            sessionId,
+            routing.model,
+            provider,
+            messages,
+            managerCtx,
+            abort.signal,
+            reasoningLevel,
+            interactionMode,
+            fastMode,
+            providerConversationRevision,
+            regenerationBranch !== undefined,
+          );
+          reconcileUsage(retryResult);
+          turnFailure = retryResult.failure;
+          observedNativeTool ||= retryResult.observedNativeTool === true;
+          lastTurnToolCallCount = retryResult.completedToolCalls?.length ?? 0;
+          // Execute any Kory tool calls the continuation requested (one bounded
+          // round) so continued work is not dropped before persistence.
+          if (
+            retryResult.success &&
+            retryResult.completedToolCalls &&
+            retryResult.completedToolCalls.length > 0
+          ) {
+            for (const tc of retryResult.completedToolCalls) {
+              if (abort.signal.aborted) break;
+              const toolResult = await this.executeManagerToolCall(sessionId, tc, managerCtx);
+              const archiveId = await this.archiveToolResult(sessionId, tc, toolResult);
+              this.emitWSMessage(sessionId, 'stream.tool_result', {
+                agentId: KORY_IDENTITY.id,
+                toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
+              });
+              executedToolCallCount++;
+              messages.push({
+                role: 'tool',
+                content: JSON.stringify(toolResult),
+                tool_call_id: tc.id,
+              });
+            }
+            observeCancellation();
+          }
+        } catch (retryErr) {
+          if (retryErr instanceof TurnOwnershipLostError) throw retryErr;
+          observeCancellation();
+          if (!stoppedByUser)
+            turnFailure = retryErr instanceof Error ? retryErr : new Error(String(retryErr));
+          reconcileUsage({ success: false });
+          koryLog.warn(
+            { err: retryErr instanceof Error ? retryErr.message : String(retryErr), sessionId },
+            'Final-answer continuation did not complete',
+          );
+          break;
+        }
+        deriveFinalContent();
+        if (observeCancellation()) break;
+      }
+
+      // Anything that ends the run without a user-facing answer is reported as
+      // unfinished. A user never has to infer the outcome from raw tool output,
+      // and Kory never narrates a completion the model did not make.
+      const missingFinalResponse = !turnFailure && !stoppedByUser && !content;
+      const EMPTY_NOTICE =
+        executedToolCallCount > 0 || observedNativeTool
+          ? 'Kory ran tools but the model stopped before returning a final answer, so the task was NOT completed. Nothing has been claimed as done. Resend the request or say "continue" to resume from the tool results already in context.'
+          : 'The model returned an empty response. Please resend or rephrase your request.';
       if (missingFinalResponse) {
         this.emitWSMessage(sessionId, 'system.info', {
           message: EMPTY_NOTICE,
@@ -3982,10 +4971,10 @@ export class KoryManager implements WorkerPipelineHost {
 
       // Stopping must never erase work: persist whatever the model produced
       // as Kory's message, and record the stop as a separate system marker so
-      // it renders as plain text — not as something Kory said.
-      const toPersist = stoppedByUser
-        ? content
-        : content || (missingFinalResponse ? EMPTY_NOTICE : '[Task completed using tools.]');
+      // it renders as plain text — not as something Kory said. There is no
+      // placeholder completion: an unanswered run persists the unfinished-run
+      // notice or nothing at all, never a fabricated "[Task completed]".
+      const toPersist = stoppedByUser || turnFailure ? content : content || EMPTY_NOTICE;
       // Conversation text belongs in the message store, not in operational logs. Keep only
       // non-content metadata here so a long response, prompt excerpt, or credential echoed by
       // a provider cannot be copied into stdout or launcher/watchdog log files.
@@ -3998,13 +4987,19 @@ export class KoryManager implements WorkerPipelineHost {
         finalMessageId = responseMessageId ?? nanoid(12);
         // Persist the provider-reported token usage and computed cost with the
         // assistant message so the session counters (messageCount / totalCost)
-        // reflect real spend — not just in the demo.
+        // reflect real spend — not just in the demo. Worker/subagent spend
+        // accumulated via recordWorkerUsage is folded in here so the chat
+        // total includes subagents.
+        const workerPending = this.pendingWorkerUsage.get(sessionId);
+        this.pendingWorkerUsage.delete(sessionId);
+        const totalTokensIn = tokensIn + (workerPending?.tokensIn ?? 0);
+        const totalTokensOut = tokensOut + (workerPending?.tokensOut ?? 0);
         const assistantCost = usageKnown
           ? (computeCostUsd(providerName, routing.model, tokensIn, tokensOut, {
               cacheReadTokens: cachedInputTokens,
               cacheWriteTokens: cacheWriteInputTokens,
-            })?.costUsd ?? 0)
-          : 0;
+            })?.costUsd ?? 0) + (workerPending?.cost ?? 0)
+          : (workerPending?.cost ?? 0);
         const persistedAssistant = {
           id: finalMessageId,
           sessionId,
@@ -4014,8 +5009,8 @@ export class KoryManager implements WorkerPipelineHost {
           provider: providerName,
           variantGroupId: responseVariant?.groupId,
           variantIndex: responseVariant?.index,
-          tokensIn: usageKnown ? tokensIn : 0,
-          tokensOut: usageKnown ? tokensOut : 0,
+          tokensIn: usageKnown ? totalTokensIn : (workerPending?.tokensIn ?? 0),
+          tokensOut: usageKnown ? totalTokensOut : (workerPending?.tokensOut ?? 0),
           cost: assistantCost,
           createdAt: Date.now(),
         } as const;
@@ -4028,7 +5023,7 @@ export class KoryManager implements WorkerPipelineHost {
         }
         koryLog.debug('Assistant message persisted');
         observeCancellation();
-        if (usageKnown && !stoppedByUser) {
+        if (usageKnown && !stoppedByUser && !turnFailure) {
           await this.persistCompletedManagerUsage(
             sessionId,
             finalMessageId,
@@ -4038,10 +5033,12 @@ export class KoryManager implements WorkerPipelineHost {
             tokensOut,
             usageBreakdown,
             cachedInputTokens,
+            usageEstimated,
           );
         }
       }
       observeCancellation();
+      if (turnFailure && !stoppedByUser) throw turnFailure;
       if (interactionMode === 'plan' && !stoppedByUser) {
         try {
           const noteId = await syncPlanNote(
@@ -4111,10 +5108,41 @@ export class KoryManager implements WorkerPipelineHost {
         await this.publishPendingSessionReview(sessionId, changes);
       }
 
+      // 25-turn cap followup: when the budget is exhausted with work still
+      // pending, persist a system note now (before the commit fence) so a
+      // manual "continue" — or the scheduled auto-followup — resumes with
+      // context instead of a silent done.
+      let needsCapContinuation = false;
+      if (capIncomplete && !this.autoContinuationIssuedBySession.has(sessionId)) {
+        this.autoContinuationIssuedBySession.add(sessionId);
+        needsCapContinuation = true;
+        try {
+          if (this.messages) {
+            await this.messages.add(sessionId, {
+              id: nanoid(12),
+              sessionId,
+              role: 'system',
+              content:
+                'Turn limit reached (25 tool turns) with work still pending. Continuation required — resuming automatically.',
+              model: routing.model,
+              provider: providerName,
+              createdAt: Date.now(),
+            });
+          }
+        } catch (error) {
+          koryLog.warn({ error, sessionId }, 'Failed to persist turn-cap continuation note');
+        }
+      }
+
       // This check and the following lifecycle call form the commit fence. No
       // await may be inserted between them: cancellation observed before the
       // fence wins; cancellation after finish starts loses to completion.
       const cancelledAtCommit = observeCancellation();
+      if (needsCapContinuation && cancelledAtCommit) {
+        // A stop wins over auto-continuation; allow a future cap to retry.
+        this.autoContinuationIssuedBySession.delete(sessionId);
+        needsCapContinuation = false;
+      }
       const terminalStatus =
         cancelledAtCommit || activeProcessIds.length === 0 ? 'done' : 'waiting';
       if (cancelledAtCommit) {
@@ -4127,40 +5155,83 @@ export class KoryManager implements WorkerPipelineHost {
       // Stop the heartbeat BEFORE emitting the terminal event. For 'waiting'
       // keep it alive: the run is parked, not over, and process completion will
       // wake the same durable continuation.
-      if (terminalStatus === 'done') {
+      if (terminalStatus === 'done' && !needsCapContinuation) {
         this.stopHeartbeat(sessionId);
       }
-      this.emitWSMessage(sessionId, 'agent.status', {
-        agentId: KORY_IDENTITY.id,
-        status: terminalStatus,
-      });
-      this.setHeartbeatPhase(sessionId, terminalStatus);
+      if (needsCapContinuation && terminalStatus === 'done') {
+        // Cap continuation is a new run, not a parked process wait: the
+        // current run is complete, but the UI must show waiting (not done) so
+        // it does not look idle while the followup dispatches.
+        this.emitWSMessage(sessionId, 'agent.status', {
+          agentId: KORY_IDENTITY.id,
+          status: 'waiting',
+          continuationNeeded: true,
+          detail: 'Turn limit reached with work pending — continuing automatically',
+        });
+        this.setHeartbeatPhase(sessionId, 'waiting');
+        const followupMessage = `Continue the previous task where it left off. The 25-turn budget was reached with pending tool work or open session tasks. Do not restart; resume from existing tool results and complete the remaining work. Original request: ${userMessage.slice(0, 2000)}`;
+        const followupModel = preferredModel;
+        const followupReasoning = reasoningLevel;
+        const followupMode = interactionMode;
+        const followupFast = fastMode;
+        setTimeout(() => {
+          void this.submitSessionTurn({
+            sessionId,
+            source: 'internal',
+            sourceCommandId: crypto.randomUUID(),
+            userMessage: followupMessage,
+            preferredModel: followupModel,
+            reasoningLevel: followupReasoning,
+            interactionMode: followupMode,
+            fastMode: followupFast,
+          }).catch((error) => {
+            this.autoContinuationIssuedBySession.delete(sessionId);
+            const msg = error instanceof Error ? error.message : String(error);
+            koryLog.warn({ error, sessionId }, 'Automatic turn-cap continuation failed');
+            this.emitError(
+              sessionId,
+              `Automatic continuation failed (${msg}). Say "continue" to resume manually.`,
+            );
+          });
+        }, 0);
+      } else {
+        this.emitWSMessage(sessionId, 'agent.status', {
+          agentId: KORY_IDENTITY.id,
+          status: terminalStatus,
+        });
+        this.setHeartbeatPhase(sessionId, terminalStatus);
+      }
 
       // Auto-compaction is intentionally post-turn: never replace context while
-      // the manager or its tools are still using it. Only a provider-reported
-      // input count and a trusted model window can trigger it.
+      // the manager or its tools are still using it. Only an exact (never
+      // estimated) provider-reported input count and a trusted model window
+      // can trigger it — cumulative agentic-harness totals must not start a
+      // compaction, and a session with a recent failure cools down instead
+      // of re-triggering every turn. The trigger compares NON-skill tokens:
+      // provider tokensIn includes re-injected skill guidance every turn, so
+      // the tracked skill cost is subtracted first — otherwise a skill-heavy
+      // session self-triggers compaction that pruning cannot relieve (skills
+      // are re-injected on the next turn regardless).
       const autoSettings = loadAgentSettings(managerCtx.workingDirectory);
-      const trustedWindow = resolveTrustedContextWindow(routing.model, providerName);
+      const trustedWindow = this.resolveEffectiveSessionContextWindow(
+        sessionId,
+        routing.model,
+        providerName,
+      );
       const thresholdPercent = Math.max(10, Math.min(99, autoSettings.autoCompactThreshold ?? 80));
+      const nonSkillTokensIn = nonSkillTokensForCompaction(tokensIn, lastSkillContextCostChars);
       if (
         !stoppedByUser &&
         autoSettings.autoCompactEnabled !== false &&
+        usageKnown &&
+        !usageEstimated &&
         tokensIn > 0 &&
         trustedWindow.contextKnown &&
         trustedWindow.contextWindow &&
-        tokensIn / trustedWindow.contextWindow >= thresholdPercent / 100
+        !isAutoCompactCoolingDown(this.lastAutoCompactFailureBySession.get(sessionId)) &&
+        nonSkillTokensIn / trustedWindow.contextWindow >= thresholdPercent / 100
       ) {
-        const selectedModel = `${providerName}:${routing.model}`;
-        setTimeout(() => {
-          void this.compactSession({
-            sessionId,
-            selectedModel,
-            reasoningLevel,
-            automatic: true,
-          }).catch((error) =>
-            koryLog.warn({ error, sessionId }, 'Automatic compaction did not complete'),
-          );
-        }, 0);
+        this.scheduleAutoCompaction(sessionId, `${providerName}:${routing.model}`, reasoningLevel);
       }
     } finally {
       this.managerAbortBySession.delete(sessionId);
@@ -4254,14 +5325,32 @@ export class KoryManager implements WorkerPipelineHost {
     fastMode?: boolean,
     providerConversationRevision?: number,
     forceFreshConversation = false,
+    shrinkLevelParam?: number,
   ): Promise<LLMTurnResult> {
     const handle = this.requireRunHandle(sessionId);
     if (signal?.aborted) throw new DOMException('Manager run aborted', 'AbortError');
 
+    // Progressive context shrink for small-route gateways (custom conduit
+    // routes 413 even on a one-word message because the full system prompt +
+    // skills + memory + tools exceed the route window). Level 0 is the full
+    // prompt; each context-limit failure retries one level smaller without
+    // surfacing the raw 413 dump to the user. Deferred context (skills via
+    // load_skill_detail, history via fetch_context, tools via request_tools)
+    // stays reachable on demand at every level.
+    const shrinkHintKey = `${sessionId} ${provider.name} ${modelId}`;
+    const shrink = Math.max(
+      0,
+      Math.min(
+        3,
+        Math.floor(shrinkLevelParam ?? this.contextShrinkHintBySession.get(shrinkHintKey) ?? 0),
+      ),
+    );
+    const reservedOutputByShrink = [MANAGER_OUTPUT_TOKEN_LIMIT, 8192, 4096, 2048];
+
     // Load agent settings to apply experimental overrides
-    const { loadAgentSettings } = await import('../agent-settings');
+    const { loadAgentSettingsForSession } = await import('../agent-settings');
     const promptRoot = await this.resolveSessionWorkingDirectory(sessionId);
-    const settings = loadAgentSettings(promptRoot);
+    const settings = loadAgentSettingsForSession(promptRoot, sessionId);
 
     const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
     const taskGoal =
@@ -4269,39 +5358,44 @@ export class KoryManager implements WorkerPipelineHost {
         ? latestUserMessage.content
         : 'Continue the current user-requested task.';
     let memorySupplementalContext = '';
-    const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
-    if (notesEntries.length > 0) {
-      const notesSections = notesEntries
-        .map(([group, text]) => `### ${group}\n${text.trim()}`)
-        .join('\n\n');
-      memorySupplementalContext += `\n\n## User Notes (standing guidance)\n${notesSections}`;
-    }
-    const agentContext = assembleAgentContext(promptRoot, settings);
-    if (agentContext.preferences.trim()) {
-      memorySupplementalContext += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
-    }
-    const memoryContext = assembleMemoryContext(promptRoot, sessionId);
-    const automaticMemory = automaticMemoryPrompt(
-      formatMemoryForContext(memoryContext),
-      memoryContext.settings,
-    );
-    if (automaticMemory) memorySupplementalContext += `\n\n${automaticMemory}`;
-    if (hasAnyVisibleNoteTools(promptRoot)) {
-      const hint = buildNotesNetworkSystemHint(promptRoot);
-      if (hint) memorySupplementalContext += `\n\n${hint}`;
-      try {
-        const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
-        memorySupplementalContext += await buildNotesNetworkPrompt(2500, promptRoot);
-      } catch (err: unknown) {
-        serverLog.debug(
-          { err: err instanceof Error ? err.message : String(err) },
-          'Notes DB may be unavailable — continuing without network context',
-        );
+    if (shrink < 2) {
+      const notesEntries = Object.entries(settings.managerNotes ?? {}).filter(([, v]) => v?.trim());
+      if (notesEntries.length > 0) {
+        const notesSections = notesEntries
+          .map(([group, text]) => `### ${group}\n${text.trim()}`)
+          .join('\n\n');
+        memorySupplementalContext += `\n\n## User Notes (standing guidance)\n${notesSections}`;
+      }
+      const agentContext = assembleAgentContext(promptRoot, settings);
+      if (agentContext.preferences.trim()) {
+        memorySupplementalContext += `\n\n## Durable user preferences\n${agentContext.preferences.trim()}`;
+      }
+      const memoryContext = assembleMemoryContext(promptRoot, sessionId);
+      const automaticMemory = automaticMemoryPrompt(
+        formatMemoryForContext(memoryContext),
+        memoryContext.settings,
+      );
+      if (automaticMemory) memorySupplementalContext += `\n\n${automaticMemory}`;
+      if (hasAnyVisibleNoteTools(promptRoot)) {
+        const hint = buildNotesNetworkSystemHint(promptRoot);
+        if (hint) memorySupplementalContext += `\n\n${hint}`;
+        try {
+          const { buildNotesNetworkPrompt } = await import('../memory/unified-memory');
+          memorySupplementalContext += await buildNotesNetworkPrompt(2500, promptRoot);
+        } catch (err: unknown) {
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Notes DB may be unavailable — continuing without network context',
+          );
+        }
       }
     }
-    const researchSupplementalContext = settings.multiSourceResearch
-      ? '\n\n• DEEP RESEARCH: When researching complex topics, do not rely on a single source. Use the web_search tool to find multiple perspectives and fetch/read at least 3-5 different pages to verify information and identify consensus or contradictions.'
-      : '';
+    const researchSupplementalContext =
+      shrink >= 1
+        ? ''
+        : settings.multiSourceResearch
+          ? '\n\n• DEEP RESEARCH: When researching complex topics, do not rely on a single source. Use the web_search tool to find multiple perspectives and fetch/read at least 3-5 different pages to verify information and identify consensus or contradictions.'
+          : '';
     const managerCompilation = compilePrompt({
       role: 'manager',
       mode: getModeManager().getMode(),
@@ -4311,8 +5405,11 @@ export class KoryManager implements WorkerPipelineHost {
         estimateOccupiedContextTokenUpperBound(messages) +
         textTokenUpperBound(memorySupplementalContext) +
         textTokenUpperBound(researchSupplementalContext),
-      reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
+      reservedOutputTokens: reservedOutputByShrink[shrink] ?? 2048,
       requireVerifiedContextWindow: true,
+      // The composer's context-window budget scales skill budgeting and the
+      // capacity warnings; compilePrompt clamps it against the verified window.
+      contextWindowOverride: this.contextWindowOverrideBySession.get(sessionId),
       workingDirectory: promptRoot,
       taskContract: createTaskContract(taskGoal, {
         goalContext: this.goalContextBySession.get(sessionId),
@@ -4320,13 +5417,21 @@ export class KoryManager implements WorkerPipelineHost {
       contextPaths: this.config.contextPaths,
       skillSelection: {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
-        ...(interactionMode === 'plan' ? { pins: ['plan-mode'] } : {}),
+        pins: shrink >= 3 ? [] : alwaysPinnedSkills(interactionMode),
+        ...(shrink >= 1 ? { contextBudget: MIN_SKILL_CONTEXT_BUDGET } : {}),
       },
     });
-    if (managerCompilation.warnings?.length) {
-      for (const w of managerCompilation.warnings) {
-        this.emitWSMessage(sessionId, 'system.info', { message: w });
-      }
+    this.emitCompilationWarnings(sessionId, managerCompilation.warnings, provider.name, modelId);
+    try {
+      recordSkillUsage(
+        promptRoot,
+        managerCompilation.manifest.skills.map((skill) => skill.name),
+      );
+    } catch (error: unknown) {
+      serverLog.debug(
+        { error: error instanceof Error ? error.message : String(error) },
+        'Skill usage health signal could not be recorded',
+      );
     }
     let systemPrompt =
       managerCompilation.systemPrompt + memorySupplementalContext + researchSupplementalContext;
@@ -4353,13 +5458,13 @@ export class KoryManager implements WorkerPipelineHost {
     // context-usage bar can show memory as its own segment.
     const memoryChars = memorySupplementalContext.length;
 
-    // Filter tools based on local web search setting
-    let tools = filterToolDefsForNotesPermissions(
-      this.tools.getToolDefsForRole('manager'),
-      promptRoot,
-    );
+    // Keep the provider declaration universe byte-stable across turn-level
+    // eligibility changes. Runtime policy below decides which declared tools
+    // may actually execute without rewriting the prompt-cache tool prefix.
+    const declaredManagerTools = this.tools.getToolDefsForRole('manager');
+    let allowedManagerTools = filterToolDefsForNotesPermissions(declaredManagerTools, promptRoot);
     if (settings.localWebSearch === 'off') {
-      tools = tools.filter((t) => t.name !== 'web_search');
+      allowedManagerTools = allowedManagerTools.filter((t) => t.name !== 'web_search');
     }
     if (interactionMode === 'plan' || forceFreshConversation) {
       const allowed = new Set([
@@ -4383,14 +5488,14 @@ export class KoryManager implements WorkerPipelineHost {
         'fetch_context',
         'load_skill_detail',
       ]);
-      tools = tools.filter((tool) => allowed.has(tool.name));
+      allowedManagerTools = allowedManagerTools.filter((tool) => allowed.has(tool.name));
       systemPrompt += forceFreshConversation
         ? '\n\nRESPONSE-ONLY REGENERATION IS ENFORCED BY THE HOST. Produce another answer from retained evidence. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write Notes. If current workspace inspection would be required, say so instead of changing anything.'
         : '\n\nPLAN MODE IS ENFORCED BY THE HOST. You cannot edit project files, run shell commands, commit, create pull requests, delegate, or write arbitrary Notes. Koryphaios synchronizes the dedicated Plan note after each turn.';
     }
 
     if (!this.isJulesAvailable()) {
-      tools = tools.filter((t) => t.name !== 'delegate_to_jules');
+      allowedManagerTools = allowedManagerTools.filter((t) => t.name !== 'delegate_to_jules');
     } else {
       systemPrompt += `\n\n• JULES (cloud): delegate_to_jules sends work to Google Jules — remote VMs, async, may take minutes, produces PRs. Never substitute for local tools on quick edits.\n• ${JULES_SYNC_INSTRUCTIONS}`;
     }
@@ -4400,11 +5505,11 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt += `\n\n• You are chatting through Jules (cloud provider). All code changes happen on Google's remote infrastructure and GitHub — not in this local workspace until synced.\n• ${julesMeta?.managerHint ?? JULES_SYNC_INSTRUCTIONS}`;
     }
 
-    if (!supportsKoryControlPlaneTools(provider.name)) {
+    const supportsControlPlaneTools = supportsKoryControlPlaneTools(provider.name);
+    if (!supportsControlPlaneTools) {
       // Native CLI harnesses may execute and report their own tools, but cannot
-      // call back into Kory's control plane. Hiding the schemas prevents a
-      // manager from claiming a delegation that Kory never received.
-      tools = [];
+      // call back into Kory's control plane. This provider-level capability is
+      // stable, so it remains the one boundary where Kory schemas are omitted.
       systemPrompt +=
         '\n\n• This native CLI harness cannot invoke Kory control-plane tools in this build. Do not claim to delegate, ask Kory for input, or run a Kory-managed tool; complete only work the native harness can actually perform.';
     }
@@ -4415,7 +5520,7 @@ export class KoryManager implements WorkerPipelineHost {
     //  • auto   → Kory decides per-task (default)
     const execMode = settings.agentExecutionMode ?? 'auto';
     if (execMode === 'single') {
-      tools = tools.filter(
+      allowedManagerTools = allowedManagerTools.filter(
         (t) => t.name !== 'delegate_to_worker' && t.name !== 'delegate_to_jules',
       );
       systemPrompt +=
@@ -4424,9 +5529,61 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt +=
         '\n\n• AGENT MODE: MULTI-AGENT — Host-enforced for non-trivial work. Decompose the task into independent workstreams and delegate them to specialist workers. Issue multiple delegate_to_worker calls in the same turn whenever at least two workstreams can proceed independently, then synthesize the results. Questions and genuinely tiny mechanical edits may stay direct; all other work must use at least one worker.';
     }
+    ctx.allowedToolNames = supportsControlPlaneTools
+      ? new Set(allowedManagerTools.map((tool) => tool.name))
+      : new Set<string>();
+
+    let tools = [] as typeof declaredManagerTools;
+    if (supportsControlPlaneTools && declaredManagerTools.length > 0) {
+      // Every tool stays named and callable; only the schema is a stub, and a
+      // rejected call returns the authoritative schema so the model can correct
+      // itself without a discovery round trip.
+      tools = buildExposedToolset(declaredManagerTools);
+      ctx.validateToolInput = true;
+      if (shrink >= 3) {
+        // Emergency level: keep only the tools a dropped-context turn needs to
+        // read state, record goal evidence, and pull context back.
+        const essential = new Set([
+          'ask_user',
+          'read_file',
+          'grep',
+          'glob',
+          'ls',
+          'fetch_context',
+          'prune_context',
+          'load_skill_detail',
+          // Goal Mode's evidence gate is driven entirely by update_goal. A
+          // context-emergency turn that cannot advertise it stalls the driver
+          // with evidence_missing, so these stay reachable at every shrink level.
+          'create_goal',
+          'update_goal',
+          'create_workflow_draft',
+          'update_workflow',
+          'start_workflow',
+          'list_workflows',
+        ]);
+        tools = tools.filter((tool) => essential.has(tool.name)) as typeof tools;
+      }
+    } else {
+      ctx.validateToolInput = false;
+    }
     // If "fallback", we keep it in the list. The model can choose to use it if its native search fails or is unavailable.
 
-    const providerMessages = this.toProviderMessages(messages);
+    let providerMessages = this.toProviderMessages(messages);
+    if (shrink >= 2) {
+      // Small routes cannot carry full tool history. Keep text-only
+      // user/assistant turns (no tool_calls or tool results, so no orphan
+      // tool-message errors) and let the model pull detail on demand via
+      // fetch_context. Level 3 keeps only the latest exchange.
+      const keep = shrink >= 3 ? 2 : 6;
+      const textOnly = providerMessages
+        .filter(
+          (m) => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string',
+        )
+        .map((m) => ({ role: m.role, content: m.content }) as ProviderMessage)
+        .slice(-keep);
+      providerMessages = textOnly.length > 0 ? textOnly : [{ role: 'user', content: taskGoal }];
+    }
     // Estimated context composition at dispatch (chars/4) — segment ratios for
     // the context-usage bar; the provider's usage_update stays the real total.
     // Agentic CLI harnesses (claude/grok/antigravity) run their OWN tools —
@@ -4441,18 +5598,38 @@ export class KoryManager implements WorkerPipelineHost {
     const toolDefsChars = NATIVE_TOOL_PROVIDERS.has(provider.name)
       ? 0
       : JSON.stringify(tools ?? []).length;
+    // Skill guidance promptText ships inside managerCompilation.systemPrompt:
+    // carve it out (resolver totalContextCost) so the bar shows Skills instead
+    // of inflating System. Research guidance is memory-like supplemental
+    // context, not base system — charge it to Memory.
+    const researchChars = researchSupplementalContext.length;
+    const skillsChars = Math.max(
+      0,
+      Math.min(
+        managerCompilation.manifest.skillContextCost ?? 0,
+        Math.max(0, systemPrompt.length - memoryChars - researchChars),
+      ),
+    );
     const contextBreakdown: ContextBreakdown = {
-      system: Math.ceil(Math.max(0, systemPrompt.length - memoryChars) / 4),
-      memory: Math.ceil(memoryChars / 4),
-      tools: Math.ceil((toolDefsChars + msgSplit.tools) / 4),
-      chat: Math.ceil(msgSplit.chat / 4),
+      system: Math.ceil(
+        Math.max(0, systemPrompt.length - memoryChars - researchChars - skillsChars) / TOKEN_CHARS,
+      ),
+      memory: Math.ceil((memoryChars + researchChars) / TOKEN_CHARS),
+      skills: Math.ceil(skillsChars / TOKEN_CHARS),
+      tools: Math.ceil((toolDefsChars + msgSplit.tools) / TOKEN_CHARS),
+      chat: Math.ceil(msgSplit.chat / TOKEN_CHARS),
+      // Generated output is unknown until the provider usage report lands;
+      // emitUsageUpdate/persistCompletedManagerUsage patch this post-dispatch.
+      output: 0,
     };
 
     const estTokens =
       contextBreakdown.system +
       contextBreakdown.memory +
+      contextBreakdown.skills +
       contextBreakdown.tools +
-      contextBreakdown.chat;
+      contextBreakdown.chat +
+      contextBreakdown.output;
     // This is deliberately a chars/4 planning estimate, not a token count.
     // Do not mark it provider-known or let the UI present it as truth. A
     // provider/CLI usage event replaces it as soon as one is available.
@@ -4465,13 +5642,16 @@ export class KoryManager implements WorkerPipelineHost {
       0,
       false,
       contextBreakdown,
+      this.contextWindowOverrideBySession.get(sessionId),
     );
 
     // Context self-awareness: tell the model what its window looks like and
     // what's prunable, so it can decide on its own to free space or compact.
-    if (settings.contextSelfAwareness !== false) {
+    // Skipped on shrunk retries — it is pure overhead on a route that already
+    // reported it cannot fit the full prompt.
+    if (shrink < 1 && settings.contextSelfAwareness !== false) {
       const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
-      const win = resolveTrustedContextWindow(modelId, provider.name);
+      const win = this.resolveEffectiveSessionContextWindow(sessionId, modelId, provider.name);
       const pct = win.contextWindow ? Math.round((estTokens / win.contextWindow) * 100) : null;
       const bulky = messages
         .filter(
@@ -4482,7 +5662,7 @@ export class KoryManager implements WorkerPipelineHost {
             typeof m.content === 'string' &&
             m.content.length > 400,
         )
-        .map((m) => ({ id: m.archiveId, tok: Math.ceil(m.content.length / 4) }))
+        .map((m) => ({ id: m.archiveId, tok: Math.ceil(m.content.length / TOKEN_CHARS) }))
         .sort((a, b) => b.tok - a.tok)
         .slice(0, 5);
       systemPrompt +=
@@ -4490,7 +5670,7 @@ export class KoryManager implements WorkerPipelineHost {
 
 [CONTEXT STATUS] ~${k(estTokens)} tokens in your context` +
         (pct !== null ? ` (~${pct}% of a ${k(win.contextWindow!)} window)` : '') +
-        ` — system ${k(contextBreakdown.system)}, memory ${k(contextBreakdown.memory)}, tools ${k(contextBreakdown.tools)}, chat/tool-results ${k(contextBreakdown.chat)}.` +
+        ` — system ${k(contextBreakdown.system)}, memory ${k(contextBreakdown.memory)}, skills ${k(contextBreakdown.skills)}, tools ${k(contextBreakdown.tools)}, chat/tool-results ${k(contextBreakdown.chat)}.` +
         (bulky.length
           ? ` Largest prunable tool outputs: ${bulky.map((b) => `${b.id} (~${k(b.tok)})`).join(', ')}.`
           : '') +
@@ -4517,257 +5697,146 @@ export class KoryManager implements WorkerPipelineHost {
       forceFreshConversation ? 'plan' : interactionMode,
     );
 
-    const streamSignal = withTimeoutSignal(signal, AGENT.LLM_STREAM_TIMEOUT_MS);
-    const stream = this.providers.executeWithRetry(
-      {
-        model: modelId,
-        systemPrompt,
-        messages: providerMessages,
-        tools,
-        maxTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
-        signal: streamSignal,
-        ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
-        ...(fastMode === true && { fastMode: true }),
-        // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
-        workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
-        sessionId,
-        providerConversationRevision,
-        ...(forceFreshConversation && { forceFreshConversation: true }),
-        harnessRole: 'manager',
-        permissionMode: permissionPolicy.mode as AgentSettings['permissionMode'],
-        promptManifestHash: managerCompilation.manifest.hash,
-        taskContractHash: managerCompilation.manifest.taskContractHash,
-        promptCache: managerCompilation.promptCache,
-        sandbox: SANDBOX_PRESETS.readonly,
+    const runtime = new TurnRuntime({
+      providers: this.providers,
+      lifecycle: this.runLifecycle,
+      assertActive: (owner) => {
+        this.assertRunHandleActive(owner);
+        const durable = this.runs?.get(owner.sessionId);
+        if (this.runs && (durable?.runId !== owner.runId || durable.status !== 'active')) {
+          throw new TurnOwnershipLostError();
+        }
       },
-      provider.name,
-    );
-
-    let assistantContent = '';
-    let pendingToolCalls = new Map<string, { name: string; input: string }>();
-    const completedToolCalls: CompletedToolCall[] = [];
-    let hasToolCalls = false;
-    let observedNativeTool = false;
-    let tokensIn = 0;
-    let tokensOut = 0;
-    let cachedInputTokens = 0;
-    let cacheWriteInputTokens = 0;
-    let usageKnown = false;
-
-    try {
-      for await (const event of stream) {
-        // On user stop, keep everything accumulated so far — breaking (instead of
-        // throwing) lets the partial response flow into `messages` and get
-        // persisted. Throwing here erased the user's proof-of-work on Stop.
-        if (signal?.aborted) break;
-        if (event.type === 'error') {
-          throw new Error(event.error ?? 'LLM stream error');
-        }
-        if (event.type === 'content_delta') {
-          const delta = event.content ?? '';
-          assistantContent += delta;
-          // Stream live, token-by-token — so the user sees text appear immediately (no
-          // "thinks then dumps" pause) and partial output survives a mid-stream error.
-          if (delta) {
-            await this.runLifecycle.phase(handle, 'streaming', 'provider_content');
-            this.setHeartbeatPhase(sessionId, 'streaming');
-            this.emitWSMessage(sessionId, 'stream.delta', {
-              agentId: KORY_IDENTITY.id,
-              content: delta,
-              model: modelId,
-            });
-          }
-        } else if (event.type === 'thinking_delta') {
-          if (event.thinking || typeof event.thinkingTokens === 'number') {
-            await this.runLifecycle.phase(handle, 'thinking', 'provider_reasoning');
-            this.setHeartbeatPhase(sessionId, 'thinking');
-            this.emitWSMessage(sessionId, 'agent.status', {
-              agentId: KORY_IDENTITY.id,
-              status: 'thinking',
-              detail: 'Provider reported reasoning activity',
-            });
-            this.emitWSMessage(sessionId, 'stream.thinking', {
-              agentId: KORY_IDENTITY.id,
-              thinking: event.thinking ?? '',
-              ...(typeof event.thinkingTokens === 'number'
-                ? { thinkingTokens: event.thinkingTokens }
-                : {}),
-            } satisfies StreamThinkingPayload);
-          }
-        } else if (event.type === 'file_edit') {
-          // Agentic provider (claude-code) already wrote the file — surface it in the live
-          // diff preview (it's done, not a tool for us to execute).
-          if (event.filePath) {
-            this.streamAgentFileEdit(
-              ctx,
-              event.filePath,
-              event.fileContent ?? '',
-              event.fileOperation ?? 'edit',
-              event.fileOldContent,
-            );
-            // Archive a bounded, redacted edit preview for later identification.
-            await getContextArchive()?.record(
+      archive: getContextArchive(),
+      processes: processSupervisor,
+    });
+    let failure: Error | undefined;
+    const result = await runtime
+      .stream({
+        handle,
+        agentId: KORY_IDENTITY.id,
+        provider: provider.name,
+        effects: {
+          emit: (type, payload) => this.emitWSMessage(sessionId, type, payload),
+          heartbeat: (phase) => this.setHeartbeatPhase(sessionId, phase),
+          fileEdit: (...args) => this.streamAgentFileEdit(ctx, ...args),
+          usage: (usage) =>
+            this.emitUsageUpdate(
               sessionId,
-              'file_edit',
-              `${event.fileOperation ?? 'edit'} ${event.filePath}`,
-              event.fileContent ?? '',
-            );
-          }
-        } else if (event.type === 'tool_executed') {
-          observedNativeTool = true;
-          await this.runLifecycle.phase(handle, 'tool_calling', 'provider_tool');
-          // Agentic provider already ran a non-file tool — surface it in the tool feed.
-          const callId = `agent-${nanoid(8)}`;
-          // CLI-native background command (Claude Code's Bash run_in_background):
-          // register it so the background-terminals UI tracks it with live logs.
-          const bgMatch =
-            /running in background with ID:\s*(\S+?)\.[\s\S]*?written to:\s*(\S+?\.output)/i.exec(
-              event.toolOutput ?? '',
-            );
-          if (bgMatch) {
-            let bgCommand = event.toolName ?? 'background command';
-            try {
-              const input = JSON.parse(event.toolInput ?? '{}') as { command?: string };
-              if (input.command) bgCommand = input.command;
-            } catch (err: unknown) {
-              logBackgroundRegistrationFailure({
-                cwd: ctx.workingDirectory,
-                error: err,
-                phase: 'input_invalid',
-                sessionId,
-                toolCallId: callId,
-              });
-            }
-            void processSupervisor
-              .registerExternal({
-                name: `cli:${bgMatch[1]}`,
-                command: bgCommand,
-                sessionId,
-                outputFile: bgMatch[2],
-              })
-              .catch((err: unknown) => {
-                // Background process registration is fire-and-forget — the command
-                // is already running; failure to track it doesn't affect the user.
-                logBackgroundRegistrationFailure({
-                  command: bgCommand,
-                  cwd: ctx.workingDirectory,
-                  error: err,
-                  phase: 'registration_failed',
-                  sessionId,
-                  toolCallId: callId,
-                });
-              });
-          }
-          const agenticArchiveId = await getContextArchive()?.record(
-            sessionId,
-            'tool_result',
-            `${event.toolName ?? 'tool'} ${(event.toolInput ?? '').slice(0, 140)}`,
-            event.toolOutput ?? '',
-            event.isError === true,
-          );
-          this.emitWSMessage(sessionId, 'stream.tool_call', {
-            agentId: KORY_IDENTITY.id,
-            sourceProvider: provider.name,
-            toolCall: {
-              id: callId,
-              name: event.toolName ?? 'tool',
-              input: safeParseJson(event.toolInput),
-            },
-          });
-          this.setHeartbeatPhase(sessionId, 'tool_calling');
-          this.emitWSMessage(sessionId, 'stream.tool_result', {
-            agentId: KORY_IDENTITY.id,
-            sourceProvider: provider.name,
-            toolResult: {
-              callId,
-              name: event.toolName ?? 'tool',
-              output: event.toolOutput ?? '',
-              isError: event.isError === true,
-              durationMs: 0,
-              ...(agenticArchiveId ? { archiveId: agenticArchiveId } : {}),
-            },
-          });
-        } else if (event.type === 'usage_update') {
-          // Cached prompt tokens still occupy the context window — fold them in
-          // so the context bar reflects real occupancy, not just billed input.
-          if (typeof event.tokensIn === 'number')
-            tokensIn = Math.max(tokensIn, event.tokensIn + (event.tokensCache ?? 0));
-          if (typeof event.tokensOut === 'number') tokensOut = Math.max(tokensOut, event.tokensOut);
-          if (typeof event.tokensCacheRead === 'number') {
-            cachedInputTokens = Math.max(cachedInputTokens, event.tokensCacheRead);
-          }
-          if (typeof event.tokensCacheWrite === 'number') {
-            cacheWriteInputTokens = Math.max(cacheWriteInputTokens, event.tokensCacheWrite);
-          }
-          usageKnown = true;
-          this.emitUsageUpdate(
-            sessionId,
-            KORY_IDENTITY.id,
-            modelId,
-            provider.name,
-            tokensIn,
-            tokensOut,
-            true,
-            contextBreakdown,
-            cachedInputTokens,
-          );
-        } else if (event.type === 'tool_use_start') {
-          hasToolCalls = true;
-          await this.runLifecycle.phase(handle, 'tool_calling', 'tool_requested');
-          pendingToolCalls.set(event.toolCallId!, { name: event.toolName!, input: '' });
-          this.setHeartbeatPhase(sessionId, 'tool_calling');
-          this.emitWSMessage(sessionId, 'stream.tool_call', {
-            agentId: KORY_IDENTITY.id,
-            toolCall: { id: event.toolCallId, name: event.toolName, input: {} },
-          });
-        } else if (event.type === 'tool_use_delta') {
-          const tc = pendingToolCalls.get(event.toolCallId!);
-          if (tc) tc.input += event.toolInput ?? '';
-        } else if (event.type === 'tool_use_stop') {
-          const call = pendingToolCalls.get(event.toolCallId!);
-          if (call) {
-            let parsedInput = {};
-            try {
-              parsedInput = JSON.parse(call.input || '{}');
-            } catch (err: unknown) {
-              serverLog.debug(
-                { err: err instanceof Error ? err.message : String(err) },
-                'Malformed tool input JSON, defaults to {}',
-              );
-            }
-            this.emitWSMessage(sessionId, 'stream.tool_call', {
-              agentId: KORY_IDENTITY.id,
-              toolCall: { id: event.toolCallId, name: call.name, input: parsedInput },
-            });
-            completedToolCalls.push({ id: event.toolCallId!, name: call.name, input: parsedInput });
-            pendingToolCalls.delete(event.toolCallId!);
-          }
-        }
-      }
-    } catch (err) {
-      // Provider streams can throw on abort (fetch AbortError) — salvage the
-      // partial response instead of discarding the turn. Real errors rethrow.
-      const aborted = signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
-      if (!aborted) throw err;
+              KORY_IDENTITY.id,
+              modelId,
+              provider.name,
+              usage.tokensIn,
+              usage.tokensOut,
+              usage.usageKnown,
+              contextBreakdown,
+              usage.cachedInputTokens,
+              usage.estimated,
+              this.contextWindowOverrideBySession.get(sessionId),
+              usage.cacheWriteInputTokens,
+            ),
+        },
+        request: {
+          model: modelId,
+          systemPrompt,
+          messages: providerMessages,
+          tools,
+          ...(supportsControlPlaneTools && {
+            allowedToolNames: [...(ctx.allowedToolNames ?? [])].sort(),
+          }),
+          maxTokens: reservedOutputByShrink[shrink] ?? 2048,
+          signal,
+          ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
+          ...(fastMode === true && { fastMode: true }),
+          // Agentic CLI providers (claude-code) run + edit files in the session's project directory.
+          workingDirectory: await this.resolveSessionWorkingDirectory(sessionId),
+          sessionId,
+          providerConversationRevision,
+          ...(forceFreshConversation && { forceFreshConversation: true }),
+          harnessRole: 'manager',
+          permissionMode: permissionPolicy.mode as AgentSettings['permissionMode'],
+          promptManifestHash: managerCompilation.manifest.hash,
+          taskContractHash: managerCompilation.manifest.taskContractHash,
+          promptCache: managerCompilation.promptCache,
+          promptCacheKeepaliveMode: settings.promptCacheKeepaliveMode,
+          cacheLaneKind: 'manager',
+          sandbox: SANDBOX_PRESETS.readonly,
+        },
+      })
+      .catch((error: unknown): TurnStreamResult => {
+        if (!(error instanceof TurnStreamFailure)) throw error;
+        // Strip the partial payload from the error propagated to outer logging.
+        failure = new Error(error.message);
+        return error.partial;
+      });
+
+    // The route rejected the full prompt (custom conduit gateways 413 even on
+    // a one-word message). Shrink skills/memory/tools/history one level and
+    // retry — the intermediate 413 is hidden from the user feed and only a
+    // subtle system.info notes the retry. Deferred context (fetch_context,
+    // load_skill_detail, request_tools) stays available on demand.
+    if (
+      failure &&
+      isContextLimitFailureMessage(failure.message) &&
+      shrink < 3 &&
+      !signal?.aborted
+    ) {
+      koryLog.warn(
+        { sessionId, provider: provider.name, model: modelId, shrink },
+        'Model route reported a context limit — auto-shrinking and retrying without surfacing the raw error',
+      );
+      this.emitWSMessage(sessionId, 'system.info', {
+        message: `The model route reported a context limit, so Koryphaios retried with a smaller context (level ${shrink + 1}/3). Background skills, memory, and older history were deferred — they reappear on demand via fetch_context, load_skill_detail, and request_tools.`,
+      });
+      const retried = await this.processManagerTurn(
+        sessionId,
+        modelId,
+        provider,
+        messages,
+        ctx,
+        signal,
+        reasoningLevel,
+        interactionMode,
+        fastMode,
+        providerConversationRevision,
+        forceFreshConversation,
+        shrink + 1,
+      );
+      if (retried.success) this.contextShrinkHintBySession.set(shrinkHintKey, shrink + 1);
+      return retried;
     }
+    if (!failure && shrink > 0) this.contextShrinkHintBySession.set(shrinkHintKey, shrink);
+
+    const { content: assistantContent, completedToolCalls, observedNativeTool } = result;
+    const {
+      tokensIn,
+      tokensOut,
+      usageKnown,
+      estimated: usageEstimated,
+      cachedInputTokens,
+      cacheWriteInputTokens,
+    } = result.usage;
 
     messages.push({
       role: 'assistant',
       content: assistantContent,
       tool_calls:
-        hasToolCalls && completedToolCalls.length > 0
+        completedToolCalls.length > 0
           ? completedToolCalls.map((tc) => ({ id: tc.id, name: tc.name, input: tc.input }))
           : undefined,
     });
 
-    if (hasToolCalls && completedToolCalls.length > 0) {
+    if (completedToolCalls.length > 0) {
       return {
-        success: true,
+        success: !failure,
+        failure,
         content: assistantContent,
         usage: {
           tokensIn,
           tokensOut,
           usageKnown,
+          estimated: usageEstimated,
+          skillContextCostChars: managerCompilation.manifest.skillContextCost,
           ...(usageKnown
             ? { cachedInputTokens, cacheWriteInputTokens, breakdown: contextBreakdown }
             : {}),
@@ -4777,12 +5846,15 @@ export class KoryManager implements WorkerPipelineHost {
       };
     }
     return {
-      success: assistantContent.length > 0,
+      success: !failure && assistantContent.length > 0,
+      failure,
       content: assistantContent,
       usage: {
         tokensIn,
         tokensOut,
         usageKnown,
+        estimated: usageEstimated,
+        skillContextCostChars: managerCompilation.manifest.skillContextCost,
         ...(usageKnown
           ? { cachedInputTokens, cacheWriteInputTokens, breakdown: contextBreakdown }
           : {}),
@@ -4877,6 +5949,17 @@ export class KoryManager implements WorkerPipelineHost {
       };
     }
 
+    // Read-only retrieval never parks for an approval round-trip under the
+    // permissive presets (yolo/guarded) — auto-allow list/read/search/recall
+    // and similar side-effect-free calls. Only writes/deletes/exec park.
+    const policyMode = ctx.permissionPolicy?.mode;
+    if (
+      (policyMode === 'yolo' || policyMode === 'guarded') &&
+      (READ_ONLY_TOOLS.has(tc.name) || READ_ONLY_NOTE_TOOL_NAMES.has(tc.name))
+    ) {
+      return null;
+    }
+
     // If the active preset already asks for this tool, let the central tool
     // gate issue the single approval prompt instead of double-prompting.
     const presetDecision = decideToolPermission(ctx.permissionPolicy, tc.name);
@@ -4962,8 +6045,8 @@ export class KoryManager implements WorkerPipelineHost {
     if (!archive) return;
     const { loadAgentSettings } = await import('../agent-settings');
     const settings = loadAgentSettings(await this.resolveSessionWorkingDirectory(sessionId));
-    const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 3; // recent turns keep full outputs
-    const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 600; // tiny outputs aren't worth stubbing
+    const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 8; // recent turns keep full outputs
+    const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 2000; // tiny outputs aren't worth stubbing
     // A single current-turn result can be enormous (for example a tool
     // accidentally serializing image pixels). Do not let it overflow the next
     // provider request before age-based pruning gets a chance to run.
@@ -5011,6 +6094,16 @@ export class KoryManager implements WorkerPipelineHost {
     tc: CompletedToolCall,
     ctx: ToolContext,
   ): Promise<ToolCallOutput> {
+    if (ctx.allowedToolNames && !ctx.allowedToolNames.has(tc.name)) {
+      return {
+        callId: tc.id,
+        name: tc.name,
+        output: `Tool ${tc.name} is disabled for this turn by the host.`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
     const before = await this.events.runWorkflowHooks('before-tool', sessionId, {
       role: 'manager',
       tool: tc.name,
@@ -5026,6 +6119,8 @@ export class KoryManager implements WorkerPipelineHost {
       };
     }
     if (tc.name === 'ask_user') {
+      // Explicit user questions always park for an answer by design — even in
+      // yolo/guarded modes. Only approval parking auto-allows read-only calls.
       const question = (tc.input?.question as string) ?? 'Proceed?';
       const options = (tc.input?.options as string[]) ?? ['Yes', 'No'];
       const selection = await this.waitForUserInputInternal(sessionId, question, options);
@@ -5067,6 +6162,7 @@ export class KoryManager implements WorkerPipelineHost {
     success: boolean;
     error?: string;
     workerMessages?: InternalMessage[];
+    skillReviewContext?: SkillReviewContext;
     usage?: { tokensIn: number; tokensOut: number };
   }> {
     const workerId = `worker-${nanoid(8)}`;
@@ -5106,6 +6202,8 @@ export class KoryManager implements WorkerPipelineHost {
     const ctx: ToolContext = {
       sessionId,
       agentId: workerId,
+      callerRole: 'worker',
+      callerDomain: domain,
       activeProvider: provider.name,
       activeModel: modelId,
       reasoningLevel: resolvedReasoningLevel,
@@ -5123,10 +6221,14 @@ export class KoryManager implements WorkerPipelineHost {
       waitForUserInput: (question, options, opts) =>
         this.waitForUserInputInternal(sessionId, question, options, opts),
     } as ToolContext;
+    // Workers inherit the delegating chat's APPROVAL posture, so the parent's
+    // per-chat YOLO/guarded choice (not the project default) is what applies.
+    // Confinement is resolved separately from `workspace.sandbox`, so a YOLO
+    // chat still runs its workers inside a kernel-enforced worktree jail.
     Object.defineProperties(ctx, {
       permissionPolicy: {
         get() {
-          const s = loadAgentSettings(workerWorkingDirectory);
+          const s = loadAgentSettingsForSession(workerWorkingDirectory, sessionId);
           return resolveSubAgentPermissionPolicy(s, s.subAgentApproval);
         },
         enumerable: true,
@@ -5134,16 +6236,26 @@ export class KoryManager implements WorkerPipelineHost {
       },
       sandboxOptions: {
         get() {
-          const s = loadAgentSettings(workerWorkingDirectory);
-          return resolveSubAgentSandboxOptions(s, s.subAgentApproval, isSandboxed);
+          const s = loadAgentSettingsForSession(workerWorkingDirectory, sessionId);
+          return resolveSubAgentSandboxOptions(
+            s,
+            s.subAgentApproval,
+            isSandboxed,
+            this.workspaceSandboxMode(),
+          );
         },
         enumerable: true,
         configurable: true,
       },
       isSandboxed: {
         get() {
-          const s = loadAgentSettings(workerWorkingDirectory);
-          return resolveSubAgentSandboxOptions(s, s.subAgentApproval, isSandboxed).isSandboxed;
+          const s = loadAgentSettingsForSession(workerWorkingDirectory, sessionId);
+          return resolveSubAgentSandboxOptions(
+            s,
+            s.subAgentApproval,
+            isSandboxed,
+            this.workspaceSandboxMode(),
+          ).isSandboxed;
         },
         enumerable: true,
         configurable: true,
@@ -5151,7 +6263,7 @@ export class KoryManager implements WorkerPipelineHost {
     });
     const history = await this.loadHistory(sessionId);
     const messages: InternalMessage[] = [...history, { role: 'user', content: userMessage }];
-    const workerSettings = loadAgentSettings(workerWorkingDirectory);
+    const workerSettings = loadAgentSettingsForSession(workerWorkingDirectory, sessionId);
     let workerSupplementalContext = '';
     const workerGuidance = assembleAgentContext(workerWorkingDirectory, workerSettings);
     if (workerGuidance.preferences.trim()) {
@@ -5200,12 +6312,13 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
-    if (workerCompilation.warnings?.length) {
-      for (const w of workerCompilation.warnings) {
-        this.emitWSMessage(sessionId, 'system.info', { message: w });
-      }
-    }
+    this.emitCompilationWarnings(sessionId, workerCompilation.warnings, provider.name, modelId);
     const workerSystemPrompt = workerCompilation.systemPrompt + workerSupplementalContext;
+    persistSkillDeliveryEvidence(
+      await this.resolveSessionWorkingDirectory(sessionId),
+      workerId,
+      workerCompilation.skillDelivery,
+    );
 
     const thread: AgentThreadState = {
       sessionId,
@@ -5217,7 +6330,9 @@ export class KoryManager implements WorkerPipelineHost {
       systemPrompt: workerSystemPrompt,
       promptManifestHash: workerCompilation.manifest.hash,
       taskContractHash: workerCompilation.manifest.taskContractHash,
+      skillDelivery: workerCompilation.skillDelivery,
       promptCache: workerCompilation.promptCache,
+      cacheLaneKind: 'worker',
       toolRole: 'worker',
       reasoningLevel: resolvedReasoningLevel,
       maxTurns: 25,
@@ -5260,6 +6375,10 @@ export class KoryManager implements WorkerPipelineHost {
       return {
         success: true,
         workerMessages: [...thread.messages],
+        skillReviewContext: {
+          taskContract: workerCompilation.manifest.taskContract,
+          delivery: workerCompilation.skillDelivery,
+        },
         usage: usage ? { tokensIn: usage.tokensIn, tokensOut: usage.tokensOut } : undefined,
       };
     } catch (err: unknown) {
@@ -5359,6 +6478,16 @@ export class KoryManager implements WorkerPipelineHost {
       );
       return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
     }
+    if (tc.name === 'request_manager_relay') {
+      const ans = await this.handleRelayRequest(
+        sessionId,
+        workerId,
+        String(tc.input.toProject ?? ''),
+        String(tc.input.subject ?? '(no subject)'),
+        String(tc.input.body ?? ''),
+      );
+      return { callId: tc.id, name: tc.name, output: ans, isError: false, durationMs: 0 };
+    }
     const gated = await this.gateNoteToolCall(sessionId, tc, ctx);
     if (gated) return gated;
     const result = await this.tools.execute(ctx, { id: tc.id, name: tc.name, input: tc.input });
@@ -5381,12 +6510,34 @@ export class KoryManager implements WorkerPipelineHost {
     this.workers.cancelWorker(agentId);
   }
 
+  /** Effective session window = the composer's context-window override
+   *  layered on the provider-verified window. Fail closed: the override is
+   *  honored only when it is a positive safe integer within the trusted
+   *  ceiling; an unknown window passes through unchanged, never guessed. */
+  private resolveEffectiveSessionContextWindow(
+    sessionId: string,
+    modelId: string,
+    providerName: ProviderName,
+  ) {
+    return applyContextWindowOverride(
+      resolveTrustedContextWindow(modelId, providerName),
+      this.contextWindowOverrideBySession.get(sessionId),
+    );
+  }
+
   /** Read the authoritative context preview for a model the user just picked.
    *  Exact occupancy is reusable only when the last provider report came from
    *  this same route and exact conversation boundary. The caller applies the
    *  response for its current picker generation; this method never emits or
-   *  persists preview state. */
-  async previewModelContext(sessionId: string, modelId: string, providerName: ProviderName) {
+   *  persists preview state. The optional session budget is clamped against
+   *  the verified window here so the previewed denominator is the effective
+   *  one; an unknown window ignores the override instead of guessing. */
+  async previewModelContext(
+    sessionId: string,
+    modelId: string,
+    providerName: ProviderName,
+    contextWindowOverride?: number,
+  ) {
     const imageAttachmentCountPromise = this.messages?.countContextImageAttachments
       ? this.messages.countContextImageAttachments(sessionId, 1000)
       : (this.messages?.getContextMessages(sessionId, 1000) ?? Promise.resolve([])).then(
@@ -5406,7 +6557,10 @@ export class KoryManager implements WorkerPipelineHost {
       this.messages?.getActiveBoundary(sessionId),
       imageAttachmentCountPromise,
     ]);
-    const context = resolveTrustedContextWindow(modelId, providerName);
+    const context = applyContextWindowOverride(
+      resolveTrustedContextWindow(modelId, providerName),
+      contextWindowOverride,
+    );
     // Provider-reported token counts are only authoritative for the exact
     // routing identity and conversation boundary that produced them.
     // Different providers may tokenize the same transcript differently, and
@@ -5420,6 +6574,7 @@ export class KoryManager implements WorkerPipelineHost {
     const used = sameSnapshot ? last.used : 0;
     const breakdown = sameSnapshot ? last.breakdown : undefined;
     const cachedInputTokens = sameSnapshot ? last.cachedInputTokens : undefined;
+    const estimated = sameSnapshot ? last.estimated === true : false;
     // Preview is intentionally response-only. The composer guards HTTP
     // responses with its current selection generation; an unsolicited usage
     // websocket event has no such request identity and could let a delayed
@@ -5434,6 +6589,7 @@ export class KoryManager implements WorkerPipelineHost {
       contextKnown: context.contextKnown,
       contextSource: context.contextSource,
       usageKnown: sameSnapshot,
+      ...(estimated ? { estimated: true } : {}),
       hasImageAttachments: imageAttachmentCount > 0,
       imageAttachmentCount,
       ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
@@ -5837,8 +6993,7 @@ export class KoryManager implements WorkerPipelineHost {
       thread.activeRun = work;
       void work
         .catch((err) => {
-          const cancelled =
-            admission.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+          const cancelled = admission.signal.aborted;
           const detail = {
             agentId,
             sessionId,
@@ -5978,8 +7133,7 @@ export class KoryManager implements WorkerPipelineHost {
         status: 'done',
       });
     } catch (err) {
-      const aborted =
-        thread.abort?.signal.aborted || (err instanceof Error && err.name === 'AbortError');
+      const aborted = thread.abort?.signal.aborted === true;
       thread.status = aborted ? 'done' : 'error';
       thread.updatedAt = Date.now();
       if (!aborted) {
@@ -6048,6 +7202,7 @@ export class KoryManager implements WorkerPipelineHost {
         promptManifestHash: thread.promptManifestHash,
         taskContractHash: thread.taskContractHash,
         promptCache: thread.promptCache,
+        cacheLaneKind: thread.cacheLaneKind,
         ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
       },
       provider.name,
@@ -6198,11 +7353,7 @@ export class KoryManager implements WorkerPipelineHost {
         collisionChoices: this.skillCollisionChoicesBySession.get(sessionId),
       },
     });
-    if (fallbackCompilation.warnings?.length) {
-      for (const w of fallbackCompilation.warnings) {
-        this.emitWSMessage(sessionId, 'system.info', { message: w });
-      }
-    }
+    this.emitCompilationWarnings(sessionId, fallbackCompilation.warnings, provider.name, modelId);
     const fallbackThread: AgentThreadState = {
       sessionId,
       identity: {
@@ -6222,6 +7373,7 @@ export class KoryManager implements WorkerPipelineHost {
       promptManifestHash: fallbackCompilation.manifest.hash,
       taskContractHash: fallbackCompilation.manifest.taskContractHash,
       promptCache: fallbackCompilation.promptCache,
+      cacheLaneKind: 'worker',
       toolRole: 'worker',
       reasoningLevel,
       maxTurns: 1,
@@ -6300,6 +7452,12 @@ export class KoryManager implements WorkerPipelineHost {
     this.titleGenerationBySession.delete(sessionId);
     this.promptManifestHashBySession.delete(sessionId);
     this.skillCollisionChoicesBySession.delete(sessionId);
+    for (const key of [...this.contextShrinkHintBySession.keys()]) {
+      if (key === sessionId || key.startsWith(`${sessionId} `)) {
+        this.contextShrinkHintBySession.delete(key);
+      }
+    }
+    this.warnedUnverifiedContextWindowBySession.delete(sessionId);
     this.goalContextBySession.delete(sessionId);
     this.sessionWorkingDirs.delete(sessionId);
     this.stopHeartbeat(sessionId);
@@ -6393,6 +7551,12 @@ export class KoryManager implements WorkerPipelineHost {
       tasks.push(
         this.workspaceManager.prune().then((r) => {
           if (!r.success) koryLog.warn({ msg: r.message }, 'Worktree prune failed');
+        }),
+        // Fully merged `ai/*` branches are cheap but accumulate without bound.
+        // Branches that still hold unmerged work are always retained.
+        this.workspaceManager.reapMergedBranches().then((r) => {
+          if (r.success) koryLog.debug({ msg: r.message }, 'Koryphaios branch reap completed');
+          else koryLog.warn({ msg: r.message }, 'Koryphaios branch reap failed');
         }),
       );
     }
@@ -6492,6 +7656,8 @@ export class KoryManager implements WorkerPipelineHost {
     this.agentThreads.clear();
 
     // Drain active worktrees before the server closes the database/process.
+    // Alternate per-session-project managers are owned by the pipeline service.
+    await this.workerPipeline?.dispose();
     if (this.workspaceManager) {
       await this.workspaceManager.shutdown();
     }
@@ -6511,6 +7677,43 @@ export class KoryManager implements WorkerPipelineHost {
   // Per-session project folders: a chat created with a project open runs in THAT
   // folder (tools, providers, workers), not the backend's launch directory.
   private sessionWorkingDirs = new Map<string, string>();
+
+  /** Kernel sandbox policy for agents, from `workspace.sandbox`. Governs
+   *  confinement only — never whether the user is asked to approve a tool. */
+  private workspaceSandboxMode(): WorkspaceSandboxMode {
+    return this.config.workspace?.sandbox ?? WORKSPACE.DEFAULT_SANDBOX_MODE;
+  }
+
+  // ─── Worktree inventory and conflict recovery ──────────────────────────
+  // A reconcile that cannot merge cleanly leaves the user's checkout untouched
+  // and parks the work on its branch. These accessors are how that state
+  // becomes visible and actionable instead of silently occupying disk.
+
+  /** Active worktrees, capacity, and branches awaiting resolution. */
+  getWorkspaceStatus(): WorktreeStatus | null {
+    return this.workspaceManager?.getStatus() ?? null;
+  }
+
+  /** Retry a previously conflicted merge after the destination has moved. */
+  async applyWorktreeResolution(taskId: string): Promise<ReconcileResult> {
+    if (!this.workspaceManager) {
+      return {
+        success: false,
+        outcome: 'error',
+        conflicts: [],
+        message: 'Worktree isolation is not available for this project',
+      };
+    }
+    return this.workspaceManager.applyResolution(taskId);
+  }
+
+  /** Drop a pending resolution and delete the branch holding its work. */
+  async discardWorktreeResolution(taskId: string): Promise<{ success: boolean; message: string }> {
+    if (!this.workspaceManager) {
+      return { success: false, message: 'Worktree isolation is not available for this project' };
+    }
+    return this.workspaceManager.discardResolution(taskId);
+  }
 
   private async resolveSessionWorkingDirectory(sessionId: string): Promise<string> {
     const cached = this.sessionWorkingDirs.get(sessionId);
@@ -6541,6 +7744,135 @@ export class KoryManager implements WorkerPipelineHost {
    *  resolve a session's working directory without a private-method breach. */
   async resolveSessionWorkingDirectoryPublic(sessionId: string): Promise<string> {
     return this.resolveSessionWorkingDirectory(sessionId);
+  }
+
+  async prewarmSessionCache(
+    sessionId: string,
+    selectedModel: string,
+    reasoningLevel = 'medium',
+    interactionMode: 'act' | 'plan' = 'act',
+  ): Promise<{ triggered: boolean; reason?: string }> {
+    const key = `${selectedModel}\0${reasoningLevel}\0${interactionMode}`;
+    const previous = this.cachePrewarmBySession.get(sessionId);
+    const now = Date.now();
+    if (previous?.key === key && now - previous.at < 30_000) {
+      return { triggered: false, reason: 'cooldown' };
+    }
+    const result = await this.performColdCachePrewarm(
+      sessionId,
+      selectedModel,
+      reasoningLevel,
+      interactionMode,
+    );
+    if (result.triggered) {
+      this.cachePrewarmBySession.set(sessionId, { key, at: now });
+      promptCacheMaintenance.recordExternalPrewarm();
+    }
+    return result;
+  }
+
+  private async performColdCachePrewarm(
+    sessionId: string,
+    selectedModel: string,
+    reasoningLevel: string,
+    interactionMode: 'act' | 'plan',
+  ): Promise<{ triggered: boolean; reason?: string }> {
+    const { provider: providerName, model: modelId } = splitProviderKey(selectedModel);
+    if (providerName !== 'openai' && providerName !== 'anthropic') {
+      return { triggered: false, reason: 'provider-does-not-support-prewarm' };
+    }
+    if (providerName === 'openai' && reasoningLevel === 'auto') {
+      return { triggered: false, reason: 'auto-reasoning-not-resolved-yet' };
+    }
+    const provider = this.providers.get(providerName);
+    if (!provider?.isAvailable()) return { triggered: false, reason: 'provider-unavailable' };
+
+    const promptRoot = await this.resolveSessionWorkingDirectory(sessionId);
+    const settings = loadAgentSettingsForSession(promptRoot, sessionId);
+    const compilation = compilePrompt({
+      role: 'manager',
+      mode: getModeManager().getMode(),
+      provider: provider.name,
+      model: modelId,
+      occupiedContextTokenUpperBound: 0,
+      reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: false,
+      contextWindowOverride: this.contextWindowOverrideBySession.get(sessionId),
+      workingDirectory: promptRoot,
+      taskContract: createTaskContract('Prepare the stable provider cache prefix.'),
+      contextPaths: this.config.contextPaths,
+      skillSelection: { pins: alwaysPinnedSkills(interactionMode) },
+    });
+    const tools = this.buildManagerPrewarmTools(
+      settings,
+      promptRoot,
+      interactionMode,
+      provider.name,
+    );
+    const normalizedReasoning = normalizeReasoningLevel(
+      provider.name,
+      modelId,
+      reasoningLevel || undefined,
+    );
+    const workspaceRoute = derivePromptCacheLane(
+      {
+        model: modelId,
+        reasoningLevel: normalizedReasoning,
+        promptCache: compilation.promptCache,
+        sessionId,
+        harnessRole: 'manager',
+        cacheLaneKind: 'manager',
+      },
+      tools,
+      { provider: String(provider.name), custom: provider.config.custom === true },
+    );
+    if (workspaceRoute) {
+      const existingWorkspaceLane = await promptCacheMaintenance.prewarmRoute(
+        workspaceRoute.routingKey,
+      );
+      if (existingWorkspaceLane.triggered || existingWorkspaceLane.reason === 'cooldown') {
+        return existingWorkspaceLane;
+      }
+    }
+    if (!settings.promptCacheColdPrewarmEnabled) {
+      return { triggered: false, reason: 'cold-prewarm-disabled' };
+    }
+
+    const prewarmed = await collectProviderEvents(provider, {
+      model: modelId,
+      systemPrompt: compilation.promptCache.stableSystemPrompt,
+      messages: [{ role: 'user', content: '.' }],
+      tools,
+      ...((provider.name === 'openai' || provider.name === 'anthropic') && {
+        allowedToolNames: [],
+      }),
+      maxTokens: 1,
+      ...(normalizedReasoning !== undefined && { reasoningLevel: normalizedReasoning }),
+      workingDirectory: promptRoot,
+      sessionId,
+      harnessRole: 'manager',
+      permissionMode: resolveToolPermissionPolicy(settings, interactionMode)
+        .mode as AgentSettings['permissionMode'],
+      promptCache: compilation.promptCache,
+      promptCacheKeepaliveMode: settings.promptCacheKeepaliveMode,
+      cacheLaneKind: 'manager',
+      sandbox: SANDBOX_PRESETS.readonly,
+    });
+    if (prewarmed.failed) return { triggered: false, reason: 'provider-prewarm-failed' };
+    return { triggered: true };
+  }
+
+  private buildManagerPrewarmTools(
+    _settings: AgentSettings,
+    _promptRoot: string,
+    _interactionMode: 'act' | 'plan',
+    providerName: ProviderName,
+  ) {
+    if (!supportsKoryControlPlaneTools(providerName)) return [];
+    const declaredManagerTools = this.tools.getToolDefsForRole('manager');
+    return declaredManagerTools.length > 0
+      ? buildExposedToolset(declaredManagerTools)
+      : declaredManagerTools;
   }
 
   /** Last provider/model the manager routed a task to for a session, or null.
@@ -6617,6 +7949,7 @@ export class KoryManager implements WorkerPipelineHost {
     tokensOut: number,
     breakdown?: ContextBreakdown,
     cachedInputTokens?: number,
+    estimated?: boolean,
   ): Promise<boolean> {
     const archive = getContextArchive();
     if (!archive || !this.messages || this.erasedSessions.has(sessionId)) return false;
@@ -6631,9 +7964,23 @@ export class KoryManager implements WorkerPipelineHost {
         );
         return false;
       }
-      const win = resolveTrustedContextWindow(model, provider);
+      // Clamp before persisting: a cumulative harness total must not become a
+      // durable impossible meter (860k used on a 285k window) after reload.
+      const occupancy = resolveLiveOccupancy({
+        tokensIn,
+        tokensOut,
+        model,
+        provider,
+        usageKnown: true,
+        estimated,
+      });
+      const win = this.resolveEffectiveSessionContextWindow(sessionId, model, provider);
+      // Input buckets stay as the dispatch estimate; Output is the exact
+      // provider-reported tokensOut so generated text stops landing in the
+      // frontend's "Provider remainder".
+      const snapshotBreakdown = applyUsageOutput(breakdown, occupancy.tokensOut, true);
       await archive.recordUsage(sessionId, {
-        used: tokensIn + tokensOut,
+        used: occupancy.tokensUsed,
         max: win.contextWindow ?? 0,
         contextKnown: win.contextKnown,
         model,
@@ -6641,7 +7988,8 @@ export class KoryManager implements WorkerPipelineHost {
         activeMessageId: boundary.messageId,
         contextRevision: boundary.contextRevision,
         ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
-        ...(breakdown ? { breakdown } : {}),
+        ...(snapshotBreakdown ? { breakdown: snapshotBreakdown } : {}),
+        ...(occupancy.estimated ? { estimated: true } : {}),
         ts: Date.now(),
       });
       return true;
@@ -6666,34 +8014,98 @@ export class KoryManager implements WorkerPipelineHost {
     usageKnown: boolean,
     breakdown?: ContextBreakdown,
     cachedInputTokens?: number,
+    estimated?: boolean,
+    contextWindowOverride?: number,
+    cacheWriteInputTokens?: number,
   ) {
     if (this.erasedSessions.has(sessionId)) return;
+    // Reconcile with the trusted window — layered with the session context
+    // budget when one is set — before emitting: cumulative harness totals
+    // are clamped to the effective window and marked estimated so the meter
+    // never shows an impossible ratio — and downstream never mistakes it
+    // for exact occupancy. Planning estimates (usageKnown=false) pass
+    // through untouched; the UI already treats them as unknown.
+    const win = applyContextWindowOverride(
+      resolveTrustedContextWindow(model, provider),
+      contextWindowOverride,
+    );
+    const occupancy = usageKnown
+      ? resolveLiveOccupancy({ tokensIn, tokensOut, model, provider, usageKnown, estimated })
+      : null;
+    // resolveLiveOccupancy clamps against the provider-verified window only.
+    // A session budget sits below that window, so re-clamp the reconciled
+    // sample to the effective window — the meter must never show an
+    // impossible ratio against the user-selected budget.
+    const effectiveWindow =
+      win.contextKnown && typeof win.contextWindow === 'number' && win.contextWindow > 0
+        ? win.contextWindow
+        : undefined;
+    const effectiveOccupancy =
+      occupancy && effectiveWindow !== undefined && occupancy.contextWindow !== effectiveWindow
+        ? {
+            ...occupancy,
+            contextWindow: effectiveWindow,
+            tokensIn: Math.min(occupancy.tokensIn, effectiveWindow),
+            tokensOut: Math.min(occupancy.tokensOut, effectiveWindow),
+            tokensUsed: Math.min(occupancy.tokensUsed, effectiveWindow),
+            estimated:
+              occupancy.estimated ||
+              occupancy.tokensIn > effectiveWindow ||
+              occupancy.tokensOut > effectiveWindow ||
+              occupancy.tokensUsed > effectiveWindow,
+          }
+        : occupancy;
+    // Input buckets stay as the dispatch-time estimate; once usage is known,
+    // Output carries the provider-reported tokensOut (post-clamp) instead of
+    // leaving generated text in the frontend's "Provider remainder".
+    const breakdownWithOutput = applyUsageOutput(
+      breakdown,
+      effectiveOccupancy?.tokensOut,
+      usageKnown,
+    );
+    const pricedUsage = usageKnown
+      ? computeCostUsd(provider, model, tokensIn, tokensOut, {
+          cacheReadTokens: cachedInputTokens,
+          cacheWriteTokens: cacheWriteInputTokens,
+        })
+      : null;
+    const freshUsage =
+      usageKnown && pricedUsage ? computeCostUsd(provider, model, tokensIn, tokensOut) : null;
+    const cacheSavingsUsd =
+      pricedUsage && freshUsage ? freshUsage.costUsd - pricedUsage.costUsd : undefined;
     this.events.emitUsageUpdate(
       sessionId,
       agentId,
       model,
       provider,
-      tokensIn,
-      tokensOut,
+      effectiveOccupancy?.tokensIn ?? tokensIn,
+      effectiveOccupancy?.tokensOut ?? tokensOut,
       usageKnown,
-      breakdown,
+      breakdownWithOutput,
       cachedInputTokens,
+      effectiveOccupancy?.estimated ?? estimated,
+      cacheWriteInputTokens,
+      pricedUsage?.costUsd,
+      cacheSavingsUsd,
     );
     // Live provider usage is response-only until the final assistant message
     // establishes an exact conversation boundary. Stream-time archive writes
     // could race that completed snapshot and make stale occupancy durable.
     if (agentId === KORY_IDENTITY.id && usageKnown) {
-      const win = resolveTrustedContextWindow(model, provider);
       // Window resolution can lose the startup race (provider model lists
-      // refresh in the background). Retry once shortly after — if the window
-      // is known by then, re-emit so the bar stops saying "unknown".
+      // refresh in the background). Retry once shortly after — if the
+      // effective window is known by then, re-emit so the bar stops saying
+      // "unknown".
       if (!win.contextKnown) {
         const t = setTimeout(() => {
           const timers = this.usageRetryTimersBySession.get(sessionId);
           timers?.delete(t);
           if (timers?.size === 0) this.usageRetryTimersBySession.delete(sessionId);
           if (this.erasedSessions.has(sessionId)) return;
-          const retry = resolveTrustedContextWindow(model, provider);
+          const retry = applyContextWindowOverride(
+            resolveTrustedContextWindow(model, provider),
+            contextWindowOverride,
+          );
           if (retry.contextKnown) {
             this.emitUsageUpdate(
               sessionId,
@@ -6705,6 +8117,9 @@ export class KoryManager implements WorkerPipelineHost {
               usageKnown,
               breakdown,
               cachedInputTokens,
+              estimated,
+              contextWindowOverride,
+              cacheWriteInputTokens,
             );
           }
         }, 6_000);
@@ -6717,6 +8132,11 @@ export class KoryManager implements WorkerPipelineHost {
   }
   private emitWSMessage(sessionId: string, type: string, payload: WSMessage['payload']) {
     this.events.emit(sessionId, type, payload);
+  }
+
+  /** Public hook for AgentMailService: surface inter-agent mail to the UI. */
+  emitAgentMessageEvent(sessionId: string, message: AgentMessage): void {
+    this.emitWSMessage(sessionId, 'agent.message', { message });
   }
 
   /** Update the phase reported by the next heartbeat for this session.
@@ -6763,7 +8183,51 @@ export class KoryManager implements WorkerPipelineHost {
  *  typed back) vs TOOL traffic (tool calls + tool results). The context bar
  *  shows these separately — "chat" should be only the conversation, never the
  *  tool plumbing. */
-function estimateProviderMessagesChars(messages: ProviderMessage[]): {
+/** Guard: hand the turn back to the model when a run used tools but produced no
+ *  user-facing answer, instead of declaring the task complete for it. Bounded by
+ *  `attempts`/`maxAttempts` so a persistently-silent provider cannot loop. */
+export function shouldRequestFinalAnswer(args: {
+  noFinalContent: boolean;
+  toolActivity: boolean;
+  attempts: number;
+  maxAttempts: number;
+  stoppedByUser: boolean;
+  turnFailure: boolean;
+}): boolean {
+  if (args.stoppedByUser || args.turnFailure) return false;
+  if (!args.noFinalContent || !args.toolActivity) return false;
+  return args.attempts < args.maxAttempts;
+}
+
+/** Guard: after a 25-turn cap, request one automatic continuation only when
+ *  work remains and no followup was already issued for this chain. */
+export function shouldAutoContinueAfterCap(args: {
+  turnCount: number;
+  stoppedByUser: boolean;
+  hasOpenTasks: boolean;
+  lastToolCallCount: number;
+  alreadyIssued: boolean;
+}): boolean {
+  if (args.stoppedByUser || args.alreadyIssued) return false;
+  if (args.turnCount < 25) return false;
+  return args.hasOpenTasks || args.lastToolCallCount > 0;
+}
+/** Patch provider-reported output tokens onto a dispatch-time breakdown.
+ *  Input buckets stay as the dispatch chars/4 estimate; Output is exact
+ *  provider data (post-clamp occupancy), set only when usageKnown. Returns
+ *  the breakdown untouched at dispatch (output 0) and passes undefined
+ *  through so callers keep their existing spread guards. */
+export function applyUsageOutput(
+  breakdown: ContextBreakdown | undefined,
+  tokensOut: number | undefined,
+  usageKnown: boolean,
+): ContextBreakdown | undefined {
+  if (!breakdown) return undefined;
+  if (!usageKnown || typeof tokensOut !== 'number') return breakdown;
+  return { ...breakdown, output: Math.max(0, Math.floor(tokensOut)) };
+}
+
+export function estimateProviderMessagesChars(messages: ProviderMessage[]): {
   chat: number;
   tools: number;
 } {
@@ -6778,8 +8242,13 @@ function estimateProviderMessagesChars(messages: ProviderMessage[]): {
     }
     for (const b of m.content) {
       if (b.type === 'text') chat += b.text?.length ?? 0;
-      else if (b.type === 'image') chat += 4000;
-      else if (b.type === 'tool_use')
+      else if (b.type === 'image') {
+        // Base64 decodes to ~0.75 byte/char; the caller converts chars to
+        // tokens via chars/4, so tokens ≈ base64Len*0.75/4. No payload (e.g. a
+        // CLI-harness transcript reference) falls back to ~1k tokens of chars.
+        const base64Len = b.imageData?.length ?? 0;
+        chat += base64Len > 0 ? Math.ceil(base64Len * 0.75) : 4000;
+      } else if (b.type === 'tool_use')
         tools += (b.toolName?.length ?? 0) + JSON.stringify(b.toolInput ?? {}).length;
       else if (b.type === 'tool_result') tools += b.toolOutput?.length ?? 0;
     }

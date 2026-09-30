@@ -400,7 +400,6 @@ const MODE_CONFIG = {
   toolAccess: 'full',
   explanations: 'minimal',
   enableShadowLoggerUI: true,
-  enableWorktrees: true,
   enableCriticGate: true,
   showAgentDetails: true,
   showCostTracking: true,

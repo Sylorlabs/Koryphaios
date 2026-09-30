@@ -186,6 +186,20 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
     ) {
       errors.push('workspace.skipHooks must be a boolean');
     }
+
+    if (
+      config.workspace.modifyGitignore !== undefined &&
+      typeof config.workspace.modifyGitignore !== 'boolean'
+    ) {
+      errors.push('workspace.modifyGitignore must be a boolean');
+    }
+
+    if (
+      config.workspace.sandbox !== undefined &&
+      !['auto', 'always', 'off'].includes(config.workspace.sandbox)
+    ) {
+      errors.push("workspace.sandbox must be one of 'auto', 'always', 'off'");
+    }
   }
 
   if (config.safety) {

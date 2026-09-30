@@ -151,6 +151,9 @@ export function loadConfig(projectRoot: string): BackendConfig {
       worktreeLimit: fileConfig.workspace?.worktreeLimit ?? WORKSPACE.DEFAULT_WORKTREE_LIMIT,
       worktreeDir: fileConfig.workspace?.worktreeDir ?? WORKSPACE.DEFAULT_WORKTREE_DIR,
       copyEnvFiles: fileConfig.workspace?.copyEnvFiles ?? WORKSPACE.DEFAULT_COPY_ENV_FILES,
+      skipHooks: fileConfig.workspace?.skipHooks ?? WORKSPACE.DEFAULT_SKIP_HOOKS,
+      modifyGitignore: fileConfig.workspace?.modifyGitignore ?? WORKSPACE.DEFAULT_MODIFY_GITIGNORE,
+      sandbox: fileConfig.workspace?.sandbox ?? WORKSPACE.DEFAULT_SANDBOX_MODE,
     },
     mode:
       fileConfig.mode ??

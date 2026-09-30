@@ -162,13 +162,6 @@ export class ModeManager {
   }
 
   /**
-   * Check if worktrees are enabled
-   */
-  areWorktreesEnabled(): boolean {
-    return this.getModeConfig().enableWorktrees;
-  }
-
-  /**
    * Check if critic gate is enabled
    */
   isCriticGateEnabled(): boolean {

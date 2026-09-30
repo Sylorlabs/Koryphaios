@@ -40,6 +40,25 @@ export interface WorkspaceConfig {
   copyEnvFiles?: boolean;
   /** Skip pre-commit hooks on AI-generated commits during reconcile. @default true */
   skipHooks?: boolean;
+  /**
+   * Write the worktree directory into the tracked `.gitignore` instead of the
+   * clone-local `.git/info/exclude`. Off by default so Koryphaios never edits
+   * a tracked file without being asked to.
+   * @default false
+   */
+  modifyGitignore?: boolean;
+  /**
+   * Kernel sandbox for delegated agents.
+   * - 'auto'     → sandbox whenever a real enforcement engine is installed
+   *                 (bubblewrap on Linux, sandbox-exec on macOS)
+   * - 'always'   → require it; sandboxed commands are refused when unavailable
+   * - 'off'      → never sandbox delegated bash
+   *
+   * This controls filesystem/network confinement only, never approval prompts —
+   * those follow the session's permission mode.
+   * @default 'auto'
+   */
+  sandbox?: 'auto' | 'always' | 'off';
 }
 
 export interface ServerConfig {
@@ -68,6 +87,8 @@ export interface AgentSettings {
   autoApplySafeFixes: boolean;
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
+  /** Inter-agent messaging (AgentMail) policy. */
+  agentMessaging?: 'open' | 'approval-cross-project' | 'off';
   /** Run the agent's tools without an upfront "proceed?" prompt (on by default). */
   autoRunTools?: boolean;
   /** Agent memory - allow agents to update memory files */
@@ -84,6 +105,10 @@ export interface AgentSettings {
   localWebSearch?: 'off' | 'on' | 'fallback';
   /** Experimental: Multi-source research requirements */
   multiSourceResearch?: boolean;
+  /** Opt into first-turn prompt-cache prewarming while composing. */
+  promptCacheColdPrewarmEnabled?: boolean;
+  /** Prompt-cache keepalive policy. Economic is the safe default; always is an explicit spend choice. */
+  promptCacheKeepaliveMode?: 'economic' | 'always' | 'off';
   /** Context-window percentage at which automatic compaction triggers. */
   autoCompactThreshold?: number;
   /** Timestamp of last update for synchronization */

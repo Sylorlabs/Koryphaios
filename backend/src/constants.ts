@@ -281,6 +281,12 @@ export const WORKSPACE = {
   DEFAULT_WORKTREE_DIR: '.trees',
   /** Default: don't copy .env files to worktrees (security) */
   DEFAULT_COPY_ENV_FILES: false,
+  /** Default: skip pre-commit hooks on AI-generated reconcile commits */
+  DEFAULT_SKIP_HOOKS: true,
+  /** Default: exclude the worktree dir via .git/info/exclude, not a tracked .gitignore */
+  DEFAULT_MODIFY_GITIGNORE: false,
+  /** Default kernel sandbox for delegated agents: use it when an engine exists */
+  DEFAULT_SANDBOX_MODE: 'auto',
   /** Estimated RAM usage per worktree in MB (for guidance) */
   RAM_PER_WORKTREE_MB: 300,
 } as const;
