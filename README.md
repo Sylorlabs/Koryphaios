@@ -64,15 +64,17 @@ The backend handles orchestration, tools, sessions, HTTP APIs, and WebSocket str
 
 **Session-scoped Time Travel.** Koryphaios publishes private Git checkpoints only after their snapshot, metadata, manifest, and cursor are durable. Recovery is limited to the session-owned paths and conversation boundary recorded at that checkpoint. It is refused while an agent tool is active or when the current index/worktree cannot be proven safe, so unrelated work is not silently overwritten. Repositories without an initial Git commit cannot use delegated rollback and fail closed before a worker starts.
 
-**Parallel agent isolation.** Git worktrees let multiple agents work at the same time without clobbering each other's files. The workspace manager, worker pipeline, and conflict resolution services keep concurrent work separated and reconciled.
+**Parallel agent isolation.** Git worktrees let multiple agents work at the same time without clobbering each other's files. Each delegated task runs in its own worktree on a dedicated branch, and its filesystem grant is pinned to exactly that worktree and re-verified on every attempt. Reconciliation is preflighted in memory with `git merge-tree`, so a task that conflicts with a concurrent one never modifies your checkout: the destination is left clean and the work is preserved on its `ai/*` branch as a pending resolution you can retry or discard. Two tasks that edit the same file therefore do not merge silently — the overlap is reported instead of being resolved for you. Where the destination branch is not the one you have checked out, the merge is applied with `commit-tree`/`update-ref` and your working tree and uncommitted changes are not touched at all.
 
 **Real time streaming.** WebSocket streaming pushes response deltas, status changes, tool approvals, process lifecycle events, and recovery state to the desktop interface as they happen.
 
 **Local MCP diagnostics.** The bundled MCP server exposes workspace error detection and bounded diagnostic tools over Model Context Protocol. It does not install, impersonate, or claim a native VS Code, Cursor, Windsurf, or Augment extension; editor-specific compatibility fields remain readable only for older configuration files.
 
-**Sub agent teams with explicit recovery boundaries.** A manager plans and synthesizes while workers execute a bounded task and a read-only critic reviews the evidence. Delegation requires a project-scoped Git baseline. When a workflow requires kernel path confinement, the worker fails closed if the configured OS sandbox is unavailable instead of pretending argv parsing is a sandbox.
+**Sub agent teams with explicit recovery boundaries.** A manager plans and synthesizes while workers execute a bounded task and a read-only critic reviews the evidence. Delegation requires a project-scoped Git baseline. Workers stay inside a kernel-confined worktree under every permission mode, including YOLO: the permission mode decides whether you are asked, and `workspace.sandbox` decides what the process can reach. Setting `workspace.sandbox` to `always` makes a missing OS engine fail the command closed instead of running it unconfined.
 
 **Notes, feedback, and cost tracking.** Project-scoped long-form Notes and Memory use revision checks, explicit context budgets, and bounded attachments. The feedback dialog opens a prefilled GitHub issue containing only the text and optional app version you review; it does not silently upload diagnostics, source, prompts, screenshots, or keys. Session history tracks provider-reported usage and Koryphaios-attributed cost without inventing unavailable account totals.
+
+**Optional semantic retrieval.** Notes search can use an explicitly configured authenticated embedding endpoint. It applies project visibility and permissions before sending content, validates returned vectors, bounds requests and caching, and falls back to local search when unavailable. It is disabled by default and searches a bounded candidate set, not an exhaustive vault index. See [configuration and limits](docs/adr/006-embeddings-explicit-stub.md).
 
 **Signed-update plumbing with a verification boundary.** The Tauri shell includes signed-manifest update support and platform build workflows. A configured updater is not proof that every external artifact currently exists or works; each published OS/architecture target must pass its own build, signature, install, restart, and rollback checks. This checkout's local verification does not certify unavailable platform targets.
 
@@ -171,6 +173,9 @@ Koryphaios/
 - [Configuration and sandbox boundaries](docs/configuration.md)
 - [2026-08-09 native reliability hardening](docs/hardening-2026-08-09.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Core regression and task evaluation](docs/core-evaluation.md)
+- [Provider compatibility evidence](docs/provider-compatibility.md)
+- [Prompt caching architecture and verification](docs/prompt-caching.md)
 
 ## Troubleshooting
 

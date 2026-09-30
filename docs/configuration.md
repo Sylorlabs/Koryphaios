@@ -89,7 +89,7 @@ If you want to reset to the new defaults, delete the key from your
 | `KORYPHAIOS_HOST`            | Bind address                                               | `127.0.0.1`           |
 | `KORYPHAIOS_PORT`            | Bind port                                                  | `3001`                |
 | `KORYPHAIOS_TRUSTED_PROXIES` | CIDR list of trusted reverse proxies (for X-Forwarded-For) | (empty — XFF ignored) |
-| `KORYPHAIOS_OS_SANDBOX`      | Enable OS-level command sandbox (`1`/`0`)                  | `0` (opt-in)          |
+| `KORYPHAIOS_OS_SANDBOX`      | Force-disable OS-level confinement (`0`)                   | (unset — auto)        |
 
 ### KMS provider
 
@@ -136,22 +136,68 @@ migration remain disabled rather than being stored with a development key.
 
 ## OS sandbox
 
-The OS sandbox (`KORYPHAIOS_OS_SANDBOX=1`) confines sandboxed agent
-commands at the kernel level:
+Kernel path confinement for delegated agents is controlled by
+`workspace.sandbox`, not by an environment opt-in:
 
-- **Linux**: uses `bwrap` (bubblewrap) for mount-namespace + network
-  isolation. Install with `apt install bubblewrap` (Debian/Ubuntu) or
+| Value    | Behavior                                                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `auto`   | Confinement is used whenever a real engine is installed (the default). When no engine exists, the turn is reported as degraded rather than claimed to be isolated, and a warning is logged once. |
+| `always` | Confinement is required. A sandbox-required command is refused before it spawns if it cannot bind.                                                                                               |
+| `off`    | Delegated commands are never confined.                                                                                                                                                           |
+
+The engines themselves:
+
+- **Linux**: `bwrap` (bubblewrap) for mount-namespace and network isolation.
+  Install with `apt install bubblewrap` (Debian/Ubuntu) or
   `dnf install bubblewrap` (Fedora). If `bwrap` is unavailable, a
   sandbox-required command is rejected before it spawns.
-- **macOS**: uses `sandbox-exec` with a generated profile that allows
-  the workspace root and denies network when requested.
-- **Windows / unsupported**: kernel path confinement is unavailable, so a
-  sandbox-required command is rejected before it spawns.
+- **macOS**: `sandbox-exec` with a generated profile. Writes are confined to
+  the granted root. macOS requires a system-wide read allow to complete dynamic
+  linking — a profile built only from filtered read rules aborts the child during
+  linking on current releases — so reads are closed with explicit deny rules for
+  credential stores instead: `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`,
+  `~/.docker`, `~/.config/gcloud`, `~/.config/gh`, `~/.config/koryphaios`,
+  `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, and
+  `KORYPHAIOS_DATA_DIR`. Toolchain configuration agents legitimately need
+  (`~/.gitconfig`, `~/.npmrc`, `~/.bunfig.toml`) stays readable.
+- **Windows / unsupported**: no kernel engine exists, so `auto` reports degraded
+  and `always` refuses sandbox-required commands.
 
-When the OS sandbox is off, Koryphaios does not describe argv parsing or a
-working-directory check as containment. A workflow whose policy requires path
-confinement fails closed. Explicitly user-authorized unsandboxed agent commands
-remain a separate mode: they run with provider/backend secrets removed from
-the child environment, resource limits, process provenance, and the normal
-catastrophic-command approval floor. Manual user services have their own
-explicit lifecycle and environment contract.
+`KORYPHAIOS_OS_SANDBOX=0` is a process-wide kill switch for users who need to
+run without confinement at all.
+
+Approval and confinement are independent. A permission mode — including YOLO —
+decides only whether the user is asked to approve a tool call; it never removes
+the kernel boundary from a worker. Koryphaios does not describe argv parsing or a
+working-directory check as containment.
+
+## Workspace and worktrees
+
+```jsonc
+{
+  "workspace": {
+    "worktreeLimit": 4, // max concurrent isolated worker worktrees
+    "worktreeDir": ".trees", // base directory, relative to the project root
+    "copyEnvFiles": false, // do not copy .env files into worktrees
+    "skipHooks": true, // skip pre-commit hooks on AI reconcile commits
+    "modifyGitignore": false, // false: exclude locally via .git/info/exclude
+    "sandbox": "auto", // 'auto' | 'always' | 'off'
+  },
+}
+```
+
+`worktreeDir` and Koryphaios' own `.koryphaios/` state directory are excluded
+from Git through `.git/info/exclude` by default, so Koryphaios never edits a
+tracked `.gitignore` on your behalf and `git add -A` cannot commit credential
+material. Set `modifyGitignore` to `true` to write a tracked entry instead.
+
+Delegated work is merged back into the branch that was checked out when the
+worktree was created. That destination is pinned per task: switching branches
+mid-task does not redirect the output, and a task whose destination has been
+deleted or is checked out in another worktree is refused rather than forced.
+
+When a merge cannot complete, the result is reported through
+`GET /api/git/worktrees` together with the list of pending resolutions, which
+can be retried with `POST /api/git/worktrees/resolve` or dropped with
+`POST /api/git/worktrees/discard`. Branches holding work that was never merged
+are preserved across restarts and are never deleted by the periodic reaper.

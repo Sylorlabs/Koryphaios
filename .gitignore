@@ -47,6 +47,12 @@ frontend/frontend*.log
 .DS_Store
 Thumbs.db
 
+# Transpiler build cache (regenerable, tens of MB per file)
+*.bun-build
+
+# Local agent-tool state
+.workbuddy-ai/
+
 # IDE
 .vscode/
 .idea/
