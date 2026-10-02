@@ -111,7 +111,13 @@
       if (!activeTarget) return;
       const related = event.relatedTarget;
       if (related instanceof Node && activeTarget.contains(related)) return;
-      hide();
+      // Removing a focused element during Svelte's render can synchronously
+      // dispatch focusout. Defer reactive writes until that render completes,
+      // and do not hide a tooltip acquired by a newer focus event.
+      const previousTarget = activeTarget;
+      queueMicrotask(() => {
+        if (activeTarget === previousTarget) hide();
+      });
     };
 
     const reposition = () => schedulePosition();
