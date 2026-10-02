@@ -13,6 +13,7 @@ import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
 import { GoalStore } from './stores/goal-store';
+import { ChecklistStore } from './stores/checklist-store';
 import { loadConfig } from './runtime/config';
 import { PROJECT_ROOT } from './runtime/paths';
 import { loadEnvFromProject, validateEnvironment } from './runtime/env';
@@ -40,6 +41,9 @@ import {
   AskUserTool,
   AskManagerTool,
   DelegateToWorkerTool,
+  SendAgentMessageTool,
+  RequestManagerRelayTool,
+  ListAgentMessagesTool,
   DelegateToJulesTool,
   MCPDetectErrorsTool,
   MCPAnalyzeErrorTool,
@@ -64,9 +68,11 @@ import { setContext, type AppContext } from './context';
 import { getModeManager } from './mode';
 import { TimeTravelService } from './services/timetravel';
 import { startBackgroundCleanup } from './memory/background-cleanup';
+import { startCatalogRefresh } from './providers/catalog-refresh';
 import { GoalDriveService } from './kory/goal-drive-service';
 import { SANDBOX_PRESETS } from '@koryphaios/shared';
 import { cliResearchBoundary, hasResearchCitation } from './providers/cli-research';
+import { createPromptCachePlan } from './providers/prompt-cache';
 import { initEnforcedSpendCapsTable } from './security/spend-caps-enforced';
 import { recoverInterruptedSessionErasures } from './services/session-erasure-service';
 import { SessionRunStore } from './runs/session-run-store';
@@ -80,7 +86,7 @@ export async function bootstrap(): Promise<AppContext> {
   // ── Wire CLI deep-integration bridge scripts ────────────────────────────
   // The CLI bridges (cli-bridges.ts, devin-bridge.ts) read these env vars to
   // spawn the kory MCP server + hook bridge as subprocesses of each native CLI
-  // (claude, codex, devin, grok, cursor, cline, antigravity). Without them,
+  // (claude, codex, devin, grok, cursor, antigravity). Without them,
   // MCP/hooks wiring silently no-ops and CLIs lose access to kory__ tools.
   // Resolve the bundled scripts relative to this module so they work in both
   // dev (ts) and packaged (compiled) layouts.
@@ -140,7 +146,13 @@ export async function bootstrap(): Promise<AppContext> {
       if (!p?.listModels) return undefined;
       return p
         .listModels()
-        .find((m) => m.id === modelId || m.apiModelId === modelId || m.name === modelId);
+        .find(
+          (m) =>
+            m.id === modelId ||
+            m.apiModelId === modelId ||
+            m.name === modelId ||
+            m.aliases?.includes(modelId),
+        );
     } catch (err: unknown) {
       serverLog.debug(
         { provider: providerName, modelId, err: err instanceof Error ? err.message : String(err) },
@@ -160,6 +172,7 @@ export async function bootstrap(): Promise<AppContext> {
   const messages = new MessageStore();
   const tasks = new TaskStore();
   const goals = new GoalStore();
+  const checklists = new ChecklistStore();
   const timeTravel = new TimeTravelService(PROJECT_ROOT, messages);
 
   // The WebSocket manager is a projection sink, not the lifecycle owner.
@@ -208,6 +221,7 @@ export async function bootstrap(): Promise<AppContext> {
     messages,
     tasks,
     goals,
+    checklists,
     goalDriver,
     kory,
     wsManager,
@@ -216,6 +230,7 @@ export async function bootstrap(): Promise<AppContext> {
   };
 
   setContext(context);
+  configureAgentMail({ kory, sessions });
   // Kory subscribed during construction; initialize only after the WebSocket
   // broker and AppContext exist so restart-recovery terminal events can be
   // surfaced and drained without racing bootstrap dependencies.
@@ -231,13 +246,31 @@ export async function bootstrap(): Promise<AppContext> {
   }
   const recoveredQuestionHandoffs = await kory.recoverDurableQuestionHandoffs();
   if (recoveredQuestionHandoffs.requeued > 0 || recoveredQuestionHandoffs.queued > 0) {
-    serverLog.info(
-      recoveredQuestionHandoffs,
-      'Reconciled durable answered-question handoffs',
-    );
+    serverLog.info(recoveredQuestionHandoffs, 'Reconciled durable answered-question handoffs');
   }
   await goalDriver.recover();
   startBackgroundCleanup(kory, wsManager);
+  // Keep enabled providers' model catalogs warm in the background. Cadence is
+  // per-provider by discovery cost and stretches when the user is idle, so new
+  // models appear without burning requests or spawning CLIs for a session that
+  // is not happening. A changed catalog is pushed to connected clients so the
+  // picker updates on its own.
+  startCatalogRefresh(providers, {
+    onCatalogsChanged: () => {
+      try {
+        wsManager.broadcastEphemeral({
+          type: 'provider.status',
+          payload: { providers: providers.getStatus() },
+          timestamp: Date.now(),
+        });
+      } catch (err: unknown) {
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Failed to broadcast refreshed provider status',
+        );
+      }
+    },
+  });
   return context;
 }
 
@@ -261,8 +294,10 @@ async function initEncryption() {
 }
 
 import { registerGitTools, registerCheckpointTools } from './tools';
-import { CreateGoalTool, UpdateGoalTool } from './tools/goals';
+import { CreateGoalTool, UpdateGoalTool, EditGoalChecklistTool } from './tools/goals';
 import { noteTools } from './tools/notes';
+import { checklistTools } from './tools/checklists';
+import { configureAgentMail } from './kory/services/agent-mail-service';
 
 /** Build the authoritative runtime tool registry without starting the backend. */
 export async function initTools(providers: ProviderRegistry) {
@@ -305,13 +340,14 @@ export async function initTools(providers: ProviderRegistry) {
         await provider.refreshModels?.(true);
         const model = provider.listModels()[0];
         if (!model) continue;
+        const researchSystemPrompt =
+          'Perform web research only. Use the provider native web search/fetch capability. Do not inspect local files, run shell commands, modify anything, call MCP tools, or delegate. Return concise results with source URLs.';
         let output = '';
         let failed = false;
         for await (const event of providers.executeWithRetry(
           {
             model: model.id,
-            systemPrompt:
-              'Perform web research only. Use the provider native web search/fetch capability. Do not inspect local files, run shell commands, modify anything, call MCP tools, or delegate. Return concise results with source URLs.',
+            systemPrompt: researchSystemPrompt,
             messages: [
               {
                 role: 'user',
@@ -326,6 +362,14 @@ export async function initTools(providers: ProviderRegistry) {
             permissionMode: 'plan',
             sandbox: researchSandbox,
             capabilityProfile: 'research-only',
+            promptCache: createPromptCachePlan({
+              stableSystemPrompt: researchSystemPrompt,
+              providerAdapter: providerName,
+              role: 'research',
+              workspaceScope: context.workingDirectory,
+            }),
+            promptCacheKeepaliveMode: 'off',
+            cacheLaneKind: 'research',
           },
           providerName,
         )) {
@@ -354,6 +398,9 @@ export async function initTools(providers: ProviderRegistry) {
     new AskUserTool(),
     new AskManagerTool(),
     new DelegateToWorkerTool(),
+    new SendAgentMessageTool(),
+    new RequestManagerRelayTool(),
+    new ListAgentMessagesTool(),
     new DelegateToJulesTool(),
     new MCPDetectErrorsTool(),
     new MCPAnalyzeErrorTool(),
@@ -363,6 +410,7 @@ export async function initTools(providers: ProviderRegistry) {
     new PruneContextTool(),
     new CreateGoalTool(),
     new UpdateGoalTool(),
+    new EditGoalChecklistTool(),
     new LoadSkillDetailTool(),
     new ListWorkflowsTool(),
     new StartWorkflowTool(),
@@ -379,6 +427,10 @@ export async function initTools(providers: ProviderRegistry) {
   registerCheckpointTools(tools);
 
   for (const tool of noteTools) {
+    tools.register(tool);
+  }
+
+  for (const tool of checklistTools) {
     tools.register(tool);
   }
 

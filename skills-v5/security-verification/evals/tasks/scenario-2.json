@@ -1,0 +1,68 @@
+{
+  "id": "security-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A resource API authorizes privileged exports through an external policy service and a bounded decision cache. The completed change is supposed to stop stale admin access after role revocation and to fail closed when a fresh authorization decision cannot be obtained. Run an authorization test in the disposable fixture. First establish a valid-admin export succeeds. Revoke the test user's admin role at the authoritative directory, record the configured authorization-cache TTL, and test both inside and immediately after that documented stale window. After the cache must be refreshed, make the policy service unavailable and attempt export again. The operation must follow the documented fail-closed contract: no export artifact, background job, presigned URL, or durable permission side effect. Restore the policy service and verify the revoked user remains denied while a separate valid admin control still succeeds. Check audit records for decision source, revocation/failure reason, and absence of token or signing-key leakage.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://security-verification/revocation-policy-cache",
+    "requirements": [
+      "the disposable fixture contains one revocable admin identity and a separate stable-admin positive control",
+      "the authorization cache TTL and expected behavior inside that stale window are explicitly documented in the fixture contract",
+      "directory revocation and policy-service unavailability can be triggered deterministically",
+      "export artifacts, queued jobs, generated URLs, permission state, and sanitized audit records are independently observable",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "security-revocation-window",
+      "assertion": "The test distinguishes documented behavior inside the bounded decision-cache window from the required denial once the cache must refresh, using the authoritative role revocation as the reference state."
+    },
+    {
+      "id": "security-policy-fail-closed",
+      "assertion": "When a fresh policy decision is required but the policy service is unavailable, the revoked identity cannot create an export artifact, background job, URL, or durable privileged side effect."
+    },
+    {
+      "id": "security-policy-recovery-control",
+      "assertion": "After policy-service restoration the revoked identity remains denied, the separate valid-admin control succeeds, and audit evidence records the decision source/reason without exposing authorization credentials or signing material."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "security-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Revocation/cache decision timeline",
+        "positive and negative authorization evidence",
+        "independent export/job/state observations",
+        "sanitized audit evidence"
+      ]
+    },
+    {
+      "id": "security-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the configured stale-decision window is verified rather than treated as immediate revocation by assumption",
+        "policy-service failure is tested at the enforcing resource boundary and checked for non-effects",
+        "a valid-admin positive control separates dependency failure from blanket service failure"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Revocation/cache decision timeline",
+    "allow/deny request evidence",
+    "independent export/job/permission non-effect evidence",
+    "sanitized audit evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "security-verification-scenario-2-revocation-matrix",
+    "security-verification-scenario-2-fail-closed-evidence",
+    "security-verification-scenario-2-verdict",
+    "security-verification-scenario-2-paired-evaluation"
+  ]
+}

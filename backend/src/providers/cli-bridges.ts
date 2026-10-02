@@ -8,7 +8,6 @@
 //   claude-code : --append-system-prompt, --allowedTools, --disallowedTools,
 //                 --effort, --permission-mode, CLAUDE_CONFIG_DIR, MCP (.claude.json)
 //   codex       : --sandbox, --json, --model, <KORY_TOOL_CALL> envelope, CODEX_HOME
-//   cline       : --plan, --auto-approve, --json, --reasoning-effort, --model
 //   cursor      : -p, --output-format stream-json, --mode, --sandbox, --force, --model
 //   antigravity : --print, --model, --mode, --sandbox, --log-file, --conversation
 //   grok        : -p, --model, --output-format, --permission-mode, --no-subagents,
@@ -175,10 +174,6 @@ export function getKoryphaiosCodexHome(profileDir = join(homedir(), '.codex')): 
       ? 'codex-home'
       : `codex-home-${basename(profileDir).replace(/[^a-z0-9._-]/gi, '-')}`;
   return makeIsolatedHome(dirName, profileDir, ['auth.json']);
-}
-
-export function getKoryphaiosClineHome(): string {
-  return makeIsolatedHome('cline-home', join(homedir(), '.cline'), []);
 }
 
 export function getKoryphaiosCursorHome(): string {
@@ -359,6 +354,68 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
 
 // ─── Codex bridge ──────────────────────────────────────────────────────────
 
+function tomlBasicString(value: string): string {
+  let out = '"';
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (ch === '\\') out += '\\\\';
+    else if (ch === '"') out += '\\"';
+    else if (ch === '\n') out += '\\n';
+    else if (ch === '\r') out += '\\r';
+    else if (ch === '\t') out += '\\t';
+    else if (code < 0x20 || code === 0x7f) {
+      out += `\\u${code.toString(16).padStart(4, '0').toUpperCase()}`;
+    } else out += ch;
+  }
+  return `${out}"`;
+}
+
+function sanitizeTomlKey(name: string): string | null {
+  const key = name.trim();
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : null;
+}
+
+/**
+ * Serialize MCP servers to a Codex `kory.config.toml` profile (layered via
+ * `codex --profile kory`, so the base config.toml is never rewritten).
+ * stdio transport only — the kory bridge is stdio. Throws on anything else
+ * so a half-understood server can never silently turn into a broken one.
+ */
+export function serializeCodexMcpProfile(servers: CliMcpServerConfig[]): string {
+  const lines = [
+    '# Managed by Koryphaios: per-turn kory MCP servers for Codex.',
+    '# Rewritten every turn with a fresh session-scoped grant; do not edit.',
+  ];
+  for (const srv of servers) {
+    const key = sanitizeTomlKey(srv.name);
+    if (!key) {
+      throw new Error(`Codex MCP profile: unsupported server name ${JSON.stringify(srv.name)}`);
+    }
+    if (srv.transport !== 'stdio') {
+      throw new Error(
+        `Codex MCP profile: transport ${srv.transport} is not supported (stdio only)`,
+      );
+    }
+    lines.push(`[mcp_servers.${key}]`);
+    lines.push(`command = ${tomlBasicString(srv.command)}`);
+    lines.push(`args = [${srv.args.map((a) => tomlBasicString(a)).join(', ')}]`);
+    // Bun cold-starts the TypeScript bridge; give it room beyond codex's default.
+    lines.push('startup_timeout_sec = 30');
+    const env = srv.env ?? {};
+    if (Object.keys(env).length > 0) {
+      lines.push(`[mcp_servers.${key}.env]`);
+      for (const [name, value] of Object.entries(env)) {
+        const envKey = sanitizeTomlKey(name);
+        if (!envKey) {
+          throw new Error(`Codex MCP profile: unsupported env name ${JSON.stringify(name)}`);
+        }
+        lines.push(`${envKey} = ${tomlBasicString(value)}`);
+      }
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
   readonly provider: ProviderName = 'codex' as const;
   preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'agent-config';
@@ -371,7 +428,11 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
       supportsExport: true, // --json JSONL
       supportsPermissionMode: false, // uses --sandbox instead
       supportsAcp: true, // codex app-server --stdio
-      supportsMcp: false, // no MCP support yet
+      // codex exec spawns `mcp_servers` from config (verified live against
+      // `codex mcp list` + per-turn server startup). The kory MCP server is
+      // mounted via a per-turn `kory.config.toml` profile; the envelope
+      // protocol stays as the fallback for servers that fail to start.
+      supportsMcp: true,
       supportsRules: false,
       supportsSkills: false,
       supportsHooks: false,
@@ -388,11 +449,10 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
   }
 
   buildAgentConfig(ctx: CliBridgeContext): CliAgentConfig | null {
-    // Codex uses the <KORY_TOOL_CALL> envelope in the prompt body, not a
-    // config file. We package the system instructions + the kory__ tool
-    // whitelist so the provider can build the envelope protocol.
-    // The envelope tells Codex to emit kory__ tool calls instead of using
-    // its native command_execution tool.
+    // Codex prefers the kory MCP server (mounted via the per-turn kory
+    // profile) and falls back to the <KORY_TOOL_CALL> envelope in the prompt
+    // body when MCP is unavailable. We package the system instructions + the
+    // kory__ tool whitelist so the provider can build both transports.
     // This configuration advertises the Kory-owned capability surface. The
     // Codex provider renders the current request's role-filtered, unprefixed
     // ToolRegistry names into its envelope protocol.
@@ -400,7 +460,7 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
     return {
       systemInstructions: [
         ctx.systemPrompt?.trim() ?? '',
-        'You are running inside Koryphaios. Native tools are not authority. Use only the host-supplied Kory tool names through the KORY_TOOL_CALL envelope protocol; Koryphaios enforces permissions and executes them.',
+        'You are running inside Koryphaios. Native tools are not authority. Prefer the host-supplied kory MCP tools for every read, edit, search, and command; if the kory MCP server is unavailable, emit Kory tool calls through the KORY_TOOL_CALL envelope protocol instead. Koryphaios enforces permissions and executes them.',
       ],
       allowedTools,
       permissions: this.buildPermissionScopes(ctx),
@@ -420,8 +480,12 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
     return '{}';
   }
 
-  buildMcpConfig(_ctx: CliBridgeContext): CliMcpServerConfig[] | null {
-    return null; // Codex has no MCP yet — uses the <KORY_TOOL_CALL> envelope
+  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
+    // The kory MCP server is mounted through a per-turn `kory.config.toml`
+    // profile (see serializeCodexMcpProfile). The envelope protocol stays as
+    // the fallback when no session-scoped grant can be issued.
+    const server = buildKoryMcpServerConfig(ctx, 'codex');
+    return server ? [server] : null;
   }
 
   buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
@@ -441,76 +505,6 @@ export class CodexCliBridge extends ManagedCliBridge implements CliBridge {
 
   parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
     // Codex streams JSONL directly; the provider maps events live.
-    return { trajectory: { steps: [] }, events: [] };
-  }
-}
-
-// ─── Cline bridge ──────────────────────────────────────────────────────────
-
-export class ClineCliBridge extends ManagedCliBridge implements CliBridge {
-  readonly provider: ProviderName = 'cline' as const;
-  preferredTransport: 'acp' | 'agent-config' | 'legacy' = 'legacy';
-
-  getCapabilities(): CliCapabilities {
-    return {
-      ...EMPTY_CLI_CAPABILITIES,
-      supportsAgentConfig: false, // no config file; uses --plan + --auto-approve
-      supportsSandbox: false,
-      supportsExport: true, // --json NDJSON
-      supportsPermissionMode: true, // --plan mode
-      supportsAcp: false,
-      supportsMcp: true, // cline supports MCP servers via cline_mcp_settings.json
-      supportsRules: true, // .clinerules
-      supportsSkills: false,
-      supportsHooks: false,
-      version: null,
-      probedAt: 0,
-    };
-  }
-
-  buildPermissionScopes(ctx: CliBridgeContext): CliPermissionScopes {
-    // Cline uses --plan (read-only) vs --auto-approve true. No scope matchers.
-    return sandboxToScopes(ctx.sandbox, ctx.role);
-  }
-
-  buildAgentConfig(_ctx: CliBridgeContext): CliAgentConfig | null {
-    return null; // Cline has no agent-config file
-  }
-
-  serializeAgentConfig(_config: CliAgentConfig): string {
-    return '{}';
-  }
-
-  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
-    return null; // Cline has no hooks system
-  }
-
-  serializeHooks(_hooks: CliHookConfig[]): string {
-    return '{}';
-  }
-
-  buildMcpConfig(ctx: CliBridgeContext): CliMcpServerConfig[] | null {
-    // Cline reads MCP servers from cline_mcp_settings.json in its home dir.
-    const server = buildKoryMcpServerConfig(ctx, 'cline');
-    return server ? [server] : null;
-  }
-
-  buildRules(ctx: CliBridgeContext): CliRuleFile[] | null {
-    // Cline reads .clinerules as always-on rules.
-    const home = getKoryphaiosClineHome();
-    return [
-      {
-        path: join(home, '.clinerules'),
-        content: `# Koryphaios Session Rules\n\n${ctx.systemPrompt.trim()}\n`,
-      },
-    ];
-  }
-
-  buildSkills(_ctx: CliBridgeContext): CliSkillFile[] | null {
-    return null;
-  }
-
-  parseTrajectory(_raw: string): { trajectory: CliTrajectory; events: ProviderEvent[] } {
     return { trajectory: { steps: [] }, events: [] };
   }
 }
@@ -895,9 +889,6 @@ export function getCliBridge(provider: ProviderName): CliBridge | null {
       break;
     case 'codex':
       bridge = new CodexCliBridge();
-      break;
-    case 'cline':
-      bridge = new ClineCliBridge();
       break;
     case 'cursor':
       bridge = new CursorCliBridge();

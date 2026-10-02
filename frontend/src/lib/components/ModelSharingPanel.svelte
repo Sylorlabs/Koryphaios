@@ -16,7 +16,12 @@
   import Search from 'lucide-svelte/icons/search';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
-  import { SANDBOX_PRESETS, type ProviderShareRisk, type SandboxPolicy, type SandboxPreset } from '@koryphaios/shared';
+  import {
+    SANDBOX_PRESETS,
+    type ProviderShareRisk,
+    type SandboxPolicy,
+    type SandboxPreset,
+  } from '@koryphaios/shared';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
   interface ShareCandidate {
@@ -44,7 +49,9 @@
 
   // Sandbox policy for remote CLI turns.
   let sandbox = $state<SandboxPolicy | null>(null);
-  let sandboxCaps = $state<{ osIsolation: boolean; mechanism: string; platform: string } | null>(null);
+  let sandboxCaps = $state<{ osIsolation: boolean; mechanism: string; platform: string } | null>(
+    null,
+  );
   let savingSandbox = $state(false);
   const sharingAnyCli = $derived(candidates.some((c) => c.agentic && sharedSet.has(c.provider)));
 
@@ -60,14 +67,27 @@
     loadingHost = true;
     try {
       const res = await apiFetch(apiUrl('/api/collab/providers/shared'));
-      const data = await parseJsonResponse<{ ok?: boolean; data?: { shared: string[]; sharedModels?: Record<string, string[]>; candidates: ShareCandidate[] } }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        data?: {
+          shared: string[];
+          sharedModels?: Record<string, string[]>;
+          candidates: ShareCandidate[];
+        };
+      }>(res);
       if (data.ok && data.data) {
-        candidates = data.data.candidates.map((candidate) => ({ ...candidate, models: candidate.models ?? [] }));
+        candidates = data.data.candidates.map((candidate) => ({
+          ...candidate,
+          models: candidate.models ?? [],
+        }));
         sharedSet = new Set(data.data.shared);
         sharedModels = data.data.sharedModels ?? {};
       }
     } catch (err: unknown) {
-      console.warn('Failed to load shared providers:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load shared providers:',
+        err instanceof Error ? err.message : String(err),
+      );
       /* backend offline — panel stays empty */
     } finally {
       loadingHost = false;
@@ -80,7 +100,10 @@
       const data = await parseJsonResponse<{ ok?: boolean; data?: typeof remote }>(res);
       if (data.ok) remote = data.data ?? null;
     } catch (err: unknown) {
-      console.warn('Failed to load remote provider status:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load remote provider status:',
+        err instanceof Error ? err.message : String(err),
+      );
       /* ignore */
     }
   }
@@ -88,13 +111,19 @@
   async function loadSandbox() {
     try {
       const res = await apiFetch(apiUrl('/api/collab/providers/sandbox'));
-      const data = await parseJsonResponse<{ ok?: boolean; data?: { policy: SandboxPolicy; capabilities: typeof sandboxCaps } }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        data?: { policy: SandboxPolicy; capabilities: typeof sandboxCaps };
+      }>(res);
       if (data.ok && data.data) {
         sandbox = data.data.policy;
         sandboxCaps = data.data.capabilities;
       }
     } catch (err: unknown) {
-      console.warn('Failed to load sandbox policy:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to load sandbox policy:',
+        err instanceof Error ? err.message : String(err),
+      );
       /* ignore */
     }
   }
@@ -120,7 +149,10 @@
         body: JSON.stringify({ policy: sandbox }),
       });
     } catch (err: unknown) {
-      console.warn('Failed to save sandbox policy:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to save sandbox policy:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Could not save sandbox policy');
     } finally {
       savingSandbox = false;
@@ -141,7 +173,7 @@
     {
       key: 'filesystemIsolation',
       label: 'Filesystem jail',
-      hint: 'CLI can only touch the shared project — not your home, keys, or other files.',
+      hint: 'CLI can only touch the shared project. It cannot reach your home, keys, or other files.',
     },
     {
       key: 'allowNetwork',
@@ -161,29 +193,39 @@
     {
       key: 'allowShell',
       label: 'Run shell commands',
-      hint: 'CLI may run commands — on YOUR machine (inside the jail).',
+      hint: 'CLI may run commands on YOUR machine inside the jail.',
     },
   ];
 
-  const PRESET_META: Array<{ id: Exclude<SandboxPreset, 'custom'>; label: string; hint: string }> = [
-    { id: 'balanced', label: 'Balanced', hint: 'Jailed, but network + web + shell + edits on. Recommended.' },
-    { id: 'hardened', label: 'Hardened', hint: 'No network, no shell. Read + edit only.' },
-    { id: 'readonly', label: 'Read-only', hint: 'Analysis only — no edits, shell, or network.' },
-    { id: 'trusted', label: 'Trusted', hint: 'No jail, everything on. Full trust only.' },
-  ];
+  const PRESET_META: Array<{ id: Exclude<SandboxPreset, 'custom'>; label: string; hint: string }> =
+    [
+      {
+        id: 'balanced',
+        label: 'Balanced',
+        hint: 'Jailed, but network + web + shell + edits on. Recommended.',
+      },
+      { id: 'hardened', label: 'Hardened', hint: 'No network, no shell. Read + edit only.' },
+      { id: 'readonly', label: 'Read only', hint: 'Analysis only. No edits, shell, or network.' },
+      { id: 'trusted', label: 'Trusted', hint: 'No jail, everything on. Full trust only.' },
+    ];
 
   function toggleShare(c: ShareCandidate) {
     const enabling = !sharedSet.has(c.provider);
     if (enabling && c.risk === 'prohibited') {
-      toastStore.warning(`${c.label} violates the provider's Terms of Service — sharing is at your own risk.`);
+      toastStore.warning(
+        `${c.label} violates the provider's Terms of Service. Sharing is at your own risk.`,
+      );
     } else if (enabling && c.risk === 'caution') {
-      toastStore.warning(`Sharing ${c.label} may violate the provider's terms — use at your own risk.`);
+      toastStore.warning(
+        `Sharing ${c.label} may violate the provider's terms. Use at your own risk.`,
+      );
     }
     const next = new Set(sharedSet);
     if (next.has(c.provider)) next.delete(c.provider);
     else {
       next.add(c.provider);
-      if (!sharedModels[c.provider]) sharedModels = { ...sharedModels, [c.provider]: c.models.map((model) => model.id) };
+      if (!sharedModels[c.provider])
+        sharedModels = { ...sharedModels, [c.provider]: c.models.map((model) => model.id) };
     }
     sharedSet = next;
   }
@@ -194,7 +236,9 @@
 
   function toggleModel(candidate: ShareCandidate, modelId: string) {
     const current = modelsFor(candidate);
-    const next = current.includes(modelId) ? current.filter((id) => id !== modelId) : [...current, modelId];
+    const next = current.includes(modelId)
+      ? current.filter((id) => id !== modelId)
+      : [...current, modelId];
     sharedModels = { ...sharedModels, [candidate.provider]: next };
   }
 
@@ -209,7 +253,10 @@
       if (res.ok) toastStore.success('Shared providers updated');
       else toastStore.error('Could not update shared providers');
     } catch (err: unknown) {
-      console.warn('Failed to save shared providers:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to save shared providers:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Could not update shared providers');
     } finally {
       savingHost = false;
@@ -226,9 +273,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ joinCode: code }),
       });
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string; data?: { hostName: string | null } }>(res);
+      const data = await parseJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: { hostName: string | null };
+      }>(res);
       if (data.ok) {
-        toastStore.success(`Connected to ${data.data?.hostName ?? 'host'} — their models are now in your picker`);
+        toastStore.success(
+          `Connected to ${data.data?.hostName ?? 'host'}. Their models are now in your picker`,
+        );
         joinCode = '';
         await loadRemote();
         await loadProvidersFromApi();
@@ -236,7 +289,9 @@
         toastStore.error(data.error || 'Could not connect to host');
       }
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Could not connect to host');
+      toastStore.error(
+        (err instanceof Error ? err.message : String(err)) || 'Could not connect to host',
+      );
     } finally {
       connecting = false;
     }
@@ -250,7 +305,10 @@
       await loadProvidersFromApi();
       toastStore.info('Disconnected from host');
     } catch (err: unknown) {
-      console.warn('Failed to disconnect from host:', err instanceof Error ? err.message : String(err));
+      console.warn(
+        'Failed to disconnect from host:',
+        err instanceof Error ? err.message : String(err),
+      );
       toastStore.error('Could not disconnect');
     }
   }
@@ -259,64 +317,99 @@
   const filteredCandidates = $derived.by(() => {
     const query = providerSearch.trim().toLowerCase();
     return candidates
-      .filter((candidate) =>
-        !query ||
-        candidate.label.toLowerCase().includes(query) ||
-        candidate.provider.toLowerCase().includes(query),
+      .filter(
+        (candidate) =>
+          !query ||
+          candidate.label.toLowerCase().includes(query) ||
+          candidate.provider.toLowerCase().includes(query),
       )
-      .sort((left, right) => Number(right.available) - Number(left.available) || left.label.localeCompare(right.label));
+      .sort(
+        (left, right) =>
+          Number(right.available) - Number(left.available) || left.label.localeCompare(right.label),
+      );
   });
 
   function candidateDescription(candidate: ShareCandidate): string {
-    if (!candidate.available) return 'Not connected — configure this provider in Providers before sharing it.';
+    if (!candidate.available)
+      return 'Not connected. Configure this provider in Providers before sharing it.';
     const modelText = `${candidate.modelCount} model${candidate.modelCount === 1 ? '' : 's'}`;
     return candidate.agentic
       ? `${modelText} · CLI runs in a temporary sandbox on this computer.`
       : `${modelText} · ${candidate.reason}`;
   }
 
-  const remoteApiCount = $derived(remote?.catalog?.providers?.filter((p: any) => !p.agentic).length ?? 0);
-  const remoteCliCount = $derived(remote?.catalog?.providers?.filter((p: any) => p.agentic).length ?? 0);
+  const remoteApiCount = $derived(
+    remote?.catalog?.providers?.filter((p: any) => !p.agentic).length ?? 0,
+  );
+  const remoteCliCount = $derived(
+    remote?.catalog?.providers?.filter((p: any) => p.agentic).length ?? 0,
+  );
 </script>
 
 <div class="space-y-8">
   <div class="flex items-start gap-4">
-    <div class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl" style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;">
+    <div
+      class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl"
+      style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;"
+    >
       <Share2 size={18} />
     </div>
     <div>
       <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Models you share</h3>
       <p class="mt-2 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
-        Lend providers for inference without sharing your workspace or files. Only the model call travels.
+        Lend providers for inference without sharing your workspace or files. Only the model call
+        travels.
       </p>
     </div>
   </div>
 
   <!-- ── HOST: share my providers ── -->
-  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7">
+  <section
+    class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7"
+  >
     <div class="flex items-center gap-3">
       <Share2 size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
     </div>
     <p class="ml-8 mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
-      Every provider is listed here. Search by name, then enable the connected providers you want to lend.
+      Every provider is listed here. Search by name, then enable the connected providers you want to
+      lend.
     </p>
 
     {#if loadingHost}
-      <div class="mt-6 flex items-center gap-2 text-xs text-[var(--color-text-muted)]"><Loader2 size={14} class="animate-spin" /> Loading providers…</div>
+      <div class="mt-6 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+        <Loader2 size={14} class="animate-spin" /> Loading providers…
+      </div>
     {:else if candidates.length === 0}
-      <p class="mt-6 text-xs text-[var(--color-text-muted)]">Connect a provider first — authenticated providers appear here to share.</p>
+      <p class="mt-6 text-xs text-[var(--color-text-muted)]">
+        Connect a provider first. Authenticated providers appear here to share.
+      </p>
     {:else}
-      <div class="mb-4 mt-6 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5">
+      <div
+        class="mb-4 mt-6 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5"
+      >
         <Search size={14} class="shrink-0 text-[var(--color-text-muted)]" />
-        <input bind:value={providerSearch} type="search" placeholder="Search all providers…" class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]" aria-label="Search providers to share" />
-        <span class="text-[10px] text-[var(--color-text-muted)]">{filteredCandidates.length}/{candidates.length}</span>
+        <input
+          bind:value={providerSearch}
+          type="search"
+          placeholder="Search all providers…"
+          class="min-w-0 flex-1 bg-transparent text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)]"
+          aria-label="Search providers to share"
+        />
+        <span class="text-[10px] text-[var(--color-text-muted)]"
+          >{filteredCandidates.length}/{candidates.length}</span
+        >
       </div>
       <div class="max-h-[32rem] space-y-3 overflow-y-auto pr-2">
         {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
-          <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]" style="border-color: {on && c.risk === 'prohibited' ? 'color-mix(in srgb, #ef4444 45%, var(--color-border))' : 'var(--color-border)'};">
+          <div
+            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
+            style="border-color: {on && c.risk === 'prohibited'
+              ? 'color-mix(in srgb, #ef4444 45%, var(--color-border))'
+              : 'var(--color-border)'};"
+          >
             <SettingsSwitch
               large
               checked={on}
@@ -327,43 +420,92 @@
             />
             {#if c.available && c.models.length > 0}
               <div class="flex items-center justify-between gap-4 px-4 pb-3">
-                <span class="text-[10px] text-[var(--color-text-muted)]">{modelsFor(c).length} of {c.models.length} models shared</span>
-                <button type="button" onclick={() => expandedProvider = expandedProvider === c.provider ? null : c.provider} class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]" aria-expanded={expandedProvider === c.provider}>
-                  <SlidersHorizontal size={12} /> Choose models <ChevronDown size={12} class={expandedProvider === c.provider ? 'rotate-180' : ''} />
+                <span class="text-[10px] text-[var(--color-text-muted)]"
+                  >{modelsFor(c).length} of {c.models.length} models shared</span
+                >
+                <button
+                  type="button"
+                  onclick={() =>
+                    (expandedProvider = expandedProvider === c.provider ? null : c.provider)}
+                  class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
+                  aria-expanded={expandedProvider === c.provider}
+                >
+                  <SlidersHorizontal size={12} /> Choose models <ChevronDown
+                    size={12}
+                    class={expandedProvider === c.provider ? 'rotate-180' : ''}
+                  />
                 </button>
               </div>
               {#if expandedProvider === c.provider}
-                <div class="mx-4 mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-                  <div class="mb-3 px-1 text-[10px] leading-4 text-[var(--color-text-muted)]">Only these models are advertised to guests and accepted by the host.</div>
+                <div
+                  class="mx-4 mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+                >
+                  <div class="mb-3 px-1 text-[10px] leading-4 text-[var(--color-text-muted)]">
+                    Only these models are advertised to guests and accepted by the host.
+                  </div>
                   <div class="grid gap-2 sm:grid-cols-2">
                     {#each c.models as model (model.id)}
-                      <SettingsSwitch compact checked={modelsFor(c).includes(model.id)} label={model.name} description={model.id} onchange={() => toggleModel(c, model.id)} />
+                      <SettingsSwitch
+                        compact
+                        checked={modelsFor(c).includes(model.id)}
+                        label={model.name}
+                        description={model.id}
+                        onchange={() => toggleModel(c, model.id)}
+                      />
                     {/each}
                   </div>
                 </div>
               {/if}
             {/if}
             <div class="flex flex-wrap gap-2 px-4 pb-4">
-              <span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"><meta.icon size={10} /> {meta.label}</span>
-              {#if c.agentic}<span class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium" style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"><HardDrive size={10} /> CLI</span>{/if}
-              {#if !c.available}<span class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">Not connected</span>{/if}
+              <span
+                class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"
+                ><meta.icon size={10} /> {meta.label}</span
+              >
+              {#if c.agentic}<span
+                  class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"
+                  ><HardDrive size={10} /> CLI</span
+                >{/if}
+              {#if !c.available}<span
+                  class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                  >Not connected</span
+                >{/if}
             </div>
           </div>
         {/each}
-        {#if filteredCandidates.length === 0}<p class="px-3 py-5 text-center text-xs text-[var(--color-text-muted)]">No providers match “{providerSearch}”.</p>{/if}
+        {#if filteredCandidates.length === 0}<p
+            class="px-3 py-5 text-center text-xs text-[var(--color-text-muted)]"
+          >
+            No providers match “{providerSearch}”.
+          </p>{/if}
       </div>
 
       {#if anyRisky}
-        <div class="mt-6 rounded-2xl border p-4 text-[11px] leading-relaxed" style="border-color: color-mix(in srgb, #f59e0b 40%, transparent); background: color-mix(in srgb, #f59e0b 8%, transparent); color: var(--color-text-secondary);">
-          <strong style="color: #f59e0b;">Heads up:</strong> you've selected subscription-backed providers. Lending a subscription to
-          another person is account-sharing that several providers' terms forbid and actively enforce (bans). Your own
+        <div
+          class="mt-6 rounded-2xl border p-4 text-[11px] leading-relaxed"
+          style="border-color: color-mix(in srgb, #f59e0b 40%, transparent); background: color-mix(in srgb, #f59e0b 8%, transparent); color: var(--color-text-secondary);"
+        >
+          <strong style="color: #f59e0b;">Heads up:</strong> you've selected subscription-backed
+          providers. Lending a subscription to another person is account-sharing that several
+          providers' terms forbid and actively enforce (bans). Your own
           <em>API keys</em> are the safe way to share. Enable these only if you accept the risk.
         </div>
       {/if}
 
-      <div class="mt-6 flex flex-col items-stretch justify-between gap-4 border-t border-[var(--color-border)] pt-5 sm:flex-row sm:items-center">
-        <span class="text-[10px] text-[var(--color-text-muted)]">Changes apply only after saving.</span>
-        <button type="button" onclick={saveHost} disabled={savingHost} class="btn btn-primary shrink-0 px-6 py-2.5 text-xs">
+      <div
+        class="mt-6 flex flex-col items-stretch justify-between gap-4 border-t border-[var(--color-border)] pt-5 sm:flex-row sm:items-center"
+      >
+        <span class="text-[10px] text-[var(--color-text-muted)]"
+          >Changes apply only after saving.</span
+        >
+        <button
+          type="button"
+          onclick={saveHost}
+          disabled={savingHost}
+          class="btn btn-primary shrink-0 px-6 py-2.5 text-xs"
+        >
           {savingHost ? 'Saving…' : 'Save shared providers'}
         </button>
       </div>
@@ -374,7 +516,10 @@
           <div class="mb-2 flex items-center gap-2">
             <Lock size={14} style="color: #a78bfa;" />
             <span class="text-xs font-bold text-[var(--color-text-primary)]">CLI sandbox</span>
-            {#if savingSandbox}<Loader2 size={11} class="animate-spin text-[var(--color-text-muted)]" />{/if}
+            {#if savingSandbox}<Loader2
+                size={11}
+                class="animate-spin text-[var(--color-text-muted)]"
+              />{/if}
           </div>
           <p class="mb-4 text-[11px] leading-5 text-[var(--color-text-muted)]">
             You're sharing a CLI model, which runs on your PC. Choose how it's confined.
@@ -382,17 +527,45 @@
 
           <!-- OS-level enforcement indicator (mechanism-aware) -->
           {#if sandboxCaps}
-            <div class="mb-4 rounded-xl px-4 py-3 text-[10px] leading-relaxed" style="background: {sandboxCaps.osIsolation ? 'color-mix(in srgb, #22c55e 10%, transparent)' : 'color-mix(in srgb, #f59e0b 10%, transparent)'};">
+            <div
+              class="mb-4 rounded-xl px-4 py-3 text-[10px] leading-relaxed"
+              style="background: {sandboxCaps.osIsolation
+                ? 'color-mix(in srgb, #22c55e 10%, transparent)'
+                : 'color-mix(in srgb, #f59e0b 10%, transparent)'};"
+            >
               {#if sandboxCaps.mechanism === 'bubblewrap'}
-                <span style="color:#22c55e"><strong>Kernel-hardened jail active</strong> (bubblewrap).</span>
-                The filesystem jail and network block are enforced by the Linux kernel — the CLI can't escape them, even via its own shell.
+                <span style="color:#22c55e"
+                  ><strong>Kernel-hardened jail active</strong> (bubblewrap).</span
+                >
+                The filesystem jail and network block are enforced by the Linux kernel. The CLI cannot
+                escape them, even via its own shell.
               {:else if sandboxCaps.mechanism === 'seatbelt'}
-                <span style="color:#22c55e"><strong>Kernel-hardened jail active</strong> (macOS Seatbelt).</span>
-                Writes are confined to the project, your secret stores (.ssh/.aws/Keychains…) are read-blocked by the OS, and the network can be cut.
+                <span style="color:#22c55e"
+                  ><strong>Kernel-hardened jail active</strong> (macOS Seatbelt).</span
+                >
+                Writes are confined to the project, your secret stores (.ssh/.aws/Keychains…) are read-blocked
+                by the OS, and the network can be cut.
               {:else}
-                <span style="color:#f59e0b"><strong>⚠ Warning: OS-level sandbox unavailable on {sandboxCaps.platform === 'win32' ? 'Windows' : sandboxCaps.platform}.</strong></span>
-                Windows has no kernel primitive to jail a process's filesystem, so the CLI can't be hard-contained. Koryphaios falls back to a <strong>soft jail</strong> — your other keys are scrubbed from the CLI's environment and its home is redirected, so it can't reach <code>~/.ssh</code> or cloud creds — but a program reading a secret by full absolute path isn't blocked. Only share CLI models with people you trust (or use Read-only/Hardened), or run under WSL2 for a kernel jail.
-                <a href="https://koryphaios.com/docs/sandbox#windows" target="_blank" rel="noreferrer" class="inline-block mt-1 font-semibold underline" style="color:#f59e0b;">Read more →</a>
+                <span style="color:#f59e0b"
+                  ><strong
+                    >⚠ Warning: OS-level sandbox unavailable on {sandboxCaps.platform === 'win32'
+                      ? 'Windows'
+                      : sandboxCaps.platform}.</strong
+                  ></span
+                >
+                Windows has no kernel primitive to jail a process's filesystem, so the CLI cannot be fully
+                contained. Koryphaios falls back to a <strong>soft jail</strong>. Your other keys
+                are scrubbed from the CLI's environment and its home is redirected, so it can't
+                reach <code>~/.ssh</code> or cloud creds. A program reading a secret by full
+                absolute path isn't blocked. Only share CLI models with people you trust (or use
+                Read only or Hardened), or run under WSL2 for a kernel jail.
+                <a
+                  href="https://koryphaios.com/docs/sandbox#windows"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="inline-block mt-1 font-semibold underline"
+                  style="color:#f59e0b;">Read more →</a
+                >
               {/if}
             </div>
           {/if}
@@ -405,11 +578,19 @@
                 title={p.hint}
                 onclick={() => applyPreset(p.id)}
                 class="rounded-lg px-2.5 py-1 text-[10px] font-bold transition-colors"
-                style="background: {sandbox.preset === p.id ? 'var(--color-accent)' : 'var(--color-surface-1)'}; color: {sandbox.preset === p.id ? 'var(--color-surface-0)' : 'var(--color-text-secondary)'};"
-              >{p.label}</button>
+                style="background: {sandbox.preset === p.id
+                  ? 'var(--color-accent)'
+                  : 'var(--color-surface-1)'}; color: {sandbox.preset === p.id
+                  ? 'var(--color-surface-0)'
+                  : 'var(--color-text-secondary)'};">{p.label}</button
+              >
             {/each}
             {#if sandbox.preset === 'custom'}
-              <span class="rounded-lg px-2.5 py-1 text-[10px] font-bold" style="background: color-mix(in srgb, #a78bfa 16%, transparent); color:#a78bfa;">Custom</span>
+              <span
+                class="rounded-lg px-2.5 py-1 text-[10px] font-bold"
+                style="background: color-mix(in srgb, #a78bfa 16%, transparent); color:#a78bfa;"
+                >Custom</span
+              >
             {/if}
           </div>
 
@@ -427,8 +608,14 @@
             {/each}
           </div>
           <p class="mt-3 text-[10px] leading-4 text-[var(--color-text-muted)]">
-            A guest's access tier can only tighten these, never loosen them. Blocked catastrophic commands (rm -rf /, shutdown…) always apply.
-            <a href="https://koryphaios.com/docs/sandbox" target="_blank" rel="noreferrer" class="underline hover:text-[var(--color-accent)]">How the sandbox works →</a>
+            A guest's access tier can only tighten these, never loosen them. Blocked catastrophic
+            commands (rm -rf /, shutdown…) always apply.
+            <a
+              href="https://koryphaios.com/docs/sandbox"
+              target="_blank"
+              rel="noreferrer"
+              class="underline hover:text-[var(--color-accent)]">How the sandbox works →</a
+            >
           </p>
         </div>
       {/if}
@@ -436,11 +623,15 @@
       <!-- Dedicated model-sharing link — grants ONLY model access, not session access. -->
       <div class="mt-7 border-t border-[var(--color-border)] pt-7">
         {#if hosting}
-          <div class="flex flex-col items-stretch justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-5 sm:flex-row sm:items-center">
+          <div
+            class="flex flex-col items-stretch justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-5 sm:flex-row sm:items-center"
+          >
             <div>
-              <div class="text-xs font-bold text-[var(--color-text-primary)]">Model-sharing invite</div>
+              <div class="text-xs font-bold text-[var(--color-text-primary)]">
+                Model-sharing invite
+              </div>
               <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                A models-only link — they can use your providers but never see your session or files.
+                A models only link. They can use your providers but never see your session or files.
               </p>
             </div>
             <button
@@ -454,7 +645,8 @@
           </div>
         {:else}
           <p class="text-[11px] text-[var(--color-text-muted)]">
-            Start a hosted session (in the Team Collaboration section above) to get a shareable model link.
+            Start a hosted session (in the Team Collaboration section above) to get a shareable
+            model link.
           </p>
         {/if}
       </div>
@@ -462,35 +654,59 @@
   </section>
 
   <!-- ── CLIENT: use a host's models ── -->
-  <section class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7">
+  <section
+    class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7"
+  >
     <div class="mb-2 flex items-center gap-3">
       <MonitorSmartphone size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Use someone's models</h4>
     </div>
     <p class="mb-6 text-[11px] leading-5 text-[var(--color-text-muted)]">
-      Paste a host's model link (or join code). Their models appear in your model picker and run on your own
-      projects and files — you keep your workspace, they supply the inference.
+      Paste a host's model link (or join code). Their models appear in your model picker and run on
+      your own projects and files. You keep your workspace, they supply the inference.
     </p>
 
     {#if remote?.connected}
       {@const apiCount = remoteApiCount}
       {@const cliCount = remoteCliCount}
-      <div class="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-1)] p-5">
+      <div
+        class="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-1)] p-5"
+      >
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-xs font-bold text-[var(--color-text-primary)]">Connected to {remote.hostName ?? 'host'}</div>
+            <div class="text-xs font-bold text-[var(--color-text-primary)]">
+              Connected to {remote.hostName ?? 'host'}
+            </div>
             <p class="text-[11px] text-[var(--color-text-muted)] mt-0.5">
               {apiCount + cliCount} remote model provider(s) in your picker.
             </p>
           </div>
-          <button type="button" onclick={disconnect} class="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10">Disconnect</button>
+          <button
+            type="button"
+            onclick={disconnect}
+            class="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10"
+            >Disconnect</button
+          >
         </div>
         <div class="mt-4 space-y-2 text-[10px] leading-4 text-[var(--color-text-muted)]">
           {#if apiCount}
-            <div class="flex items-start gap-1.5"><ShieldCheck size={11} style="color:#22c55e" class="mt-px shrink-0" /> <span><strong>{apiCount} API model(s)</strong> — run on the host, your files never leave your PC.</span></div>
+            <div class="flex items-start gap-1.5">
+              <ShieldCheck size={11} style="color:#22c55e" class="mt-px shrink-0" />
+              <span
+                ><strong>{apiCount} API model(s)</strong>. They run on the host, so your files never
+                leave your PC.</span
+              >
+            </div>
           {/if}
           {#if cliCount}
-            <div class="flex items-start gap-1.5"><HardDrive size={11} style="color:#a78bfa" class="mt-px shrink-0" /> <span><strong>{cliCount} CLI model(s)</strong> (labeled "runs on host") — your project is copied to the host's temp folder to run, then edits come back. You'll confirm before the first send.</span></div>
+            <div class="flex items-start gap-1.5">
+              <HardDrive size={11} style="color:#a78bfa" class="mt-px shrink-0" />
+              <span
+                ><strong>{cliCount} CLI model(s)</strong> (labeled "runs on host"). Your project is copied
+                to the host's temp folder to run, then edits come back. You'll confirm before the first
+                send.</span
+              >
+            </div>
           {/if}
         </div>
       </div>
@@ -503,7 +719,12 @@
           class="input min-h-11 flex-1 text-sm"
           onkeydown={(e) => e.key === 'Enter' && connect()}
         />
-        <button type="button" onclick={connect} disabled={connecting || !joinCode.trim()} class="btn btn-primary min-h-11 px-6 py-2 text-xs">
+        <button
+          type="button"
+          onclick={connect}
+          disabled={connecting || !joinCode.trim()}
+          class="btn btn-primary min-h-11 px-6 py-2 text-xs"
+        >
           {connecting ? 'Connecting…' : 'Connect'}
         </button>
       </div>

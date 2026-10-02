@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
+import type { ContextBreakdown } from '@koryphaios/shared';
 import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { IMessageStore } from '../../stores/message-store';
 import { ContextArchiveService, getContextArchive } from '../context-archive';
@@ -80,7 +81,7 @@ describe('KoryManager model context preview provenance', () => {
       activeMessageId: 'assistant-final',
       contextRevision: 2,
       cachedInputTokens: 199_200,
-      breakdown: { system: 1_200, memory: 10_200, tools: 0, chat: 1_200 },
+      breakdown: { system: 1_200, memory: 10_200, skills: 800, tools: 0, chat: 1_200, output: 700 },
       ts: Date.now(),
     });
     // Constructing the manager creates a fresh archive service, exercising
@@ -97,7 +98,14 @@ describe('KoryManager model context preview provenance', () => {
         used: 211_700,
         usageKnown: true,
         cachedInputTokens: 199_200,
-        breakdown: { system: 1_200, memory: 10_200, tools: 0, chat: 1_200 },
+        breakdown: {
+          system: 1_200,
+          memory: 10_200,
+          skills: 800,
+          tools: 0,
+          chat: 1_200,
+          output: 700,
+        },
       });
     } finally {
       manager.shutdown();
@@ -120,7 +128,14 @@ describe('KoryManager model context preview provenance', () => {
         provider: 'openai',
         activeMessageId: 'assistant-old',
         contextRevision: 4,
-        breakdown: { system: 10_000, memory: 2_000, tools: 8_000, chat: 40_000 },
+        breakdown: {
+          system: 10_000,
+          memory: 2_000,
+          skills: 1_500,
+          tools: 8_000,
+          chat: 40_000,
+          output: 3_000,
+        },
         ts: Date.now(),
       });
       const manager = createManager(directory, {
@@ -150,7 +165,7 @@ describe('KoryManager model context preview provenance', () => {
             provider: 'openai',
             tokensIn: number,
             tokensOut: number,
-            breakdown: { system: number; memory: number; tools: number; chat: number },
+            breakdown: ContextBreakdown,
             cachedInputTokens: number,
           ): Promise<boolean>;
         }
@@ -161,7 +176,7 @@ describe('KoryManager model context preview provenance', () => {
         'openai',
         60_000,
         3_000,
-        { system: 10_000, memory: 2_000, tools: 8_000, chat: 40_000 },
+        { system: 10_000, memory: 2_000, skills: 1_500, tools: 8_000, chat: 40_000, output: 0 },
         30_000,
       );
 
@@ -169,6 +184,16 @@ describe('KoryManager model context preview provenance', () => {
       expect(await getContextArchive()!.getLastUsage('completed-boundary')).toMatchObject({
         activeMessageId: 'assistant-final',
         contextRevision: 7,
+        // The dispatch estimate carries output 0; the completed snapshot
+        // patches in the exact provider-reported tokensOut.
+        breakdown: {
+          system: 10_000,
+          memory: 2_000,
+          skills: 1_500,
+          tools: 8_000,
+          chat: 40_000,
+          output: 3_000,
+        },
       });
       expect(
         await manager.previewModelContext('completed-boundary', 'gpt-5', 'openai'),
@@ -176,6 +201,14 @@ describe('KoryManager model context preview provenance', () => {
         used: 63_000,
         usageKnown: true,
         cachedInputTokens: 30_000,
+        breakdown: {
+          system: 10_000,
+          memory: 2_000,
+          skills: 1_500,
+          tools: 8_000,
+          chat: 40_000,
+          output: 3_000,
+        },
       });
     } finally {
       manager.shutdown();
@@ -196,7 +229,14 @@ describe('KoryManager model context preview provenance', () => {
         activeMessageId: 'assistant-cli',
         contextRevision: 1,
         cachedInputTokens: 199_200,
-        breakdown: { system: 1_200, memory: 10_200, tools: 0, chat: 1_200 },
+        breakdown: {
+          system: 1_200,
+          memory: 10_200,
+          skills: 800,
+          tools: 0,
+          chat: 1_200,
+          output: 700,
+        },
         ts: Date.now(),
       });
 
@@ -227,7 +267,14 @@ describe('KoryManager model context preview provenance', () => {
           used: 42_000,
           max: 128_000,
           contextKnown: true,
-          breakdown: { system: 4_000, memory: 2_000, tools: 30_000, chat: 6_000 },
+          breakdown: {
+            system: 4_000,
+            memory: 2_000,
+            skills: 500,
+            tools: 30_000,
+            chat: 6_000,
+            output: 250,
+          },
           ts: 123,
         },
       })}\n`,

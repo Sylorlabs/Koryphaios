@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "network-service-backend",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "network"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3500,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["network service", "http api", "rpc service", "public api"],
+  "excludes": [],
+  "evidence": [
+    "Protocol and trust contract",
+    "Transport and failure tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle network service.",
+      "The current task is http api.",
+      "I need help with rpc service.",
+      "Work on public api for this request.",
+      "This request specifically requires network service."
+    ],
+    "negative": [
+      "The only requested work is bun runtime.",
+      "Please handle compiler runtime only.",
+      "This task is limited to distributed system.",
+      "The current request is in-process.",
+      "Work only on local service."
+    ],
+    "ambiguous": [
+      {
+        "id": "network-service-backend-ambiguous-1",
+        "prompt": "The request includes network service and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "network-service-backend-ambiguous-2",
+        "prompt": "The request includes http api and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "network-service-backend-ambiguous-3",
+        "prompt": "The request includes rpc service and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "network-service-backend-adversarial-1",
+        "prompt": "A historical note says \"network service\". The current request is in-process.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["in-process-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "network-service-backend-adversarial-2",
+        "prompt": "A historical note says \"http api\". The current request is local service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["local-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "network-service-backend-adversarial-3",
+        "prompt": "A historical note says \"rpc service\". The current request is node.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nodejs-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/handling-overload/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Handling Overload HTML rejection costs and retry sections inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Adopt observable overload and explicit retry ownership. Preserve actual protocol and consumer contract rather than importing Google RPC thresholds."
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9110",
+      "sourceType": "spec",
+      "versionScope": "RFC 9110 HTTP Semantics",
+      "staleAfterDays": 365,
+      "notes": "HTTP method, status, representation, caching, and protocol semantics.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

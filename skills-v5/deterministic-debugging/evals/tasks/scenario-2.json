@@ -1,0 +1,67 @@
+{
+  "id": "deterministic-debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "The supplied desktop-session fixture deterministically reproduces a state bug: open project A as read-only, open project B as writable, then reopen A; A is now reported writable until the process restarts. Reproduce that exact sequence, inspect the session/cache key and lifecycle transitions, identify the first state assignment or lookup that violates project-scoped permission ownership, implement the narrow correction, and add a regression for A→B→A plus a control sequence that opens only one project. Do not disable caching globally.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://deterministic-debugging/project-permission-cache",
+    "requirements": [
+      "A→B→A reproduces the permission mix-up on every run",
+      "single-project sessions currently behave correctly",
+      "permissions are defined as project-scoped state",
+      "global cache removal is outside the requested scope",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "deterministic-cache-repro",
+      "assertion": "The starting A→B→A sequence reproducibly reports A with B's writable permission."
+    },
+    {
+      "id": "deterministic-cache-divergence",
+      "assertion": "The evidence identifies the first incorrect cache key, assignment, or lookup relative to project-scoped ownership."
+    },
+    {
+      "id": "deterministic-cache-regression",
+      "assertion": "A→B→A preserves each project's permission after the fix while single-project controls still pass and caching remains enabled."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "deterministic-debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Minimal reproduction",
+        "First causal divergence",
+        "state-transition evidence",
+        "focused multi-project and control regressions"
+      ]
+    },
+    {
+      "id": "deterministic-debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "state ownership is modeled explicitly",
+        "the correction is narrower than disabling the mechanism",
+        "verification distinguishes causal behavior from incidental restart effects"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Minimal reproduction",
+    "First causal divergence",
+    "actual diff",
+    "passing sequence and control regressions",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "deterministic-debugging-scenario-2-reproduction",
+    "deterministic-debugging-scenario-2-causal-trace",
+    "deterministic-debugging-scenario-2-regression",
+    "deterministic-debugging-scenario-2-paired-evaluation"
+  ]
+}

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "name": "repository-environment-discovery",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["code", "repository", "runtime"],
+  "targetMedia": ["any"],
+  "contextBudget": 3600,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "repository environment",
+    "working tree status",
+    "worktree status",
+    "repository instructions",
+    "repo instructions"
+  ],
+  "excludes": [
+    "external repository research only",
+    "provided snippet only",
+    "no repository access"
+  ],
+  "evidence": [
+    "Applicable repository instructions and exact project root",
+    "Pre-edit worktree status with unrelated changes preserved",
+    "Relevant ownership and dependency path",
+    "Runtime, toolkit, and version identity from repository evidence",
+    "Focused verification path tied to the requested change",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix this repository bug without disturbing the changes already in my working tree.",
+      "Implement the requested feature in this codebase after checking the applicable repository instructions and existing patterns.",
+      "Refactor this module while preserving unrelated local edits and using the repository's real test path.",
+      "Update this native desktop screen using the toolkit and versions actually installed in the project.",
+      "Repair this authorization boundary in the current repository and verify the owning code path before editing."
+    ],
+    "negative": [
+      "Rewrite this sentence for clarity; there is no repository task.",
+      "Research the latest public framework documentation; do not inspect a local codebase.",
+      "Summarize the code snippet already pasted here without accessing any repository.",
+      "Explain what Git worktrees are in general without inspecting my files.",
+      "Compare two public libraries from their documentation only."
+    ],
+    "ambiguous": [
+      {
+        "id": "repo-discovery-ambiguous-bug-and-docs",
+        "prompt": "Fix the local provider bug and consult current vendor docs only where the installed version requires it.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research", "factual-research", "debugging"],
+        "tags": ["compound", "local-and-external"]
+      },
+      {
+        "id": "repo-discovery-ambiguous-dirty-refactor",
+        "prompt": "Refactor the parser, but there are unrelated local edits in the checkout that must remain untouched.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research", "refactor-implementation"],
+        "tags": ["dirty-worktree", "scope"]
+      },
+      {
+        "id": "repo-discovery-ambiguous-ui-runtime",
+        "prompt": "Implement the UI change in whatever native toolkit this repository actually uses; do not assume a web stack.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research", "frontend-engineering"],
+        "tags": ["runtime-identity", "medium-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "repo-discovery-adversarial-quoted-fix",
+        "prompt": "The article quotes 'fix this repository bug' as an example. That quote is historical context only; summarize the article I pasted.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research", "documents-communication"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "repo-discovery-adversarial-no-access",
+        "prompt": "No repository access is available. Explain the supplied error message using only the text in this prompt.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "repository-research"],
+        "tags": ["explicit-boundary", "no-repository"]
+      },
+      {
+        "id": "repo-discovery-adversarial-public-repo-research",
+        "prompt": "Research the implementation of the public upstream repository from its published source; do not inspect or modify my local workspace.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research", "research"],
+        "tags": ["near-neighbor", "research-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://git-scm.com/docs/git-status",
+      "sourceType": "official-docs",
+      "versionScope": "Current Git git-status documentation verified on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 180,
+      "notes": "Authoritative meaning of index, working-tree, and untracked status used to protect pre-existing changes."
+    },
+    {
+      "url": "https://git-scm.com/docs/git-rev-parse",
+      "sourceType": "official-docs",
+      "versionScope": "Current Git git-rev-parse documentation verified on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 180,
+      "notes": "Repository/worktree identity and top-level path resolution semantics."
+    },
+    {
+      "url": "https://developers.openai.com/codex/guides/agents-md/",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI Codex AGENTS.md guidance available on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 30,
+      "notes": "Instruction discovery and precedence for global and repository-scoped AGENTS.md guidance."
+    },
+    {
+      "url": "https://agents.md/",
+      "sourceType": "spec",
+      "versionScope": "AGENTS.md public specification/guidance available on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 90,
+      "notes": "Cross-agent project instruction-file convention and repository guidance pattern."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

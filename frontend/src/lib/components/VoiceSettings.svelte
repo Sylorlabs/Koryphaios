@@ -1,12 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Check from 'lucide-svelte/icons/check';
+  import Download from 'lucide-svelte/icons/download';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
   import Mic from 'lucide-svelte/icons/mic';
   import Play from 'lucide-svelte/icons/play';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Square from 'lucide-svelte/icons/square';
   import Volume2 from 'lucide-svelte/icons/volume-2';
   import type { VoiceProviderDescriptor, VoiceSettings } from '@koryphaios/shared';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';
@@ -15,8 +19,38 @@
   import KorySlider from './KorySlider.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
+  interface Props {
+    attention?: boolean;
+  }
+
+  type LocalVoiceModelStatus = {
+    installed: boolean;
+    modelId: string;
+    name: string;
+    /** ggml, Onnx, Torch, or Unknown. */
+    format: string;
+    /** The attached model's own file name, so an attached model is never
+     *  mistaken for the bundled one. */
+    fileName?: string;
+    formatLabel?: string;
+    sizeBytes?: number | null;
+    estimatedDownloadBytes: number;
+    /** Set when a model is present but this machine cannot run it. */
+    unsupportedReason?: string | null;
+  };
+
+  type LocalVoiceDownloadProgress = {
+    downloadedBytes: number;
+    totalBytes: number;
+    percent: number;
+  };
+
+  const KORY_LOCAL_PROVIDER = 'kory-local';
+  const KORY_LOCAL_MODEL = 'kory-local-voice';
+  let { attention = false }: Props = $props();
+
   const DEFAULT_SETTINGS: VoiceSettings = {
-    input: { provider: 'system', modelId: 'web-speech-recognition', language: 'en' },
+    input: { provider: KORY_LOCAL_PROVIDER, modelId: KORY_LOCAL_MODEL, language: 'en' },
     output: {
       provider: 'system',
       modelId: 'web-speech-synthesis',
@@ -25,8 +59,9 @@
     },
     autoReadFinalReplies: false,
     voiceModeEnabled: true,
+    localVoiceSetupVersion: 1,
   };
-  let settings = $state<VoiceSettings>(structuredClone(DEFAULT_SETTINGS));
+  let settings = $state<VoiceSettings>($state.snapshot(DEFAULT_SETTINGS));
   let providers = $state<VoiceProviderDescriptor[]>([]);
   let systemVoices = $state<Array<{ value: string; label: string }>>([]);
   let loading = $state(true);
@@ -34,6 +69,11 @@
   let previewing = $state(false);
   let systemSpeechSupported = $state(false);
   let systemRecognitionSupported = $state(false);
+  let localDesktopRuntime = $state(false);
+  let localModelStatus = $state<LocalVoiceModelStatus | null>(null);
+  let localModelBusy = $state(false);
+  let localModelProgress = $state(0);
+  let localModelError = $state('');
   let inputProvider = $derived(
     providers.find((provider) => provider.id === settings.input.provider),
   );
@@ -41,17 +81,23 @@
     providers
       .filter((provider) => provider.capabilities.includes('stt'))
       .filter((provider) =>
-        provider.id === 'system' ? systemRecognitionSupported : provider.configured,
+        provider.id === KORY_LOCAL_PROVIDER
+          ? localDesktopRuntime
+          : provider.id === 'system'
+            ? systemRecognitionSupported
+            : provider.configured,
       )
       .map((provider) => ({
         value: provider.id,
         label: provider.name,
         description:
-          provider.id === 'system'
-            ? 'Uses speech recognition available on this device'
-            : provider.local
-              ? 'Uses a model loaded in your local endpoint'
-              : 'API provider is connected',
+          provider.id === KORY_LOCAL_PROVIDER
+            ? 'Runs offline with the model installed in Koryphaios'
+            : provider.id === 'system'
+              ? 'Uses speech recognition available on this device'
+              : provider.local
+                ? 'Uses a model loaded in your local endpoint'
+                : 'API provider is connected',
       })),
   );
   let inputModelOptions = $derived(
@@ -103,6 +149,78 @@
     systemVoices = speechSynthesis
       .getVoices()
       .map((voice) => ({ value: voice.voiceURI, label: `${voice.name} · ${voice.lang}` }));
+  }
+
+  const FORMAT_LABELS: Record<string, string> = {
+    ggml: 'ggml',
+    Onnx: 'ONNX',
+    Torch: 'PyTorch',
+    Unknown: 'unknown format',
+  };
+
+  function formatBytes(bytes?: number | null): string {
+    if (!bytes || bytes <= 0) return 'an unknown size';
+    const mb = bytes / (1024 * 1024);
+    return (mb >= 100 ? mb.toFixed(0) : mb.toFixed(1)) + ' MB';
+  }
+
+  async function refreshLocalModelStatus() {
+    if (!localDesktopRuntime) return;
+    try {
+      const status = await invoke<LocalVoiceModelStatus>('local_voice_model_status');
+      localModelStatus = { ...status, formatLabel: FORMAT_LABELS[status.format] ?? status.format };
+      localModelError = '';
+    } catch (error) {
+      localModelStatus = null;
+      localModelError =
+        error instanceof Error ? error.message : 'Could not check the local voice model';
+    }
+  }
+
+  async function activateLocalModel() {
+    settings.input.provider = KORY_LOCAL_PROVIDER;
+    settings.input.modelId = KORY_LOCAL_MODEL;
+    settings.localVoiceSetupVersion = 1;
+    await save(false);
+  }
+
+  async function downloadLocalModel() {
+    if (!localDesktopRuntime || localModelBusy) return;
+    localModelBusy = true;
+    localModelProgress = 0;
+    localModelError = '';
+    try {
+      const status = await invoke<LocalVoiceModelStatus>('download_local_voice_model');
+      localModelStatus = { ...status, formatLabel: FORMAT_LABELS[status.format] ?? status.format };
+      await activateLocalModel();
+      toastStore.success('Kory Voice is ready');
+    } catch (error) {
+      localModelError = error instanceof Error ? error.message : String(error);
+      toastStore.error(localModelError || 'Voice model download failed');
+    } finally {
+      localModelBusy = false;
+    }
+  }
+
+  async function attachLocalModel() {
+    if (!localDesktopRuntime || localModelBusy) return;
+    try {
+      const selected = await invoke<string | null>('select_voice_model_dialog');
+      if (!selected) return;
+      localModelBusy = true;
+      localModelError = '';
+      const status = await invoke<LocalVoiceModelStatus>('attach_local_voice_model', {
+        sourcePath: selected,
+      });
+      localModelStatus = { ...status, formatLabel: FORMAT_LABELS[status.format] ?? status.format };
+      await activateLocalModel();
+      toastStore.success(`${status.name || 'Voice model'} attached`);
+    } catch (error) {
+      localModelError = error instanceof Error ? error.message : String(error);
+      toastStore.error(localModelError || 'Could not attach the voice model');
+    } finally {
+      localModelBusy = false;
+    }
   }
 
   async function load() {
@@ -194,6 +312,7 @@
   });
 
   onMount(() => {
+    localDesktopRuntime = '__TAURI_INTERNALS__' in window;
     systemSpeechSupported =
       'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
     systemRecognitionSupported =
@@ -201,8 +320,24 @@
     refreshSystemVoices();
     if (systemSpeechSupported)
       speechSynthesis.addEventListener('voiceschanged', refreshSystemVoices);
+    let disposed = false;
+    let unlistenProgress: (() => void) | undefined;
+    if (localDesktopRuntime) {
+      void refreshLocalModelStatus();
+      void listen<LocalVoiceDownloadProgress>(
+        'koryphaios:voice-model-download-progress',
+        (event) => {
+          localModelProgress = Math.max(0, Math.min(100, event.payload.percent));
+        },
+      ).then((unlisten) => {
+        if (disposed) unlisten();
+        else unlistenProgress = unlisten;
+      });
+    }
     void load();
     return () => {
+      disposed = true;
+      unlistenProgress?.();
       stopVoicePlayback();
       if (systemSpeechSupported)
         speechSynthesis.removeEventListener('voiceschanged', refreshSystemVoices);
@@ -218,6 +353,94 @@
       system or cloud voices.
     </p>
   </header>
+  {#if localDesktopRuntime || attention}
+    <section
+      class="space-y-3 rounded-2xl border bg-[var(--color-surface-2)] p-5 {attention &&
+      !localModelStatus?.installed
+        ? 'border-[var(--color-accent)]'
+        : 'border-[var(--color-border)]'}"
+      aria-live="polite"
+    >
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h4 class="font-medium text-[var(--color-text-primary)]">Local voice transcription</h4>
+          {#if localModelStatus?.installed}
+            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+              {#if localModelStatus.name}
+                {localModelStatus.name} is installed and ready
+              {:else}
+                The local voice model is installed and ready
+              {/if}
+              {#if localModelStatus.formatLabel}
+                · {localModelStatus.formatLabel}
+              {/if}. Microphone audio is transcribed on this device.
+            </p>
+          {:else if localModelStatus?.unsupportedReason}
+            <p class="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--color-text-muted)]">
+              {localModelStatus.unsupportedReason}
+            </p>
+          {:else}
+            <p class="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--color-text-muted)]">
+              Voice needs a local voice model. Download Kory Voice or attach a voice model you
+              already have — ggml, ONNX, and PyTorch models are all supported. The built in download
+              is about {formatBytes(localModelStatus?.estimatedDownloadBytes)}.
+            </p>
+          {/if}
+        </div>
+        {#if localModelStatus?.installed}
+          <span class="inline-flex items-center gap-1 text-xs text-[var(--color-success)]">
+            <Check size={13} /> Ready
+          </span>
+        {/if}
+      </div>
+      {#if localDesktopRuntime}
+        <div class="flex flex-wrap items-center gap-2">
+          <button
+            class="btn btn-primary"
+            type="button"
+            disabled={localModelBusy}
+            onclick={() => void downloadLocalModel()}
+          >
+            <Download size={14} />
+            {#if localModelBusy && localModelProgress > 0}
+              Downloading {Math.round(localModelProgress)}%
+            {:else if localModelStatus?.installed}
+              Download again
+            {:else}
+              Download Kory Voice
+            {/if}
+          </button>
+          <button
+            class="btn"
+            type="button"
+            disabled={localModelBusy}
+            onclick={() => void attachLocalModel()}
+          >
+            <FolderOpen size={14} /> Attach a voice model
+          </button>
+          <span class="text-[10px] text-[var(--color-text-muted)]">
+            {#if localModelStatus?.installed && localModelStatus.sizeBytes}
+              {localModelStatus.name || 'Voice model'} ·
+              {formatBytes(localModelStatus.sizeBytes)}
+            {:else}
+              Download about {formatBytes(localModelStatus?.estimatedDownloadBytes)}
+            {/if}
+          </span>
+        </div>
+        <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+          Attaching an ONNX export? Select the encoder file and Koryphaios picks up the decoder and
+          tokenizer beside it.
+        </p>
+      {:else}
+        <p class="text-xs text-[var(--color-text-muted)]">
+          Local voice models are available in the Koryphaios desktop app.
+        </p>
+      {/if}
+      {#if localModelError}
+        <p class="text-xs text-[var(--color-error)]">{localModelError}</p>
+      {/if}
+    </section>
+  {/if}
   {#if loading}
     <p class="text-sm text-[var(--color-text-muted)]">Checking voice capabilities…</p>
   {:else}
@@ -248,7 +471,8 @@
           value={settings.input.modelId}
           options={inputModelOptions}
           label="Transcription model"
-          allowCustom={settings.input.provider !== 'system'}
+          allowCustom={settings.input.provider !== 'system' &&
+            settings.input.provider !== KORY_LOCAL_PROVIDER}
           customLabel="Use model ID"
           customPlaceholder="Model ID exposed by this endpoint"
           onchange={(value) => (settings.input.modelId = value)}
@@ -369,12 +593,11 @@
     <section
       class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-5"
     >
-      <h4 class="font-medium text-[var(--color-text-primary)]">Run local speech models</h4>
+      <h4 class="font-medium text-[var(--color-text-primary)]">Use another local speech server</h4>
       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-        Serve a speech model with any OpenAI-compatible local runtime (LocalAI, speaches, LM Studio,
-        llama.cpp), configure its endpoint under Providers &amp; models, then select that provider
-        and its model ID above. Audio stays on your machine — nothing is uploaded unless you pick a
-        cloud provider.
+        You can also serve a speech model with an OpenAI compatible local runtime such as LocalAI,
+        speaches, LM Studio, or llama.cpp. Configure its endpoint under Providers &amp; models, then
+        select that provider above.
       </p>
     </section>
 

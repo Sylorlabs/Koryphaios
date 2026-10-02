@@ -14,7 +14,10 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
   expect: { timeout: 8_000 },
-  fullyParallel: true,
+  // These tests share a single-user backend (workspace selection, archive
+  // operations and settings). Parallel browsers are not isolated users.
+  fullyParallel: false,
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',

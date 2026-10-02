@@ -104,6 +104,10 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
   <string>10.13</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Koryphaios records audio only when you press the microphone button so it can transcribe your prompt.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Koryphaios uses speech recognition only when you press the microphone button to dictate a prompt.</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>
@@ -139,6 +143,8 @@ codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
   <key>com.apple.security.network.client</key>
   <true/>
   <key>com.apple.security.network.server</key>
+  <true/>
+  <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>
 </plist>

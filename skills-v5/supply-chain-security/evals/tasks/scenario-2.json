@@ -1,0 +1,87 @@
+{
+  "id": "supply-chain-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Run supply-chain incident response for a confirmed compromised transitive dependency in the supplied synthetic release environment. The current lockfile pins `codec-helper@2.4.1`, the known compromised build; the last published SBOM is stale and lists `2.4.0`; provenance and CI logs show which release artifacts were built from the locked graph. During the affected release job, dependency installation occurs while a registry publishing token is available to child processes, so credential exposure is plausible rather than proven. Preserve the suspect lockfile, artifact digests, SBOM, provenance/signature bundle, and CI evidence before changes. Stop promotion of affected artifacts, determine blast radius from the enforced resolution and build records, quarantine the compromised version, rotate the exposed publishing credential because the build-time threat can access it, update to the supplied reviewed fixed dependency in the lockfile, and rebuild in the clean isolated fixture with release credentials unavailable during dependency installation. Regenerate the SBOM from the resolved replacement build, verify that the compromised version is absent, then verify the replacement artifact's digest, expected builder/signer identity, SLSA provenance fields, and required cosign attestation policy before restoration. Record withdrawal of the affected artifact and residual downstream notification/rebuild needs; do not declare recovery from the version bump alone.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://supply-chain-security/scenario-2",
+    "requirements": [
+      "enforced lockfile pinning compromised transitive codec-helper@2.4.1 plus a reviewed fixed replacement fixture",
+      "stale SBOM listing codec-helper@2.4.0 so incident scoping must reconcile inventory sources",
+      "published artifact/provenance records that identify which releases consumed the compromised locked graph",
+      "release CI evidence showing a publishing token available during dependency installation, making exfiltration plausible",
+      "containment, credential-rotation, artifact-withdrawal, and clean isolated rebuild controls",
+      "replacement SBOM, SLSA provenance, keyless cosign bundle, and verification-policy fixture",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "supply-chain-security-preserve-contain-2",
+      "assertion": "Before remediation, the response preserves the suspect lockfile, artifact digests, stale SBOM, provenance/signature bundle, and relevant CI logs, and stops further promotion/consumption of the identified affected artifacts."
+    },
+    {
+      "id": "supply-chain-security-blast-radius-2",
+      "assertion": "Blast radius is derived from the enforced lockfile/resolution plus build/provenance records, correctly identifying codec-helper@2.4.1 as the consumed compromised version despite the stale SBOM reporting 2.4.0."
+    },
+    {
+      "id": "supply-chain-security-credential-response-2",
+      "assertion": "The publishing credential is rotated because CI evidence makes build-time exposure plausible, while the result labels exfiltration as unproven rather than inventing evidence of theft."
+    },
+    {
+      "id": "supply-chain-security-clean-rebuild-2",
+      "assertion": "The fixed dependency is locked to the reviewed replacement, dependency installation in the replacement build cannot access the release publishing credential, and the rebuild runs in the supplied clean isolated environment with recorded tool/input identities."
+    },
+    {
+      "id": "supply-chain-security-sbom-reconcile-2",
+      "assertion": "A fresh SBOM is generated from the resolved replacement build and independently reconciled to show codec-helper@2.4.1 is absent; the stale pre-incident SBOM is retained as evidence rather than overwritten or treated as authoritative."
+    },
+    {
+      "id": "supply-chain-security-replacement-verification-2",
+      "assertion": "Restoration occurs only after the replacement artifact digest, expected builder/signer identity, provenance subject/source/build parameters, and required cosign attestation policy all verify successfully; the affected artifact is recorded as withdrawn and residual downstream notification/rebuild work is explicit.",
+      "source": "https://slsa.dev/spec/v1.2/verifying-artifacts"
+    }
+  ],
+  "scorers": [
+    {
+      "id": "supply-chain-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "pre-remediation evidence preservation and artifact containment",
+        "lockfile/provenance blast-radius result overriding stale SBOM inventory",
+        "bounded credential-exposure assessment plus rotation evidence",
+        "clean rebuild with corrected dependency and separated release credential boundary",
+        "fresh SBOM reconciliation",
+        "replacement provenance/signature/attestation verification plus withdrawal/handoff record"
+      ]
+    },
+    {
+      "id": "supply-chain-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "incident conclusions distinguish observed compromise from plausible credential exposure",
+        "stale SBOM is not allowed to erase stronger resolution/build evidence",
+        "recovery requires verified replacement artifact and downstream handoff rather than only a dependency update"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "preserved suspect lockfile/SBOM/artifact/provenance/signature/CI evidence",
+    "affected-artifact blast-radius map tied to enforced dependency resolution",
+    "credential exposure assessment and publishing-token rotation evidence",
+    "fixed lockfile and clean isolated replacement build inputs",
+    "fresh SBOM reconciliation proving the compromised version is absent",
+    "replacement provenance/signature/attestation policy verification",
+    "affected artifact withdrawal and residual downstream notification/rebuild handoff",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "supply-chain-security-scenario-2-result",
+    "supply-chain-security-scenario-2-verification",
+    "supply-chain-security-scenario-2-paired-evaluation"
+  ]
+}

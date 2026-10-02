@@ -9,7 +9,7 @@
 // - types/MessageTypes.ts: Message and content blocks
 // - types/SessionTypes.ts: Session management
 // - types/TaskTypes.ts: Task types
-// - providers/ProviderNames.ts: Provider registry (59 providers)
+// - providers/ProviderNames.ts: Provider registry (63 providers)
 // - providers/ModelDefs.ts: Model definitions and provider config
 // - websocket/WSEvents.ts: WebSocket event types
 // - websocket/WSPayloads.ts: WebSocket payload types
@@ -38,6 +38,7 @@ export type {
 // ============== Session Types ==============
 export type {
   Session,
+  SessionAgentOverrides,
   SessionStatus,
   SessionMetadata,
   SessionSnapshot,
@@ -49,6 +50,14 @@ export type {
 
 // ============== Task Types ==============
 export type { WorkerTask } from './types/TaskTypes';
+
+// ============== Inter-Agent Messaging ==============
+export type {
+  AgentMessage,
+  AgentMessagePartyRole,
+  AgentMessageStatus,
+  AgentMessageEventPayload,
+} from './types/MessagingTypes';
 
 // ============== Process Supervision ==============
 export type {
@@ -217,6 +226,7 @@ export {
   DEFAULT_REASONING_RULES,
   STANDARD_REASONING_OPTIONS,
   buildReasoningConfigFromLevels,
+  resolveReasoningLevel,
 } from './reasoning/ReasoningFunctions';
 export type {
   Goal,
@@ -229,6 +239,20 @@ export type {
   GoalExecutionConfig,
 } from './types/GoalTypes';
 export { goalProgress } from './types/GoalTypes';
+export type {
+  Checklist,
+  ChecklistItem,
+  ChecklistItemStatus,
+  ChecklistScope,
+  ChecklistActivity,
+  ChecklistMutation,
+  ChecklistToolName,
+} from './types/ChecklistTypes';
+export {
+  checklistProgress,
+  CHECKLIST_TOOL_NAMES,
+  isChecklistToolName,
+} from './types/ChecklistTypes';
 
 export type {
   ReasoningLevel,

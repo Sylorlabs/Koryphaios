@@ -1,0 +1,87 @@
+{
+  "id": "growth-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply growth engineering expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The acceptance boundary is growth-engineering: Map the growth mechanism from source through activation and retained value, including identity, attribution, incentives, abuse, instrumentation, and downstream quality. The adjacent experimentation-ab-testing discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://growth-engineering/activation-checklist-holdout",
+    "requirements": [
+      "new-user and existing-user fixtures with stable account ids across two devices",
+      "server-backed checklist progress plus experiment assignment record",
+      "holdout cohort that must never receive checklist UI/events",
+      "fixed seven-day activation definition and guardrail metrics",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "growth-engineering parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "growth-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "growth-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "growth-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "growth-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "growth-engineering-individual-scenario-2-result",
+    "growth-engineering-individual-scenario-2-verification",
+    "growth-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual growth-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=product-analytics; near-neighbor=experimentation-ab-testing), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Map the growth mechanism from source through activation and retained value, including identity, attribution, incentives, abuse, instrumentation, and downstream quality."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Instrument full funnels with valid denominators, run controlled experiments where appropriate, monitor retention/quality/abuse guardrails, and reconcile attribution or referral credit to authoritative events."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not optimize signup conversion while degrading retained value, create incentives without fraud modeling, dark-pattern consent, or claim channel causality from last-touch attribution alone."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (growth-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

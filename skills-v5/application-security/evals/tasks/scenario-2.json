@@ -1,0 +1,75 @@
+{
+  "id": "application-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Review application security for a native desktop synchronization client. It accepts custom deep links and local IPC commands, stores access/refresh credentials, persists queued sync operations across restart, opens user-selected local paths, records crash/diagnostic logs, and requires fresh authentication before exporting a recovery bundle. Define typed IPC/deep-link parsing, size/count limits, canonical file boundaries, safe persistence/serialization, token/secret storage and log/crash redaction, session expiry/renewal/revocation semantics, reauthentication state transition for recovery export, and fail-closed behavior for malformed persisted queue entries. Keep passkey/password/MFA authenticator design in secure-authentication and desktop process/window mechanics in desktop-electron-tauri.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://application-security/scenario-2",
+    "requirements": [
+      "native desktop sync client with deep-link and local IPC entry points",
+      "persisted queue/credential store with malformed and stale-state fixtures",
+      "user-selected filesystem roots plus attempted escape paths",
+      "session lifecycle fixture covering expiry, revocation, restart, and recovery-export reauthentication",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "application-security-typed-input-2",
+      "assertion": "Deep-link and IPC messages are decoded once into explicit typed/versioned schemas with bounded string/list/payload sizes and reject unknown privileged operations or malformed representations before dispatch."
+    },
+    {
+      "id": "application-security-files-2",
+      "assertion": "Local file operations use canonical paths constrained to the selected/authorized roots and define safe behavior for symlink/reparse/alias changes and malformed persisted paths rather than trusting the original user-facing path string."
+    },
+    {
+      "id": "application-security-secrets-2",
+      "assertion": "Access/refresh credentials have an explicit protected-storage boundary and are excluded from URLs, ordinary logs, crash artifacts, analytics, and recovery bundles unless that bundle has a separately documented protected format."
+    },
+    {
+      "id": "application-security-session-2",
+      "assertion": "Expiry, renewal, revocation, restart restoration, and sensitive-action reauthentication are explicit state transitions; a stale/revoked session cannot silently regain authority from cached local state."
+    },
+    {
+      "id": "application-security-persistence-2",
+      "assertion": "Persisted queued operations are validated again when loaded, unsupported or malformed entries fail closed without executing privileged work, and partial processing does not corrupt the queue into an implicitly trusted state."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "application-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "typed IPC/deep-link schema",
+        "filesystem and persistence invariants",
+        "credential/session lifecycle contract",
+        "negative malformed/stale-state cases"
+      ]
+    },
+    {
+      "id": "application-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "desktop entry-point/trust map",
+    "typed validation and filesystem constraints",
+    "credential/log/crash storage rules",
+    "session/reauthentication state machine",
+    "persisted-queue negative cases",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "application-security-scenario-2-result",
+    "application-security-scenario-2-verification",
+    "application-security-scenario-2-paired-evaluation"
+  ]
+}

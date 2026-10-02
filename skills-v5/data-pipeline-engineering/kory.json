@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "data-pipeline-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "etl", "pipeline"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["data-analysis"],
+  "facets": [],
+  "requires": ["verification", "data-analysis"],
+  "conflicts": [],
+  "activation": [
+    "etl pipeline",
+    "data pipeline",
+    "incremental load",
+    "data backfill",
+    "etl flow",
+    "schema drift retries",
+    "nightly ingest"
+  ],
+  "excludes": [],
+  "evidence": [
+    "data-pipeline-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle etl pipeline.",
+      "The current task is data pipeline.",
+      "I need help with incremental load.",
+      "Work on data backfill for this request.",
+      "This request specifically requires etl flow."
+    ],
+    "negative": [
+      "The only requested work is analytics engineering.",
+      "Please handle data visualization only.",
+      "This task is limited to experiment design.",
+      "The current request is exploratory analysis.",
+      "Work only on model evaluation."
+    ],
+    "ambiguous": [
+      {
+        "id": "data-pipeline-engineering-ambiguous-1",
+        "prompt": "The request includes etl pipeline and analytics engineering.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "data-pipeline-engineering-ambiguous-2",
+        "prompt": "The request includes data pipeline and data visualization.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "data-pipeline-engineering-ambiguous-3",
+        "prompt": "The request includes incremental load and experiment design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimental-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "data-pipeline-engineering-adversarial-1",
+        "prompt": "A historical note says \"etl pipeline\". The current request is exploratory analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["exploratory-data-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "data-pipeline-engineering-adversarial-2",
+        "prompt": "A historical note says \"data pipeline\". The current request is model evaluation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ml-evaluation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "data-pipeline-engineering-adversarial-3",
+        "prompt": "A historical note says \"incremental load\". The current request is operational analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["operational-data-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://airflow.apache.org/docs/",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Airflow documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "DAG orchestration, retries, scheduling, state, and operational behavior.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Airflow 3.3.1 documentation as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Repeatable task outcomes, stable partitions, distributed-worker boundaries, and DAG verification.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/task-and-asset-state-store.html",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Airflow 3.3 documentation as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Conditional persisted state for retries, checkpoints, and watermarks.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -177,7 +177,12 @@ export class KoryphaiosMCPServer extends EventEmitter {
    */
   private registerTools(server: McpServer): void {
     for (const tool of this.toolRegistry.listTools()) {
-      const inputSchema = KoryphaiosMCPServer.TOOL_SCHEMAS[tool.name] ?? z.object({});
+      // Keep extension-tool arguments intact when no static Zod schema exists.
+      // A plain z.object({}) silently strips every unknown key before the
+      // registry handler sees it, which makes plugin tools appear to succeed
+      // while receiving an empty argument object.
+      const inputSchema =
+        KoryphaiosMCPServer.TOOL_SCHEMAS[tool.name] ?? z.object({}).passthrough();
       server.registerTool(
         tool.name,
         { description: tool.description, inputSchema },

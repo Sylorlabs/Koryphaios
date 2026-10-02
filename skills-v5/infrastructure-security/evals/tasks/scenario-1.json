@@ -1,0 +1,74 @@
+{
+  "id": "infrastructure-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Harden a Kubernetes namespace hosting an API, worker, Redis, and an admin-only diagnostics endpoint. The current manifests use the default service account, allow privilege escalation, run one container as root, mount `/var/run` from the host, have no NetworkPolicy, and expose diagnostics through the same ingress as the public API. Produce a deployment-security design that pins an appropriate Pod Security Standards version, reduces container privilege/capabilities/mounts, creates purpose-specific service accounts, separates the admin control plane, defines explicit ingress/egress including DNS/dependency needs, and verifies effective runtime identity, mounts, capabilities, listeners, and reachability after deployment. Image provenance is already handled by supply-chain-security.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://infrastructure-security/scenario-1",
+    "requirements": [
+      "Kubernetes namespace and manifests with stated insecure defaults",
+      "cluster-version fixture for version-pinned Pod Security policy",
+      "network reachability matrix",
+      "runtime pod/identity/capability inspection",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "infrastructure-security-pod-policy-1",
+      "assertion": "The namespace/workloads use an explicit version-pinned Pod Security policy and named exceptions only where justified; root, privilege escalation, host namespaces/mounts, and unnecessary capabilities are removed or explicitly documented."
+    },
+    {
+      "id": "infrastructure-security-identities-1",
+      "assertion": "API, worker, and administrative paths use purpose-specific identities/service accounts with no reliance on the namespace default credential for privileged operations."
+    },
+    {
+      "id": "infrastructure-security-network-1",
+      "assertion": "Ingress/egress rules allow only the documented API, worker, Redis, DNS, dependency, and admin paths, and the admin endpoint is not reachable through the public ingress."
+    },
+    {
+      "id": "infrastructure-security-runtime-proof-1",
+      "assertion": "Verification inspects the running workload's UID, capabilities, mounts, service-account identity, listeners, and effective network reachability instead of concluding from manifest text alone."
+    },
+    {
+      "id": "infrastructure-security-ops-1",
+      "assertion": "Administrative access and configuration changes are authenticated/audited and have an explicit break-glass/recovery path without shared standing root credentials."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "infrastructure-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "hardened deployment policy",
+        "network/identity matrix",
+        "runtime privilege evidence",
+        "admin/recovery contract"
+      ]
+    },
+    {
+      "id": "infrastructure-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "cluster and policy version",
+    "runtime identity/capability/mount evidence",
+    "network reachability results",
+    "admin-plane controls",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "infrastructure-security-scenario-1-result",
+    "infrastructure-security-scenario-1-verification",
+    "infrastructure-security-scenario-1-paired-evaluation"
+  ]
+}

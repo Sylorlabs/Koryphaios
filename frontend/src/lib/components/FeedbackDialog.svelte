@@ -167,7 +167,7 @@
             Opening GitHub issue
           </h3>
           <p class="mt-2 max-w-sm text-xs leading-5 text-[var(--color-text-muted)]">
-            GitHub opened with your report filled in. Review it there and submit when ready — no
+            GitHub opened with your report filled in. Review it there and submit when ready. No
             reply email is needed.
           </p>
           <button

@@ -99,7 +99,7 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
         }
         if (!providerName || !isNativeCliProvider(providerName)) {
           throw new ValidationError(
-            'No CLI provider is active. Select a CLI-backed provider (Claude Code, Codex, Devin, Grok, Cursor, Cline, Antigravity, Kimi Code) to use its /commands.',
+            'No CLI provider is active. Select a CLI-backed provider (Claude Code, Codex, Devin, Grok, Cursor, Antigravity, Kimi Code) to use its /commands.',
           );
         }
 

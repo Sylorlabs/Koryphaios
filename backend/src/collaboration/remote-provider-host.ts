@@ -37,7 +37,7 @@ const log = serverLog.child({ module: 'remote-provider-host' });
 // they cannot be served as pure inference to a remote client's filesystem.
 // They are advertised as `agentic: true` (offered in host-side "remote agentic"
 // mode) so the UI can present them honestly.
-const AGENTIC_PROVIDERS = new Set(['claude', 'grok', 'antigravity', 'cursor', 'devin', 'cline']);
+const AGENTIC_PROVIDERS = new Set(['claude', 'grok', 'antigravity', 'cursor', 'devin']);
 
 export function isAgenticProvider(name: string): boolean {
   return AGENTIC_PROVIDERS.has(name);

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "customer-success",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "customer-success"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3299,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "customer success",
+    "customer onboarding",
+    "renewal risk",
+    "customer adoption",
+    "success plan",
+    "health signals",
+    "renewals and escalation"
+  ],
+  "excludes": [],
+  "evidence": [
+    "customer-success decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle customer success.",
+      "The current task is customer onboarding.",
+      "I need help with renewal risk.",
+      "Work on customer adoption for this request.",
+      "This request specifically requires success plan."
+    ],
+    "negative": [
+      "The only requested work is accessibility.",
+      "Please handle audio production only.",
+      "This task is limited to content design.",
+      "The current request is developer experience.",
+      "Work only on information architecture."
+    ],
+    "ambiguous": [
+      {
+        "id": "customer-success-ambiguous-1",
+        "prompt": "The request includes customer success and accessibility.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "customer-success-ambiguous-2",
+        "prompt": "The request includes customer onboarding and audio production.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["audio-production"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "customer-success-ambiguous-3",
+        "prompt": "The request includes renewal risk and content design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["content-error-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "customer-success-adversarial-1",
+        "prompt": "A historical note says \"customer success\". The current request is developer experience.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "customer-success-adversarial-2",
+        "prompt": "A historical note says \"customer onboarding\". The current request is information architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["information-architecture"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "customer-success-adversarial-3",
+        "prompt": "A historical note says \"renewal risk\". The current request is interaction.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["interaction-design"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://handbook.gitlab.com/handbook/customer-success/csm/success-plans/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Success plan objectives and verified outcomes HTML sections inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt customer-owned outcomes, baselines, owners and evidence states. Do not require GitLab epics, account tiers or its specific reporting cadence."
+    },
+    {
+      "url": "https://playbook.cio.gov/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Digital Services Playbook as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Outcome, user, iterative delivery, analytics, security, and operating-product guidance.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

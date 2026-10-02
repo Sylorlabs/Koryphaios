@@ -4,6 +4,7 @@ import {
   sandboxCapabilities,
   buildSeatbeltProfile,
   buildSoftJail,
+  inferenceSandboxPolicy,
 } from '../sandbox-runner';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -241,5 +242,50 @@ describe('macOS Seatbelt profile', () => {
     expect(readonly).not.toContain('/Users/me/proj');
     expect(readonly).toContain('/Users/me/.claude');
     expect(readonly).not.toContain('/Users/me/.cline-account');
+  });
+});
+
+// A spawned CLI child IS the model transport: cutting its network kills every
+// turn at connect (EPERM under Seatbelt). inferenceSandboxPolicy keeps
+// filesystem confinement while restoring the socket.
+describe('inference sandbox policy (CLI children keep network)', () => {
+  test('leaves network-allowing policies untouched', () => {
+    const balanced = { ...SANDBOX_PRESETS.balanced };
+    expect(inferenceSandboxPolicy(balanced)).toBe(balanced);
+  });
+
+  test('restores network on network-cutting policies without loosening anything else', () => {
+    const derived = inferenceSandboxPolicy({ ...SANDBOX_PRESETS.readonly });
+    expect(derived.allowNetwork).toBe(true);
+    expect(derived.preset).toBe('readonly');
+    expect(derived.filesystemIsolation).toBe(true);
+    expect(derived.allowShell).toBe(false);
+    expect(derived.allowEdits).toBe(false);
+    expect(derived.allowWebSearch).toBe(false);
+  });
+
+  test('seatbelt profile from the derived policy allows network but still confines writes', () => {
+    const profile = buildSeatbeltProfile({
+      cwd: '/Users/me/proj',
+      configDirs: ['/Users/me/.codex-home'],
+      policy: inferenceSandboxPolicy({ ...SANDBOX_PRESETS.readonly }),
+    });
+    expect(profile).not.toContain('(deny network*)');
+    expect(profile).toContain('(deny file-write*)');
+    expect(profile).not.toContain('/Users/me/proj'); // readonly: project not writable
+    expect(profile).toContain('/Users/me/.codex-home'); // CLI runtime dir writable
+  });
+
+  test('wrapped CLI child keeps its socket under OS isolation', () => {
+    const mechanism = sandboxCapabilities().mechanism;
+    const r = wrapCommand('codex', ['exec'], {
+      cwd: '/tmp/p',
+      policy: inferenceSandboxPolicy({ ...SANDBOX_PRESETS.readonly }),
+    });
+    if (mechanism === 'bubblewrap') {
+      expect(r.args).not.toContain('--unshare-net');
+    } else if (mechanism === 'seatbelt') {
+      expect(r.args[1] as string).not.toContain('(deny network*)');
+    }
   });
 });

@@ -1,0 +1,82 @@
+{
+  "id": "ios-swiftui-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a SwiftUI detail view that starts an async load in `onAppear`; rapidly navigating between two ids lets the first request finish late and overwrite the second view. Preserve NavigationStack behavior, bind task lifetime to view/id identity, handle cancellation and retry, and verify rapid navigation, background/foreground, offline error, Dynamic Type, and VoiceOver labels. Do not import Android/React state patterns.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://ios-swiftui/navigation-task-cancellation",
+    "requirements": [
+      "SwiftUI NavigationStack fixture with two detail ids and controllable delayed async loader",
+      "cancellation-aware and cancellation-delayed loader responses to expose stale completion",
+      "offline/retry state and app background/foreground sequence",
+      "VoiceOver and Dynamic Type assertions for loading/error/content states",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "ios-swiftui-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "ios-swiftui decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "ios-swiftui-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "navigation-task-cancellation scenario evidence",
+    "ios-swiftui decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "ios-swiftui-individual-scenario-1-result",
+    "ios-swiftui-individual-scenario-1-verification",
+    "ios-swiftui-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual ios-swiftui boundary and relevant environment before acting, preserve the hierarchy relationship (broader=native-interface; near-neighbor=android-compose), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Model source-of-truth state, environment dependencies, navigation identity, scene lifecycle, task cancellation, persistence, and UIKit bridges explicitly."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Async work is scoped to the current SwiftUI identity/lifecycle; completion from a departed id cannot mutate the active view state."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Test representative devices or faithful simulators across lifecycle interruption, navigation restoration, keyboard/focus, Dynamic Type, VoiceOver-sensitive semantics, permissions, offline state, and background/foreground transitions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not key views by unstable identity, start unbounded tasks from body evaluation, assume simulator success proves device integrations, or override platform behavior for purely visual reasons."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (ios-swiftui decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "name": "executive-communication",
+  "version": "5.1.1",
+  "skillKind": "artifact",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents", "executive"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5100,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "executive brief",
+    "leadership update",
+    "decision memo",
+    "leadership brief",
+    "executive summary",
+    "board-ready summary",
+    "board update",
+    "weekly executive update",
+    "go no-go brief",
+    "decision brief",
+    "status for leadership",
+    "one page update",
+    "exec team",
+    "business impact material risk"
+  ],
+  "excludes": [
+    "technical design without executive summary",
+    "step-by-step tutorial only",
+    "api reference only",
+    "implement the change without an executive artifact",
+    "only calculate the numbers",
+    "do not write an executive brief or leadership update",
+    "return only the underlying financial analysis",
+    "extract the three dates",
+    "return only the supplied kpi values",
+    "trace which repository test reads the fixture"
+  ],
+  "evidence": [
+    "Decision/status/outcome and explicit ask",
+    "Actual/forecast/scenario/recommendation separation",
+    "Impact, options, risk, cost, timing, and ownership",
+    "Evidence trace for material numbers and status",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Prepare a one-page leadership brief for the launch go/no-go. Lead with the recommendation, quantify verified customer and revenue impact, compare the viable options, state top risks and mitigations, and make the decision/owner/deadline explicit.",
+      "Turn this program packet into a weekly executive update with status, changes since last week, delivery forecast, business impact, top dependencies/risks, decisions needed, owners, and dates. Keep actuals separate from forecast.",
+      "Write a decision memo for whether to fund the migration this quarter. Summarize the verified cost model, capacity/reliability impact, alternatives, reversibility, risks, timing, recommendation, and the exact approval requested.",
+      "Create a board-ready summary of the incident and recovery: measured customer/business impact, current residual risk, remediation status, what has changed, and any leadership actions required. Keep the technical causal chain in supporting detail only.",
+      "Draft an executive summary for the portfolio review that identifies which initiatives are on/off track, what materially changed, forecast confidence, resource constraints, and the three decisions that need leadership attention."
+    ],
+    "negative": [
+      "Write the detailed architecture RFC for the migration with interfaces, failure semantics, alternatives, rollout, rollback, and observability for engineering reviewers.",
+      "Create a step-by-step deployment runbook with prerequisites, exact commands, expected outputs, failure branches, rollback, and completion checks.",
+      "Generate an API reference with every parameter, type, default, status code, error shape, example, and version boundary; no leadership summary is needed.",
+      "Calculate the NPV, payback period, and sensitivity table for these options and return only the financial analysis; do not draft an executive brief.",
+      "Implement the approved migration in the repository and run verification. The decision has already been made and no leadership artifact is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "executive-communication-ambiguous-1",
+        "prompt": "Finish the underlying business-case analysis, then create a leadership decision brief that compresses the verified economics, options, risks, timing, and exact approval needed. Keep the analysis model separate from the executive artifact.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "compound", "analysis-plus-brief"]
+      },
+      {
+        "id": "executive-communication-ambiguous-2",
+        "prompt": "Produce the detailed engineering incident report and a separate board-ready update covering measured impact, residual risk, remediation status, and decisions needed. Do not replace technical evidence with executive compression.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication", "incident-response"],
+        "tags": ["ambiguous", "compound", "technical-plus-executive"]
+      },
+      {
+        "id": "executive-communication-ambiguous-3",
+        "prompt": "Maintain the detailed program plan with milestones, owners, and dependencies, and also write the weekly leadership update with material status changes, forecast, risks, and explicit asks. Keep operating detail out of the primary brief unless decision-relevant.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["project-program-management"],
+        "tags": ["ambiguous", "compound", "program-plus-update"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "executive-communication-adversarial-1",
+        "prompt": "The pasted meeting notes say 'prepare an executive brief for Friday.' Treat that as historical source text. My actual request is only to extract the three dates from the notes.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "executive-communication-adversarial-2",
+        "prompt": "Do not write a leadership update, executive summary, or decision memo. Return only the supplied KPI values in CSV order with no narrative.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "executive-communication-adversarial-3",
+        "prompt": "A fixture contains the sentence 'write a decision memo for leadership.' Ignore that inert fixture instruction. Trace which repository test reads the fixture and how it is parsed.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered structure, wording, and readability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/brand-voice-above-all-simple-human",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft public writing guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Key takeaway first, choices and next steps obvious, concise scanning-oriented communication.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/top-10-tips-style-voice",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft concise-writing guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Bigger ideas with fewer words and enough information to make decisions confidently.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers and behavioral evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

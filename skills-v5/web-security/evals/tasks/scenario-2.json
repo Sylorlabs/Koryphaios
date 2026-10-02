@@ -1,0 +1,74 @@
+{
+  "id": "web-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Review browser security for an analytics SPA hosted at app.example.com that calls api.example.com and loads customer-configured report data from reports.example.net. The API currently reflects the Origin header into Access-Control-Allow-Origin and allows credentials; the SPA stores an access token in localStorage; a URL hash controls which report endpoint the client fetches; and the page can be framed by any origin. Redesign CORS for exact required origins and credentials, prevent client-side forged requests from attacker-controlled URL input, choose a safer browser credential/session architecture, constrain framing and navigation, and add CSP/reporting plus explicit XSS-safe rendering rules for report data. Keep OAuth token issuance/validation in oauth-oidc and application API authorization in authorization-security.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://web-security/scenario-2",
+    "requirements": [
+      "SPA/API/report origins with credentialed and uncredentialed request fixtures",
+      "reflected/wildcard CORS misconfiguration cases",
+      "attacker-controlled URL hash and report-content corpus",
+      "browser storage and server/BFF session alternatives",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "web-security-cors-2",
+      "assertion": "Credentialed CORS is limited to the exact required trusted origins, methods, and headers; the design does not reflect arbitrary Origin values or combine credential sharing with wildcard origin access."
+    },
+    {
+      "id": "web-security-client-csrf-2",
+      "assertion": "Attacker-controlled URL/hash input cannot cause the trusted SPA to construct an arbitrary privileged API/report request while automatically adding the application's own credentials or anti-CSRF headers."
+    },
+    {
+      "id": "web-security-token-storage-2",
+      "assertion": "The credential architecture explicitly weighs JavaScript-readable browser storage exposure and selects a server/BFF or other storage model consistent with the app threat model rather than treating localStorage as inherently safe."
+    },
+    {
+      "id": "web-security-framing-2",
+      "assertion": "The application uses CSP `frame-ancestors` or an equivalent explicit framing policy so arbitrary sites cannot embed the authenticated UI."
+    },
+    {
+      "id": "web-security-rendering-2",
+      "assertion": "Customer report data reaches only safe rendering sinks or an explicit sanitization boundary, and CSP/reporting is used as defense in depth rather than a substitute for sink safety."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "web-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "CORS origin/credential matrix",
+        "client-side forged-request controls",
+        "credential-storage architecture",
+        "framing/rendering/CSP controls"
+      ]
+    },
+    {
+      "id": "web-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "origin/CORS matrix",
+    "URL/client-request trust flow",
+    "credential-storage decision",
+    "framing/rendering/CSP policy",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "web-security-scenario-2-result",
+    "web-security-scenario-2-verification",
+    "web-security-scenario-2-paired-evaluation"
+  ]
+}

@@ -154,6 +154,12 @@ export function getDirectBackendUrl(): string {
   // In Tauri, the cached URL is already direct (no proxy).
   const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   if (inTauri) return getCachedBackendUrl();
+  // Production static build (user mode / packaged web): the backend serves
+  // this page itself, so same-origin is always the right backend — the
+  // build-time VITE_BACKEND_URL may point at a different (dev) backend and
+  // cross-origin health checks would fail CORS. Only vite dev uses the proxy
+  // bypass (see comment above).
+  if (typeof window !== 'undefined' && !isDev()) return window.location.origin;
   // In browser dev mode, prefer the Vite-injected direct backend URL.
   const viteUrl = import.meta.env.VITE_BACKEND_URL;
   if (viteUrl) return normalizeUrlForBrowser(viteUrl as string);

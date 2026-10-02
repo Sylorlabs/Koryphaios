@@ -36,6 +36,12 @@
   );
   const autoScrollCtl = createAutoScroll(() => scrollEl, { threshold: 100 });
 
+  // A thread that has just opened only knows where its bottom is from row
+  // estimates, so the view starts near the end and walks down as the real
+  // heights come back. Keep it out of sight until it has landed on the last
+  // message instead of letting the reader watch it crawl there.
+  let landing = $state(false);
+
   // Attach the scroll/observer listeners whenever the container element
   // changes (e.g. empty-state ↔ VirtualList).
   $effect(() => {
@@ -81,6 +87,10 @@
       case 'tool_result':
       case 'tool_group':
         return 80;
+      // Sub-agent groups render as a clamped summary, never as a full
+      // transcript dump, so a flat estimate stays close to the real height.
+      case 'agent_group':
+        return 44;
       default:
         return 100;
     }
@@ -123,6 +133,7 @@
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'unorouter') return 'UnoRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
@@ -174,7 +185,9 @@
           items={feed}
           estimateHeight={estimateFeedHeight}
           follow={autoScrollCtl.follow}
-          class="h-full p-4 feed-scroll"
+          resetKey={agent.identity.id}
+          onLandingChange={(value) => (landing = value)}
+          class="h-full p-4 feed-scroll {landing ? 'opacity-0' : ''}"
         >
           {#snippet row(entry, i)}
             <div class="pb-3">

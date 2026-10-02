@@ -1,0 +1,94 @@
+{
+  "id": "experimental-analysis-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"design an A/B experiment\". The evidence packet contains missingness, duplicates, unit ambiguity, and an attractive aggregate that can change the unit of analysis. The acceptance boundary is experimental-analysis: State the causal question, units, intervention, comparator, outcomes, assignment, interference, stopping, exclusions, and analysis before outcomes where possible. The adjacent analytics-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://experimental-analysis/blocked-factorial-coating",
+    "requirements": [
+      "three two-level controllable factors with plausible two-factor interactions",
+      "raw-material batch and operator nuisance factors with predictable run structure",
+      "16-run hard budget, historical response variance, and minimum practically relevant effect",
+      "throughput guardrail plus one measurement calibration drift window",
+      "unsafe proposed sequential run order that would confound treatment with time/batch",
+      "paired same-model skill/no-skill execution",
+      "experimental-analysis parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual experimental-analysis boundary and relevant environment before acting, preserve the hierarchy relationship (broader=data-analysis; near-neighbor=analytics-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "State the causal question, units, intervention, comparator, outcomes, assignment, interference, stopping, exclusions, and analysis before outcomes where possible."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Predeclared design; Assignment evidence; Power and sensitivity"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of experimental-analysis correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Causal question, estimand, units, intervention, comparator, outcomes, timing, and assignment or identification strategy; Design structure including randomization, blocking/clustering/factorial aliasing, or quasi-experimental assumptions; Power/precision, effective sample size, attrition/missingness, interference, and protocol-deviation evidence; Effect estimate with baseline/comparator, units, uncertainty, and practical significance), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "experimental-analysis-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Causal question, estimand, units, intervention, comparator, outcomes, timing, and assignment or identification strategy",
+        "Design structure including randomization, blocking/clustering/factorial aliasing, or quasi-experimental assumptions",
+        "Power/precision, effective sample size, attrition/missingness, interference, and protocol-deviation evidence",
+        "Effect estimate with baseline/comparator, units, uncertainty, and practical significance",
+        "Design-specific falsification, sensitivity, robustness, and multiplicity boundaries",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "experimental-analysis-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Causal question, estimand, units, intervention, comparator, outcomes, timing, and assignment or identification strategy",
+    "Design structure including randomization, blocking/clustering/factorial aliasing, or quasi-experimental assumptions",
+    "Power/precision, effective sample size, attrition/missingness, interference, and protocol-deviation evidence",
+    "Effect estimate with baseline/comparator, units, uncertainty, and practical significance",
+    "Design-specific falsification, sensitivity, robustness, and multiplicity boundaries",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "experimental-analysis-individual-scenario-1-result",
+    "experimental-analysis-individual-scenario-1-verification",
+    "experimental-analysis-individual-scenario-1-paired-evaluation"
+  ]
+}

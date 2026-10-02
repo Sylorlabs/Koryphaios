@@ -7,6 +7,7 @@
     min: number;
     max: number;
     step?: number;
+    decimals?: number;
     label: string;
     valueText?: string;
     onchange: (value: number) => unknown | Promise<unknown>;
@@ -20,6 +21,7 @@
     min,
     max,
     step = 1,
+    decimals,
     label,
     valueText,
     onchange,
@@ -31,16 +33,18 @@
   let editing = $state(false);
   let draft = $state('');
 
-  const decimalPlaces = $derived(Math.max(0, (String(step).split('.')[1] ?? '').length));
+  const decimalPlaces = $derived(
+    decimals ?? Math.max(0, (String(step).split('.')[1] ?? '').length),
+  );
   const clamp = (next: number) => Number(Math.min(max, Math.max(min, next)).toFixed(decimalPlaces));
 
   $effect.pre(() => {
-    if (!editing) draft = String(value);
+    if (!editing) draft = decimalPlaces > 0 ? value.toFixed(decimalPlaces) : String(value);
   });
 
   function setValue(next: number) {
     const bounded = clamp(next);
-    draft = String(bounded);
+    draft = decimalPlaces > 0 ? bounded.toFixed(decimalPlaces) : String(bounded);
     void onchange(bounded);
   }
 
@@ -52,7 +56,7 @@
     editing = false;
     const parsed = Number(draft.trim());
     if (!Number.isFinite(parsed)) {
-      draft = String(value);
+      draft = decimalPlaces > 0 ? value.toFixed(decimalPlaces) : String(value);
       return;
     }
     setValue(parsed);
@@ -78,7 +82,7 @@
     } else if (event.key === 'Escape') {
       event.preventDefault();
       editing = false;
-      draft = String(value);
+      draft = decimalPlaces > 0 ? value.toFixed(decimalPlaces) : String(value);
       (event.currentTarget as HTMLInputElement).blur();
     }
   }

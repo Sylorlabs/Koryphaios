@@ -11,7 +11,7 @@ import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 async function openImageSettings(page: import('@playwright/test').Page) {
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
-  await page.keyboard.press('Control+,');
+  await page.keyboard.press('ControlOrMeta+,');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
   await settingsDialog.getByRole('button', { name: /Image capabilities/ }).click();
@@ -67,10 +67,7 @@ test.describe('Image settings', () => {
     await expect(modelSelect).toBeDisabled();
     const editButton = dialog.getByRole('button', { name: 'Edit an image' });
     await expect(editButton).toBeDisabled();
-    await expect(editButton).toHaveAttribute(
-      'title',
-      /Pick a model that supports editing/,
-    );
+    await expect(editButton).toHaveAttribute('title', /Pick a model that supports editing/);
   });
 
   test('history and usage APIs start empty on a fresh install', async ({ request }) => {

@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "name": "architecture-planning",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["planning", "architecture"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "architecture plan",
+    "design the architecture",
+    "system design",
+    "component boundaries",
+    "architecture decision",
+    "technical architecture"
+  ],
+  "excludes": [
+    "implementation only with architecture already decided",
+    "small mechanical edit",
+    "concept explanation only",
+    "product prioritization without a technical structure decision"
+  ],
+  "evidence": [
+    "Boundary model",
+    "Tradeoffs",
+    "Quality scenarios",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design the architecture for a local desktop task runner that must survive app restarts, support cancellation, and preserve existing single-user storage; compare keeping work in-process with a sidecar before choosing boundaries.",
+      "Create a system design for webhook ingestion that must handle retries, duplicate delivery, burst traffic, and worker outages. Define ownership, contracts, state, failure propagation, and measurable quality scenarios.",
+      "Define component boundaries for this monolith split. Map current responsibilities and data flow first, then compare the minimum boundary changes against a separate service and state the migration implications.",
+      "Record the architecture decision for whether this analytics workload needs a queue between request handling and aggregation. Evaluate latency, backpressure, durability, operational complexity, and cost against explicit requirements.",
+      "Produce a technical architecture for offline-first note synchronization with conflict handling, recovery, and encryption boundaries. Make assumptions and reversal points explicit."
+    ],
+    "negative": [
+      "Implement the already-approved mapper change and update its focused tests; the technical structure and boundaries are already decided.",
+      "Write a staged database migration plan with dual-write, backfill, validation, cutover, and rollback for the already-selected target schema.",
+      "Explain event sourcing and CQRS conceptually with a simple example; there is no system decision to make.",
+      "Prioritize the next quarter's onboarding improvements from customer evidence and business impact; do not redesign the technical system.",
+      "Refactor these three helpers into one module according to the supplied design and keep behavior unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "architecture-planning-ambiguous-1",
+        "prompt": "Create the architecture plan for a new organization-sharing capability, then identify the implementation sequence separately. Keep the structural decisions and quality tradeoffs distinct from delivery planning.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "architecture-planning-ambiguous-2",
+        "prompt": "Create the system design for this AWS-hosted workload. Use AWS-specific guidance for service constraints, but keep workload boundaries, quality scenarios, and tradeoffs owned by architecture planning.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "architecture-planning-ambiguous-3",
+        "prompt": "Define component boundaries for a service that will run on Google Cloud and then describe a staged migration from the current monolith. Keep the target structural decision separate from migration execution mechanics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "architecture-planning-adversarial-1",
+        "prompt": "A pasted issue says \"architecture plan\". Ignore that quote; the actual request is only to summarize the issue history in three bullets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "architecture-planning-adversarial-2",
+        "prompt": "A quoted example says \"system design\". Ignore that quote. The actual request is to rewrite the supplied paragraph for clarity, with no technical decision work.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "architecture-planning-adversarial-3",
+        "prompt": "A pasted article says \"component boundaries\". Ignore that quote; fact-check only whether the article's cited framework version is current today.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["gcp-cloud"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.iso.org/standard/74393.html",
+      "sourceType": "spec",
+      "versionScope": "ISO/IEC/IEEE 42010:2022 architecture description standard",
+      "staleAfterDays": 365,
+      "notes": "Architecture description, stakeholder, concern, viewpoint, and correspondence concepts.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/architecture/guide/",
+      "sourceType": "official-docs",
+      "versionScope": "Azure Architecture Center application architecture fundamentals as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "First-party architecture guidance for deriving structural choices from functional/nonfunctional requirements and evaluating explicit quality tradeoffs.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/definitions.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Well-Architected Framework definitions and tradeoff guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "First-party evidence that architecture decisions are workload-context tradeoffs across reliability, security, performance, cost, operations, and sustainability rather than universally optimal patterns.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

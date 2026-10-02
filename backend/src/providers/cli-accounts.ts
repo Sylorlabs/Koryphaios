@@ -75,12 +75,6 @@ const PROFILE_DEFINITIONS: ProfileDefinition[] = [
     authFiles: ['cli-config.json'],
   },
   {
-    provider: 'cline',
-    command: 'cline',
-    directoryPrefix: '.cline',
-    authFiles: ['data/secrets.json'],
-  },
-  {
     provider: 'antigravity',
     command: 'agy',
     directoryPrefix: '.gemini',

@@ -1,0 +1,82 @@
+{
+  "id": "postgres-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a PostgreSQL job queue where multiple workers use `SELECT ... LIMIT 1` then update, causing duplicate claims and lock waits. On the pinned PostgreSQL version, implement an atomic/transactionally correct claim pattern using row locking semantics, preserve priority ordering as far as concurrency permits, and verify 20 concurrent workers, empty queue, worker crash after claim, retry visibility, and lock/transaction duration. Do not add a separate broker.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://postgres-engineering/skip-locked-job-claim",
+    "requirements": [
+      "PostgreSQL job table with priority, available_at, status, and stable job id",
+      "20-worker concurrency harness reproducing duplicate claim/lock wait",
+      "worker crash/lease-or-recovery policy and retry fixture",
+      "EXPLAIN/lock evidence on the pinned PostgreSQL release",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "postgres-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "postgres-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "postgres-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "skip-locked-job-claim scenario evidence",
+    "postgres-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "postgres-engineering-individual-scenario-1-result",
+    "postgres-engineering-individual-scenario-1-verification",
+    "postgres-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual postgres-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=relational-data-modeling; near-neighbor=mysql-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm PostgreSQL version, schema ownership, isolation needs, extension availability, and workload."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Each claim is serialized by PostgreSQL’s actual row/transaction semantics so no two workers own the same claim concurrently and abandoned work has an explicit recovery path."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use EXPLAIN with representative parameters/data, test lock and transaction behavior, migration rollback or forward recovery, constraint violations, and production-like statistics."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not cargo-cult indexes, trust estimated plans without data context, hold transactions across external work, or use serializable isolation without handling retries."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (postgres-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

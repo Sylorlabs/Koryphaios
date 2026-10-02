@@ -1,0 +1,71 @@
+{
+  "id": "performance-debugging-full-task-1",
+  "maturity": "individual",
+  "prompt": "The supplied HTTP service has a measured latency regression between commits `base` and `candidate`: under the provided 400 requests/s workload with the same 20k-record dataset and runtime configuration, p95 rose from about 85 ms to 230 ms while correctness remains green. Reproduce both builds with the fixture's warm-up and five repeated runs, record p50/p95/p99, throughput, CPU, allocation/GC, I/O wait, and saturation, then profile the candidate before editing. Establish which resource/path explains the regression, make the narrow correction, and repeat the identical comparison. Do not lower workload, change response semantics, or report a single lucky run as the fix.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-debugging/http-p95-regression",
+    "requirements": [
+      "base and candidate builds are available from the same fixture",
+      "400 rps, dataset, runtime configuration, and resource limits are fixed across comparisons",
+      "warm-up plus five measured repetitions are defined",
+      "functional correctness tests pass on both starting builds",
+      "profiling and system resource counters are available",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-latency-comparable",
+      "assertion": "Baseline and candidate are measured under the same workload, dataset, configuration, warm-up, and resource envelope with repeated p50/p95/p99 observations."
+    },
+    {
+      "id": "performance-latency-profile",
+      "assertion": "The proposed cause is supported by profile/resource evidence that explains the measured delta rather than by speculation or a code diff alone."
+    },
+    {
+      "id": "performance-latency-retest",
+      "assertion": "The post-fix candidate is retested under the identical protocol, restores the stated performance budget without reducing workload, and keeps correctness green."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-debugging-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Profile",
+        "Comparable benchmark",
+        "Resource accounting",
+        "before/after latency distributions and variance",
+        "profile/resource evidence and identical post-fix rerun"
+      ]
+    },
+    {
+      "id": "performance-debugging-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the bottleneck hypothesis explains the measured resource delta",
+        "measurement protocol controls obvious confounders",
+        "performance improvement preserves semantics"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Profile",
+    "Comparable benchmark",
+    "Resource accounting",
+    "comparable base/candidate benchmark artifacts",
+    "profile and resource accounting",
+    "post-fix identical benchmark plus correctness output",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "performance-debugging-scenario-1-baseline",
+    "performance-debugging-scenario-1-profile",
+    "performance-debugging-scenario-1-retest",
+    "performance-debugging-scenario-1-paired-evaluation"
+  ]
+}

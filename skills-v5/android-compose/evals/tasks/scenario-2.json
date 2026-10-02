@@ -1,0 +1,82 @@
+{
+  "id": "android-compose-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A Compose message list uses array positions as LazyColumn keys and launches avatar loads directly from item composition. When a page is prepended, rows briefly display the wrong avatar and duplicate loads survive navigation away. Correct identity and lifecycle ownership without replacing the paging layer: use stable message identity, lifecycle-safe collection/effects, preserve scroll position, and verify prepend, retry, navigation-away cleanup, large font scaling, and keyboard focus on the search field.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://android-compose/paged-list-key-lifecycle",
+    "requirements": [
+      "paged message fixture that prepends older rows while current rows remain visible",
+      "instrumented avatar loader that counts launches and cancellation on navigation",
+      "stable message ids plus a deliberately wrong index-key implementation",
+      "font-scale and keyboard-focus checks on the supported Android runtime",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "android-compose-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "android-compose decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "android-compose-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "paged-list-key-lifecycle scenario evidence",
+    "android-compose decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "android-compose-individual-scenario-2-result",
+    "android-compose-individual-scenario-2-verification",
+    "android-compose-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual android-compose boundary and relevant environment before acting, preserve the hierarchy relationship (broader=native-interface; near-neighbor=ios-swiftui), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Separate durable domain state from composable state, collect flows with lifecycle awareness, use stable keys and state restoration intentionally, and keep navigation/back behavior aligned with platform conventions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Row identity follows message identity, and asynchronous work is owned by an appropriate lifecycle so paging/recomposition cannot duplicate or misassociate effects."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise configuration/process recreation, navigation/back, offline/error states, TalkBack-sensitive semantics, font scaling, permission denial, and representative physical-device behavior for hardware integrations."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not launch work from recomposition without lifecycle control, retain Activity references in long-lived state, assume preview behavior equals runtime, or ignore state restoration."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (android-compose decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

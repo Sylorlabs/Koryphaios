@@ -1,0 +1,81 @@
+{
+  "id": "accessibility-practice-full-task-cross-platform-editor",
+  "prompt": "Define the accessibility contract for a mature cross-platform desktop editor. Core tasks include opening and navigating large projects, editing, search, diagnostics, command discovery, conflict resolution, and recovery after interruption. The product runs on macOS and Windows, has custom tree/grid controls, dense diagnostics, keyboard-heavy expert workflows, light/dark themes, motion, and scalable text. Produce implementation-ready accessibility requirements and a verification matrix without claiming tests that have not been run.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://accessibility-practice/cross-platform-editor",
+    "requirements": [
+      "platform and toolkit inventory",
+      "critical-task and state inventory",
+      "existing semantics/input/accessibility-service behavior",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "editor-critical-task-equivalence",
+      "assertion": "The contract covers opening/navigating projects, editing, search, diagnostics, command discovery, conflict resolution, and interruption recovery with equivalent operability that is not dependent on pointer-only or vision-only interaction."
+    },
+    {
+      "id": "editor-custom-control-semantics",
+      "assertion": "Custom tree/grid and dense diagnostic controls define exposed role/name/state/relationship, focus, keyboard operation, and state-change announcement requirements instead of assuming native accessibility is inherited automatically."
+    },
+    {
+      "id": "editor-perception-and-adaptation",
+      "assertion": "Text scaling, contrast/theme behavior, motion, and time-sensitive or sensory information have explicit non-single-channel requirements that preserve critical information across supported states."
+    },
+    {
+      "id": "editor-verification-matrix",
+      "assertion": "Verification names representative macOS and Windows task/state combinations, applicable assistive technologies and input methods, manual versus automatable checks, and explicitly marks combinations that remain untested."
+    },
+    {
+      "id": "editor-evidence-honesty",
+      "assertion": "The result separates universal requirements from platform/toolkit-specific behavior and does not claim conformance or runtime success for tests that were not actually executed."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "equivalent-task-access-contract",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "critical tasks and platform services identified",
+        "alternative-input and assistive-technology requirements",
+        "semantics/names/relationships/state requirements",
+        "scaling contrast motion and non-single-channel requirements",
+        "platform-specific versus universal requirements separated"
+      ]
+    },
+    {
+      "id": "verification-scope-and-evidence-honesty",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "representative task/state matrix",
+        "manual plus applicable automation plan",
+        "assistive-technology/platform combinations named",
+        "untested combinations explicit",
+        "no unearned compliance claim"
+      ]
+    },
+    {
+      "id": "blind-editor-accessibility-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "applicable standard/platform scope",
+    "critical-task access model",
+    "alternative-input and assistive-technology requirements",
+    "verification matrix",
+    "unverified combinations and residual risk"
+  ],
+  "requiredArtifacts": [
+    "cross-platform-accessibility-contract",
+    "accessibility-verification-matrix",
+    "paired-experiment-report"
+  ]
+}

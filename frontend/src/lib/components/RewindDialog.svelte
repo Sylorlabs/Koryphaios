@@ -4,6 +4,7 @@
   import X from 'lucide-svelte/icons/x';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
+  import { formatUsd } from '$lib/utils/usd';
 
   let preview = $derived(wsStore.rewindPreview);
   let dialogEl = $state<HTMLElement | null>(null);
@@ -111,7 +112,7 @@
             <dd class="mt-1 font-mono text-[var(--color-text-primary)]">
               {preview.evidence.cost === undefined
                 ? 'Unpriced'
-                : `$${preview.evidence.cost.toFixed(4)}`}
+                : formatUsd(preview.evidence.cost)}
             </dd>
           </div>
           <div class="col-span-2 sm:col-span-3">

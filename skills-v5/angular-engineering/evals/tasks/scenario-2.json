@@ -1,0 +1,82 @@
+{
+  "id": "angular-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "An Angular admin feature provides a polling service at component scope and opens an overlay that resolves the same service from a different injector. Closing and reopening the feature leaves multiple pollers running and duplicated notifications appear. Diagnose the injector/lifecycle boundary, make one ownership decision, and prove teardown across feature navigation and overlay close/reopen while preserving the public service API. Do not solve by introducing a global singleton unless the required lifetime actually is application-wide.",
+  "environment": {
+    "kind": "browser",
+    "startingState": "fixture://angular-engineering/di-scope-overlay-cleanup",
+    "requirements": [
+      "component-scoped provider plus overlay/dialog fixture with a distinct injector boundary",
+      "polling service exposing observable notification counts and teardown hooks",
+      "navigation sequence that currently leaves duplicate active pollers",
+      "tests that distinguish feature lifetime from application lifetime",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "angular-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "angular-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "angular-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "di-scope-overlay-cleanup scenario evidence",
+    "angular-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "angular-engineering-individual-scenario-2-result",
+    "angular-engineering-individual-scenario-2-verification",
+    "angular-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual angular-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=frontend-engineering; near-neighbor=svelte-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm Angular version and standalone/module conventions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The service has one explicit injector/lifecycle owner, and all resources started within that lifetime are torn down exactly once when the owner ends."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run Angular build/tests and exercise routing, form validation, subscription cleanup, async error states, keyboard behavior, and change-detection-sensitive interactions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not subscribe without lifecycle ownership, mutate shared service state invisibly, bypass template type checking, or mix incompatible reactive patterns without a reason."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (angular-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

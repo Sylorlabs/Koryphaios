@@ -16,6 +16,8 @@ import { join, relative, dirname, basename, resolve, isAbsolute, sep } from 'pat
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { validatePathAccess } from '../security';
 import { serverLog } from '../logger';
+import { crossAgentEvidenceCache } from '../cache/evidence-cache';
+import { gitBlobMatchesContent, tryResolveGitBlobEvidenceIdentity } from '../cache/git-evidence';
 
 /** Resolve allowed filesystem roots for file operations.
  *  Default to project directory even when not explicitly sandboxed — never allow "/" implicitly. */
@@ -110,7 +112,27 @@ export class ReadFileTool implements Tool {
     }
 
     try {
-      const content = await Bun.file(absPath).text();
+      const blobIdentity = await tryResolveGitBlobEvidenceIdentity(ctx.workingDirectory, absPath);
+      let bytes = blobIdentity
+        ? await crossAgentEvidenceCache.getOrLoad(
+            {
+              scope: blobIdentity.scope,
+              operation: 'read_file',
+              revision: `${blobIdentity.algorithm}:${blobIdentity.oid}`,
+            },
+            async () => new Uint8Array(await Bun.file(absPath).arrayBuffer()),
+            { validate: (value) => gitBlobMatchesContent(value, blobIdentity) },
+          )
+        : new Uint8Array(await Bun.file(absPath).arrayBuffer());
+      if (blobIdentity) {
+        const currentIdentity = await tryResolveGitBlobEvidenceIdentity(
+          ctx.workingDirectory,
+          absPath,
+        );
+        if (!currentIdentity || currentIdentity.oid !== blobIdentity.oid)
+          bytes = new Uint8Array(await Bun.file(absPath).arrayBuffer());
+      }
+      const content = Buffer.from(bytes).toString('utf8');
       let lines = content.split('\n');
 
       if (startLine !== undefined || endLine !== undefined) {
@@ -497,7 +519,10 @@ function jsGrep(
     regex = new RegExp(pattern, flags);
   } catch (err: unknown) {
     // If the pattern is invalid regex, treat it as a literal string.
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'jsGrep: invalid regex pattern, treating as literal');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'jsGrep: invalid regex pattern, treating as literal',
+    );
     regex = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
   }
 
@@ -515,7 +540,10 @@ function jsGrep(
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dir }, 'jsGrep: failed to read directory');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), dir },
+        'jsGrep: failed to read directory',
+      );
       return;
     }
     for (const entry of entries) {
@@ -548,7 +576,10 @@ function jsGrep(
           }
         } catch (err: unknown) {
           // binary or unreadable file — skip
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err), file: full }, 'jsGrep: skipping binary or unreadable file');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err), file: full },
+            'jsGrep: skipping binary or unreadable file',
+          );
         }
       }
     }
@@ -582,7 +613,10 @@ function jsGrep(
     }
   } catch (err: unknown) {
     // searchPath doesn't exist — return empty
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err), searchPath }, 'jsGrep: searchPath does not exist');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err), searchPath },
+      'jsGrep: searchPath does not exist',
+    );
   }
 
   return results;
@@ -633,7 +667,10 @@ export class GrepTool implements Tool {
         try {
           proc.kill();
         } catch (err: unknown) {
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grep: rg process already exited on timeout kill');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'grep: rg process already exited on timeout kill',
+          );
         }
       }, SUBPROC_TIMEOUT_MS);
       try {
@@ -671,14 +708,20 @@ export class GrepTool implements Tool {
         try {
           proc.kill();
         } catch (err: unknown) {
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grep: rg process already exited on cleanup kill');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'grep: rg process already exited on cleanup kill',
+          );
         }
         await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
       }
     } catch (err: unknown) {
       // rg not found (ENOENT) — fall back to JS-based search so the tool works
       // on systems without ripgrep installed (stock Windows, minimal macOS).
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'grep: rg not found, falling back to JS-based search');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'grep: rg not found, falling back to JS-based search',
+      );
       try {
         const results = jsGrep(searchPath, pattern, {
           glob,
@@ -1162,7 +1205,10 @@ export class DiffTool implements Tool {
             try {
               proc.kill();
             } catch (err: unknown) {
-              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'diff: process already exited on timeout kill');
+              serverLog.debug(
+                { err: err instanceof Error ? err.message : String(err) },
+                'diff: process already exited on timeout kill',
+              );
             }
           }, SUBPROC_TIMEOUT_MS);
           try {
@@ -1190,13 +1236,19 @@ export class DiffTool implements Tool {
             try {
               proc.kill();
             } catch (err: unknown) {
-              serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'diff: process already exited on cleanup kill');
+              serverLog.debug(
+                { err: err instanceof Error ? err.message : String(err) },
+                'diff: process already exited on cleanup kill',
+              );
             }
             await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 2000))]);
           }
         } catch (err: unknown) {
           // diff not found (ENOENT) — use the built-in JS unified diff.
-          serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'diff: diff binary not found, using built-in JS unified diff');
+          serverLog.debug(
+            { err: err instanceof Error ? err.message : String(err) },
+            'diff: diff binary not found, using built-in JS unified diff',
+          );
           const contentA = await Bun.file(absA).text();
           const contentB = await Bun.file(absB).text();
           const diff = generateUnifiedDiff(path_a, contentA.split('\n'), contentB.split('\n'));

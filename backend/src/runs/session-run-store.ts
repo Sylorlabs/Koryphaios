@@ -1363,7 +1363,10 @@ export class SessionRunStore {
 
   markPublished(eventId: string, publishedAt = Date.now()): void {
     this.sqlite
-      .query('UPDATE session_run_events SET published_at = ? WHERE event_id = ?')
+      .query(
+        `UPDATE session_run_events SET published_at = ?
+              WHERE event_id = ? AND published_at IS NULL`,
+      )
       .run(publishedAt, eventId);
   }
 
@@ -1519,6 +1522,9 @@ export class SessionRunStore {
         throw new Error('A waiting run may complete only through its owned continuation');
       }
       const next = reduceSessionRun(current, command, now);
+      if (command.kind === 'resume' && !effect) {
+        throw new Error('A waiting run may resume only through its owned continuation');
+      }
 
       if (command.kind !== 'start' && sameProjection(current, next)) {
         return { payload: { snapshot: current, transition: null }, publishRequired: false };
@@ -1538,15 +1544,19 @@ export class SessionRunStore {
         }
       } else if (current.continuationId) {
         if (allowOrphanedContinuation) {
-          this.sqlite
+          const cancelled = this.sqlite
             .query(
               `UPDATE session_run_continuations SET state = 'cancelled', updated_at = ?
-               WHERE id = ? AND state = 'pending'`,
+               WHERE id = ? AND session_id = ? AND run_id = ?
+                 AND wait_revision = ? AND state = 'pending'`,
             )
-            .run(now, current.continuationId);
-          this.sqlite
-            .query(`DELETE FROM session_run_continuation_processes WHERE continuation_id = ?`)
-            .run(current.continuationId);
+            .run(now, current.continuationId, sessionId, current.runId, current.revision);
+          // A corrupt pointer is not authority to mutate another wait's rows.
+          if (cancelled.changes === 1) {
+            this.sqlite
+              .query(`DELETE FROM session_run_continuation_processes WHERE continuation_id = ?`)
+              .run(current.continuationId);
+          }
         } else if (command.kind === 'resume') {
           const continuation = this.getContinuation(current.continuationId);
           if (continuation?.kind === 'process_set') {

@@ -1,0 +1,74 @@
+{
+  "id": "secure-authentication-full-task-2",
+  "maturity": "individual",
+  "prompt": "Design multi factor authentication for an enterprise admin console. Password-only login may establish ordinary account access, but administrative actions require a phishing-resistant authenticator. Support WebAuthn security keys/passkeys plus time-limited recovery codes for break-glass recovery. Define enrollment, factor binding, step-up/fresh-auth state, device loss, recovery-code use, adding/removing/replacing a strong factor, help-desk escalation, suspension, and compromise response. A user who completed a weaker OTP fallback must not be labelled phishing-resistant or allowed to satisfy the admin step-up unless policy explicitly permits it. Produce an assurance/state matrix and concrete failure cases; OAuth/OIDC token plumbing and resource authorization remain separate skills.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://secure-authentication/scenario-2",
+    "requirements": [
+      "enterprise account with password baseline and privileged admin actions",
+      "WebAuthn strong-factor fixture plus weaker OTP/recovery alternatives",
+      "help-desk, lost-device, suspension, and compromise lifecycle fixtures",
+      "session state tracking last authentication method and freshness",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "secure-authentication-assurance-2",
+      "assertion": "The result maps each authenticator/recovery path to its actual assurance/phishing-resistance properties and does not classify OTP or a weaker recovery path as phishing-resistant."
+    },
+    {
+      "id": "secure-authentication-stepup-2",
+      "assertion": "Administrative actions require a sufficiently fresh qualifying strong-authentication event, with the method/freshness bound to the authenticated session rather than inferred from account enrollment alone."
+    },
+    {
+      "id": "secure-authentication-factor-change-2",
+      "assertion": "Adding, removing, or replacing a strong factor requires adequate current assurance or the explicit recovery process, and the change generates a security-relevant event plus appropriate session response."
+    },
+    {
+      "id": "secure-authentication-recovery-code-2",
+      "assertion": "Recovery codes are single-use or otherwise explicitly lifecycle-controlled, protected like authenticators, and their use triggers the documented post-recovery restrictions or re-enrollment process."
+    },
+    {
+      "id": "secure-authentication-helpdesk-2",
+      "assertion": "Help-desk escalation has explicit identity/authority checks, auditability, and limits; it cannot simply disable strong-factor policy based on knowledge-based questions or operator discretion."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "secure-authentication-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "assurance and phishing-resistance matrix",
+        "step-up freshness state model",
+        "factor lifecycle/recovery contract",
+        "help-desk and compromise controls"
+      ]
+    },
+    {
+      "id": "secure-authentication-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "authenticator assurance matrix",
+    "admin step-up/freshness state model",
+    "factor replacement/removal and recovery controls",
+    "help-desk/compromise response",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "secure-authentication-scenario-2-result",
+    "secure-authentication-scenario-2-verification",
+    "secure-authentication-scenario-2-paired-evaluation"
+  ]
+}

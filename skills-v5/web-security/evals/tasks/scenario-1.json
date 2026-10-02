@@ -1,0 +1,74 @@
+{
+  "id": "web-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Review and harden a React customer-support dashboard. It renders user-submitted rich text, has one legacy dangerouslySetInnerHTML path, reads a return URL from the query string, uses cookie authentication for JSON mutations, embeds a payment-status iframe, and accepts postMessage events from that iframe. Define the browser source-to-sink map; safe rendering/sanitization rules; a nonce-based strict Content Security Policy and rollout/reporting plan; CSRF protection for cookie-authenticated mutations; exact iframe framing and postMessage sender/target origin/message-schema rules; safe return-navigation policy; and Secure/HttpOnly/SameSite/Domain/Path cookie settings. Do not claim CSP alone fixes XSS, and keep backend tenant authorization separate.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://web-security/scenario-1",
+    "requirements": [
+      "React dashboard with safe and unsafe rich-text rendering paths",
+      "cookie-authenticated JSON mutation endpoints",
+      "payment iframe on a distinct trusted origin plus untrusted-origin message fixtures",
+      "valid/malicious return URL and HTML/DOM payload corpus",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "web-security-xss-1",
+      "assertion": "The design identifies the legacy DOM/HTML execution sink, replaces or sanitizes it appropriately, and specifies context-safe handling for ordinary text, HTML, attributes, and navigation URLs instead of relying on generic input filtering."
+    },
+    {
+      "id": "web-security-csp-1",
+      "assertion": "The proposed CSP is nonce/hash based as appropriate, avoids broad unsafe-inline/eval allowances, constrains required resource and framing origins, and has a Report-Only/enforcement verification path without being presented as the primary XSS fix."
+    },
+    {
+      "id": "web-security-csrf-1",
+      "assertion": "Every cookie-authenticated state-changing request has a server-validated anti-CSRF mechanism appropriate to the framework/session design, with SameSite and Origin/Fetch Metadata treated as complementary controls rather than authorization substitutes."
+    },
+    {
+      "id": "web-security-postmessage-1",
+      "assertion": "Incoming postMessage events require the exact expected origin plus a validated message schema and expected source/context; outgoing sensitive messages use an exact target origin rather than `*`."
+    },
+    {
+      "id": "web-security-cookie-nav-1",
+      "assertion": "Session cookie scope/attributes and return-navigation validation are explicit and prevent unnecessarily broad Domain scope or attacker-selected external navigation."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "web-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "browser origin/source-to-sink map",
+        "XSS/CSP design",
+        "CSRF/cookie contract",
+        "iframe/postMessage/navigation rules"
+      ]
+    },
+    {
+      "id": "web-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "origin/credential/source-to-sink inventory",
+    "rendering/sanitization and CSP policy",
+    "CSRF/cookie controls",
+    "framing/postMessage/navigation controls",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "web-security-scenario-1-result",
+    "web-security-scenario-1-verification",
+    "web-security-scenario-1-paired-evaluation"
+  ]
+}

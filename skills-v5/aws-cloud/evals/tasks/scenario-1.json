@@ -1,0 +1,91 @@
+{
+  "id": "aws-cloud-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply aws expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is aws-cloud: Confirm account, region, workload, compliance, network, identity, data, availability, and operational requirements before selecting services. The adjacent azure-cloud discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://aws-cloud/scenario-1",
+    "requirements": [
+      "synthetic AWS Organizations management plus member workload/log archive account fixture",
+      "engineer IAM access keys, single-AZ EC2/RDS topology, ALB, S3 and CloudTrail Event History starting state",
+      "CloudFormation change-set/drift/rollback harness plus service-quota snapshot",
+      "database/object/volume backup-and-restore fixture with observable resource identifiers",
+      "paired same-model skill/no-skill execution",
+      "aws-cloud parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual aws-cloud boundary and relevant environment before acting, preserve the hierarchy relationship (broader=architecture-planning; near-neighbor=azure-cloud), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm account, region, workload, compliance, network, identity, data, availability, and operational requirements before selecting services."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Validate infrastructure plans, IAM denied/allowed paths, health and rollback, backup/restore where material, quota behavior, and cost-driving usage with the actual target account/environment before claiming readiness."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not infer production identity from a local profile, use wildcard IAM by default, expose services publicly for convenience, or call multi-AZ deployment disaster recovery without recovery evidence."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (AWS organization/account/Region and caller/workload identity evidence; Effective IAM/network/KMS/service topology and quota evidence; CloudTrail/Config/CloudWatch operational evidence; Backup/restore or failover plus reviewed change/rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "aws-cloud-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "AWS organization/account/Region and caller/workload identity evidence",
+        "Effective IAM/network/KMS/service topology and quota evidence",
+        "CloudTrail/Config/CloudWatch operational evidence",
+        "Backup/restore or failover plus reviewed change/rollback evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "aws-cloud-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "AWS organization/account/Region and caller/workload identity evidence",
+    "Effective IAM/network/KMS/service topology and quota evidence",
+    "CloudTrail/Config/CloudWatch operational evidence",
+    "Backup/restore or failover plus reviewed change/rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "aws-cloud-individual-scenario-1-result",
+    "aws-cloud-individual-scenario-1-verification",
+    "aws-cloud-individual-scenario-1-paired-evaluation"
+  ]
+}

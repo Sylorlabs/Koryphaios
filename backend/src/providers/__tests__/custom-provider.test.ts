@@ -28,10 +28,23 @@ function mockFetch(input: any): Promise<Response> {
   }
   if (url.includes('/models')) {
     return Promise.resolve(
-      new Response(JSON.stringify({ object: 'list', data: [{ id: 'live-model-from-endpoint' }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          object: 'list',
+          data: [
+            { id: 'live-model-from-endpoint' },
+            {
+              id: 'route-truth-model',
+              display_name: 'Route Truth Model',
+              context_window: 64000,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
     );
   }
   return Promise.resolve(new Response('{}', { status: 200 }));
@@ -83,6 +96,31 @@ describe('Custom (bring-your-own) provider', () => {
     // declared models present...
     expect(ids).toContain('my-model-a');
     expect(ids).toContain('my-model-b');
+  });
+
+  it('prefers live route metadata over declared generic placeholders', async () => {
+    const res = registry.registerCustomProvider({
+      id: 'custom:route-truth',
+      label: 'Route Truth',
+      kind: 'openai',
+      baseUrl: 'https://route-truth.example/v1',
+      apiKey: 'sk-test',
+      // Same id the live catalog reports WITH verified metadata: the live
+      // entry must win so sessions compact against the route's real window
+      // instead of dying on its limit. declared-only stays generic.
+      models: ['route-truth-model', 'declared-only-model'],
+      catalogDetected: true,
+    });
+    expect(res.success).toBe(true);
+    const provider = registry.get('custom:route-truth')!;
+    await provider.refreshModels(true);
+    const byId = new Map(provider.listModels().map((m) => [m.id, m]));
+    expect(byId.get('route-truth-model')).toMatchObject({
+      name: 'Route Truth Model',
+      contextWindow: 64000,
+      contextVerified: true,
+    });
+    expect(byId.get('declared-only-model')).toMatchObject({ contextWindow: 0 });
   });
 
   it('works without an API key (keyless OpenAI-compatible endpoint)', () => {
@@ -168,6 +206,21 @@ describe('Custom (bring-your-own) provider', () => {
                   limit: { context: 200000, output: 32000 },
                   modalities: { input: ['text', 'image'], output: ['text'] },
                 },
+                // Toggle + effort tiers that already include 'none' — the
+                // prepended off-level must not duplicate the reported one.
+                'test-toggle-none-model': {
+                  id: 'test-toggle-none-model',
+                  reasoning: true,
+                  reasoning_options: [
+                    { type: 'toggle' },
+                    { type: 'effort', values: ['none', 'high'] },
+                  ],
+                },
+                'test-toggle-only-model': {
+                  id: 'test-toggle-only-model',
+                  reasoning: true,
+                  reasoning_options: [{ type: 'toggle' }],
+                },
               },
             },
           }),
@@ -185,7 +238,12 @@ describe('Custom (bring-your-own) provider', () => {
           label: 'Enriched',
           kind: 'openai',
           baseUrl: 'https://enriched.example/v1',
-          models: ['test-reasoning-model', 'test-plain-model'],
+          models: [
+            'test-reasoning-model',
+            'test-plain-model',
+            'test-toggle-none-model',
+            'test-toggle-only-model',
+          ],
           catalogDetected: true,
         }).success,
       ).toBe(true);
@@ -196,6 +254,15 @@ describe('Custom (bring-your-own) provider', () => {
       expect(reasoned.contextWindow).toBe(200000);
       expect(reasoned.supportsAttachments).toBe(true);
       expect(reasoned.vision).toBe(true);
+      // Toggle + effort tiers already carrying 'none': exactly one off-level,
+      // in its reported position — no duplicate from the prepend.
+      const toggleNone = defs.find((m) => m.id === 'test-toggle-none-model')!;
+      expect(toggleNone.canReason).toBe(true);
+      expect(toggleNone.reasoningLevels).toEqual(['none', 'high']);
+      // Pure on/off thinking keeps the none/high pair.
+      const toggleOnly = defs.find((m) => m.id === 'test-toggle-only-model')!;
+      expect(toggleOnly.canReason).toBe(true);
+      expect(toggleOnly.reasoningLevels).toEqual(['none', 'high']);
       // Unknown ids stay generic — enrichment never invents capabilities.
       const plain = defs.find((m) => m.id === 'test-plain-model')!;
       expect(plain.canReason).toBe(false);

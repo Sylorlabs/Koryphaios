@@ -1,0 +1,77 @@
+{
+  "id": "simulation-device-testing-full-task-2",
+  "maturity": "individual",
+  "prompt": "Qualify GPS-loss failsafe behavior for the supplied PX4 v1.16 fixture using a matched SITL run and a hardware-in-the-loop/HITL run on the supplied real flight controller. First perform a capability check for the fixture's pinned board, airframe, simulator, transport, and PX4 revision; do not silently substitute a different branch or simulator if HITL is unsupported. Before starting HITL, prove from the fixture interlock and controller configuration that motors/actuators cannot energize. Record firmware/image hash, flight-controller model/revision/serial, parameter snapshot including HIL mode, simulator/version, host/runtime, transport, scenario seed, and harness revision. Run the fixture's stable baseline, inject its deterministic simulated GPS outage, verify the declared navigation/failsafe state transition within the fixture-defined timing bound, restore GPS, and verify the declared recovery policy. Capture ULog plus MAVLink/event evidence from SITL and the real controller. Compare the paths by property and injection point; preserve divergence because PX4 HITL can bypass functionality exercised by SITL. Do not generalize a HITL pass to real GPS RF behavior, vehicle dynamics, motors/actuators, power, or flight safety.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://simulation-device-testing/px4-v1.16-hitl-gps-loss",
+    "requirements": [
+      "PX4 v1.16 fixture with pinned source/image hash, flight-controller target, airframe, parameters, and known-compatible simulator/HITL transport",
+      "real flight controller with recorded model/revision/serial and machine-readable controller telemetry",
+      "observable actuator-power isolation or equivalent fixture interlock that prevents physical motion during HITL",
+      "matched SITL and HITL scenario seed/stimulus with fixture-defined baseline, GPS-outage timing, expected failsafe state, and recovery policy",
+      "ULog, MAVLink/event, parameter, simulator, and harness artifacts retained for both evidence levels",
+      "reset-to-known-state procedure between runs",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "simulation-device-testing-s2-safe-preflight",
+      "assertion": "No HITL fault injection begins until the artifact set proves the intended flight-controller/HIL configuration and an actuator-power isolation or equivalent interlock that prevents unintended physical actuation."
+    },
+    {
+      "id": "simulation-device-testing-s2-controlled-scenario",
+      "assertion": "SITL and HITL use the fixture's same logical GPS-outage stimulus, declared baseline, timing oracle, and recovery policy, while their mode-specific identities and injection paths remain separately recorded."
+    },
+    {
+      "id": "simulation-device-testing-s2-failsafe",
+      "assertion": "ULog and MAVLink/event artifacts show the fixture-declared failsafe/navigation transition within the declared timing bound after GPS loss and the declared recovery behavior after GPS restoration; final prose alone cannot satisfy this check."
+    },
+    {
+      "id": "simulation-device-testing-s2-coverage-boundary",
+      "assertion": "The comparison explicitly records SITL/HITL path differences and any divergence, and the final claim does not treat HITL as proof of real RF/GPS reception, aerodynamics, motors/actuators, power behavior, or flight safety."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "simulation-device-testing-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "flight-controller, firmware, parameter, simulator, transport, seed, and harness manifest",
+        "actuator isolation/interlock preflight evidence",
+        "matched SITL/HITL baseline and GPS-outage stimulus record",
+        "ULog and MAVLink/event failsafe/recovery observations",
+        "property/injection-point comparison with divergence and proof boundary"
+      ]
+    },
+    {
+      "id": "simulation-device-testing-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent review of HIL safety, coverage reasoning, and physical-claim calibration"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Claim-to-validity matrix by evidence level",
+    "Exact simulator, firmware, device, fixture, and runtime identity",
+    "Predeclared stimulus, oracle, tolerance, and reset state",
+    "Fault safe-state and recovery trace",
+    "Explicit simulated, emulated, HIL, or physical proof boundary",
+    "HITL actuator-isolation preflight and SITL/HITL divergence record",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "simulation-device-testing-scenario-2-manifest",
+    "simulation-device-testing-scenario-2-safety-preflight",
+    "simulation-device-testing-scenario-2-sitl-trace",
+    "simulation-device-testing-scenario-2-hitl-trace",
+    "simulation-device-testing-scenario-2-cross-level-diff",
+    "simulation-device-testing-scenario-2-paired-evaluation"
+  ]
+}

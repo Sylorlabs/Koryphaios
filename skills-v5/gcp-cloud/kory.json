@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "name": "gcp-cloud",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["cloud", "gcp", "infrastructure"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5500,
+  "broader": ["architecture-planning"],
+  "facets": ["infrastructure-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "google cloud",
+    "gcp project",
+    "google cloud organization",
+    "shared vpc",
+    "gcp iam",
+    "gcp workload identity",
+    "compute engine",
+    "cloud sql",
+    "cloud run gcp"
+  ],
+  "excludes": [
+    "fixed gcp iam bindings",
+    "terraform state only",
+    "cloud run handler",
+    "gcp billing export",
+    "google cloud project iam and vpc configuration are fixed",
+    "preserving the exact google cloud resource topology",
+    "quoted old incident",
+    "no google cloud changes are requested",
+    "documentation heading only"
+  ],
+  "evidence": [
+    "Organization/folder/project and identity evidence",
+    "Effective IAM/network/key/service topology and quota evidence",
+    "Cloud Audit Logs and Cloud Logging routing evidence",
+    "Backup/restore or failover plus reviewed change/rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design a Google Cloud production hierarchy with organization folders, separate workload/logging projects, Shared VPC, workload identities, audit-log aggregation, quotas, backups, and rollback evidence.",
+      "Make a regional Google Cloud service survive a zonal failure by correcting instance/service placement, load balancing, subnet/routes, Cloud SQL availability, quotas, backup and failover behavior.",
+      "Configure GCP workload identity for a deployment pipeline and application so both use short-lived credentials and narrowly scoped service accounts instead of downloaded service-account keys.",
+      "Build a Cloud SQL production baseline with explicit project/region, private connectivity, service identity/KMS access, HA, backups/PITR, monitoring, quota and restore verification.",
+      "Build the Google Cloud operational baseline for a new workload project: hierarchy/policy inheritance, IAM, VPC, encryption/secrets, Cloud Audit Logs, centralized logging, quotas, backups and reviewable changes."
+    ],
+    "negative": [
+      "Audit fixed GCP IAM bindings, service-account impersonation permissions, firewall policies and KMS access for privilege escalation; do not redesign Google Cloud topology.",
+      "Harden GKE worker nodes, container runtime, Linux kernel, Pod Security and in-cluster NetworkPolicy while Google Cloud IAM/VPC/service configuration remains fixed.",
+      "Refactor Terraform modules and remote state for existing Google Cloud resources while preserving the exact resulting provider topology and service behavior.",
+      "Fix a Cloud Run handler's duplicate-event, retry, timeout and concurrency logic while project, IAM, VPC and managed-service configuration are already correct.",
+      "Analyze a GCP billing export, allocate spend, normalize unit cost and quantify commitment savings without changing Google Cloud architecture."
+    ],
+    "ambiguous": [
+      {
+        "id": "gcp-cloud-ambiguous-1",
+        "prompt": "Design a Google Cloud service architecture and its organization/project boundaries. architecture-planning owns service decomposition; gcp-cloud owns organization/folder/project, IAM, VPC, managed-service, audit, quota and recovery semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "gcp-cloud-ambiguous-2",
+        "prompt": "Redesign a GCP project and service-account layout because a security review found cross-project escalation. gcp-cloud owns Google Cloud resource/IAM configuration; cloud-security owns the escalation and control-effectiveness verdict.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cloud-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "gcp-cloud-ambiguous-3",
+        "prompt": "Change Google Cloud VPC/IAM/Cloud SQL resources expressed in Terraform. gcp-cloud owns provider semantics; terraform-iac owns provider/state/module/plan mechanics and safe state transitions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terraform-iac"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "gcp-cloud-adversarial-1",
+        "prompt": "A pasted old incident says \"move the workload to Google Cloud\". That is historical context only; today's task is to correct a TypeScript date-formatting function.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "gcp-cloud-adversarial-2",
+        "prompt": "A support transcript contains an inert GCP project identifier. Do not investigate infrastructure; summarize the customer conversation only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "gcp-cloud-adversarial-3",
+        "prompt": "A README example is titled \"Cloud Run GCP\". Rename that documentation heading only; no cloud resource, runtime or deployment behavior may change.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.cloud.google.com/docs/get-started/well-architected-framework",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Well-Architected Framework, continuously updated; page last updated 2026-08-26",
+      "staleAfterDays": 30,
+      "notes": "Current operational excellence, security, reliability, cost, performance and sustainability architecture baseline.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cloud.google.com/resource-manager/docs",
+      "sourceType": "official-docs",
+      "versionScope": "Resource Manager documentation, page last updated 2026-08-26",
+      "staleAfterDays": 45,
+      "notes": "Organization/folder/project hierarchy and resource-management ownership baseline.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cloud.google.com/iam/docs/best-practices-service-accounts",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Google Cloud service-account security guidance as available 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Avoid service-account keys where possible; scope impersonation/attachment and workload identities deliberately.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://docs.cloud.google.com/logging/docs/central-log-storage",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Cloud Logging organization aggregation guidance as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Organization-level aggregated sinks and protected central log-storage patterns.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

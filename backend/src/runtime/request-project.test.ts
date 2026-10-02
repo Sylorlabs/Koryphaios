@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { getRequestProjectRoot } from './request-project';
@@ -21,14 +21,14 @@ function requestFor(project?: string): Request {
 
 describe('request project resolution', () => {
   test('uses the launch root only when no project was explicitly supplied', () => {
-    expect(getRequestProjectRoot(requestFor())).toBe(PROJECT_ROOT);
+    expect(getRequestProjectRoot(requestFor())).toBe(realpathSync(PROJECT_ROOT));
   });
 
   test('returns an explicitly selected existing directory', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-request-project-'));
     temporaryRoots.push(root);
 
-    expect(getRequestProjectRoot(requestFor(root))).toBe(resolve(root));
+    expect(getRequestProjectRoot(requestFor(root))).toBe(realpathSync(resolve(root)));
   });
 
   test('rejects relative, missing, and non-directory project selections', () => {

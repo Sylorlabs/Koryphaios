@@ -1,0 +1,80 @@
+{
+  "id": "incident-response-full-task-1",
+  "maturity": "individual",
+  "prompt": "A production checkout rollout completed 12 minutes ago. User-visible 5xx rose from 0.4% to 27%, p95 latency doubled, and two responders are independently changing feature flags while another is investigating the database. Operate the production incident from the supplied timeline and controls: declare severity from explicit impact, establish incident command plus operations/comms/scribe ownership, freeze uncoordinated mutations, preserve the rollout/configuration and telemetry evidence, choose and execute one reversible mitigation, publish a factual stakeholder update with a next-update trigger/cadence, then verify recovery using user error/latency, representative checkout transactions, dependency health, and the rollback state. Keep an observation window long enough to catch the supplied recurrence pattern and hand off any temporary configuration divergence and follow-up owners before closing.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://incident-response/scenario-1",
+    "requirements": [
+      "live synthetic checkout outage with timestamped telemetry and recent rollout history",
+      "reversible rollout and feature-flag controls with audit log",
+      "stakeholder communication channel fixture and incident timeline document",
+      "representative synthetic checkout transaction probe",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "incident-response-command-1",
+      "assertion": "The response records declaration/severity and assigns a single IC plus explicit operations, communications, and timeline ownership before additional production mutations occur."
+    },
+    {
+      "id": "incident-response-change-control-1",
+      "assertion": "Uncoordinated mutations are stopped, the chosen mitigation has one owner and a documented undo path, and the incident log records its start time, intended effect, and observed result."
+    },
+    {
+      "id": "incident-response-evidence-1",
+      "assertion": "The rollout/configuration state and relevant telemetry/log evidence are preserved before rollback or restart so the response does not erase the only available pre-mitigation state."
+    },
+    {
+      "id": "incident-response-communication-1",
+      "assertion": "The stakeholder update states impact, current mitigation/status, known unknowns, and a next update time or event without presenting an unproven root cause as fact."
+    },
+    {
+      "id": "incident-response-recovery-1",
+      "assertion": "Resolution requires recovery of user 5xx/latency plus successful representative checkout probes and dependency/rollback-state checks through the configured recurrence observation window."
+    },
+    {
+      "id": "incident-response-handoff-1",
+      "assertion": "Closure records residual risk, any temporary configuration divergence, watch items, and named owners for follow-up work with timestamps in the incident record."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "incident-response-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "role and severity record",
+        "single-owner reversible mitigation log",
+        "factual stakeholder update",
+        "multi-signal recovery and handoff evidence"
+      ]
+    },
+    {
+      "id": "incident-response-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "incident declaration/severity and role assignments",
+    "timestamped observation/hypothesis/decision/action timeline",
+    "pre-mitigation rollout/configuration/telemetry evidence",
+    "stakeholder communication artifact",
+    "multi-signal recovery and recurrence-watch evidence",
+    "residual-risk/follow-up handoff",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "incident-response-scenario-1-result",
+    "incident-response-scenario-1-verification",
+    "incident-response-scenario-1-paired-evaluation"
+  ]
+}

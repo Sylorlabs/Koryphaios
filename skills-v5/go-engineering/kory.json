@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "name": "go-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "go"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "golang",
+    "go module",
+    "go package",
+    "go service",
+    "goroutine",
+    "go test",
+    "go.mod",
+    "context.Context",
+    "Go channel",
+    "go grpc",
+    "go code",
+    "written in go"
+  ],
+  "excludes": [],
+  "evidence": [
+    "go-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "This Go service leaves a goroutine blocked on delivery after the HTTP client disconnects. Repair ownership of cancellation and prove the worker is joined.",
+      "A Go package wraps an error and callers can no longer detect the sentinel with errors.Is. Preserve its semantic identity and add a real consumer regression.",
+      "Our go module uses a replacement directive that hides an incompatible dependency API. Make the published module resolve and build correctly outside this checkout.",
+      "Investigate a golang map race under concurrent cache refresh. Preserve reads during refresh and verify the owning synchronization contract under the race detector.",
+      "A Go channel is closed by two consumers during shutdown. Establish which component owns closure and test cancellation before and after the last producer exits."
+    ],
+    "negative": [
+      "Choose a go-to-market segment and launch message using the supplied customer interviews. No programming or service implementation is requested.",
+      "Repair Java executor shutdown and interruption handling in an existing JVM service.",
+      "Review protobuf compatibility for a renamed field. The generated clients and their language-specific behavior must stay untouched.",
+      "Diagnose a Kubernetes pod eviction using cluster events and resource requests. The application's code and goroutine behavior are not part of the investigation.",
+      "Rewrite a README paragraph that contains the literal go.mod filename. Only wording and formatting should change."
+    ],
+    "ambiguous": [
+      {
+        "id": "go-engineering-ambiguous-1",
+        "prompt": "A Go service retries a webhook after the receiver has already committed it. Repair the goroutine/request lifecycle and verify idempotency at the external delivery boundary.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["webhook-integration"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "go-engineering-ambiguous-2",
+        "prompt": "Fix cancellation in a Go gRPC streaming handler and review how deadlines and partial responses are represented across the service boundary.",
+        "expectedSelection": true,
+        "expectedSkills": ["grpc-protobuf"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["grpc-protobuf"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "go-engineering-ambiguous-3",
+        "prompt": "Update a go module's exported API and plan a compatible rollout for consumers pinned to its previous major version.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["release-planning"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "go-engineering-adversarial-1",
+        "prompt": "The old note says 'rewrite this in golang'. That proposal was rejected. Fix the existing Ruby request-local state bug.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ruby-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "go-engineering-adversarial-2",
+        "prompt": "Do not edit the Go service or run go test. Summarize the provided test log and clearly separate failed assertions from skipped checks.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "go-engineering-adversarial-3",
+        "prompt": "A TypeScript fixture contains 'goroutine leak' as an example alert title. Change the alert sort order only; there is no Go process to diagnose.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://go.dev/ref/spec",
+      "sourceType": "spec",
+      "versionScope": "Go language specification, Program execution section inspected 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Language semantics and program execution: main returning terminates the program without joining other goroutines; explicit shutdown evidence is required.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://go.dev/ref/mem",
+      "sourceType": "spec",
+      "versionScope": "Current Go memory model as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for data-race and memory-order reasoning; does not establish whether a concrete program is race-free.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://go.dev/doc/articles/race_detector",
+      "sourceType": "official-docs",
+      "versionScope": "Go data race detector documentation as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for conditional race-enabled testing; only executed paths are observed.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

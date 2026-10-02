@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedEntryLocal } from '$lib/types';
@@ -208,4 +209,37 @@ describe('FeedEntry response variant actions', () => {
       }),
     );
   });
+
+  it.each([
+    { type: 'user_message' as const, isStreaming: false },
+    { type: 'content' as const, isStreaming: false },
+    { type: 'content' as const, isStreaming: true },
+  ])(
+    'renders consecutive equations directly in $type (streaming=$isStreaming)',
+    async ({ type, isStreaming }) => {
+      const source = String.raw`$$ T=\sqrt{a^3} $$ $$ T=\sqrt{(0.3870)^3} $$ $$ T=0.24078\text{ years} $$`;
+      const { container } = render(FeedEntry, {
+        props: {
+          entry: { ...entry(), type, text: source, metadata: { sessionId: 'session-1' } },
+          isSelected: false,
+          isExpanded: false,
+          isStreaming,
+          onSelect: vi.fn(),
+          onToggleGroup: vi.fn(),
+          onDelete: mocks.onDelete,
+        },
+      });
+      await waitFor(() =>
+        expect(container.querySelectorAll('.markdown-content .katex-display')).toHaveLength(3),
+      );
+      expect(container.querySelector('.katex-error')).toBeNull();
+      expect(
+        Array.from(container.querySelectorAll('annotation'), (node) => node.textContent),
+      ).toEqual([
+        String.raw`T=\sqrt{a^3}`,
+        String.raw`T=\sqrt{(0.3870)^3}`,
+        String.raw`T=0.24078\text{ years}`,
+      ]);
+    },
+  );
 });

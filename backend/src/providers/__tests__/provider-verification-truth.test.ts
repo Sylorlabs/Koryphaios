@@ -5,7 +5,7 @@ import { delimiter, join } from 'node:path';
 import type { KoryphaiosConfig, ProviderConfig } from '@koryphaios/shared';
 import { clearTokenCache } from '../auth-utils';
 import { BedrockProvider, mapBedrockAnthropicTextModels } from '../bedrock';
-import { GITLAB_DUO_UNAVAILABLE_ERROR } from '../gitlab';
+import { GITLAB_DUO_BASE_URL } from '../gitlab';
 import { GITHUB_MODELS_CATALOG_URL, GITHUB_MODELS_API_VERSION } from '../github-models';
 import { ProviderRegistry } from '../registry';
 import { AzureProvider } from '../openai';
@@ -71,11 +71,10 @@ describe('provider verification truth', () => {
         claude: { name: 'claude', disabled: true },
         codex: { name: 'codex', disabled: true },
         grok: { name: 'grok', disabled: true },
-        cline: { name: 'cline', disabled: true },
       }),
     );
 
-    for (const name of ['claude', 'codex', 'grok', 'cline'] as const) {
+    for (const name of ['claude', 'codex', 'grok'] as const) {
       // Absence is intentional: constructing/listing these adapters can launch
       // authenticated CLI model probes. Configuration remains visible through
       // getStatus without creating a runnable adapter.
@@ -90,74 +89,92 @@ describe('provider verification truth', () => {
     }
   });
 
-  it('auto-connects an executable configured CLI and respects explicit disconnect', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kory-cli-auto-connect-'));
-    const bin = join(root, 'bin');
-    const home = join(root, 'home');
-    const settings = join(home, '.cline', 'data', 'settings');
-    const previousPath = process.env.PATH;
+  it('keeps the Cline API provider inert without a key and live once a key exists', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-cline-verify-'));
     const previousHome = process.env.HOME;
     const previousUserProfile = process.env.USERPROFILE;
+    const clineHome = join(root, 'home');
+    mkdirSync(clineHome, { recursive: true });
     try {
-      mkdirSync(bin, { recursive: true });
-      mkdirSync(settings, { recursive: true });
-      const cline = join(bin, 'cline');
-      writeFileSync(cline, '#!/bin/sh\necho "3.0.57"\n');
-      chmodSync(cline, 0o755);
-      writeFileSync(
-        join(settings, 'providers.json'),
-        JSON.stringify({ selectedProvider: 'openrouter', model: 'synthetic-model' }),
+      process.env.HOME = clineHome;
+      process.env.USERPROFILE = clineHome;
+      // Cline publishes its capability catalog unauthenticated; only the
+      // authenticated `/models` call actually needs the key.
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes('/api/v1/ai/cline/models')) {
+          return new Response(
+            JSON.stringify({
+              data: [
+                {
+                  id: 'anthropic/synthetic-sonnet',
+                  name: 'Anthropic: Synthetic Sonnet',
+                  context_length: 200_000,
+                  architecture: { input_modalities: ['text'] },
+                  pricing: { prompt: '0.000003', completion: '0.000015' },
+                  top_provider: { max_completion_tokens: 64_000 },
+                  supported_parameters: ['tools', 'reasoning', 'reasoning_effort'],
+                },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        if (url.includes('/api/v1/ai/cline/recommended-models')) {
+          return new Response(JSON.stringify({ recommended: [], free: [] }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/api/v1/models')) {
+          if (!new Headers((init?.headers as HeadersInit) ?? {}).get('authorization')) {
+            return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+          }
+          return new Response(
+            JSON.stringify({
+              object: 'list',
+              data: [
+                { id: 'anthropic/synthetic-sonnet', object: 'model', owned_by: 'anthropic' },
+              ],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify({ data: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as typeof fetch;
+
+      // No key: an api_key provider exposes no adapter, and the picker stays
+      // empty rather than guessing at a model list.
+      const keyless = new ProviderRegistry(
+        config({ cline: { name: 'cline', baseUrl: '', disabled: false } }),
       );
-      process.env.PATH = `${bin}${delimiter}${previousPath ?? ''}`;
-      process.env.HOME = home;
-      process.env.USERPROFILE = home;
-      delete process.env.KORY_DISABLE_CLI_AUTODETECT;
-      const otherClisDisabled = {
-        claude: { name: 'claude', disabled: true },
-        codex: { name: 'codex', disabled: true },
-        grok: { name: 'grok', disabled: true },
-        antigravity: { name: 'antigravity', disabled: true },
-        cursor: { name: 'cursor', disabled: true },
-        devin: { name: 'devin', disabled: true },
-      } satisfies KoryphaiosConfig['providers'];
-
-      const registry = new ProviderRegistry(config(otherClisDisabled));
-      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
-        enabled: true,
-        connectionState: 'detected',
-      });
-
-      await registry.autoConnectCliProviders(true);
-      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
-        enabled: true,
-        authenticated: true,
+      expect(keyless.get('cline')).toBeUndefined();
+      expect(keyless.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        adapterAvailable: false,
+        supportsApiKey: true,
         supportsAuthToken: false,
-        connectionState: 'verified',
+        // Enabled but unprobed and credential-free, so the state is deliberately
+        // `unknown`, not `not_configured` (which is reserved for disabled
+        // providers). Nothing has claimed a verdict either way.
+        connectionState: 'unknown',
       });
 
-      writeFileSync(cline, '#!/bin/sh\nexit 1\n');
-      expect(await registry.verifyConnection('cline')).toEqual({
-        success: true,
-        state: 'verified',
-      });
-      await registry.autoConnectCliProviders(true);
-      expect(registry.getStatus().find((item) => item.name === 'cline')).toMatchObject({
-        enabled: true,
+      // With a key the adapter exists and verifies against the real catalog.
+      const keyed = new ProviderRegistry(
+        config({ cline: { name: 'cline', apiKey: 'sk-synthetic-cline-key', disabled: false } }),
+      );
+      expect(keyed.get('cline')).toBeDefined();
+      expect(await keyed.verifyConnection('cline')).toEqual({ success: true });
+      expect(keyed.getStatus().find((item) => item.name === 'cline')).toMatchObject({
+        adapterAvailable: true,
         authenticated: true,
         connectionState: 'verified',
-      });
-
-      const disconnected = new ProviderRegistry(
-        config({ ...otherClisDisabled, cline: { name: 'cline', disabled: true } }),
-      );
-      await disconnected.autoConnectCliProviders(true);
-      expect(disconnected.getStatus().find((item) => item.name === 'cline')).toMatchObject({
-        enabled: false,
-        authenticated: false,
-        connectionState: 'not_configured',
+        verificationScope: 'credential',
       });
     } finally {
-      process.env.PATH = previousPath;
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
       if (previousUserProfile === undefined) delete process.env.USERPROFILE;
@@ -290,7 +307,9 @@ describe('provider verification truth', () => {
     expect(
       await registry.setCredentials('tokenrouter', { apiKey: 'tr_synthetic-test-key' }),
     ).toEqual({ success: true });
-    expect(requestUrl).toBe('https://api.tokenrouter.io/v1/models');
+    // `.io` and `.me` are retired hosts older versions may have persisted; the
+    // canonical default is `.com`.
+    expect(requestUrl).toBe('https://api.tokenrouter.com/v1/models');
     expect(requestHeaders.get('authorization')).toBe('Bearer tr_synthetic-test-key');
     expect(registry.get('tokenrouter')).toBeDefined();
     expect(registry.getStatus().find((item) => item.name === 'tokenrouter')).toMatchObject({
@@ -402,17 +421,32 @@ describe('provider verification truth', () => {
     }
   });
 
-  it('fails GitLab Duo closed without contacting a generic models endpoint', async () => {
+  it('proves GitLab Duo against the chat endpoint, never a generic models endpoint', async () => {
     const registry = new ProviderRegistry(config());
-    let requests = 0;
-    globalThis.fetch = (async () => {
-      requests += 1;
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      urls.push(typeof input === 'string' ? input : String((input as Request).url ?? input));
       return new Response('{}');
     }) as typeof fetch;
 
     const result = await registry.verifyConnection('gitlab', { apiKey: 'synthetic-pat' });
-    expect(result).toEqual({ success: false, error: GITLAB_DUO_UNAVAILABLE_ERROR });
-    expect(requests).toBe(0);
+
+    // A PAT plus a generic `{}` is not evidence of Duo entitlement, so the only
+    // honest probe is the chat endpoint itself.
+    expect(urls).toEqual([`${GITLAB_DUO_BASE_URL}/chat/completions`]);
+    expect(urls.some((url) => url.includes('/models'))).toBe(false);
+    expect(result).toEqual({ success: true, state: 'verified', scope: 'endpoint' });
+  });
+
+  it('reports GitLab Duo as unverified when the chat probe is rejected', async () => {
+    const registry = new ProviderRegistry(config());
+    globalThis.fetch = (async () =>
+      new Response('{}', { status: 404 })) as typeof fetch;
+
+    const result = await registry.verifyConnection('gitlab', { apiKey: 'synthetic-pat' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('GitLab team members');
   });
 
   it('verifies GitHub Models against /catalog/models with the documented API version', async () => {

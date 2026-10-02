@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "name": "finops-cloud-cost",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "cloud", "cost", "finops"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7800,
+  "broader": ["operational-data-analysis"],
+  "facets": [],
+  "requires": ["data-analysis"],
+  "conflicts": [],
+  "activation": [
+    "finops",
+    "cloud cost optimization",
+    "cloud cost",
+    "cloud spend",
+    "aws cost",
+    "technology cost allocation",
+    "cloud cost allocation",
+    "unit economics cloud",
+    "cloud unit cost",
+    "cost per tenant",
+    "cost per transaction",
+    "savings plan",
+    "savings plans",
+    "reserved instance cost",
+    "commitment coverage",
+    "commitment utilization",
+    "cost optimization hub",
+    "rightsizing savings",
+    "cloud cost recommendation",
+    "effective cost"
+  ],
+  "excludes": [
+    "generic data analysis only",
+    "generic budget only",
+    "accounting journal only",
+    "cloud infrastructure change only",
+    "provider iam only",
+    "business case only",
+    "cloud cost analysis and finops decision are unchanged",
+    "cloud cost assumptions that are already fixed and approved",
+    "cloud cost behavior is unchanged",
+    "finops decision is unchanged",
+    "quoted old finops",
+    "quoted old cloud cost optimization",
+    "quoted old aws cost",
+    "historical finops request",
+    "archived finops ticket recommends",
+    "rename the finops document only"
+  ],
+  "evidence": [
+    "Billing/export/schema/currency/cost-lens reconciliation to provider or invoice totals",
+    "Allocation/shared-cost/unallocated coverage plus business/resource unit-economics definitions and driver decomposition",
+    "Usage/rightsize/rate/commitment scenarios using effective costs, coverage/utilization, overlapping recommendation and risk evidence",
+    "Implemented before/after realized savings, reliability/performance guardrails, owner/governance and rollback/action ledger",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Explain why cloud spend rose 18% while cost per transaction fell: reconcile billing, allocate shared platform costs, decompose demand versus efficiency/rate/mix and report the unit-economic trend before proposing cuts.",
+      "Evaluate AWS rightsizing and idle-resource recommendations using after-discount effective savings, deduplicate overlapping actions, verify performance headroom and measure realized savings after the change.",
+      "Decide whether to buy a Savings Plan by modeling eligible hourly spend, existing commitment coverage/utilization, workload volatility and planned migrations across term/payment scenarios instead of choosing the largest headline discount.",
+      "Build a FinOps allocation model that maps direct cloud resources and shared Kubernetes/data-platform costs to products and teams, reports unallocated spend and reconciles allocated totals to the billing dataset.",
+      "Prioritize cloud-cost optimizations across storage lifecycle, egress/NAT, rightsizing and commitments using net effective savings, implementation effort, reliability guardrails and reversible action evidence."
+    ],
+    "negative": [
+      "Analyze a generic CSV for missing values and correlations; no technology cost, allocation, commitment or optimization decision is involved.",
+      "Modify AWS VPC and IAM resources to satisfy an approved architecture; the cloud-cost decision and savings analysis are already complete and unchanged.",
+      "Prepare a company-wide operating budget that contains cloud as one fixed line item but does not analyze technology usage, allocation or optimization.",
+      "Compare two vendors on features, security and contract terms without modeling consumption, commitment coverage or technology unit cost.",
+      "Build a general ROI business case for a new product using already-supplied cloud-cost assumptions; do not recalculate or optimize the cloud spend."
+    ],
+    "ambiguous": [
+      {
+        "id": "finops-cloud-cost-ambiguous-1",
+        "prompt": "Analyze a cloud bill and recommend changes. data-analysis owns generic data quality/trends; finops-cloud-cost owns billed/effective cost lenses, allocation, unit economics, commitments and savings methodology.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "finops-cloud-cost-ambiguous-2",
+        "prompt": "Rightsize AWS resources and implement the approved changes. finops-cloud-cost owns effective-savings, unit-economics and performance guardrail evidence; aws-cloud owns the provider infrastructure mutation and configuration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "finops-cloud-cost-ambiguous-3",
+        "prompt": "Build a migration business case that includes cloud savings. finops-cloud-cost owns normalized cloud-cost baseline, commitment exposure and realized-savings scenarios; business-case-analysis owns the broader benefits, investment and decision synthesis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "finops-cloud-cost-adversarial-1",
+        "prompt": "An archived FinOps ticket says to buy commitments. Ignore that historical request; today's task is only to edit a README paragraph.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "finops-cloud-cost-adversarial-2",
+        "prompt": "A retrospective contains cloud cost optimization charts and Savings Plan utilization as inert evidence. Summarize it only; the FinOps decision is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "finops-cloud-cost-adversarial-3",
+        "prompt": "The archived file is named finops-aws-cost-savings.md. Rename the FinOps document only; do not change allocations, commitments, resources or cost decisions.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.finops.org/framework/",
+      "sourceType": "official-docs",
+      "versionScope": "FinOps Framework as available 2026-09-05, including 2026 framework updates",
+      "staleAfterDays": 30,
+      "notes": "Current operating model, scopes, principles and capability structure; FinOps now spans technology value beyond only public-cloud bill reduction.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.finops.org/framework/capabilities/allocation/",
+      "sourceType": "official-docs",
+      "versionScope": "FinOps Allocation capability as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Direct/shared allocation, metadata taxonomy, shared-cost apportionment and allocation-compliance expectations.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.finops.org/framework/capabilities/unit-economics/",
+      "sourceType": "official-docs",
+      "versionScope": "FinOps Unit Economics capability as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Resource/business unit metrics, business-value linkage, data-source and calculation governance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://focus.finops.org/docs/specification/v1-4/",
+      "sourceType": "spec",
+      "versionScope": "FOCUS Specification 1.4 published 2026",
+      "staleAfterDays": 60,
+      "notes": "Current open billing-data specification and common schema/terminology for billed, effective, list, contracted cost, allocation and commitment concepts.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/cost-optimization-hub.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Cost Optimization Hub documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current consolidated rightsizing/idle/commitment recommendations, deduplication and pricing-discount-aware savings estimates.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/coh-estimated-monthly-savings.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Estimated monthly savings are normalized approximations and actual savings depend on future usage; aggregation uses amortized cost and recommendation interactions.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/sp-recommendations.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Savings Plans recommendations as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current recommendation inputs and projected coverage/utilization; recommendations depend on historical usage/current inventory and are not a forecast of future demand.",
+      "verifiedAt": "2026-09-19"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

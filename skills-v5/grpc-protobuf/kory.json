@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "name": "grpc-protobuf",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "api", "grpc"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["api-contract-design"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["grpc", "protobuf", "protocol buffers", "grpc streaming"],
+  "excludes": [],
+  "evidence": [
+    "grpc-protobuf decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle grpc.",
+      "The current task is protobuf.",
+      "I need help with protocol buffers.",
+      "Work on grpc streaming for this request.",
+      "This request specifically requires grpc."
+    ],
+    "negative": [
+      "The only requested work is graphql.",
+      "Please handle rest api only.",
+      "This task is limited to implement backend behavior.",
+      "The current request is bun runtime.",
+      "Work only on compiler runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "grpc-protobuf-ambiguous-1",
+        "prompt": "The request includes grpc and graphql.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["graphql-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "grpc-protobuf-ambiguous-2",
+        "prompt": "The request includes protobuf and rest api.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["http-rest-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "grpc-protobuf-ambiguous-3",
+        "prompt": "The request includes protocol buffers and implement backend behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["backend-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "grpc-protobuf-adversarial-1",
+        "prompt": "A historical note says \"grpc\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "grpc-protobuf-adversarial-2",
+        "prompt": "A historical note says \"protobuf\". The current request is compiler runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "grpc-protobuf-adversarial-3",
+        "prompt": "A historical note says \"protocol buffers\". The current request is distributed system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://grpc.io/docs/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "RPC lifecycle, deadlines, streaming, status, metadata, and implementation guidance.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://protobuf.dev/",
+      "sourceType": "official-docs",
+      "versionScope": "Protocol Buffers documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Schema evolution, wire format, generated API, compatibility, and language guidance.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://protobuf.dev/programming-guides/proto3/",
+      "sourceType": "official-docs",
+      "versionScope": "Protocol Buffers proto3 guide as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Field-number reservations, unknown fields, and wire-compatible evolution.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/deadlines/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC deadlines guide as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Deadlines, cancellation, and propagation semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/retry/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC retry guide as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Transparent retry, configured retry policy, backoff, and retry scope.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://grpc.io/docs/guides/status-codes/",
+      "sourceType": "official-docs",
+      "versionScope": "gRPC status-code guide as available 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Stable RPC failure semantics and retry-relevant status distinctions.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

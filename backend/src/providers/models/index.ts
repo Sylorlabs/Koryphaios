@@ -72,6 +72,39 @@ export function resolveTrustedContextWindow(
   return { contextKnown: false };
 }
 
+/**
+ * Layer a user-selected session budget on top of the provider-verified
+ * window. Fail closed: an override is honored only when it is a positive
+ * safe integer and the trusted window is known and at least as large —
+ * an unknown window or an oversized budget falls back to the trusted
+ * result unchanged instead of guessing. The client-side session budget is
+ * never an API request parameter.
+ */
+export function applyContextWindowOverride(
+  trusted: {
+    contextWindow?: number;
+    contextKnown: boolean;
+    contextSource?: 'live';
+  },
+  override: number | undefined,
+): {
+  contextWindow?: number;
+  contextKnown: boolean;
+  contextSource?: 'live';
+} {
+  if (
+    typeof override === 'number' &&
+    Number.isSafeInteger(override) &&
+    override > 0 &&
+    trusted.contextKnown &&
+    typeof trusted.contextWindow === 'number' &&
+    override <= trusted.contextWindow
+  ) {
+    return { contextWindow: override, contextKnown: true, contextSource: 'live' };
+  }
+  return trusted;
+}
+
 /** Model substitution is unsafe without a provider-reported alternative. */
 export function findAlternativeModel(_failedModelId: string): ModelDef | undefined {
   return undefined;

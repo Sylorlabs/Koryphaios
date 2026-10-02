@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { constants as fsConstants, existsSync } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { ContextBreakdown } from '@koryphaios/shared';
 import { serverLog } from '../logger';
 import { redactSecretsInText } from '../security';
 
@@ -59,7 +60,11 @@ export interface UsageSnapshot {
   activeMessageId?: string | null;
   contextRevision?: number;
   cachedInputTokens?: number;
-  breakdown?: { system: number; memory: number; tools: number; chat: number };
+  /** True when `used` is approximate (provider-flagged cumulative total or
+   *  clamped to the trusted window). Reloaded meters display it as-is but
+   *  never treat it as an exact trigger-grade occupancy. */
+  estimated?: boolean;
+  breakdown?: ContextBreakdown;
   ts: number;
 }
 

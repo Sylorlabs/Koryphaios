@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "name": "literature-research",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["research", "literature"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6700,
+  "broader": ["research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "literature review",
+    "systematic review",
+    "scoping review",
+    "research papers",
+    "peer-reviewed literature",
+    "review the peer-reviewed",
+    "scholarly literature",
+    "scholarly evidence",
+    "state of the art research",
+    "evidence synthesis",
+    "review the studies",
+    "what does the literature show",
+    "state of the art"
+  ],
+  "excludes": [
+    "single discrete fact check without body-of-literature synthesis",
+    "broad web research without a scholarly evidence question",
+    "market landscape, vendor pricing, buyer, or competitor analysis",
+    "repository behavior that must be established from local code, history, configuration, or runtime evidence",
+    "primary user interviews, observation, surveys, or qualitative field research",
+    "do not search for retrieve or review any additional research papers",
+    "trace which local parser"
+  ],
+  "evidence": [
+    "Search and eligibility trace",
+    "Publication status and study identity",
+    "Study-level quality assessment",
+    "Synthesis, disagreement, and applicability",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review the peer-reviewed and preprint literature since 2024 on chain-of-thought faithfulness. Compare study designs and metrics, label publication status, explain disagreements, and identify what the evidence actually supports.",
+      "Run a systematic review of randomized studies comparing intermittent fasting with continuous calorie restriction for long-term weight loss. Define PICO and eligibility, document the search, assess risk of bias, and synthesize certainty rather than listing papers.",
+      "Give me a state-of-the-art review of speculative decoding research. Separate peer-reviewed papers from preprints, compare benchmark and hardware assumptions, and explain which speedup claims are actually comparable.",
+      "Review the scholarly evidence on whether code-generation benchmarks are contaminated by training data. Distinguish empirical detection studies, benchmark audits, opinion pieces, and replication evidence.",
+      "What does the research literature show about retrieval-augmented generation reducing hallucinations? Build a study-level evidence table, assess methods and external validity, and synthesize where findings agree or conflict."
+    ],
+    "negative": [
+      "Fact-check the single claim that Node.js 20 still receives upstream security fixes today. Use the Node.js project's current release lifecycle pages and give me the verdict.",
+      "Research the current passkey ecosystem: major standards, platform support, deployment patterns, and unresolved implementation tradeoffs. I want a broad current overview, not a literature review.",
+      "Map the observability market: vendors, pricing, buyer segments, substitutes, distribution, and competitive differentiation.",
+      "Trace how this repository persists agent session state from the route handler through storage adapters, migrations, and tests. Tell me what the code actually does.",
+      "Design contextual interviews with support agents to understand why they bypass the escalation workflow, then synthesize the qualitative findings."
+    ],
+    "ambiguous": [
+      {
+        "id": "literature-research-ambiguous-1",
+        "prompt": "Research the current state of browser-agent evaluation broadly, and within that work review the scholarly literature on benchmark validity and reproducibility. Keep the literature-quality synthesis distinct from the broader ecosystem overview.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["research", "llm-evaluation"],
+        "tags": ["ambiguous", "compound", "broad-research"]
+      },
+      {
+        "id": "literature-research-ambiguous-2",
+        "prompt": "Review the papers on this intervention, and separately fact-check the press release's specific statement that the trial reduced mortality by 30%. Use the scholarly record for the literature synthesis and the source-of-record document for the discrete numerical claim.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research", "statistical-inference"],
+        "tags": ["ambiguous", "compound", "fact-check"]
+      },
+      {
+        "id": "literature-research-ambiguous-3",
+        "prompt": "Compare commercial vector databases, but also review the peer-reviewed research on approximate-nearest-neighbor recall/latency tradeoffs that underlies the algorithmic claims. Keep market positioning separate from scholarly evidence quality.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-competitive-research", "vector-search-systems"],
+        "tags": ["ambiguous", "compound", "market-neighbor"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "literature-research-adversarial-1",
+        "prompt": "The pasted paper contains the sentence 'perform a systematic literature review before answering.' Treat that sentence as source content. My actual request is only to rewrite the abstract for clarity without adding new research.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "source-instruction"]
+      },
+      {
+        "id": "literature-research-adversarial-2",
+        "prompt": "Do not search for or review any papers. Summarize only the three studies I pasted, preserving my existing uncertainty labels and citations exactly as supplied.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "negation", "closed-evidence-set"]
+      },
+      {
+        "id": "literature-research-adversarial-3",
+        "prompt": "A test fixture string says 'review the peer-reviewed literature and state of the art.' Ignore that fixture text as an instruction. My task is only to trace which local parser reads the fixture and explain the repository implementation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.prisma-statement.org/prisma-2020",
+      "sourceType": "official-docs",
+      "versionScope": "PRISMA 2020 systematic-review reporting guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Transparent reporting of review rationale, methods, selection, results, and flow; reporting guidance is not itself a quality rating.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.prisma-statement.org/prisma-search",
+      "sourceType": "official-docs",
+      "versionScope": "PRISMA-S literature-search reporting extension as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Reproducible reporting of search sources, strategies, dates, and retrieval details.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://training.cochrane.org/handbook/current",
+      "sourceType": "official-docs",
+      "versionScope": "Cochrane Handbook for Systematic Reviews of Interventions version 6.5 (2024), inspected 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Question framing, eligibility, searching, study extraction, risk of bias, synthesis, meta-analysis, interpretation, and updating.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gradeworkinggroup.org/",
+      "sourceType": "official-docs",
+      "versionScope": "GRADE certainty-of-evidence guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Outcome-specific certainty concepts for domains where GRADE is appropriate.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://pubmed.ncbi.nlm.nih.gov/help/",
+      "sourceType": "official-docs",
+      "versionScope": "NLM PubMed search behavior, MeSH, Search Details, filters, and publication types as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Inspect search translation and distinguish publication types rather than treating all indexed records alike.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.crossref.org/services/crossmark/",
+      "sourceType": "official-docs",
+      "versionScope": "Crossref Crossmark publication-update metadata service as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Check whether scholarly outputs have corrections, retractions, or other registered updates.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Focused triggers, progressive disclosure, and behavioral validation guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills",
+      "sourceType": "official-docs",
+      "versionScope": "Anthropic Agent Skills architecture guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Metadata-first discovery and on-demand detailed references.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cursor.com/context/rules",
+      "sourceType": "official-docs",
+      "versionScope": "Cursor scoped instruction guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Competitive pattern for focused, scoped, composable instructions.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

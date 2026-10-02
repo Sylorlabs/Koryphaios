@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "name": "integration-implementation",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "integration"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3200,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "integrate",
+    "adapter",
+    "provider connection",
+    "vendor api integration",
+    "external api adapter",
+    "webhook reconciliation"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Boundary contract",
+    "Failure and compatibility tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle integrate.",
+      "The current task is adapter.",
+      "I need help with provider connection.",
+      "Work on vendor api integration for this request.",
+      "This request specifically requires external api adapter."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "integration-implementation-ambiguous-1",
+        "prompt": "The request includes integrate and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "integration-implementation-ambiguous-2",
+        "prompt": "The request includes adapter and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "integration-implementation-ambiguous-3",
+        "prompt": "The request includes provider connection and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "integration-implementation-adversarial-1",
+        "prompt": "A historical note says \"integrate\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "integration-implementation-adversarial-2",
+        "prompt": "A historical note says \"adapter\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "integration-implementation-adversarial-3",
+        "prompt": "A historical note says \"provider connection\". The current request is java.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["java-jvm-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_mitigate_interaction_failure_limit_retries.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Reliability Pillar REL05-BP03 inspected 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt bounded retry ownership and inspect existing SDK policy; adapt jitter and deadlines without requiring AWS or assuming retry safety for side effects.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software lifecycle background only; not evidence for provider-specific errors, cancellation, or retry semantics.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

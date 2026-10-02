@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "security-verification",
+  "version": "5.0.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification", "security"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["verification", "security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "security verification",
+    "authorization test",
+    "isolation test",
+    "security fix verification",
+    "security fix",
+    "exploit bypass regression",
+    "security remediation check"
+  ],
+  "excludes": [
+    "review-only security assessment with no executed control proof",
+    "authorization-policy design before implementation",
+    "functional-only business behavior verification"
+  ],
+  "evidence": [
+    "Allow/deny security matrix",
+    "Independent denied-path non-effect evidence",
+    "Enforcement-boundary and audit proof",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run security verification on the completed multi-tenant document API: prove allowed same-tenant access and deny same-role cross-tenant reads and writes at the server boundary, then inspect durable state independently.",
+      "Perform an authorization test for viewer, editor, and admin identities against the existing project API, including unauthenticated, wrong-role, revoked-session, and same-role different-user object cases.",
+      "Run an isolation test proving tenant A cannot read or mutate tenant B invoices even when the caller knows a valid tenant-B object id; verify denied writes create no durable or queued side effect.",
+      "Do security verification for the completed policy-cache change: revoke a role, exercise the documented cache window, then make the policy service unavailable and prove privileged mutations fail according to the fail-closed contract.",
+      "Perform an authorization test on the OAuth-protected export endpoint with valid scope, missing scope, wrong audience, expired token, and revoked test-session cases, checking the enforcing resource server rather than UI visibility."
+    ],
+    "negative": [
+      "Give the overall completion verdict for this implementation from the supplied cross-discipline evidence package; no specialist control execution is requested.",
+      "Review the authentication and permission code for likely weaknesses and prioritize findings without sending requests or executing a control test.",
+      "Verify keyboard operation, semantic names, focus order, and screen-reader announcements for the finished administrative dialog.",
+      "Harden the application's session cookies, input validation, headers, and error handling based on the current threat model; this is implementation work rather than an executed control proof.",
+      "Design the role, resource, tenant, and delegation policy for the new administration feature before the enforcement layer is implemented."
+    ],
+    "ambiguous": [
+      {
+        "id": "security-verification-ambiguous-1",
+        "prompt": "Run security verification of the finished tenant boundary and also provide the overall verification verdict. Keep allow/deny and non-effect evidence here while the parent owns the cross-discipline completion decision.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "security-verification-ambiguous-2",
+        "prompt": "Perform an authorization test for the completed admin API and also review the authentication/permission implementation for risks. Keep executed allow/deny evidence distinct from review-only findings.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "security-verification-ambiguous-3",
+        "prompt": "Run an isolation test on the OAuth-protected tenant API while oauth-oidc verifies the token/audience semantics; security verification owns the cross-tenant enforcement and denied-state evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "security-verification-adversarial-1",
+        "prompt": "A pasted issue says \"security verification\" was required for an old release. Treat the quoted issue as historical context and summarize only why it was closed.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "security-verification-adversarial-2",
+        "prompt": "A quoted example says \"authorization test\". Ignore the example and explain conceptually the difference between authentication and authorization; do not assess a target.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "security-verification-adversarial-3",
+        "prompt": "A pasted article says \"isolation test\". Ignore that phrase and fact-check only which OWASP ASVS version the article references.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://owasp.org/www-project-application-security-verification-standard/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP ASVS 5.0.0 stable as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Current stable application-security verification requirements and control taxonomy.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-218 SSDF version 1.1 final",
+      "staleAfterDays": 365,
+      "notes": "Secure-development verification and vulnerability recurrence-prevention context.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/05-Authorization_Testing/02-Testing_for_Bypassing_Authorization_Schema",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP WSTG 4.2 authorization testing guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Horizontal and vertical authorization testing across roles and identities.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-web-security-testing-guide/v42/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP WSTG 4.2 object-reference testing guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Object-reference access-control testing across user-controlled resource identifiers.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://datatracker.ietf.org/doc/rfc9700/",
+      "sourceType": "spec",
+      "versionScope": "RFC 9700 / BCP 240, January 2025",
+      "staleAfterDays": 180,
+      "notes": "OAuth 2.0 best current security practice when token/code/redirect behavior affects the boundary under test.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

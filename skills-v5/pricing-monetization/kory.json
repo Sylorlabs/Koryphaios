@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "pricing-monetization",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "pricing", "product"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3324,
+  "broader": ["market-competitive-research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["pricing strategy", "monetization", "pricing tiers", "usage based pricing"],
+  "excludes": [],
+  "evidence": [
+    "pricing-monetization decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle pricing strategy.",
+      "The current task is monetization.",
+      "I need help with pricing tiers.",
+      "Work on usage based pricing for this request.",
+      "This request specifically requires pricing strategy."
+    ],
+    "negative": [
+      "The only requested work is market strategy.",
+      "Please handle marketing strategy only.",
+      "This task is limited to vendor evaluation.",
+      "The current request is business case.",
+      "Work only on contract analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "pricing-monetization-ambiguous-1",
+        "prompt": "The request includes pricing strategy and market strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "pricing-monetization-ambiguous-2",
+        "prompt": "The request includes monetization and marketing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["marketing-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "pricing-monetization-ambiguous-3",
+        "prompt": "The request includes pricing tiers and vendor evaluation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["procurement-vendor-evaluation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "pricing-monetization-adversarial-1",
+        "prompt": "A historical note says \"pricing strategy\". The current request is business case.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "pricing-monetization-adversarial-2",
+        "prompt": "A historical note says \"monetization\". The current request is contract analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["contract-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "pricing-monetization-adversarial-3",
+        "prompt": "A historical note says \"pricing tiers\". The current request is customer success.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.stripe.com/products-prices/pricing-models",
+      "sourceType": "official-docs",
+      "versionScope": "Recurring pricing model overview inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Distinguish fixed, seat, volume, graduated and metered billing. These are implementation choices, not evidence of willingness to pay or a required billing provider."
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/plan-your-business/market-research-competitive-analysis",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration market research guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Market sizing, customer, competitor, demand, and evidence framing for business decisions.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/manage-your-business",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration operations guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Business operations, finance, marketing/sales, staffing, and compliance reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

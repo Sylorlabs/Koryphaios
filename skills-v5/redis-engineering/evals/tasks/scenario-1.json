@@ -1,0 +1,82 @@
+{
+  "id": "redis-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Redis-backed cache refresh lock where a worker that runs longer than the fixed lock TTL can have its lock expire, allowing a second worker to refresh and the first to delete the second worker’s lock on completion. Use ownership tokens and an atomic release/renewal strategy appropriate to the pinned Redis deployment, bound failure behavior, and verify TTL expiry, paused worker, failover/error, and cache correctness without treating the lock as distributed consensus.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://redis-engineering/cache-lock-expiry",
+    "requirements": [
+      "Redis lock/cache fixture with controllable worker delay longer than TTL",
+      "two workers and unique lock ownership tokens",
+      "atomic script/command behavior on the pinned Redis topology",
+      "failure/retry sequence proving one owner cannot release another owner’s lock",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "redis-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "redis-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "redis-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "cache-lock-expiry scenario evidence",
+    "redis-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "redis-engineering-individual-scenario-1-result",
+    "redis-engineering-individual-scenario-1-verification",
+    "redis-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual redis-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; near-neighbor=mongodb-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define whether Redis is a cache, coordination service, queue, stream, rate limiter, or authoritative store because durability and recovery differ."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Lock release/renewal is conditional on current ownership identity; expiration can lose authority but can never let a stale worker erase a newer owner’s claim."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise expiry, eviction, reconnect, failover assumptions, duplicate/replayed work, atomic operations, serialization compatibility, and load patterns with realistic key distributions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not treat cache presence as truth, use KEYS in production paths, depend on distributed locks without fencing/expiry analysis, or let retry loops multiply writes."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (redis-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

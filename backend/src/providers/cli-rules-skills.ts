@@ -10,7 +10,6 @@
 //   claude      → CLAUDE.md
 //   antigravity → AGENTS.md
 //   codex       → AGENTS.md (codex reads it if present)
-//   cline       → .clinerules (cline reads it if present)
 //   cursor      → .cursorrules (cursor reads it if present)
 //   grok        → .grokrules (grok reads it if present)
 //
@@ -237,8 +236,6 @@ export function writeAllCliRulesAndSkills(
   );
   // Codex: AGENTS.md (no skills)
   writeRulesAndSkills(join(base, 'codex-home'), 'codex', systemPrompt, 'AGENTS.md', null, base);
-  // Cline: .clinerules
-  writeRulesAndSkills(join(base, 'cline-home'), 'cline', systemPrompt, '.clinerules', null, base);
   // Cursor: .cursorrules
   writeRulesAndSkills(
     join(base, 'cursor-home'),

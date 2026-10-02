@@ -1,0 +1,87 @@
+{
+  "id": "three-d-graphics-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply 3d graphics expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is three-d-graphics: Establish coordinate systems, units, handedness, transform hierarchy, camera model, mesh topology, materials/color space, lights, shadows, texture budgets, animation ownership, and target GPU/runtime. The adjacent image-generation-practice discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://three-d-graphics/frustum-culling-space",
+    "requirements": [
+      "camera/projection fixture documenting handedness, depth range, and matrix multiplication convention",
+      "object bounds at each frustum plane plus behind-camera/outside controls",
+      "transformed/non-uniform scaled object bounds",
+      "visibility golden set and culling-performance measurement",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "three-d-graphics parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "three-d-graphics-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "three-d-graphics decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "three-d-graphics-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "three-d-graphics decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "three-d-graphics-individual-scenario-2-result",
+    "three-d-graphics-individual-scenario-2-verification",
+    "three-d-graphics-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual three-d-graphics boundary and relevant environment before acting, preserve the hierarchy relationship (broader=game-spatial-interface; near-neighbor=image-generation-practice), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Establish coordinate systems, units, handedness, transform hierarchy, camera model, mesh topology, materials/color space, lights, shadows, texture budgets, animation ownership, and target GPU/runtime."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Inspect representative scenes for geometry/normals, scale, camera clipping, color/gamma, material response, animation interpolation, z-fighting, GPU/CPU frame cost, memory, and fallback behavior on supported hardware."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not fix coordinate mistakes with scattered magic rotations, mix color spaces, ship unbounded texture/poly budgets, or infer mobile/VR performance from a desktop editor."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (three-d-graphics decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

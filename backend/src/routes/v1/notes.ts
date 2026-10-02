@@ -324,7 +324,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       (query.q as string) ?? '',
       resultLimit + 1,
       getRequestProjectRoot(request),
+      { signal: request.signal },
     );
+    request.signal.throwIfAborted();
     return {
       ok: true,
       data: results.slice(0, resultLimit),

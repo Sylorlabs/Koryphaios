@@ -98,10 +98,17 @@
     open?: boolean;
     initialTab?: SettingsTab | undefined;
     initialAgentSection?: 'permissions';
+    voiceSetupRequired?: boolean;
     onClose?: () => void;
   }
 
-  let { open = false, initialTab, initialAgentSection, onClose }: Props = $props();
+  let {
+    open = false,
+    initialTab,
+    initialAgentSection,
+    voiceSetupRequired = false,
+    onClose,
+  }: Props = $props();
   let activeTab = $state<SettingsTab>('providers');
   let settingsSearch = $state('');
   let wasOpen = $state(false);
@@ -153,6 +160,7 @@
   let showModelSelector = $state(false);
   let selectorTarget = $state<any>(null);
   let showColorPicker = $state(false);
+  let colorPickerTarget = $state<'primary' | 'secondary'>('primary');
   let showRotateDialog = $state(false);
   let rotateProvider = $state<{ name: string; keyType: 'apiKey' | 'authToken' } | null>(null);
   let showAccountManageDialog = $state(false);
@@ -568,7 +576,6 @@
     'antigravity',
     'cursor',
     'devin',
-    'cline',
     'copilot',
   ]);
   const LOCAL_ENDPOINT_PROVIDER_KEYS = new Set(['local', 'ollama', 'lmstudio', 'llamacpp']);
@@ -649,7 +656,7 @@
     }
     if (deployment === 'local') {
       return isCliExecutionProvider(providerKey)
-        ? 'CLI provider — runs via local CLI'
+        ? 'CLI provider. Runs via local CLI'
         : 'Local endpoint';
     }
     return null;
@@ -812,7 +819,10 @@
     }
     const first = focusable[0];
     const last = focusable.at(-1)!;
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === customIconDialog)) {
+    if (
+      event.shiftKey &&
+      (document.activeElement === first || document.activeElement === customIconDialog)
+    ) {
       event.preventDefault();
       last.focus();
     } else if (!event.shiftKey && document.activeElement === last) {
@@ -991,10 +1001,12 @@
     e.preventDefault();
     e.stopImmediatePropagation();
     const keys: string[] = [];
-    if (e.ctrlKey) keys.push('Ctrl');
+    // A single platform modifier is recorded as 'Mod' so the binding follows
+    // the platform: capturing ⌘ on a Mac should still mean Ctrl elsewhere.
+    const primaryModifier = e.metaKey !== e.ctrlKey ? (e.metaKey ? 'Meta' : 'Ctrl') : 'Mod';
+    if (e.ctrlKey || e.metaKey) keys.push(primaryModifier);
     if (e.shiftKey) keys.push('Shift');
     if (e.altKey) keys.push('Alt');
-    if (e.metaKey) keys.push('Meta');
     const key = e.key;
     if (!['Control', 'Shift', 'Alt', 'Meta'].includes(key))
       keys.push(key.length === 1 ? key.toUpperCase() : key);
@@ -1030,6 +1042,8 @@
   let billingExcludedProviders = $state<string[]>([]);
   let showSubscriptionApiEquivalent = $state(true);
   let expandedBillingProviders = $state<Record<string, boolean>>({});
+  let billingControlsExpanded = $state(false);
+  let billingControlsSearch = $state('');
   const TEAM_UI_PREFERENCES_STORAGE_KEY = 'koryphaios-team-ui-preferences-v1';
   let showTeamSidebarShortcut = $state(false);
 
@@ -1115,7 +1129,8 @@
   function formatBillingUsd(value: number | null | undefined, minimumDigits = 2): string {
     if (value == null || !Number.isFinite(value)) return '$?.??';
     if (value === 0) return '$0.00';
-    const digits = value >= 100 ? Math.max(minimumDigits, 2) : value >= 1 ? Math.max(minimumDigits, 4) : 6;
+    const digits =
+      value >= 100 ? Math.max(minimumDigits, 2) : value >= 1 ? Math.max(minimumDigits, 4) : 6;
     return `$${value.toFixed(digits)}`;
   }
 
@@ -1420,10 +1435,13 @@
                       title={entry.description}
                       onclick={() => selectSettingsTab(entry.id)}
                     >
-                      <span class="settings-tab-icon flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true"
-                        ><Icon size={15} /></span
+                      <span
+                        class="settings-tab-icon flex h-5 w-5 shrink-0 items-center justify-center"
+                        aria-hidden="true"><Icon size={15} /></span
                       >
-                      <span class="hidden min-w-0 flex-1 truncate text-[13px] sm:block">{entry.label}</span>
+                      <span class="hidden min-w-0 flex-1 truncate text-[13px] sm:block"
+                        >{entry.label}</span
+                      >
                       <span class="sr-only">{entry.scope}</span>
                     </button>
                   {/each}
@@ -1451,7 +1469,12 @@
         </nav>
       </aside>
 
-      <!-- Content Area -->
+      <!-- Content Area. Every tab panel below is a `flex-1` scroll child of this
+           column, so each one MUST carry `min-h-0`: a flex item's automatic
+           minimum size is its content height, so without it the panel refuses to
+           shrink, grows past the clipped parent, and its own scrollbar never
+           engages (scrolling the page appears to do nothing). `overflow-x-hidden`
+           keeps a stray horizontal scrollbar from appearing at all. -->
       <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
         {#if activeTab !== 'mcp' && activeTab !== 'archived'}
           <div
@@ -1476,7 +1499,7 @@
         <!-- Providers Tab -->
         <div
           class={activeTab === 'providers'
-            ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6'
             : 'hidden'}
         >
           <div class="flex items-center gap-2">
@@ -1520,18 +1543,6 @@
                 {category.label}
               </button>
             {/each}
-          </div>
-
-          <div
-            class="flex items-start gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-          >
-            <Shield size={13} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
-            <span
-              >Direct API keys and tokens entered here stay local in <code
-                >.koryphaios/credentials.json</code
-              > with owner-only file permissions. This direct-provider store is not encrypted or backed
-              by the operating-system keychain.</span
-            >
           </div>
 
           <!-- Detected on your system — presence is not an authentication verdict. -->
@@ -1658,7 +1669,7 @@
               </div>
               <span
                 class="text-[10px] text-[var(--color-text-muted)] transition-colors duration-150 group-hover:text-[var(--color-text-secondary)]"
-                >OpenAI-compatible &amp; more</span
+                >OpenAI compatible &amp; more</span
               >
             </button>
           {:else}
@@ -1686,13 +1697,13 @@
               </button>
               <div class="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
                 <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
-                  Bring your own endpoint — works with any OpenAI-compatible API (vLLM, LiteLLM, LM
-                  Studio, self-hosted gateways, OpenRouter-style services), plus Anthropic- and
-                  Gemini-compatible servers. Koryphaios detects the wire format automatically from
+                  Bring your own endpoint. Works with any OpenAI compatible API (vLLM, LiteLLM, LM
+                  Studio, self hosted gateways, OpenRouter style services), plus Anthropic and
+                  Gemini compatible servers. Koryphaios detects the wire format automatically from
                   the endpoint, repairs common pasted endpoint paths, then checks
-                  <code>/models</code> before anything is saved. Catalog access does not claim
-                  that inference, entitlement, or quota works; the first real response establishes that.
-                  If discovery is unsupported, you can explicitly save with manual model IDs.
+                  <code>/models</code> before anything is saved. Catalog access does not claim that inference,
+                  entitlement, or quota works; the first real response establishes that. If discovery
+                  is unsupported, you can explicitly save with manual model IDs.
                 </p>
                 <div class="space-y-1">
                   <label
@@ -1725,7 +1736,7 @@
                     class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
                     for="custom-key"
                     >API key <span class="opacity-60 normal-case"
-                      >(optional — leave blank if not required)</span
+                      >(optional. Leave blank if not required)</span
                     ></label
                   >
                   <div class="relative">
@@ -1760,12 +1771,14 @@
                   <input
                     id="custom-models"
                     type="text"
-                    placeholder="my-model-a, my-model-b — or leave blank to auto-fetch"
+                    placeholder="my model a, my model b. Or leave blank to fetch automatically"
                     bind:value={customForm.models}
                     class="input w-full text-xs"
                   />
                 </div>
-                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                <div
+                  class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                >
                   <button
                     type="button"
                     onclick={() => (showCustomAdvanced = !showCustomAdvanced)}
@@ -1781,7 +1794,9 @@
                     <ChevronDown
                       size={15}
                       class="text-[var(--color-text-muted)] transition-transform duration-200 ease-out"
-                      style={showCustomAdvanced ? 'transform: rotate(180deg);' : 'transform: rotate(0deg);'}
+                      style={showCustomAdvanced
+                        ? 'transform: rotate(180deg);'
+                        : 'transform: rotate(0deg);'}
                     />
                   </button>
                   <div
@@ -1819,8 +1834,7 @@
                         <label
                           class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
                           for="custom-headers"
-                          >Custom headers <span class="opacity-60 normal-case"
-                            >(optional)</span
+                          >Custom headers <span class="opacity-60 normal-case">(optional)</span
                           ></label
                         >
                         <textarea
@@ -1830,10 +1844,8 @@
                           bind:value={customForm.headers}
                           class="input w-full text-xs"
                         ></textarea>
-                        <p
-                          class="text-[10px] text-[var(--color-text-muted)] leading-relaxed"
-                        >
-                          One per line, Name: Value — sent with every request to this endpoint.
+                        <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
+                          One per line, Name: Value. Sent with every request to this endpoint.
                         </p>
                       </div>
                     </div>
@@ -1965,8 +1977,7 @@
                       <div class="min-w-0">
                         <span
                           class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                          title={status?.label ?? prov.label}
-                          >{status?.label ?? prov.label}</span
+                          title={status?.label ?? prov.label}>{status?.label ?? prov.label}</span
                         >
                         <p
                           class="line-clamp-2 text-[10px] leading-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
@@ -1977,7 +1988,7 @@
                             {@const selectedCount = status.models?.length ?? 0}
                             {@const availableCount = status.allAvailableModels?.length ?? 0}
                             Connected{availableCount > 0
-                              ? ` · ${selectedCount > 0 ? selectedCount : '—'}/${availableCount} models enabled`
+                              ? ` · ${selectedCount > 0 ? selectedCount : 'Not available'}/${availableCount} models enabled`
                               : ''}
                           {:else if status?.connectionState === 'failed'}
                             Connection failed
@@ -1985,7 +1996,7 @@
                             {@const selectedCount = status.models?.length ?? 0}
                             {@const availableCount = status.allAvailableModels?.length ?? 0}
                             Connected{availableCount > 0
-                              ? ` · ${selectedCount > 0 ? selectedCount : '—'}/${availableCount} models enabled`
+                              ? ` · ${selectedCount > 0 ? selectedCount : 'Not available'}/${availableCount} models enabled`
                               : ''}
                           {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
                             Catalog access detected · inference unverified
@@ -2021,7 +2032,7 @@
                       {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-[9px] font-bold"
-                          title="Endpoint added and model catalog confirmed; inference verifies on first use"
+                          title="Endpoint added and model catalog confirmed. Inference verifies on first use"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
                           Connected
@@ -2029,7 +2040,7 @@
                       {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
                         <div
                           class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-[9px] font-bold"
-                          title="Model catalog access succeeded; inference is checked on first use"
+                          title="Model catalog access succeeded. Inference is checked on first use"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
                           Catalog
@@ -2114,48 +2125,11 @@
                         </div>
                       {/if}
                       {#if status?.credentialDetected ?? status?.authenticated}
-                        <div
-                          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 px-3 py-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                        >
-                          {#if status?.connectionState === 'verified'}
-                            Connected to Koryphaios and working{status.verificationScope
-                              ? ` · ${status.verificationScope} scope`
-                              : ''}.
-                          {:else if status?.connectionState === 'failed'}
-                            Connection failed{status.verificationError
-                              ? `: ${status.verificationError}`
-                              : '.'}
-                          {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
-                            The provider catalog accepted this process's credentials. Runtime
-                            inference permission, model entitlement, quota, and request success are
-                            still unverified.
-                          {:else}
-                            Found on this system but not yet connected. This does not prove the
-                            credential, account, entitlement, quota, or provider endpoint is usable.
-                          {/if}
-                        </div>
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div class="text-[10px] text-[var(--color-text-muted)]">
-                            {status.connectionState === 'verified' ||
-                            (prov.key.startsWith('custom:') &&
-                              status.connectionState === 'detected' &&
-                              status.verificationScope === 'catalog' &&
-                              (status.allAvailableModels?.length ?? 0) > 0)
-                              ? `${(status.models?.length ?? 0) > 0 ? status.models?.length : '—'} enabled of ${(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : '—'} listed`
-                              : 'Model availability unverified'}
-                          </div>
-                          {#if (status.connectionState === 'verified' ||
-                            (prov.key.startsWith('custom:') &&
-                              status.connectionState === 'detected' &&
-                              status.verificationScope === 'catalog' &&
-                              (status.allAvailableModels?.length ?? 0) > 0)) &&
-                            !status.hideModelSelector}
-                            <button
-                              type="button"
-                              onclick={() => openModelSelector(status)}
-                              class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button
-                            >
-                          {/if}
+                        <!-- The action buttons lead the block, on one horizontal
+                             row: "Run safe check" sits beside "Manage Models". The
+                             grey text below explains the state they act on, so it
+                             must never render above the controls. -->
+                        <div class="flex flex-wrap items-center gap-2">
                           {#if usesLocalCliConnection(prov.key)}
                             <button
                               type="button"
@@ -2177,6 +2151,13 @@
                                 : 'Run safe check'}</button
                             >
                           {/if}
+                          {#if (status.connectionState === 'verified' || (prov.key.startsWith('custom:') && status.connectionState === 'detected' && status.verificationScope === 'catalog' && (status.allAvailableModels?.length ?? 0) > 0)) && !status.hideModelSelector}
+                            <button
+                              type="button"
+                              onclick={() => openModelSelector(status)}
+                              class="btn btn-secondary text-[10px] py-1 px-3">Manage Models</button
+                            >
+                          {/if}
                           {#if caps.supportsApiKey && !usesBrowserAuth(prov.key)}
                             <button
                               type="button"
@@ -2196,6 +2177,35 @@
                             class="text-[10px] text-[var(--color-error)] hover:opacity-80 font-medium transition-opacity"
                             >Disconnect</button
                           >
+                        </div>
+                        <div
+                          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 px-3 py-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                        >
+                          {#if status?.connectionState === 'verified'}
+                            Connected to Koryphaios and working{status.verificationScope
+                              ? ` · ${status.verificationScope} scope`
+                              : ''}.
+                          {:else if status?.connectionState === 'failed'}
+                            Connection failed{status.verificationError
+                              ? `: ${status.verificationError}`
+                              : '.'}
+                          {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
+                            The provider catalog accepted this process's credentials. Runtime
+                            inference permission, model entitlement, quota, and request success are
+                            still unverified.
+                          {:else}
+                            Found on this system but not yet connected. This does not prove the
+                            credential, account, entitlement, quota, or provider endpoint is usable.
+                          {/if}
+                        </div>
+                        <div class="text-[10px] text-[var(--color-text-muted)]">
+                          {status.connectionState === 'verified' ||
+                          (prov.key.startsWith('custom:') &&
+                            status.connectionState === 'detected' &&
+                            status.verificationScope === 'catalog' &&
+                            (status.allAvailableModels?.length ?? 0) > 0)
+                            ? `${(status.models?.length ?? 0) > 0 ? status.models?.length : 'Not available'} enabled of ${(status.allAvailableModels?.length ?? 0) > 0 ? status.allAvailableModels?.length : 'Not available'} listed`
+                            : 'Model availability unverified'}
                         </div>
                       {:else if configurationBlocked}
                         <div
@@ -2531,15 +2541,9 @@
                             <div
                               class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/80 p-3 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
                             >
-                              {#if prov.key === 'cline'}
-                                Cline owns its provider credentials and model selection. Configure
-                                them with the Cline CLI, then check the local CLI connection here.
-                                Koryphaios never asks for or stores a Cline provider token.
-                              {:else}
-                                Runs through the provider CLI. Koryphaios detects local sign-in
-                                material and checks the CLI without storing a provider token.
-                                Detection alone is not an account or entitlement verdict.
-                              {/if}
+                              Runs through the provider CLI. Koryphaios detects local sign-in
+                              material and checks the CLI without storing a provider token.
+                              Detection alone is not an account or entitlement verdict.
                             </div>
                           {/if}
                           {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
@@ -2729,13 +2733,8 @@
                           <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
                             {#if usesLocalCliConnection(prov.key)}
                               <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                                {#if prov.key === 'cline'}
-                                  Cline CLI manages provider credentials and models. Configure Cline
-                                  there, then use the connection check above.
-                                {:else}
-                                  This provider's accounts are managed by its CLI. Sign in there,
-                                  then use the check-login button above.
-                                {/if}
+                                This provider's accounts are managed by its CLI. Sign in there,
+                                then use the check-login button above.
                               </p>
                             {:else}
                               <input
@@ -2946,7 +2945,7 @@
 
         <!-- Appearance Tab -->
         <div class={activeTab === 'voice' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <VoiceSettings />
+          <VoiceSettings attention={voiceSetupRequired} />
         </div>
         <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
           <ImageSettings />
@@ -2956,17 +2955,17 @@
         </div>
 
         <div class={activeTab === 'appearance' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <AppearanceSettings bind:showColorPicker />
+          <AppearanceSettings bind:showColorPicker bind:colorPickerTarget />
         </div>
 
         <div class={activeTab === 'welcome' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
-          <WelcomeSettings />
+          <WelcomeSettings onReplayWalkthrough={() => requestSettingsClose()} />
         </div>
 
         <!-- Shortcuts Tab -->
         <div
           class={activeTab === 'shortcuts'
-            ? 'flex-1 overflow-y-auto px-6 py-5 space-y-6 w-full max-w-7xl mx-auto'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6 w-full max-w-7xl mx-auto'
             : 'hidden'}
         >
           <div class="flex items-center justify-between mb-4">
@@ -2987,18 +2986,29 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             {#each shortcutStore.list as shortcut (shortcut.id)}
               <div
-                class="group flex items-center justify-between p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]"
+                class="group flex items-center justify-between gap-3 p-4 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] transition-colors hover:border-[var(--color-text-muted)]"
+                data-testid="shortcut-row"
+                data-shortcut-id={shortcut.id}
               >
-                <div>
+                <div class="min-w-0">
                   <div class="text-sm font-semibold text-[var(--color-text-primary)]">
                     {shortcut.action}
                   </div>
                   <div class="text-xs text-[var(--color-text-muted)]">{shortcut.description}</div>
+                  {#if (shortcut.altKeys ?? []).length > 0}
+                    <div class="mt-1 text-[10px] text-[var(--color-text-muted)]">
+                      also
+                      {#each shortcut.altKeys ?? [] as chord, chordIndex (chordIndex)}
+                        <span class="font-mono">{chord.map(formatKey).join('+')}</span
+                        >{#if chordIndex < (shortcut.altKeys?.length ?? 1) - 1},
+                        {/if}{/each}
+                    </div>
+                  {/if}
                 </div>
                 <button
                   type="button"
                   onclick={() => startEditShortcut(shortcut.id)}
-                  class="flex items-center gap-1 px-3 py-2 rounded-lg border bg-[var(--color-surface-1)] text-sm font-mono transition-all
+                  class="flex shrink-0 items-center gap-1 px-3 py-2 rounded-lg border bg-[var(--color-surface-1)] text-sm font-mono transition-all
                        {editingShortcutId === shortcut.id
                     ? 'ring-2 ring-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-accent)]'
                     : 'group-hover:border-[var(--color-text-secondary)] shadow-sm'}"
@@ -3021,7 +3031,7 @@
         <!-- Billing Tab -->
         <div
           class={activeTab === 'billing'
-            ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-8 w-full'
             : 'hidden'}
         >
           {#if billingError}
@@ -3068,8 +3078,8 @@
                     Image &amp; voice API usage
                   </h4>
                   <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                    Estimated cost from this app's image and voice calls. Estimates only — not a
-                    bill. Entries older than 90 days are pruned.
+                    Estimated cost from this app's image and voice calls. Estimates only. This is
+                    not a bill. Entries older than 90 days are pruned.
                   </p>
                 </div>
                 <div class="flex gap-2">
@@ -3127,7 +3137,7 @@
                     <span class="font-bold text-[var(--color-text-primary)]">
                       {apiUsage.totals.estimatedCostUsd !== undefined
                         ? `$${apiUsage.totals.estimatedCostUsd.toFixed(4)}`
-                        : '—'}
+                        : 'Not available'}
                     </span>
                   </span>
                 </div>
@@ -3156,7 +3166,7 @@
                           >
                             {entry.estimatedCostUsd !== undefined
                               ? `$${entry.estimatedCostUsd.toFixed(4)}`
-                              : '—'}
+                              : 'Not available'}
                           </span>
                         </div>
                       </div>
@@ -3214,10 +3224,12 @@
                 {:else if billingCredits?.hasKnownSpend === false}
                   <span class="text-2xl font-semibold text-[var(--color-text-muted)]">$?.??</span>
                 {:else}
-                  <span>{formatBillingUsd(
-                    billingCredits?.totalSpendUsd ?? (billingCredits?.totalSpendCents ?? 0) / 100,
-                    2,
-                  )}</span>
+                  <span
+                    >{formatBillingUsd(
+                      billingCredits?.totalSpendUsd ?? (billingCredits?.totalSpendCents ?? 0) / 100,
+                      2,
+                    )}</span
+                  >
                 {/if}
               </div>
               <p class="text-[10px] text-[var(--color-text-muted)] mt-4">
@@ -3259,35 +3271,6 @@
                   : 'No configured API-key provider returned a queryable balance'}
               </p>
             </div>
-          </div>
-
-          <div class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
-            <div>
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Billing controls</h3>
-              <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                Choose which providers contribute to Billing totals and live balance probes.
-              </p>
-            </div>
-            <SettingsSwitch
-              compact
-              checked={showSubscriptionApiEquivalent}
-              label="Show subscription API-equivalent values"
-              description="Comparison value only. It is never added to tracked API spend."
-              onchange={toggleSubscriptionApiEquivalent}
-            />
-            {#if billingCredits?.availableBillingProviders?.length}
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {#each billingCredits.availableBillingProviders as provider (provider)}
-                  <SettingsSwitch
-                    compact
-                    checked={billingProviderIncluded(provider)}
-                    label={getProviderDisplayLabel(provider)}
-                    description="Include this provider in Billing"
-                    onchange={() => void toggleBillingProvider(provider)}
-                  />
-                {/each}
-              </div>
-            {/if}
           </div>
 
           <!-- CLI subscriptions: account-separated local usage + quota burn -->
@@ -3345,17 +3328,23 @@
                       <div
                         class="flex flex-col items-end gap-0.5 text-[10px] text-[var(--color-text-muted)]"
                       >
-                        <span
-                          >{cli.usageSource === 'codex-app-server'
-                            ? 'Tokens: live Codex account data'
-                            : cli.usageSource === 'kory-provider-events'
-                              ? 'Tokens: Freebuff request logs'
-                              : 'Tokens: local Koryphaios history'}</span
-                        >
+                        {#if cli.usageSource}
+                          <span
+                            >{cli.usageSource === 'codex-app-server'
+                              ? 'Tokens: live Codex account data'
+                              : cli.usageSource === 'kory-provider-events'
+                                ? 'Tokens: Freebuff request logs'
+                                : 'Tokens: local Koryphaios history'}</span
+                          >
+                        {:else}
+                          <span title="No metered token activity recorded for this account yet"
+                            >Tokens: none recorded yet</span
+                          >
+                        {/if}
                         {#if cli.quotaSource === 'live-cli-account'}
                           <span
                             class="font-medium text-[var(--color-success)]"
-                            title="Current account quota from agy /usage; not estimated from local token history"
+                            title="Current account quota from agy /usage. It is not estimated from local token history"
                             >Limits: live Antigravity account</span
                           >
                         {/if}
@@ -3377,12 +3366,12 @@
                           {#if cli.provider === 'freebuff'}
                             Freebuff reports the input context before each model request. Its
                             current log does not expose upstream output-token usage, so these token
-                            totals and API-equivalent values are input-side only—not charges or
-                            invented output estimates.
+                            totals and API-equivalent values are input side only. These are not
+                            charges or invented output estimates.
                           {:else}
                             {cli.provider} exposes input-context usage without upstream output-token totals.
-                            Its OpenRouter equivalent is therefore input-side only—not an invented full-inference
-                            value.
+                            Its OpenRouter equivalent is therefore input side only. This is not an invented
+                            full inference value.
                           {/if}
                         </div>
                       {/if}
@@ -3406,7 +3395,7 @@
                           >
                           <div class="text-right">
                             <div class="font-mono font-semibold text-[var(--color-text-primary)]">
-                              ${cli.apiValueMinUsd.toFixed(4)}–${cli.apiValueMaxUsd.toFixed(4)}
+                              ${cli.apiValueMinUsd.toFixed(4)} to ${cli.apiValueMaxUsd.toFixed(4)}
                             </div>
                             {#if (cli.apiValueCoverage === 'full' ? cli.apiFreshValueUsd : cli.apiFreshInputValueUsd) !== undefined}
                               <div class="text-[9px] text-[var(--color-text-muted)]">
@@ -3442,10 +3431,11 @@
                         </div>
                       {/if}
                       {#each cli.quotas as q (q.label)}
+                        {@const remainingPercent = Math.max(0, 100 - q.usedPercent)}
                         <div>
                           <div class="flex items-center justify-between text-[11px] mb-1">
                             <span class="text-[var(--color-text-secondary)] font-medium"
-                              >{q.label} quota</span
+                              >{q.label}</span
                             >
                             <span
                               class="font-mono font-bold"
@@ -3455,7 +3445,7 @@
                                   ? 'var(--color-warning)'
                                   : 'var(--color-text-secondary)'};"
                             >
-                              {q.usedPercent.toFixed(0)}% burned{q.resetsAt
+                              {remainingPercent.toFixed(0)}% left{q.resetsAt
                                 ? ` · resets ${new Date(q.resetsAt).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`
                                 : ''}
                             </span>
@@ -3467,7 +3457,7 @@
                               class="h-full rounded-full transition-all"
                               style="width: {Math.min(
                                 100,
-                                q.usedPercent,
+                                remainingPercent,
                               )}%; background: {q.usedPercent >= 90
                                 ? 'var(--color-error)'
                                 : q.usedPercent >= 70
@@ -3649,7 +3639,7 @@
                                         ? 'inference'
                                         : 'input'}
                                       <span class="font-mono text-[var(--color-text-secondary)]"
-                                        >${m.apiValueMinUsd.toFixed(4)}–${m.apiValueMaxUsd.toFixed(
+                                        >${m.apiValueMinUsd.toFixed(4)} to ${m.apiValueMaxUsd.toFixed(
                                           4,
                                         )}</span
                                       ></span
@@ -3676,7 +3666,7 @@
                                 <div
                                   class="mt-0.5 text-[9px] text-[var(--color-text-muted)]"
                                   title={m.pricingHasThresholds
-                                    ? 'OpenRouter publishes prompt-size pricing thresholds; Koryphaios applies them to each recorded request.'
+                                    ? 'OpenRouter publishes prompt size pricing thresholds. Koryphaios applies them to each recorded request.'
                                     : 'Official OpenRouter per-token pricing'}
                                 >
                                   OpenRouter $/M: fresh
@@ -3705,7 +3695,9 @@
                           <div
                             class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
                           >
-                            Installed model context{showSubscriptionApiEquivalent ? ' and OpenRouter rates' : ''}
+                            Installed model context{showSubscriptionApiEquivalent
+                              ? ' and OpenRouter rates'
+                              : ''}
                           </div>
                           {#each cli.modelCatalog as model (model.model)}
                             <div
@@ -3824,7 +3816,9 @@
                       <ProviderIcon provider={bal.provider} size={20} class="w-full h-full" />
                     </div>
                     <div class="text-lg font-black font-mono text-[var(--color-success)]">
-                      {bal.availableUsd != null ? `$${bal.availableUsd.toFixed(2)}` : '—'}
+                      {bal.availableUsd != null
+                        ? `$${bal.availableUsd.toFixed(2)}`
+                        : 'Not available'}
                     </div>
                     <div
                       class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold mt-1"
@@ -3839,49 +3833,87 @@
 
           <div class="space-y-4">
             <div class="ml-1">
-              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">Tracked API spend by provider</h3>
+              <h3 class="text-sm font-bold text-[var(--color-text-primary)]">
+                Tracked API spend by provider
+              </h3>
               <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
-                Expand a provider for exact model-level tracked spend. Unknown pricing stays unknown.
+                Expand a provider for exact model-level tracked spend. Unknown pricing stays
+                unknown.
               </p>
             </div>
             <div class="space-y-2">
               {#if billingCredits?.byProvider?.length}
                 {#each billingCredits.byProvider as prov (prov.name)}
-                  <div class="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]">
+                  <div
+                    class="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]"
+                  >
                     <button
                       type="button"
                       class="flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-[var(--color-surface-3)]"
                       aria-expanded={expandedBillingProviders[prov.name] ?? false}
-                      onclick={() => (expandedBillingProviders[prov.name] = !(expandedBillingProviders[prov.name] ?? false))}
+                      onclick={() =>
+                        (expandedBillingProviders[prov.name] = !(
+                          expandedBillingProviders[prov.name] ?? false
+                        ))}
                     >
-                      <span class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]" aria-hidden="true">
+                      <span
+                        class="w-4 shrink-0 text-[10px] text-[var(--color-text-muted)]"
+                        aria-hidden="true"
+                      >
                         {expandedBillingProviders[prov.name] ? '▼' : '▶'}
                       </span>
-                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-1.5">
+                      <span
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-3)] p-1.5"
+                      >
                         <ProviderIcon provider={prov.name} size={20} class="h-full w-full" />
                       </span>
                       <span class="min-w-0 flex-1">
-                        <span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]">{getProviderDisplayLabel(prov.name)}</span>
-                        <span class="text-[10px] font-mono text-[var(--color-text-muted)]">{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span>
+                        <span
+                          class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
+                          >{getProviderDisplayLabel(prov.name)}</span
+                        >
+                        <span class="text-[10px] font-mono text-[var(--color-text-muted)]"
+                          >{formatTokens((prov.tokensIn ?? 0) + (prov.tokensOut ?? 0))} tokens</span
+                        >
                       </span>
                       <span class="text-right">
-                        <span class="block text-xs font-mono font-bold text-[var(--color-text-secondary)]">
-                          {prov.hasKnownCost === false ? '$?.??' : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
+                        <span
+                          class="block text-xs font-mono font-bold text-[var(--color-text-secondary)]"
+                        >
+                          {prov.hasKnownCost === false
+                            ? '$?.??'
+                            : formatBillingUsd(prov.spendUsd ?? (prov.spendCents ?? 0) / 100)}
                         </span>
-                        {#if prov.pricingIncomplete}<span class="text-[9px] text-[var(--color-warning)]">pricing incomplete</span>{/if}
+                        {#if prov.pricingIncomplete}<span
+                            class="text-[9px] text-[var(--color-warning)]">pricing incomplete</span
+                          >{/if}
                       </span>
                     </button>
                     {#if expandedBillingProviders[prov.name]}
-                      <div class="border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2">
+                      <div
+                        class="border-t border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2"
+                      >
                         {#each prov.models ?? [] as model (model.model)}
                           <div class="flex items-center justify-between gap-3 py-2 text-[11px]">
                             <div class="min-w-0">
-                              <div class="truncate font-mono text-[var(--color-text-secondary)]">{model.model}</div>
-                              <div class="text-[9px] text-[var(--color-text-muted)]">{formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens</div>
+                              <div class="truncate font-mono text-[var(--color-text-secondary)]">
+                                {model.model}
+                              </div>
+                              <div class="text-[9px] text-[var(--color-text-muted)]">
+                                {formatTokens((model.tokensIn ?? 0) + (model.tokensOut ?? 0))} tokens
+                              </div>
                             </div>
-                            <div class="shrink-0 text-right font-mono font-semibold text-[var(--color-text-primary)]">
-                              {model.hasKnownCost === false ? '$?.??' : formatBillingUsd(model.spendUsd ?? (model.spendCents ?? 0) / 100)}
-                              {#if model.pricingIncomplete}<div class="text-[9px] font-sans font-normal text-[var(--color-warning)]">incomplete</div>{/if}
+                            <div
+                              class="shrink-0 text-right font-mono font-semibold text-[var(--color-text-primary)]"
+                            >
+                              {model.hasKnownCost === false
+                                ? '$?.??'
+                                : formatBillingUsd(model.spendUsd ?? (model.spendCents ?? 0) / 100)}
+                              {#if model.pricingIncomplete}<div
+                                  class="text-[9px] font-sans font-normal text-[var(--color-warning)]"
+                                >
+                                  incomplete
+                                </div>{/if}
                             </div>
                           </div>
                         {/each}
@@ -3890,11 +3922,130 @@
                   </div>
                 {/each}
               {:else}
-                <div class="py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl">
-                  <p class="text-xs text-[var(--color-text-muted)]">No tracked API usage recorded yet</p>
+                <div
+                  class="py-12 text-center border-2 border-dashed border-[var(--color-border)] rounded-2xl"
+                >
+                  <p class="text-xs text-[var(--color-text-muted)]">
+                    No tracked API usage recorded yet
+                  </p>
                 </div>
               {/if}
             </div>
+          </div>
+
+          <div
+            class="space-y-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+          >
+            <button
+              type="button"
+              class="flex w-full items-center gap-3 text-left"
+              aria-expanded={billingControlsExpanded}
+              aria-controls="billing-controls-body"
+              onclick={() => (billingControlsExpanded = !billingControlsExpanded)}
+            >
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-bold text-[var(--color-text-primary)]"
+                  >Billing controls</span
+                >
+                <span class="mt-1 block text-[10px] text-[var(--color-text-muted)]">
+                  Choose which providers contribute to Billing totals and live balance probes.
+                  {#if billingCredits?.availableBillingProviders?.length}
+                    {billingCredits.availableBillingProviders.filter((provider: string) =>
+                      billingProviderIncluded(provider),
+                    ).length} of {billingCredits.availableBillingProviders.length} included.
+                  {/if}
+                </span>
+              </span>
+              <span
+                class="shrink-0 text-[10px] font-semibold text-[var(--color-text-muted)]"
+                aria-hidden="true"
+              >
+                {billingControlsExpanded ? 'Hide' : 'Show'}
+              </span>
+              <ChevronDown
+                size={16}
+                class="shrink-0 text-[var(--color-text-muted)] transition-transform {billingControlsExpanded
+                  ? 'rotate-180'
+                  : ''}"
+              />
+            </button>
+            {#if billingControlsExpanded}
+              <div id="billing-controls-body" class="space-y-3">
+                <SettingsSwitch
+                  compact
+                  checked={showSubscriptionApiEquivalent}
+                  label="Show subscription API-equivalent values"
+                  description="Comparison value only. It is never added to tracked API spend."
+                  onchange={toggleSubscriptionApiEquivalent}
+                />
+                {#if billingCredits?.availableBillingProviders?.length}
+                  <div class="relative">
+                    <Search
+                      size={13}
+                      class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+                    />
+                    <label for="billing-controls-search" class="sr-only"
+                      >Search billing providers</label
+                    >
+                    <input
+                      id="billing-controls-search"
+                      type="search"
+                      bind:value={billingControlsSearch}
+                      placeholder="Search providers..."
+                      class="h-9 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] pl-8 pr-8 text-xs text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] hover:border-[var(--color-border-bright)] focus-visible:border-[var(--color-accent)]"
+                    />
+                    {#if billingControlsSearch}
+                      <button
+                        type="button"
+                        aria-label="Clear billing provider search"
+                        onclick={() => (billingControlsSearch = '')}
+                        class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                      >
+                        <X size={12} />
+                      </button>
+                    {/if}
+                  </div>
+                  {@const billingControlsQuery = billingControlsSearch.trim().toLocaleLowerCase()}
+                  {@const filteredBillingProviders = (
+                    billingCredits.availableBillingProviders as string[]
+                  ).filter((provider: string) => {
+                    if (!billingControlsQuery) return true;
+                    return (
+                      provider.toLocaleLowerCase().includes(billingControlsQuery) ||
+                      getProviderDisplayLabel(provider)
+                        .toLocaleLowerCase()
+                        .includes(billingControlsQuery)
+                    );
+                  })}
+                  {#if filteredBillingProviders.length}
+                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {#each filteredBillingProviders as provider (provider)}
+                        <SettingsSwitch
+                          compact
+                          checked={billingProviderIncluded(provider)}
+                          label={getProviderDisplayLabel(provider)}
+                          description="Include this provider in Billing"
+                          onchange={() => void toggleBillingProvider(provider)}
+                        />
+                      {/each}
+                    </div>
+                  {:else}
+                    <div
+                      class="rounded-xl border border-dashed border-[var(--color-border)] px-3 py-5 text-center"
+                    >
+                      <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                        No providers match “{billingControlsSearch.trim()}”
+                      </p>
+                      <button
+                        type="button"
+                        class="mt-2 min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                        onclick={() => (billingControlsSearch = '')}>Clear search</button
+                      >
+                    </div>
+                  {/if}
+                {/if}
+              </div>
+            {/if}
           </div>
         </div>
 
@@ -3938,7 +4089,7 @@
         <!-- Teams Tab -->
         <div
           class={activeTab === 'teams'
-            ? 'flex-1 overflow-y-auto px-6 py-8 sm:px-8 lg:px-12 lg:py-10 flex flex-col'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-8 sm:px-8 lg:px-12 lg:py-10 flex flex-col'
             : 'hidden'}
         >
           <div class="mx-auto flex w-full max-w-7xl flex-1 flex-col pb-16">
@@ -4309,7 +4460,7 @@
         <!-- Notes Tab -->
         <div
           class={activeTab === 'notes'
-            ? 'flex-1 overflow-y-auto px-6 py-5 space-y-8 w-full max-w-7xl mx-auto'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-8 w-full max-w-7xl mx-auto'
             : 'hidden'}
         >
           <div>
@@ -4317,9 +4468,8 @@
               Note Network
             </h3>
             <p class="text-xs" style="color: var(--color-text-muted);">
-              Obsidian-style note network — link notes with [[wikilinks]], visualise connections,
-              and explicitly choose which notes enter agent context. Pinning only changes list
-              order.
+              Obsidian style note network. Link notes with [[wikilinks]], visualise connections, and
+              explicitly choose which notes enter agent context. Pinning only changes list order.
             </p>
           </div>
 
@@ -4344,7 +4494,7 @@
             <SettingsSwitch
               checked={notesStore.settings.autoIncludeInContext}
               label="Include selected notes in agent context"
-              description="Only notes explicitly marked In context are eligible; pinned notes are unaffected"
+              description="Only notes explicitly marked In context are eligible. Pinned notes are unaffected"
               onchange={() =>
                 void notesStore.updateSettings({
                   autoIncludeInContext: !notesStore.settings.autoIncludeInContext,
@@ -4360,8 +4510,8 @@
                 </div>
                 <div class="text-xs mt-1" style="color: var(--color-text-muted);">
                   {(notesStore.settings.maxContextTokensEnabled ?? true)
-                    ? 'Use a custom 100–100,000 token limit for explicitly selected notes'
-                    : 'Custom limit off; the 100,000-token safety ceiling still applies'}
+                    ? 'Use a custom 100 to 100,000 token limit for explicitly selected notes'
+                    : 'Custom limit off. The 100,000 token safety ceiling still applies'}
                 </div>
               </div>
               <div class="flex items-start gap-4">
@@ -4435,7 +4585,7 @@
                 </div>
                 <p class="text-xs mt-1.5" style="color: var(--color-text-muted);">
                   Control what agents can do in the note network. Hidden tools are removed entirely
-                  — agents won't see them. YOLO mode still bypasses "Ask" prompts.
+                  Agents will not see them. YOLO mode still bypasses "Ask" prompts.
                 </p>
               </div>
               <button
@@ -4721,6 +4871,7 @@
 {#if showColorPicker}
   <ColorPickerModal
     open={showColorPicker}
+    target={colorPickerTarget}
     onClose={() => {
       showColorPicker = false;
     }}
@@ -4894,7 +5045,7 @@
     : 'Keep unsaved Agent settings edits?'}
   message={skillsHaveUnsavedChanges
     ? agentSettingsHaveUnsavedChanges
-      ? 'The Skills workspace has unsaved edits and Agent Preferences or Manager Notes have a local recovery draft. Closing now discards the in-memory skill edits; Agent editor drafts stay recoverable on this device.'
+      ? 'The Skills workspace has unsaved edits and Agent Preferences or Manager Notes have a local recovery draft. Closing now discards the skill edits held in memory. Agent editor drafts stay recoverable on this device.'
       : 'The Skills workspace has unsaved edits, including any in-progress new skill. Closing Settings now discards those in-memory edits.'
     : 'Agent Preferences or Manager Notes have unsaved edits. They are retained as a local recovery draft on this device and will be restored when you reopen Settings.'}
   confirmLabel={skillsHaveUnsavedChanges

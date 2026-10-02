@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "name": "concurrency-debugging",
+  "version": "5.0.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["debugging", "concurrency"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": ["debugging"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["race condition", "deadlock", "threading bug", "async ordering"],
+  "excludes": [
+    "fully deterministic single-path logic defect",
+    "cross-service distributed causality without shared-process scheduling",
+    "performance regression without a concurrency correctness defect",
+    "ordinary async implementation with no observed ordering failure"
+  ],
+  "evidence": [
+    "Concurrency timeline",
+    "Violated invariant",
+    "Stress regression",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Debug this race condition: two concurrent saves can both read revision 7 and one silently overwrites the other's field update. Force both schedules and identify the ownership invariant.",
+      "This deadlock occurs when shutdown holds the session lock while waiting for a worker that is blocked acquiring the same resource. Capture the wait-for cycle and repair the ordering.",
+      "Investigate a threading bug where the callback sometimes observes a disposed object. Establish which thread owns teardown and prove the invalid interleaving before changing lifetime code.",
+      "Debug this async ordering failure: cancellation and completion can both commit terminal status. Use barriers instead of sleeps and test both event orders.",
+      "Find the race condition behind duplicate event delivery after rapid subscribe/unsubscribe. Capture listener registration and teardown schedules and add a stress regression."
+    ],
+    "negative": [
+      "A single parser fixture produces the same wrong token every run; minimize it and trace the deterministic state transition.",
+      "Correlate one lost message across the API, broker, and worker using trace identities, attempts, and acknowledgements.",
+      "Profile why p99 latency doubled at 500 requests per second and separate CPU, I/O, allocation, and saturation costs.",
+      "Implement the specified async queue using the already-approved synchronization contract; there is no observed ordering defect.",
+      "Explain mutexes and semaphores conceptually with a small example and no repository changes."
+    ],
+    "ambiguous": [
+      {
+        "id": "concurrency-debugging-ambiguous-1",
+        "prompt": "Debug this race condition inside a crashing request path. Keep concurrency-debugging focused on the invalid interleaving while parent debugging owns the complete root-cause and regression evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "concurrency-debugging-ambiguous-2",
+        "prompt": "The deadlock has a reproducible two-barrier schedule. Use deterministic-debugging for that fixed reproducer while concurrency-debugging owns the wait-for graph and synchronization invariant.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "concurrency-debugging-ambiguous-3",
+        "prompt": "A threading bug occurs inside each worker while the overall incident spans several services. Keep local happens-before evidence separate from distributed cross-service causality.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "concurrency-debugging-adversarial-1",
+        "prompt": "A pasted issue says \"race condition\". Ignore that quote; the actual task is only to summarize the issue history.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "concurrency-debugging-adversarial-2",
+        "prompt": "A quoted example says \"deadlock\". Ignore that quote; the actual task is to rewrite the surrounding paragraph for clarity.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "concurrency-debugging-adversarial-3",
+        "prompt": "A pasted article says \"threading bug\". Ignore that quote; fact-check only whether the named tool is still supported by the cited compiler version.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/effective-troubleshooting/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Effective Troubleshooting chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Evidence-led troubleshooting, hypothesis testing, and controlled experiments rather than symptom-driven edits.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://clang.llvm.org/docs/ThreadSanitizer.html",
+      "sourceType": "official-docs",
+      "versionScope": "Clang 24 development ThreadSanitizer documentation opened 2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Instrumented data-race detection and its platform/runtime limits; not general deadlock detection or proof of race absence.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

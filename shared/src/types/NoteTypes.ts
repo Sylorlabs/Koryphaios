@@ -173,7 +173,7 @@ export interface NotesSettings {
  */
 export const CONTEXT_BUDGET_MIN_TOKENS = 100;
 export const CONTEXT_BUDGET_MAX_TOKENS = 100_000;
-export const DEFAULT_CONTEXT_BUDGET_TOKENS = 2_000;
+export const DEFAULT_CONTEXT_BUDGET_TOKENS = 8_000;
 
 export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
   enabled: true,

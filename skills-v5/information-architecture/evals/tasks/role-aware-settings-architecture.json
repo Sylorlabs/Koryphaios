@@ -1,0 +1,83 @@
+{
+  "id": "information-architecture-full-task-role-aware-settings",
+  "prompt": "Redesign the information architecture of a mature B2B application's settings. Existing controls are split across account, workspace, project, member, integration, security, billing, automation, and data-retention pages; labels were added by different teams; some destinations are duplicated; permissions vary by role; deep links are common in support; and customers report that they cannot predict where a control lives. Produce an implementation-ready IA proposal without redesigning control behavior or visual styling.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://information-architecture/role-aware-settings",
+    "requirements": [
+      "existing settings inventory and labels",
+      "role and scope matrix",
+      "support-search terms and findability complaints",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "settings-scope-relationship-model",
+      "assertion": "Account, workspace, project, member, integration, security, billing, automation, and retention concepts are organized from an explicit scope/relationship model rather than team ownership or current page history."
+    },
+    {
+      "id": "settings-primary-and-alternate-paths",
+      "assertion": "Each control has a predictable primary location; alternate paths or cross-links are intentional and do not create multiple ambiguous canonical destinations."
+    },
+    {
+      "id": "settings-language-grounding",
+      "assertion": "Labels are grounded in supplied customer/support search terms and concept meaning, with renamed concepts or redirects handled explicitly rather than invented from internal jargon."
+    },
+    {
+      "id": "settings-role-deeplink-orientation",
+      "assertion": "Role/permission differences and common deep links preserve orientation: unavailable controls are handled intentionally and a deep-linked user can determine the control's scope and surrounding location."
+    },
+    {
+      "id": "settings-evolution-boundary",
+      "assertion": "The IA includes migration, growth, and governance risks without inventing arbitrary maximum item counts or redesigning individual control behavior/visual styling."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "domain-and-organization-quality",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "concept and scope inventory",
+        "relationship model",
+        "organization rationale",
+        "specific labels",
+        "primary and alternate paths",
+        "permission-aware orientation"
+      ]
+    },
+    {
+      "id": "findability-and-evolution-quality",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "representative findability tasks",
+        "wrong-route recovery",
+        "deep-link behavior",
+        "migration considerations",
+        "growth and governance risks",
+        "no invented fixed-count rules"
+      ]
+    },
+    {
+      "id": "blind-ia-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "concept and relationship inventory",
+    "organization and labeling rationale",
+    "navigation and alternate-path model",
+    "findability evaluation plan",
+    "growth and migration risks"
+  ],
+  "requiredArtifacts": [
+    "information-architecture-proposal",
+    "findability-test-plan",
+    "paired-experiment-report"
+  ]
+}

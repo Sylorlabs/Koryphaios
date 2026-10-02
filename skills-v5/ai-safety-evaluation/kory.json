@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "name": "ai-safety-evaluation",
+  "version": "5.0.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "safety", "evaluation", "security"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5900,
+  "broader": ["security-review"],
+  "facets": ["application-security", "privacy-engineering"],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "ai safety evaluation",
+    "ai safety eval",
+    "ai red teaming",
+    "model safety testing",
+    "safeguard robustness evaluation",
+    "jailbreak evaluation",
+    "prompt injection evaluation",
+    "agent safety evaluation",
+    "agentic ai safety",
+    "harmful capability evaluation",
+    "misuse evaluation",
+    "tricky prompts",
+    "unexpected user inputs",
+    "chatbot safety behavior",
+    "agent safety"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Risk/claim matrix linking each scenario to harm, actor, prerequisites, system boundary, and severity",
+    "Exact tested system identity including model, prompts, tools, data, permissions, safeguards, harness, and attempt/resource budget",
+    "Adversarial and benign-control run artifacts with attack success, utility, and deterministic side-effect/denial checks",
+    "Validity checks for broken tasks, contamination, scorer or reward hacking, refusal artifacts, evaluator leakage, and evaluation awareness when applicable",
+    "Mitigation regression results plus residual-risk record with confirmed failures preserved",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design an AI safety evaluation for our support agent that can read email and issue refunds; test indirect prompt injection, unauthorized tool use, and secret exfiltration while measuring benign task completion.",
+      "Red-team this LLM safeguard against multi-turn jailbreak attempts and report attack success, severity, attacker budget, benign false refusals, and regression cases.",
+      "Build a model safety testing suite for misuse risks in this assistant, with policy-labeled cases, adversarial variants, deterministic checks where possible, and before/after mitigation results.",
+      "Evaluate agentic AI safety for a coding agent with shell and repository tools: test over-delegation, instruction injection from untrusted files, permission-boundary violations, and recovery behavior.",
+      "Run a safeguard robustness evaluation after this system-prompt and policy-filter change, keeping the harness and attack budget fixed and checking both harmful-case blocking and allowed-user utility."
+    ],
+    "negative": [
+      "Benchmark two chat models on answer accuracy, latency, cost, and style preference using a held-out QA set; there is no safety or harm claim.",
+      "Review this REST API for broken object-level authorization and session fixation; the application does not use an AI model.",
+      "Map what personal data we collect, why we retain it, who can access it, and how deletion requests propagate through storage.",
+      "Verify that ordinary users cannot call the admin endpoint and that tenant isolation fails closed; no AI behavior is involved.",
+      "Evaluate a fraud classifier's calibration, precision/recall, subgroup performance, and drift on a labeled validation set."
+    ],
+    "ambiguous": [
+      {
+        "id": "ai-safety-evaluation-ambiguous-1",
+        "prompt": "Compare two agents on ordinary task success, but also determine whether either can be induced to take a prohibited high-impact action under a defined attacker budget. Keep generic agent-quality scoring in llm-evaluation and own the AI safety evaluation of the prohibited-action claim here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "quality-vs-safety"]
+      },
+      {
+        "id": "ai-safety-evaluation-ambiguous-2",
+        "prompt": "The agent has a normal authorization bug to review, and we also need a prompt injection evaluation showing whether untrusted retrieved text can make the model cross that authorization boundary. Separate the application-security finding from the AI safety attack-success evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security", "security-verification"],
+        "tags": ["ambiguous", "appsec-vs-ai-safety"]
+      },
+      {
+        "id": "ai-safety-evaluation-ambiguous-3",
+        "prompt": "Review the assistant's sensitive-data lifecycle, and separately run an agent safety evaluation to see whether indirect instructions can cause disclosure of a synthetic canary secret through an allowed tool. Keep privacy governance and adversarial safety evidence distinct.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["privacy-engineering"],
+        "tags": ["ambiguous", "privacy-vs-safety"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "ai-safety-evaluation-adversarial-1",
+        "prompt": "Do not run an AI safety evaluation. The design document contains a completed historical safety-review request, but the current task is only to compare response latency and factual accuracy on a benign QA benchmark.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "ai-safety-evaluation-adversarial-2",
+        "prompt": "Do not perform model safety testing. Fix the non-AI service's missing authorization check and add a negative integration test for the admin endpoint.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security", "security-verification"],
+        "tags": ["adversarial", "negated"]
+      },
+      {
+        "id": "ai-safety-evaluation-adversarial-3",
+        "prompt": "Do not run a prompt injection evaluation. Explain at a high level what indirect prompt injection means for an architecture review, without designing attacks, datasets, scorers, or a safety test suite.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "explanation-only", "negated"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI 600-1 Generative Artificial Intelligence Profile, publication page updated 2026-04-08",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Primary risk-management reference for framing generative-AI risks, lifecycle measurement, and risk-specific evaluation rather than a single undifferentiated safety score."
+    },
+    {
+      "url": "https://openai.com/index/trustworthy-third-party-evaluations-foundations/",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI third-party evaluation playbook published 2026-05-29",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Claim-first evaluation design, harness and budget disclosure, strong elicitation for safeguard claims, and validity checks for contamination, broken tasks, refusals, reward hacking, and evaluation awareness."
+    },
+    {
+      "url": "https://genai.owasp.org/resource/genai-red-teaming-guide/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP GenAI Red Teaming Guide as available 2026-09-04",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 90,
+      "license": "See OWASP project licensing and attribution terms",
+      "notes": "Risk-based red-team methodology spanning model evaluation, implementation testing, infrastructure, and runtime behavior."
+    },
+    {
+      "url": "https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP GenAI LLM Top 10 2026, released 2026-08-03",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 90,
+      "license": "See OWASP project licensing and attribution terms",
+      "notes": "Current application-level GenAI risk taxonomy for choosing relevant security/safety slices; use as scenario input, not as a complete evaluation protocol."
+    },
+    {
+      "url": "https://atlas.mitre.org/",
+      "sourceType": "official-docs",
+      "versionScope": "MITRE ATLAS living knowledge base as available 2026-09-04",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Empirical adversary tactics, techniques, mitigations, and case studies across predictive, generative, and agentic AI; useful for threat-model and scenario coverage."
+    },
+    {
+      "url": "https://github.com/UKGovernmentBEIS/inspect_ai",
+      "sourceType": "reference-implementation",
+      "versionScope": "UK AI Security Institute Inspect AI main as available 2026-09-04",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Evaluation harness pattern for composable datasets, agents/tools, multi-turn trajectories, sandboxed execution, and deterministic or model-graded scorers."
+    },
+    {
+      "url": "https://arxiv.org/abs/2402.04249",
+      "sourceType": "community-pattern",
+      "versionScope": "HarmBench paper and benchmark methodology as published/revised on arXiv",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Research pattern for standardized automated red-teaming comparisons and robust-refusal evaluation across attacks, targets, and defenses; not normative authority."
+    },
+    {
+      "url": "https://arxiv.org/abs/2406.13352",
+      "sourceType": "community-pattern",
+      "versionScope": "AgentDojo paper and dynamic prompt-injection benchmark methodology as published/revised on arXiv",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Research pattern for realistic tool-using agent tasks, indirect prompt-injection attacks, benign utility measurement, and adaptive attack/defense evaluation; not normative authority."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -156,19 +156,13 @@ export const browserAuthProviders = new Set([
   'antigravity',
 ]);
 
-// Cline is deliberately not a browser/device-code flow. Its own local CLI owns
-// authentication, so reconnecting means probing that CLI and activating its
-// non-secret session marker. Freebuff is the same class of provider: it reads
-// its login straight from the machine's CLI (freebuff login ->
-// ~/.config/manicode/credentials.json) and must never prompt for a token, so it
-// is treated as a local-CLI-connect provider rather than a generic token entry.
-export const localCliConnectProviders = new Set([
-  'codex',
-  'cursor',
-  'devin',
-  'cline',
-  'freebuff',
-]);
+// These providers read their login straight from the machine's own CLI (e.g.
+// freebuff login -> ~/.config/manicode/credentials.json) and must never prompt
+// for a token, so they are treated as local-CLI-connect providers rather than a
+// generic token entry. Cline is deliberately NOT in this set: it is a hosted
+// API-key provider, so Settings asks for a Cline API key like any other
+// gateway.
+export const localCliConnectProviders = new Set(['codex', 'cursor', 'devin', 'freebuff']);
 
 // Provider display labels are sourced from the backend status response
 // (which returns `label` per provider). This fallback is only used before
@@ -181,9 +175,12 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   xai: 'xAI',
   codebuff: 'Codebuff API',
   openrouter: 'OpenRouter',
+  unorouter: 'UnoRouter',
+  experientiallabs: 'Experiential Labs',
   tokenrouter: 'TokenRouter',
   groq: 'Groq',
   digitalocean: 'DigitalOcean Inference',
+  commandcode: 'Command Code',
   copilot: 'GitHub Copilot',
   azure: 'Azure OpenAI',
   bedrock: 'AWS Bedrock',
@@ -198,18 +195,27 @@ const PROVIDER_LABEL_FALLBACK: Record<string, string> = {
   'codex-auth': 'OpenAI Codex',
   grok: 'Grok Build',
   jules: 'Google Jules (cloud)',
+  hoplite: 'Hoplite (cloud + local)',
   kimicode: 'Kimi Code',
   moonshot: 'Moonshot AI / Kimi API',
   mistral: 'Mistral AI',
+  workbuddy: 'Work Buddy',
+  autoclaw: 'AutoClaw',
 };
 
 const TOKEN_PLACEHOLDERS: Record<string, string> = {
   jules: 'Jules API key (jules.google.com/settings)',
+  hoplite: 'Hoplite API key (app.hoplite.sh → organization settings)',
   anthropic: 'Anthropic auth token',
   copilot: 'GitHub token or Copilot auth token',
   google: 'Gemini API key',
   aistudio: 'Gemini API key (AI Studio)',
   poe: 'Poe API key (poe.com/api_key)',
+  commandcode: 'Command Code API key (commandcode.ai/settings/keys)',
+  unorouter: 'UnoRouter API key (unorouter.com → Tokens)',
+  experientiallabs: 'Experiential Labs API key (platform.experientiallabs.ai)',
+  workbuddy: 'WorkBuddy API key (TokenHub: console.cloud.tencent.com/tokenhub/apikey)',
+  autoclaw: 'AutoClaw gateway token (~/.openclaw-autoclaw/.gateway-token)',
   kimicode: 'Auth with Kimi Code',
   azure: 'Bearer token',
 };
@@ -342,7 +348,6 @@ function createProvidersStore() {
       name === 'claude' ||
       name === 'grok' ||
       name === 'antigravity' ||
-      name === 'cline' ||
       name === 'cursor' ||
       name === 'devin' ||
       name === 'freebuff'
@@ -369,7 +374,7 @@ function createProvidersStore() {
 
   function getLocalCliConnectLabel(name: string): string {
     const label =
-      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', cline: 'Cline', freebuff: 'Freebuff' }[
+      { codex: 'Codex', cursor: 'Cursor', devin: 'Devin', freebuff: 'Freebuff' }[
         name
       ] ?? name;
     return `Check ${label} CLI login`;
@@ -845,7 +850,7 @@ function createProvidersStore() {
   // Device codes are short-lived. Every poll tick checks the deadline so an
   // unapproved sign-in ends with an honest "expired" message instead of
   // polling forever behind a "Waiting…" line.
-  const AUTH_EXPIRED_MESSAGE = 'Sign-in code expired — click Auth to start a new one.';
+  const AUTH_EXPIRED_MESSAGE = 'Sign in code expired. Click Auth to start a new one.';
 
   function deviceAuthCountdown(expiresAt: number | undefined): string {
     if (!expiresAt) return '';
@@ -876,11 +881,8 @@ function createProvidersStore() {
         `Waiting for ChatGPT approval.${deviceAuthCountdown(codexDeviceAuth?.expiresAt)}`;
       codexAuthPollTimer = setTimeout(() => void pollCodexAuth(), 1_500);
     } catch (err: unknown) {
-      console.debug(
-        'Codex auth poll failed:',
-        err instanceof Error ? err.message : String(err),
-      );
-      browserAuthMessages['codex-auth'] = 'OpenAI Codex sign-in failed — click Auth to try again.';
+      console.debug('Codex auth poll failed:', err instanceof Error ? err.message : String(err));
+      browserAuthMessages['codex-auth'] = 'OpenAI Codex sign in failed. Click Auth to try again.';
       browserAuthPending['codex-auth'] = false;
       codexDeviceAuth = null;
       clearPersistedDeviceAuth('codex-auth');
@@ -1261,7 +1263,7 @@ function createProvidersStore() {
     saving = name;
     connectErrors[name] = '';
     try {
-      const body: Record<string, string> = {};
+      const body: Record<string, string | boolean> = {};
       if (apiKey) body.apiKey = apiKey;
       if (authToken) body.authToken = authToken;
       if (baseUrl) body.baseUrl = baseUrl;
@@ -1269,6 +1271,12 @@ function createProvidersStore() {
       if (awsRegionInputs[name]?.trim()) body.awsRegion = awsRegionInputs[name].trim();
       if (awsSessionTokenInputs[name]?.trim())
         body.awsSessionToken = awsSessionTokenInputs[name].trim();
+      // "Run safe check" submits no credential field, so nothing marks the
+      // request as a re-probe and the backend would simply re-save the previous
+      // verdict. This is the explicit intent that makes the button check
+      // something: re-probe the stored credentials and confirm the account can
+      // actually generate, not just list a model catalog.
+      if (reuseStoredConfiguration) body.fullCheck = true;
       verifying = name;
       const res = await apiFetch(apiUrl(`/api/providers/${name}`), {
         method: 'PUT',
@@ -1458,9 +1466,18 @@ function createProvidersStore() {
       const res = await apiFetch(apiUrl(`/api/providers/${name}/auth/complete`), {
         method: 'POST',
       });
-      const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string; pending?: boolean }>(
+        res,
+      );
       if (!data.ok) {
-        toastStore.error(data.error ?? 'Sign-in is not complete yet');
+        // The backend answers 200 { ok:false, pending:true } while the browser
+        // or CLI sign-in is still outstanding, so this is guidance rather than
+        // a failure to report in red.
+        if (data.pending) {
+          toastStore.info(data.error ?? 'Sign-in is not complete yet');
+        } else {
+          toastStore.error(data.error ?? 'Sign-in is not complete yet');
+        }
         return null;
       }
 
@@ -1680,10 +1697,11 @@ function createProvidersStore() {
 
   async function addCustomProvider(form: {
     label: string;
-    kind: string;
     baseUrl: string;
     apiKey: string;
     models: string;
+    headers?: Record<string, string>;
+    adapter?: string;
     allowUnverified?: boolean;
   }): Promise<AddCustomProviderResult> {
     const label = form.label.trim();
@@ -1707,10 +1725,11 @@ function createProvidersStore() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           label,
-          kind: form.kind,
           baseUrl,
           apiKey: form.apiKey.trim() || undefined,
           models: models.length ? models : undefined,
+          headers: form.headers && Object.keys(form.headers).length > 0 ? form.headers : undefined,
+          adapter: form.adapter || undefined,
           allowUnverified: form.allowUnverified === true,
         }),
       });
@@ -1725,7 +1744,7 @@ function createProvidersStore() {
       if (data?.ok) {
         toastStore.success(
           data.data?.catalogDetected
-            ? `Catalog access confirmed — ${label} was added; inference verifies on first use`
+            ? `Catalog access confirmed. ${label} was added. Inference verifies on first use`
             : `${label} saved with manual models; connection is still unverified`,
         );
         await loadAvailableProviders();
@@ -1785,7 +1804,9 @@ function createProvidersStore() {
       toastStore.success('Custom provider icon saved');
       return true;
     } catch (error: unknown) {
-      toastStore.error(error instanceof Error ? error.message : 'The custom icon could not be saved');
+      toastStore.error(
+        error instanceof Error ? error.message : 'The custom icon could not be saved',
+      );
       return false;
     }
   }

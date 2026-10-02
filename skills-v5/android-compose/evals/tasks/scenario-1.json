@@ -1,0 +1,82 @@
+{
+  "id": "android-compose-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Jetpack Compose edit screen whose text field is restored after rotation but whose selected account and pending-save state reset, causing an offline retry to write the note to the wrong account after process recreation. Establish which state is durable, saveable, and ephemeral; collect the repository flow with lifecycle awareness; keep navigation/back semantics native; and add tests for rotation, process recreation, offline failure, retry, and TalkBack labels. Do not introduce desktop or web UI abstractions.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://android-compose/offline-edit-state-restoration",
+    "requirements": [
+      "Compose screen with ViewModel-backed account data, a saveable draft, and a simulated process recreation path",
+      "offline save failure followed by retry after connectivity returns",
+      "two account fixtures that expose cross-account state leakage",
+      "TalkBack semantics and back-navigation assertions for the existing Android flow",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "android-compose-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "android-compose decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "android-compose-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "offline-edit-state-restoration scenario evidence",
+    "android-compose decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "android-compose-individual-scenario-1-result",
+    "android-compose-individual-scenario-1-verification",
+    "android-compose-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual android-compose boundary and relevant environment before acting, preserve the hierarchy relationship (broader=native-interface; near-neighbor=desktop-electron-tauri), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Separate durable domain state from composable state, collect flows with lifecycle awareness, use stable keys and state restoration intentionally, and keep navigation/back behavior aligned with platform conventions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Recomposition and process recreation cannot change the selected account or duplicate a save; only state that belongs to the view is recreated locally."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise configuration/process recreation, navigation/back, offline/error states, TalkBack-sensitive semantics, font scaling, permission denial, and representative physical-device behavior for hardware integrations."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not launch work from recomposition without lifecycle control, retain Activity references in long-lived state, assume preview behavior equals runtime, or ignore state restoration."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (android-compose decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

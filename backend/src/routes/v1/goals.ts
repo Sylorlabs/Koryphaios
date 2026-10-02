@@ -135,6 +135,40 @@ export const goalRoutes = new Elysia({ prefix: '/api/goals' })
       }),
     },
   )
+  .patch(
+    '/:id/checklist',
+    async ({ request, params, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);
+      // Deliberately not reachable through the generic `PATCH /:id`, which
+      // refuses checklist writes outright. That guard exists to stop status,
+      // evidence, and linked-chat state being patched by accident; this endpoint
+      // is the narrow, intentional path for editing the shape of the plan.
+      let goal: Goal | undefined;
+      try {
+        goal = await getContext().goals.editChecklistPlan(params.id, body.items);
+      } catch (error) {
+        throw new ConflictError(
+          error instanceof Error ? error.message : 'Could not edit the goal checklist',
+        );
+      }
+      if (!goal) throw new NotFoundError('Goal', params.id);
+      return { ok: true, data: sendUpdate(goal) };
+    },
+    {
+      body: t.Object({
+        items: t.Array(
+          t.Object({
+            // Omit for a new check; the store mints an ID.
+            id: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+            title: t.String({ minLength: 1, maxLength: 1_000 }),
+            order: t.Optional(t.Number()),
+            dependsOn: t.Optional(t.Array(t.String({ maxLength: 200 }))),
+          }),
+        ),
+      }),
+    },
+  )
   .post('/:id/pause', async ({ request, params }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     if (!(await getContext().goals.get(params.id))) throw new NotFoundError('Goal', params.id);

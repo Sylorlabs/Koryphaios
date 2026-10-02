@@ -13,14 +13,16 @@
  * works on macOS, Windows, and Linux without requiring bash.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_DIR = join(PROJECT_ROOT, 'backend');
 const BACKEND_TEST_TIMEOUT_MS = 60_000;
+/** A file slower than this is called out so slow tiers stay visible. */
+const SLOW_FILE_WARN_MS = 30_000;
 const LIVE_PROVIDER_TEST_FLAG = 'KORY_RUN_LIVE_PROVIDER_TESTS';
 const SAFE_HOST_ENV = new Set([
   'PATH',
@@ -110,7 +112,10 @@ function runBackendTests(
   testArguments: string[],
   testTargets: string[],
 ) {
-  return spawnSync(
+  // Capture per-file output instead of inheriting it: a flake is only
+  // actionable if the failing file's assertion detail survives the scroll past
+  // hundreds of files. The caller echoes it and persists it on failure.
+  const result = spawnSync(
     process.execPath,
     [
       '--no-env-file',
@@ -125,13 +130,46 @@ function runBackendTests(
     {
       cwd: PROJECT_ROOT,
       env: { ...env, DATABASE_URL: databaseUrl },
-      stdio: 'inherit',
+      stdio: ['inherit', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
     },
   );
+  return {
+    status: result.status ?? 1,
+    output: `${result.stdout?.toString() ?? ''}${result.stderr?.toString() ?? ''}`,
+  };
+}
+
+/** Explicit file selection keeps focused runs on the same database/credential
+ * boundary as CI. Bare Bun path filters must not be appended to every file. */
+export function parseTestSelection(args: string[], root = PROJECT_ROOT) {
+  const files: string[] = [];
+  const runnerArguments: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== '--file') {
+      runnerArguments.push(args[i]);
+      continue;
+    }
+    const value = args[++i];
+    if (!value || value.startsWith('-')) throw new Error('--file requires a backend test path');
+    const path = resolve(root, value);
+    const backendRelative = relative(join(root, 'backend'), path);
+    if (
+      isAbsolute(backendRelative) ||
+      backendRelative.startsWith(`..${sep}`) ||
+      backendRelative === '..' ||
+      !path.endsWith('.test.ts')
+    ) {
+      throw new Error('--file must name a .test.ts file inside backend');
+    }
+    if (!statSync(path).isFile()) throw new Error(`Not a test file: ${value}`);
+    if (!files.includes(path)) files.push(path);
+  }
+  return { files, runnerArguments };
 }
 
 function main() {
-  const runnerArguments = process.argv.slice(2);
+  const { files: selectedFiles, runnerArguments } = parseTestSelection(process.argv.slice(2));
   const singleProcess = runnerArguments.includes('--single-process');
   const testArguments = runnerArguments.filter((argument) => argument !== '--single-process');
   const testDbDir = mkdtempSync(join(tmpdir(), 'kory-test-'));
@@ -148,9 +186,10 @@ function main() {
         env,
         `sqlite:${join(testDbDir, 'db', 'suite.db')}`,
         testArguments,
-        [BACKEND_DIR],
+        selectedFiles.length ? selectedFiles : [BACKEND_DIR],
       );
-      exitCode = result.status ?? 1;
+      process.stdout.write(result.output);
+      exitCode = result.status;
       process.exitCode = exitCode;
       return;
     }
@@ -161,8 +200,8 @@ function main() {
       join(BACKEND_DIR, 'test'),
     ];
 
-    const testFiles: string[] = [];
-    for (const root of searchRoots) {
+    const testFiles: string[] = [...selectedFiles];
+    for (const root of selectedFiles.length ? [] : searchRoots) {
       try {
         gatherTestFiles(root, testFiles);
       } catch {
@@ -173,24 +212,50 @@ function main() {
     // Sort for deterministic ordering (matches `sort -z` in the old bash script).
     testFiles.sort();
 
-    let testIndex = 0;
+    if (testFiles.length === 0) throw new Error('No backend tests selected');
     const failedFiles: string[] = [];
+    const durations: Array<{ display: string; ms: number }> = [];
+    const failureLogDir = join(PROJECT_ROOT, 'backend', '.test-logs');
+    let testIndex = 0;
     for (const testFile of testFiles) {
       testIndex++;
       const display = relative(PROJECT_ROOT, testFile).split(sep).join('/');
+      const startedAt = Date.now();
       console.log(`Testing ${display}`);
       const dbUrl = `sqlite:${join(testDbDir, 'db', `${testIndex}.db`)}`;
 
       const result = runBackendTests(env, dbUrl, testArguments, [testFile]);
+      const elapsedMs = Date.now() - startedAt;
+      durations.push({ display, ms: elapsedMs });
+      process.stdout.write(result.output);
+      if (elapsedMs > SLOW_FILE_WARN_MS) {
+        console.log(`  (slow: ${(elapsedMs / 1000).toFixed(1)}s)`);
+      }
 
       if (result.status !== 0) {
-        exitCode = result.status ?? 1;
         failedFiles.push(display);
+        exitCode = result.status;
+        // Persist the assertion detail. Without this a flake is reported by
+        // filename only, which is not enough to tell a timeout apart from a
+        // real regression the next time it happens.
+        mkdirSync(failureLogDir, { recursive: true });
+        const logPath = join(failureLogDir, `${display.replaceAll('/', '__')}.log`);
+        writeFileSync(
+          logPath,
+          `command: bun test ${testArguments.join(' ')} ${testFile}\nelapsed: ${elapsedMs}ms\nexit: ${result.status}\n\n${result.output}`,
+        );
+        console.error(`  failure log: ${relative(PROJECT_ROOT, logPath).split(sep).join('/')}`);
         // Keep going so the user sees all failures, not just the first.
       }
     }
-    // Per-file output is long; restate failures at the end so a bounded CI
-    // log tail still names the files that need attention.
+
+    console.log(
+      `Backend files: ${testFiles.length - failedFiles.length} passed, ${failedFiles.length} failed`,
+    );
+    const slowest = [...durations].sort((a, b) => b.ms - a.ms).slice(0, 5);
+    console.log(
+      `Slowest files: ${slowest.map((entry) => `${entry.display} (${(entry.ms / 1000).toFixed(1)}s)`).join(', ')}`,
+    );
     if (failedFiles.length > 0) {
       console.error(`\nBackend test files failed (${failedFiles.length}):`);
       for (const file of failedFiles) console.error(`  - ${file}`);

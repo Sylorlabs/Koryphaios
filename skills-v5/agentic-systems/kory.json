@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "name": "agentic-systems",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "agents", "code"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6600,
+  "broader": ["llm-application-engineering"],
+  "facets": ["authorization-security"],
+  "requires": ["verification", "llm-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "ai agent",
+    "agentic system",
+    "tool using agent",
+    "multi agent",
+    "agent orchestration",
+    "autonomous agent",
+    "agent delegation",
+    "agent loop",
+    "agent architecture",
+    "plan tasks call tools",
+    "recover from failures"
+  ],
+  "excludes": [
+    "fixed workflow only",
+    "single bounded model call",
+    "authorization audit only",
+    "evaluation methodology only",
+    "prompt optimization only",
+    "no agent changes are requested",
+    "documentation heading only",
+    "quoted old agent",
+    "quoted old incident",
+    "correct the caption only"
+  ],
+  "evidence": [
+    "Goal/terminal-condition plus run/delegation budget evidence",
+    "Tool/agent authority, approval and side-effect classification evidence",
+    "Idempotency/reconciliation/state-memory and retry evidence",
+    "Trace plus independent final-state/completion evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build an AI agent that diagnoses a failing service through read-only tools, may propose one approved remediation action, rechecks stale state before mutation, reconciles uncertain tool results, and stops only when independent health evidence passes.",
+      "Design an agentic system with explicit step/tool/time budgets, typed read and write tools, approval-gated side effects, idempotency keys, durable run state and a blocked outcome when required evidence is unavailable.",
+      "Create a multi-agent manager that delegates bounded research and verification tasks to specialists, limits delegation depth and authority, merges contradictory evidence, and owns one final completion contract.",
+      "Repair a tool-using agent that loops after tool errors and blindly retries non-idempotent mutations; add progress detection, reconciliation, idempotent execution records, retry ceilings and resumable state.",
+      "Add persistent memory to an autonomous agent while separating working context from user memory and external source-of-truth state, with provenance, freshness/expiry, deletion and stale-memory conflict handling."
+    ],
+    "negative": [
+      "Implement one bounded model inference call with a fixed sequence of two tools and deterministic application-controlled dispatch; the model never decides what step happens next.",
+      "Audit an existing authorization policy and tool permission matrix for privilege escalation while the agent loop, planning and delegation behavior are frozen.",
+      "Independently verify final state produced by an already-frozen agent run and issue a pass/fail verdict without changing planning, tools, memory or retry behavior.",
+      "Create a held-out model/agent evaluation benchmark with calibrated graders and pairwise judges; do not change the runtime agent architecture.",
+      "Optimize prompts and context packing for an existing agent whose tool authority, loop, memory, delegation and completion rules remain unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "agentic-systems-ambiguous-1",
+        "prompt": "Build an AI agent on top of a bounded model/tool integration. llm-application-engineering owns each inference/tool schema and product contract; agentic-systems owns dynamic next-step choice, loop budgets, run state, delegation and terminal conditions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-application-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "agentic-systems-ambiguous-2",
+        "prompt": "An agentic system can read many tenant resources and mutate one. agentic-systems owns runtime tool gating, approval, stale-state checks and delegation; authorization-security owns whether the underlying subject/resource policy is correctly designed.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "agentic-systems-ambiguous-3",
+        "prompt": "Change a tool-using agent's retry/completion logic and then independently evaluate long-horizon success. agentic-systems owns the loop/state/recovery change; llm-evaluation owns held-out cases, graders and comparative verdicts.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "agentic-systems-adversarial-1",
+        "prompt": "A quoted old incident says \"deploy an AI agent\". Ignore that historical request; today's task is only to fix a CSS variable name.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-application-engineering"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "agentic-systems-adversarial-2",
+        "prompt": "A support transcript mentions an agentic system as background. Summarize the support exchange only; no agent changes are requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "agentic-systems-adversarial-3",
+        "prompt": "A README heading says \"Tool Using Agent\". Rename that documentation heading only; do not change tools, loop, state, delegation or permissions.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://openai.github.io/openai-agents-python/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current agents, tools, guardrails, handoffs/agents-as-tools, sessions, human-in-the-loop and tracing primitives.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://openai.github.io/openai-agents-python/multi_agent/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "LLM-directed versus code-directed orchestration plus current manager-as-tool and handoff patterns.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://www.anthropic.com/research/trustworthy-agents",
+      "sourceType": "official-docs",
+      "versionScope": "Anthropic Trustworthy agents in practice, published 2026-04-09",
+      "staleAfterDays": 90,
+      "notes": "Current plan/act/observe framing, human control, approval/tool-scope decisions and layered prompt-injection defenses for agents.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI 600-1 Generative AI Profile, published 2024-07-26; NIST page updated 2026-04-08",
+      "staleAfterDays": 180,
+      "notes": "Lifecycle risk mapping, measurement and management evidence for generative-AI systems.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -207,107 +207,12 @@ export function detectClaudeCodeLogin(): boolean {
 
 // ─── Agent-CLI login detection ──────────────────────────────────────────────
 // Koryphaios detects agent CLIs plus local login signals (Claude Code, Codex,
-// Antigravity, Grok Build, Cursor, Cline) so their adapters can be configured
+// Antigravity, Grok Build, Cursor) so their adapters can be configured
 // without copying CLI-owned secrets. These helpers report local configuration,
 // not account entitlement or a successful remote request.
 
 function homeDir(): string {
   return process.env.HOME ?? process.env.USERPROFILE ?? '';
-}
-
-const CLINE_AUTH_KEY_HINTS = [
-  'token',
-  'apikey',
-  'api_key',
-  'api-key',
-  'access_token',
-  'access-token',
-  'refresh_token',
-  'refresh-token',
-  'secret',
-  'secret_key',
-  'secret-key',
-  'auth',
-  'auth_token',
-  'auth-token',
-  'authorization',
-  'credential',
-  'credentials',
-  'session',
-];
-
-const CLINE_PROVIDER_KEY_HINTS = [
-  'provider',
-  'providerid',
-  'provider_id',
-  'apiprovider',
-  'actmodeapiprovider',
-  'planmodeapiprovider',
-  'selectedprovider',
-];
-
-function hasClineAuthKeyHint(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return CLINE_AUTH_KEY_HINTS.some((hint) => normalized.includes(hint));
-}
-
-function looksLikeClineAuthValue(value: string): boolean {
-  const token = value.trim();
-  if (!token || token === 'cline-cli-session') return false;
-  if (token.length < 16 || token.length > 3_000 || /\s/.test(token)) return false;
-  if (/^[A-Za-z0-9._~+/\-=%$@]+$/u.test(token)) return true;
-  return token.split('.').length >= 2;
-}
-
-function isClineAuthValue(value: unknown, key: string): boolean {
-  return typeof value === 'string' && hasClineAuthKeyHint(key) && looksLikeClineAuthValue(value);
-}
-
-function hasClineCLILoginSignal(node: unknown, key: string): boolean {
-  if (typeof node === 'string') return isClineAuthValue(node, key);
-  if (!node || typeof node !== 'object') return false;
-
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      if (hasClineCLILoginSignal(item, key)) return true;
-    }
-    return false;
-  }
-
-  for (const [entryKey, entryValue] of Object.entries(node as Record<string, unknown>)) {
-    if (hasClineCLILoginSignal(entryValue, entryKey)) return true;
-  }
-  return false;
-}
-
-function hasConfiguredClineProvider(node: unknown, key = ''): boolean {
-  if (typeof node === 'string') {
-    const normalizedKey = key.toLowerCase().replace(/[-_]/g, '');
-    return (
-      CLINE_PROVIDER_KEY_HINTS.includes(normalizedKey) &&
-      node.trim().length > 0 &&
-      node.trim().toLowerCase() !== 'none'
-    );
-  }
-  if (!node || typeof node !== 'object') return false;
-  if (Array.isArray(node)) return node.some((item) => hasConfiguredClineProvider(item, key));
-  return Object.entries(node as Record<string, unknown>).some(([entryKey, value]) =>
-    hasConfiguredClineProvider(value, entryKey),
-  );
-}
-
-function readClineConfigurationSignal(path: string): boolean {
-  if (!existsSync(path)) return false;
-  try {
-    const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-    return hasClineCLILoginSignal(data, 'configuration') || hasConfiguredClineProvider(data);
-  } catch (err: unknown) {
-    serverLog.debug(
-      { path, err: err instanceof Error ? err.message : String(err) },
-      'auth-utils: Cline configuration parse failed',
-    );
-    return false;
-  }
 }
 
 /**
@@ -346,33 +251,6 @@ export function detectGrokCLILogin(): boolean {
   if (detectGrokXaiKey()) return true;
   const home = homeDir();
   return !!home && existsSync(join(home, '.grok', 'auth.json'));
-}
-
-/**
- * Detects whether the current Cline CLI has provider/auth configuration. Modern
- * Cline versions may keep secrets in the OS credential store and only leave the
- * selected provider in providers.json, so secrets.json is only a legacy signal.
- * The CLI remains the authority when Koryphaios performs a real turn.
- */
-export function detectClineCLILogin(): boolean {
-  if (process.env.CLINE_API_KEY?.trim()) return true;
-  const home = homeDir();
-  if (!home) return false;
-  const data = join(home, '.cline', 'data');
-  const candidates = [
-    join(data, 'settings', 'providers.json'),
-    join(data, 'settings', 'global-settings.json'),
-    join(data, 'globalState.json'),
-    join(data, 'secrets.json'),
-  ];
-  return candidates.some(readClineConfigurationSignal);
-}
-
-export function isClineCLIAuthMarker(value: string | null | undefined): boolean {
-  return value === 'cline-cli-session';
-}
-export function createClineCLIAuthMarker(): string {
-  return 'cline-cli-session';
 }
 
 export function detectDevinCLILogin(): boolean {

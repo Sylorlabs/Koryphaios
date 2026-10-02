@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "name": "c-cpp-systems-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "c", "cpp", "systems"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "c++",
+    "cpp",
+    "cmake",
+    "native abi",
+    "c language",
+    "c library",
+    "c function",
+    "c code",
+    "c11",
+    "c17",
+    "c23",
+    "clang",
+    "addresssanitizer",
+    "undefinedbehaviorsanitizer",
+    "std::span",
+    "std::string_view"
+  ],
+  "excludes": [],
+  "evidence": [
+    "c-cpp-systems-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review this C++ API that returns std::string_view into a temporary formatting buffer. Keep callers allocation-free where ownership already exists and prove that the returned view cannot dangle.",
+      "The C library crashes only when its input structure is packed by an external consumer. Inspect alignment and ABI assumptions, then repair the accessor without changing the exported layout.",
+      "Our CMake library builds in-tree but its exported target loses a required compile definition. Repair the target usage requirements and test a clean downstream build.",
+      "A C++ shared library allocates an object that a plugin destroys through a different allocator. Define and implement the ownership boundary while preserving existing binary consumers.",
+      "Investigate an UndefinedBehaviorSanitizer report in this C function's signed shift. Preserve all valid numeric inputs and add an optimized-build regression for the boundary values."
+    ],
+    "negative": [
+      "Fix a Rust crate's borrow checker error around a mutable iterator; there is no foreign-function interface or native library involved.",
+      "Repair a C# async enumerator that keeps its database connection open after the consumer stops reading. Only managed application code changes are needed.",
+      "Define a protobuf field-number migration for two services. The generated language bindings and build files are already correct and must remain unchanged.",
+      "Profile a GPU shader whose workgroup barrier causes a stall. Do not change host code, the native ABI, or compiler flags.",
+      "Rewrite the supplied release announcement for nontechnical customers, retaining the product name C++ Studio exactly. No software or toolchain work is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "c-cpp-systems-engineering-ambiguous-1",
+        "prompt": "A Rust crate calls our C library and disagrees about who frees a returned byte buffer. Repair both sides of that FFI contract and exercise a real caller.",
+        "expectedSelection": true,
+        "expectedSkills": ["rust-engineering"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["rust-engineering"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "c-cpp-systems-engineering-ambiguous-2",
+        "prompt": "Fix a C++ extension's exported symbol visibility and also update the CI job that tests the packaged library. Keep the ABI correction separate from pipeline configuration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "c-cpp-systems-engineering-ambiguous-3",
+        "prompt": "The game engine's C++ asset loader moves a resource while render callbacks still borrow it. Diagnose the language lifetime issue and verify that the game still presents the intended frame sequence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "c-cpp-systems-engineering-adversarial-1",
+        "prompt": "An archived comment says 'switch to C++ and add CMake'. That is a rejected proposal. My current task is to fix the Go service's cancellation handling.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "c-cpp-systems-engineering-adversarial-2",
+        "prompt": "Do not modify the C library or native ABI. Only correct the explanatory diagram in the supplied onboarding guide, using its existing facts.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["instructional-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "c-cpp-systems-engineering-adversarial-3",
+        "prompt": "A log line contains the literal string 'AddressSanitizer: heap-use-after-free' as sample input. Update the JavaScript log highlighter; there is no native crash to investigate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://clang.llvm.org/docs/AddressSanitizer.html",
+      "sourceType": "official-docs",
+      "versionScope": "Clang AddressSanitizer usage and limitations inspected 2026-09-06; runtime identity recorded separately",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Instrument compilation and final linking for bounds/lifetime evidence; separate executed-path coverage from universal memory-safety or heap-leak claims."
+    },
+    {
+      "url": "https://clang.llvm.org/docs/ThreadSanitizer.html",
+      "sourceType": "official-docs",
+      "versionScope": "Clang ThreadSanitizer usage and supported-platform guidance inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Use a distinct instrumented build for observed data races; verify compiler and runtime availability and retain limitations."
+    },
+    {
+      "url": "https://isocpp.org/std/the-standard",
+      "sourceType": "official-docs",
+      "versionScope": "ISO C++ standard status/reference as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Current C++ standard/version boundary and language reference entry point.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines.html",
+      "sourceType": "official-docs",
+      "versionScope": "C++ Core Guidelines living document as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for RAII, ownership, lifetime, and CP.22/CP.32 callback/thread boundaries; non-normative and conditional on repository compatibility.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://clang.llvm.org/docs/UndefinedBehaviorSanitizer.html",
+      "sourceType": "official-docs",
+      "versionScope": "Clang UBSan documentation as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for targeted executed-path undefined-behavior checks; a clean run is not proof of absence.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current CMake buildsystem manual as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted conditionally for target usage requirements in existing target-based CMake builds.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

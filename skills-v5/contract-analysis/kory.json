@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "contract-analysis",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "contracts", "documents"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3356,
+  "broader": ["reference-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "contract analysis",
+    "review this agreement",
+    "msa review",
+    "commercial terms review",
+    "vendor agreement",
+    "liability language",
+    "termination rights"
+  ],
+  "excludes": [],
+  "evidence": [
+    "contract-analysis decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle contract analysis.",
+      "The current task is review this agreement.",
+      "I need help with msa review.",
+      "Work on commercial terms review for this request.",
+      "This request specifically requires vendor agreement."
+    ],
+    "negative": [
+      "The only requested work is business case.",
+      "Please handle customer success only.",
+      "This task is limited to no dashes.",
+      "The current request is executive brief.",
+      "Work only on financial model."
+    ],
+    "ambiguous": [
+      {
+        "id": "contract-analysis-ambiguous-1",
+        "prompt": "The request includes contract analysis and business case.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "contract-analysis-ambiguous-2",
+        "prompt": "The request includes review this agreement and customer success.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "contract-analysis-ambiguous-3",
+        "prompt": "The request includes msa review and no dashes.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["dash-free-writing"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "contract-analysis-adversarial-1",
+        "prompt": "A historical note says \"contract analysis\". The current request is executive brief.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["executive-communication"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "contract-analysis-adversarial-2",
+        "prompt": "A historical note says \"review this agreement\". The current request is financial model.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["financial-modeling"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "contract-analysis-adversarial-3",
+        "prompt": "A historical note says \"msa review\". The current request is finops.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["finops-cloud-cost"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.law.cornell.edu/ucc/2/2-102",
+      "sourceType": "spec",
+      "versionScope": "Uniform Commercial Code model section 2-102 scope text inspected 2026-09-06; not a jurisdiction-specific enactment",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt transaction-type and legal-source boundaries. A goods provision is not authority over every service/software agreement; preserve need for applicable law and qualified review."
+    },
+    {
+      "url": "https://www.uniformlaws.org/acts/ucc",
+      "sourceType": "official-docs",
+      "versionScope": "Uniform Law Commission UCC materials as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Commercial-law reference for sales, obligations, remedies, and defined contract concepts; not a substitute for jurisdiction-specific legal advice.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

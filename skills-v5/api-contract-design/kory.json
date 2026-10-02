@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "name": "api-contract-design",
+  "version": "5.1.7",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "api"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 8000,
+  "broader": ["developer-experience"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "api design",
+    "public api contract",
+    "sdk api surface",
+    "api versioning",
+    "design an api",
+    "contracts versioning error responses"
+  ],
+  "excludes": [],
+  "evidence": [
+    "api-contract-design decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle api design.",
+      "The current task is public api contract.",
+      "I need help with sdk api surface.",
+      "Work on api versioning for this request.",
+      "This request specifically requires design an api."
+    ],
+    "negative": [
+      "The only requested work is implement backend behavior.",
+      "Please handle bun runtime only.",
+      "This task is limited to compiler runtime.",
+      "The current request is distributed system.",
+      "Work only on email delivery."
+    ],
+    "ambiguous": [
+      {
+        "id": "api-contract-design-ambiguous-1",
+        "prompt": "The request includes api design and implement backend behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["backend-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "api-contract-design-ambiguous-2",
+        "prompt": "The request includes public api contract and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "api-contract-design-ambiguous-3",
+        "prompt": "The request includes sdk api surface and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "api-contract-design-adversarial-1",
+        "prompt": "A historical note says \"api design\". The current request is distributed system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "api-contract-design-adversarial-2",
+        "prompt": "A historical note says \"public api contract\". The current request is email delivery.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["email-delivery"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "api-contract-design-adversarial-3",
+        "prompt": "A historical note says \"sdk api surface\". The current request is event driven architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["event-driven-architecture"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://spec.openapis.org/oas/latest.html",
+      "sourceType": "spec",
+      "versionScope": "Current OpenAPI Specification as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "HTTP API contract structure, schema, operation, response, and compatibility reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://spec.openapis.org/oas/v3.2.0.html",
+      "sourceType": "spec",
+      "versionScope": "OpenAPI Specification 3.2.0",
+      "staleAfterDays": 90,
+      "notes": "Exact operation, response, parameter, schema, security, callback, and link semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9457.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 9457",
+      "staleAfterDays": 365,
+      "notes": "Conditional HTTP Problem Details error representation.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc2104.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 2104",
+      "staleAfterDays": 365,
+      "notes": "HMAC reference for authenticated integrity when a continuation token must resist client tampering.",
+      "verifiedAt": "2026-09-13"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -173,11 +173,12 @@ describe('KoryManager State', () => {
 // ─── YOLO Mode Tests ──────────────────────────────────────────────────────
 
 describe('YOLO Mode', () => {
-  test('should toggle YOLO mode', () => {
-    kory.setYoloMode(true);
-    expect(kory.getIsYoloMode()).toBe(true);
-    kory.setYoloMode(false);
-    expect(kory.getIsYoloMode()).toBe(false);
+  test('resolves YOLO per chat instead of as a process-wide flag', () => {
+    // The websocket mirror no longer decides enforcement: each chat's durable
+    // approval preset does, so one chat's YOLO pill cannot un-sandbox another.
+    kory.setYoloMode(true, 'session-yolo');
+    kory.setYoloMode(false, 'session-guarded');
+    expect(kory.getIsYoloMode('session-yolo')).toBe(kory.getIsYoloMode('session-guarded'));
   });
 });
 

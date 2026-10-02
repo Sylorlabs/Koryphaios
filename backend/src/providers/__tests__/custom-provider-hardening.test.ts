@@ -54,6 +54,79 @@ describe('custom provider onboarding hardening', () => {
     expect(capturedAuthorization).toBe('Bearer sk-valid');
   });
 
+  test('falls back to /v1/models when a version-less Anthropic base serves HTML at /models', async () => {
+    // The Anthropic SDK owns the `/v1` segment, so a version-less root is the
+    // documented shape for an Anthropic-compatible deployment. Its web front
+    // end answers `/models` with 200 + HTML, which is not a verdict on the key.
+    const requested: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      requested.push(url);
+      if (url.endsWith('/v1/models')) {
+        return new Response(JSON.stringify({ data: [{ id: 'deepseek-v3.2' }] }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('<!DOCTYPE html><html><head><title>logfare</title></head></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }) as typeof fetch;
+
+    const result = await probeCustomProvider({
+      kind: 'anthropic',
+      baseUrl: 'https://logfare.ai',
+      apiKey: 'lfu_key',
+    });
+
+    expect(requested).toEqual(['https://logfare.ai/models', 'https://logfare.ai/v1/models']);
+    expect(result).toMatchObject({
+      success: true,
+      normalizedBaseUrl: 'https://logfare.ai',
+      models: ['deepseek-v3.2'],
+      canSaveUnverified: false,
+    });
+  });
+
+  test('still fails an Anthropic version-less base when no candidate serves a catalog', async () => {
+    const requested: string[] = [];
+    globalThis.fetch = (async (input) => {
+      requested.push(typeof input === 'string' ? input : input.url);
+      return new Response('<!DOCTYPE html><html></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' },
+      });
+    }) as typeof fetch;
+
+    const result = await probeCustomProvider({
+      kind: 'anthropic',
+      baseUrl: 'https://marketing-only.example',
+      apiKey: 'k',
+    });
+
+    expect(requested).toHaveLength(2);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('did not return valid JSON');
+  });
+
+  test('keeps a rejected Anthropic credential terminal on the first candidate', async () => {
+    const requested: string[] = [];
+    globalThis.fetch = (async (input) => {
+      requested.push(typeof input === 'string' ? input : input.url);
+      return new Response('{}', { status: 403 });
+    }) as typeof fetch;
+
+    const result = await probeCustomProvider({
+      kind: 'anthropic',
+      baseUrl: 'https://logfare.ai',
+      apiKey: 'bad-key',
+    });
+
+    // A 403 describes the credential, not the path: never retry it elsewhere.
+    expect(requested).toEqual(['https://logfare.ai/models']);
+    expect(result).toMatchObject({ success: false, status: 403, canSaveUnverified: false });
+  });
+
   test('never lets rejected credentials use the unverified escape hatch', async () => {
     globalThis.fetch = (async () => new Response('{}', { status: 401 })) as typeof fetch;
 
@@ -274,6 +347,83 @@ describe('custom provider onboarding hardening', () => {
         state: 'detected',
       });
       expect(requests).toBe(2);
+    } finally {
+      if (previousAutoDetect === undefined) delete process.env.KORY_DISABLE_CLI_AUTODETECT;
+      else process.env.KORY_DISABLE_CLI_AUTODETECT = previousAutoDetect;
+    }
+  });
+
+  test('the background scheduler never targets a provider whose credential probe failed', async () => {
+    const previousAutoDetect = process.env.KORY_DISABLE_CLI_AUTODETECT;
+    process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+    globalThis.fetch = (async () =>
+      new Response('{"error":"Invalid token"}', { status: 401 })) as typeof fetch;
+    try {
+      const registry = new ProviderRegistry();
+      registry.registerCustomProvider({
+        id: 'custom:rejected-target',
+        label: 'Rejected target',
+        kind: 'openai',
+        baseUrl: 'https://gateway.example/v1',
+        apiKey: 'bad-key',
+      });
+      expect(await registry.verifyConnection('custom:rejected-target')).toMatchObject({
+        success: false,
+      });
+
+      const targets = registry.listModelCatalogRefreshTargets().map((p) => p.name);
+      expect(targets).not.toContain('custom:rejected-target');
+    } finally {
+      globalThis.fetch = realFetch;
+      if (previousAutoDetect === undefined) delete process.env.KORY_DISABLE_CLI_AUTODETECT;
+      else process.env.KORY_DISABLE_CLI_AUTODETECT = previousAutoDetect;
+    }
+  });
+
+  test('the background scheduler targets only enabled, available, refreshable providers', async () => {
+    const previousAutoDetect = process.env.KORY_DISABLE_CLI_AUTODETECT;
+    process.env.KORY_DISABLE_CLI_AUTODETECT = '1';
+    try {
+      const registry = new ProviderRegistry();
+      let refreshes = 0;
+      registry.registerRemoteProvider({
+        name: 'remote-scheduler-target',
+        config: { name: 'remote-scheduler-target', disabled: false },
+        isAvailable: () => true,
+        listModels: () => [],
+        refreshModels: async () => {
+          refreshes += 1;
+        },
+        async *streamResponse() {},
+      } as Provider);
+      // A provider with no discovery hook serves a fixed list and must never be
+      // polled by the scheduler.
+      registry.registerRemoteProvider({
+        name: 'remote-no-hook',
+        config: { name: 'remote-no-hook', disabled: false },
+        isAvailable: () => true,
+        listModels: () => [],
+        async *streamResponse() {},
+      } as Provider);
+      // A disabled provider is configuration metadata, not a refresh target.
+      registry.registerRemoteProvider({
+        name: 'remote-disabled',
+        config: { name: 'remote-disabled', disabled: true },
+        isAvailable: () => false,
+        listModels: () => [],
+        refreshModels: async () => {
+          refreshes += 1;
+        },
+        async *streamResponse() {},
+      } as Provider);
+
+      const names = registry.listModelCatalogRefreshTargets().map((p) => p.name);
+      expect(names).toContain('remote-scheduler-target');
+      expect(names).not.toContain('remote-no-hook');
+      expect(names).not.toContain('remote-disabled');
+
+      await registry.refreshModelCatalog('remote-scheduler-target');
+      expect(refreshes).toBe(1);
     } finally {
       if (previousAutoDetect === undefined) delete process.env.KORY_DISABLE_CLI_AUTODETECT;
       else process.env.KORY_DISABLE_CLI_AUTODETECT = previousAutoDetect;

@@ -138,6 +138,7 @@ import { TurnRuntime } from './services/TurnRuntime';
 import {
   TurnOwnershipLostError,
   TurnStreamFailure,
+  SessionBusyError,
   type CompletedToolCall,
   type TurnStreamResult,
 } from './services/TurnRuntime.types';
@@ -1171,7 +1172,7 @@ export class KoryManager implements WorkerPipelineHost {
     automatic?: boolean;
   }): Promise<{ compactionId: string; sourceMessages: number; checkpointTokens: number }> {
     if (!this.tryBeginSessionRun(input.sessionId)) {
-      throw new Error('This session is already running or applying a Time Travel recovery');
+      throw new SessionBusyError('This session is already running or applying a Time Travel recovery');
     }
     // Install cancellation ownership before the first await. Without this,
     // cancelSessionWorkers can correctly detect the local run claim yet have
@@ -1421,6 +1422,21 @@ export class KoryManager implements WorkerPipelineHost {
         );
       }
       const checkpointTokens = tokensOut || Math.ceil(summary.length / TOKEN_CHARS);
+      // Compaction moves the conversation boundary, which invalidates every
+      // previously persisted usage snapshot (its provenance guard requires an
+      // exact activeMessageId + contextRevision match). Without a snapshot at
+      // the NEW boundary the reloaded/previewed meter blanks to "awaiting
+      // provider token report" for the whole interval until the next turn
+      // completes — the exact symptom of context data that disappears right
+      // after a compaction. Record the checkpoint's real occupancy, marked
+      // estimated because the provider has not re-reported since the rewrite.
+      await this.recordPostCompactionUsage(
+        input.sessionId,
+        `compact-${compactionId}`,
+        model,
+        providerName,
+        checkpointTokens,
+      );
       emit(
         'complete',
         100,
@@ -1792,12 +1808,20 @@ export class KoryManager implements WorkerPipelineHost {
   /** Fire-and-forget automatic compaction with bounded retries and a
    *  per-session failure cooldown. Retries use exponential backoff; a final
    *  failure cools the session down so the next turns do not re-trigger
-   *  while the compactor keeps failing. */
+   *  while the compactor keeps failing.
+   *
+   *  The first attempt is deferred to a macrotask. The trigger runs inside
+   *  the completed turn, whose run claim is only released in the enclosing
+   *  `finally`. Attempting synchronously meant `tryBeginSessionRun` rejected
+   *  every single first attempt with "already running": one of the three
+   *  attempts was always wasted, and a user who typed again inside the 2s
+   *  backoff exhausted all three and got a spurious "Automatic compaction
+   *  failed" banner for a compaction that never really got a chance. */
   private scheduleAutoCompaction(
     sessionId: string,
     selectedModel: string,
     reasoningLevel: string | undefined,
-    deps: { sleep?: (ms: number) => Promise<void> } = {},
+    deps: { sleep?: (ms: number) => Promise<void>; defer?: boolean } = {},
   ): void {
     if (isAutoCompactCoolingDown(this.lastAutoCompactFailureBySession.get(sessionId))) {
       koryLog.debug(
@@ -1806,39 +1830,68 @@ export class KoryManager implements WorkerPipelineHost {
       );
       return;
     }
-    void (async () => {
+    const start = () => {
       if (this.erasedSessions.has(sessionId)) return;
-      const outcome = await withAutoCompactRetry(
-        () =>
-          this.compactSession({
+      void (async () => {
+        let busyDeferral = false;
+        const outcome = await withAutoCompactRetry(
+          async () => {
+            try {
+              return await this.compactSession({
+                sessionId,
+                selectedModel,
+                reasoningLevel,
+                automatic: true,
+              });
+            } catch (error) {
+              // A busy session is a deferral, not a fault. Retrying cannot help
+              // while the user is mid-turn, and treating it as a failure both
+              // wasted the attempt budget and started a five-minute cooldown
+              // that suppressed compaction for the rest of the session.
+              if (error instanceof SessionBusyError) {
+                busyDeferral = true;
+                throw error;
+              }
+              return Promise.reject(error);
+            }
+          },
+          ...(deps.sleep ? [{ sleep: deps.sleep }] : []),
+        );
+        if (busyDeferral) {
+          koryLog.debug(
+            { sessionId },
+            'Deferring automatic compaction while the session is busy',
+          );
+          return;
+        }
+        if (outcome.ok) {
+          this.lastAutoCompactFailureBySession.delete(sessionId);
+        } else {
+          this.lastAutoCompactFailureBySession.set(sessionId, Date.now());
+          const msg = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+          koryLog.warn(
+            { error: outcome.error, sessionId, attempts: outcome.attempts },
+            'Automatic compaction did not complete',
+          );
+          // The automatic path is fire-and-forget: surface the final failure
+          // as a UI banner (system.error) instead of silent idle, after
+          // retries are exhausted — not once per attempt. The original
+          // conversation remains active in every failure branch.
+          this.emitError(
             sessionId,
-            selectedModel,
-            reasoningLevel,
-            automatic: true,
-          }),
-        ...(deps.sleep ? [{ sleep: deps.sleep }] : []),
+            `Automatic compaction failed (${msg}). You can keep chatting; try compacting manually later.`,
+          );
+        }
+      })().catch((error) =>
+        koryLog.warn({ error, sessionId }, 'Automatic compaction scheduler failed'),
       );
-      if (outcome.ok) {
-        this.lastAutoCompactFailureBySession.delete(sessionId);
-      } else {
-        this.lastAutoCompactFailureBySession.set(sessionId, Date.now());
-        const msg = outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-        koryLog.warn(
-          { error: outcome.error, sessionId, attempts: outcome.attempts },
-          'Automatic compaction did not complete',
-        );
-        // The automatic path is fire-and-forget: surface the final failure
-        // as a UI banner (system.error) instead of silent idle, after
-        // retries are exhausted — not once per attempt. The original
-        // conversation remains active in every failure branch.
-        this.emitError(
-          sessionId,
-          `Automatic compaction failed (${msg}). You can keep chatting; try compacting manually later.`,
-        );
-      }
-    })().catch((error) =>
-      koryLog.warn({ error, sessionId }, 'Automatic compaction scheduler failed'),
-    );
+    };
+    if (deps.defer === false) {
+      start();
+      return;
+    }
+    const timer = setTimeout(start, 0);
+    timer.unref?.();
   }
 
   async handleUserInput(sessionId: string, selection: string, text?: string, questionId?: string) {
@@ -4705,23 +4758,9 @@ export class KoryManager implements WorkerPipelineHost {
             // blow the window (and made the context bar spike absurdly). The
             // fetch_context can later identify the event and return only its
             // bounded, redacted durable preview.
-            const TOOL_OUTPUT_CONTEXT_CAP = 30_000;
-            const cappedResult =
-              (toolResult.output?.length ?? 0) > TOOL_OUTPUT_CONTEXT_CAP
-                ? {
-                    ...toolResult,
-                    output:
-                      toolResult.output.slice(0, TOOL_OUTPUT_CONTEXT_CAP) +
-                      `\n…[truncated ${toolResult.output.length - TOOL_OUTPUT_CONTEXT_CAP} chars${archiveId ? ` — durable preview via fetch_context id=${archiveId}` : ''}]`,
-                  }
-                : toolResult;
-            const toolMsg: InternalMessage = {
-              role: 'tool',
-              content: JSON.stringify(cappedResult),
-              tool_call_id: tc.id,
-            };
-            if (archiveId) Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
-            messages.push(toolMsg);
+            messages.push(
+              this.buildManagerToolMessage(tc, toolResult, archiveId, turnCount),
+            );
             const visionMsg = this.buildViewImageMessage(toolResult);
             if (visionMsg) messages.push(visionMsg);
           }
@@ -4926,11 +4965,15 @@ export class KoryManager implements WorkerPipelineHost {
                 toolResult: archiveId ? { ...toolResult, archiveId } : toolResult,
               });
               executedToolCallCount++;
-              messages.push({
-                role: 'tool',
-                content: JSON.stringify(toolResult),
-                tool_call_id: tc.id,
-              });
+              // Identical capping + prune metadata as the main tool loop. This
+              // path used to push the RAW result with no 30k cap and no
+              // archiveId/archiveTurn, so a continuation tool result could add
+              // an unbounded blob to the next request and could never be
+              // reclaimed by applyContextPruning (which requires archiveId) —
+              // context the user could neither see pruned nor recover.
+              messages.push(
+                this.buildManagerToolMessage(tc, toolResult, archiveId, turnCount),
+              );
             }
             observeCancellation();
           }
@@ -5212,7 +5255,10 @@ export class KoryManager implements WorkerPipelineHost {
       // the tracked skill cost is subtracted first — otherwise a skill-heavy
       // session self-triggers compaction that pruning cannot relieve (skills
       // are re-injected on the next turn regardless).
-      const autoSettings = loadAgentSettings(managerCtx.workingDirectory);
+      // Session-scoped overrides must apply to the trigger too, otherwise a
+      // chat that raised its own auto-compact threshold (or disabled it) was
+      // silently ignored and compacted on the global threshold.
+      const autoSettings = loadAgentSettingsForSession(managerCtx.workingDirectory, sessionId);
       const trustedWindow = this.resolveEffectiveSessionContextWindow(
         sessionId,
         routing.model,
@@ -5487,6 +5533,10 @@ export class KoryManager implements WorkerPipelineHost {
         'render_note',
         'fetch_context',
         'load_skill_detail',
+        // Read-only so a plan can account for work already in flight. The
+        // checklist *write* tools stay out: plan mode must not change state.
+        'list_checklists',
+        'read_checklist',
       ]);
       allowedManagerTools = allowedManagerTools.filter((tool) => allowed.has(tool.name));
       systemPrompt += forceFreshConversation
@@ -6032,6 +6082,44 @@ export class KoryManager implements WorkerPipelineHost {
   }
 
   /**
+   * Build the `role: 'tool'` message that enters the MODEL's context.
+   *
+   * Single source of truth for the two properties that keep the window bounded:
+   *  - the 30k output cap (a megabyte build log would blow the window and made
+   *    the context bar spike absurdly), and
+   *  - the `archiveId`/`archiveTurn` metadata that `applyContextPruning`
+   *    requires before it may reclaim the message.
+   *
+   * Both the main tool loop and the final-answer continuation must go through
+   * here; when they diverged, continuation results were uncapped and
+   * permanently unprunable.
+   */
+  private buildManagerToolMessage(
+    tc: CompletedToolCall,
+    toolResult: ToolCallOutput,
+    archiveId: string | undefined,
+    turnCount: number,
+  ): InternalMessage {
+    const TOOL_OUTPUT_CONTEXT_CAP = 30_000;
+    const cappedResult =
+      (toolResult.output?.length ?? 0) > TOOL_OUTPUT_CONTEXT_CAP
+        ? {
+            ...toolResult,
+            output:
+              toolResult.output.slice(0, TOOL_OUTPUT_CONTEXT_CAP) +
+              `\n…[truncated ${toolResult.output.length - TOOL_OUTPUT_CONTEXT_CAP} chars${archiveId ? ` — durable preview via fetch_context id=${archiveId}` : ''}]`,
+          }
+        : toolResult;
+    const toolMsg: InternalMessage = {
+      role: 'tool',
+      content: JSON.stringify(cappedResult),
+      tool_call_id: tc.id,
+    };
+    if (archiveId) Object.assign(toolMsg, { archiveId, archiveTurn: turnCount });
+    return toolMsg;
+  }
+
+  /**
    * Replace stale/hidden tool outputs in the in-flight message array with tiny
    * stubs pointing at the archive. The agent can later retrieve the bounded,
    * redacted durable preview via fetch_context.
@@ -6043,14 +6131,20 @@ export class KoryManager implements WorkerPipelineHost {
   ): Promise<void> {
     const archive = getContextArchive();
     if (!archive) return;
-    const { loadAgentSettings } = await import('../agent-settings');
-    const settings = loadAgentSettings(await this.resolveSessionWorkingDirectory(sessionId));
+    const workingDirectory = await this.resolveSessionWorkingDirectory(sessionId);
+    // Session-scoped pruning overrides must be honored here exactly as they are
+    // everywhere else in the manager; the bare loader silently ignored a
+    // per-session "keep recent turns" and made the setting appear to do nothing.
+    const settings = loadAgentSettingsForSession(workingDirectory, sessionId);
     const KEEP_FULL_TURNS = settings.contextKeepRecentTurns ?? 8; // recent turns keep full outputs
     const MIN_PRUNE_CHARS = settings.contextPruneMinChars ?? 2000; // tiny outputs aren't worth stubbing
-    // A single current-turn result can be enormous (for example a tool
-    // accidentally serializing image pixels). Do not let it overflow the next
-    // provider request before age-based pruning gets a chance to run.
-    const MAX_LIVE_TOOL_CHARS = 60_000;
+    // A single tool result can be enormous (for example a tool accidentally
+    // serializing image pixels). The 30k dispatch cap already truncated it
+    // before it reached this array, so measuring the LIVE content against a
+    // 60k bound could never fire — the "oversized" safety net was unreachable
+    // dead code and a truncated 30k blob stayed resident for the whole turn.
+    // The archive records the TRUE original size, so decide on that.
+    const OVERSIZED_ORIGINAL_BYTES = 60_000;
     const autoPrune = settings.contextPruningEnabled !== false;
     for (const m of messages) {
       const meta = m as InternalMessage & {
@@ -6066,9 +6160,12 @@ export class KoryManager implements WorkerPipelineHost {
         typeof meta.archiveTurn === 'number' &&
         currentTurn - meta.archiveTurn > KEEP_FULL_TURNS &&
         m.content.length > MIN_PRUNE_CHARS;
-      const oversized = autoPrune && m.content.length > MAX_LIVE_TOOL_CHARS;
-      if (!hiddenByUserOrAgent && !stale && !oversized) continue;
       const entry = await archive.get(sessionId, meta.archiveId);
+      const oversized =
+        autoPrune &&
+        ((entry?.originalByteCount ?? 0) > OVERSIZED_ORIGINAL_BYTES ||
+          m.content.length > OVERSIZED_ORIGINAL_BYTES);
+      if (!hiddenByUserOrAgent && !stale && !oversized) continue;
       let original: Record<string, unknown> = {};
       try {
         original = JSON.parse(m.content) as Record<string, unknown>;
@@ -6082,7 +6179,9 @@ export class KoryManager implements WorkerPipelineHost {
         callId: original.callId ?? meta.tool_call_id,
         name: original.name,
         output: `[Output ${oversized ? 'was too large for the live context and was pruned' : 'pruned'} to save context: ${entry?.label ?? 'tool output'}${entry ? ` at ${new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Retrieve the bounded, redacted preview with fetch_context id=${meta.archiveId}]`,
-        isError: false,
+        // Preserve the real failure bit. Hardcoding false told the model a
+        // failed command had succeeded, which is worse than losing the output.
+        isError: original.isError === true,
         durationMs: 0,
       });
       meta.pruneApplied = true;
@@ -6559,7 +6658,14 @@ export class KoryManager implements WorkerPipelineHost {
     ]);
     const context = applyContextWindowOverride(
       resolveTrustedContextWindow(modelId, providerName),
-      contextWindowOverride,
+      // Fall back to the budget this session is actually running under. The
+      // composer does not echo a budget on every preview request, so reading
+      // only the request body previewed the FULL provider window while the live
+      // turn clamped and persisted against the session budget — the bar's
+      // denominator visibly jumped the moment a turn reported usage.
+      typeof contextWindowOverride === 'number'
+        ? contextWindowOverride
+        : this.contextWindowOverrideBySession.get(sessionId),
     );
     // Provider-reported token counts are only authoritative for the exact
     // routing identity and conversation boundary that produced them.
@@ -7175,11 +7281,19 @@ export class KoryManager implements WorkerPipelineHost {
     thread: AgentThreadState,
     provider: Provider,
   ): Promise<boolean> {
-    const normalizedReasoning = normalizeReasoningLevel(
-      provider.name,
-      thread.modelId,
-      thread.reasoningLevel,
-    );
+    // Auto means Koryphaios decides the effort from the task, so resolve it here
+  // too — a thread turn must not hand a literal "auto" to the provider.
+  const normalizedReasoning = normalizeReasoningLevel(
+    provider.name,
+    thread.modelId,
+    thread.reasoningLevel === 'auto'
+      ? determineAutoReasoningLevel(
+          typeof thread.messages[thread.messages.length - 1]?.content === 'string'
+            ? (thread.messages[thread.messages.length - 1].content as string)
+            : '',
+        )
+      : thread.reasoningLevel,
+  );
     const streamSignal = withTimeoutSignal(thread.ctx.signal, AGENT.LLM_STREAM_TIMEOUT_MS);
     const stream = this.providers.executeWithRetry(
       {
@@ -7940,6 +8054,67 @@ export class KoryManager implements WorkerPipelineHost {
     return value.length > maxLen ? value.slice(0, maxLen - 1) + '…' : value;
   }
 
+  /**
+   * Record the post-compaction occupancy at the NEW conversation boundary.
+   *
+   * A compaction replaces `sessions.active_message_id` and bumps
+   * `conversation_revision`, so every prior usage snapshot fails
+   * `usageSnapshotMatchesBoundary` and both the reload route and the model
+   * preview correctly report "no authoritative usage". The consequence was a
+   * context bar that emptied the instant a compaction landed and stayed empty
+   * until the next turn reported. The checkpoint's token count is a real
+   * measurement of what now occupies the window, so persist it against the
+   * boundary that commitCompaction established.
+   *
+   * Marked `estimated`: the provider has not re-reported since the rewrite, so
+   * this must never arm the auto-compaction trigger (which requires an exact,
+   * non-estimated count).
+   */
+  private async recordPostCompactionUsage(
+    sessionId: string,
+    checkpointMessageId: string,
+    model: string,
+    provider: ProviderName,
+    checkpointTokens: number,
+  ): Promise<boolean> {
+    const archive = getContextArchive();
+    if (!archive || !this.messages || this.erasedSessions.has(sessionId)) return false;
+    try {
+      const boundary = await this.messages.getActiveBoundary(sessionId);
+      // A concurrent turn or a second compaction already moved past this
+      // checkpoint. Never stamp this revision's usage onto a newer boundary.
+      if (boundary.messageId !== checkpointMessageId) {
+        serverLog.debug(
+          { sessionId, checkpointMessageId, activeMessageId: boundary.messageId },
+          'Skipped post-compaction usage snapshot because the conversation advanced',
+        );
+        return false;
+      }
+      const win = this.resolveEffectiveSessionContextWindow(sessionId, model, provider);
+      const estimatedUsed = Math.max(0, Math.floor(checkpointTokens));
+      await archive.recordUsage(sessionId, {
+        used: estimatedUsed,
+        max: win.contextWindow ?? 0,
+        contextKnown: win.contextKnown,
+        model,
+        provider,
+        activeMessageId: boundary.messageId,
+        contextRevision: boundary.contextRevision,
+        estimated: true,
+        ts: Date.now(),
+      });
+      return true;
+    } catch (error) {
+      if (!this.erasedSessions.has(sessionId)) {
+        serverLog.debug(
+          { sessionId, error: error instanceof Error ? error.message : String(error) },
+          'Post-compaction usage snapshot could not be persisted',
+        );
+      }
+      return false;
+    }
+  }
+
   private async persistCompletedManagerUsage(
     sessionId: string,
     expectedActiveMessageId: string,
@@ -8087,6 +8262,15 @@ export class KoryManager implements WorkerPipelineHost {
       cacheWriteInputTokens,
       pricedUsage?.costUsd,
       cacheSavingsUsd,
+      // Publish the SAME denominator this event's tokens were reconciled and
+      // clamped against. Re-resolving the bare provider window in the emitter
+      // made a session budget silently disappear from the meter: occupancy was
+      // clamped to the budget while the payload advertised the full window, so
+      // the bar rendered an impossible too-low ratio and the reload path (which
+      // persists the effective window) disagreed with the live path.
+      effectiveWindow !== undefined
+        ? { contextWindow: effectiveWindow, contextKnown: true, contextSource: 'live' }
+        : { contextKnown: false },
     );
     // Live provider usage is response-only until the final assistant message
     // establishes an exact conversation boundary. Stream-time archive writes

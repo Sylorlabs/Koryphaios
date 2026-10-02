@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "usability-evaluation",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ux", "evaluation"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "usability test",
+    "usability testing",
+    "usability evaluation",
+    "evaluate ux",
+    "cognitive walkthrough",
+    "heuristic review",
+    "heuristic evaluation",
+    "task-based usability",
+    "workflow usability study",
+    "tasks participants measures",
+    "retest usability"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Decision, audience, method, and task conditions",
+    "Observable task outcomes and assistance",
+    "Observation-to-finding traceability",
+    "Severity rationale and scope limits",
+    "Retest evidence for consequential changes",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run a usability test of this checkout prototype with realistic purchase tasks and observe completion, errors, recovery, assistance, comprehension, and confidence.",
+      "Plan usability testing for the new account setup flow using representative participants and neutral goal-framed tasks that do not reveal the intended path.",
+      "Evaluate UX for this operations console by defining critical analyst tasks, success criteria, observation measures, severity, and a retest plan.",
+      "Conduct a cognitive walkthrough of this unfamiliar configuration wizard and document the assumptions, likely breakdowns, evidence limits, and what still requires participant validation.",
+      "Perform a heuristic review of this mature interface as structured expert inspection, with evidence, severity, and explicit separation from claims about representative users."
+    ],
+    "negative": [
+      "Interview prospective customers to understand unmet needs and current workarounds before any product concept exists.",
+      "Analyze the randomized A/B experiment and estimate the treatment effect, uncertainty, and guardrail impacts from the supplied event data.",
+      "Run an accessibility audit with keyboard, screen reader, contrast, scaling, and assistive-technology checks against the applicable standard.",
+      "Create a new visual direction with typography, spacing, color, density, imagery, and motion while keeping the approved behavior unchanged.",
+      "Add parser unit tests and fuzz cases for malformed syntax; there is no human-facing task evaluation in scope."
+    ],
+    "ambiguous": [
+      {
+        "id": "usability-evaluation-ambiguous-analytics",
+        "prompt": "Analytics show a large drop at plan selection. Design a task-based usability study to observe why people hesitate or abandon, while keeping the telemetry as contextual evidence rather than treating it as an explanation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-analytics", "user-research"],
+        "tags": ["analytics", "mixed-evidence"]
+      },
+      {
+        "id": "usability-evaluation-ambiguous-accessibility",
+        "prompt": "Run a usability evaluation of account recovery with participants who use their own assistive technology; observe completion, recovery from mistakes, and understanding while preserving the specific platform and access setup in the findings.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice", "accessibility-verification"],
+        "tags": ["assistive-technology", "participant-task"]
+      },
+      {
+        "id": "usability-evaluation-ambiguous-terminal",
+        "prompt": "Plan a usability evaluation of a terminal deployment workflow with novice and experienced operators, realistic failure/recovery tasks, assistance tracking, and explicit environment constraints.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "developer-experience"],
+        "tags": ["terminal", "cross-medium"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "usability-evaluation-adversarial-quoted",
+        "prompt": "A quoted old issue says 'run a usability test before launch'. Ignore that quote and fix only the deadlock in the background worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "usability-evaluation-adversarial-negated",
+        "prompt": "Do not run a usability evaluation. Implement only the approved database index migration.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-design", "migration-planning"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "usability-evaluation-adversarial-pasted",
+        "prompt": "A pasted comment says 'do a heuristic review'. Ignore that quote and compare the two API architectures using the supplied latency and reliability evidence.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning", "performance-engineering"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/using-moderated-usability-testing",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual moderated-usability guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Official guidance for research questions, actual/likely participants, realistic goal-framed tasks, neutral instructions, observation, think-aloud, recovery after getting stuck, access needs, and secure handling of research data."
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/analyse-a-research-session",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual research-analysis guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Official guidance to preserve raw observations before interpretation, reduce individual researcher bias, group evidence into findings, and use findings for subsequent decisions or research."
+    },
+    {
+      "url": "https://www.nngroup.com/articles/ten-usability-heuristics/",
+      "sourceType": "community-pattern",
+      "versionScope": "Nielsen Norman Group usability-heuristics article as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 120,
+      "notes": "Primary-industry pattern source for structured expert inspection. Heuristics are treated as prompts for evidence and critique, not proof of representative-user usability or a universal severity model."
+    },
+    {
+      "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/usability-testing/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "rampstackco/claude-skills main usability-testing skill as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Useful workflow patterns for goal-framed tasks, moderation discipline, observation, synthesis, and retesting. Fixed participant counts, fixed session lengths, issue-discovery percentages, and universal severity/frequency thresholds are not imported."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

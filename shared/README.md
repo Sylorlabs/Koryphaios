@@ -73,6 +73,9 @@ Current provider-specific reasoning parameter mappings implemented by this packa
 | xAI       | `reasoning_effort`              | low, high                           | high    |
 | Azure     | `reasoning.effort`              | low, medium, high                   | medium  |
 
+Tiers beyond these lists are not rejected: any effort level a provider reports
+for a model is accepted, offered in the picker, and passed through verbatim.
+
 **Model-specific overrides:**
 
 - GPT-5 series: Supports `xhigh` effort level

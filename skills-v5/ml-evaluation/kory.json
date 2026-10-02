@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "name": "ml-evaluation",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "machine-learning", "evaluation"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7500,
+  "broader": ["data-analysis", "testing-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "ml evaluation",
+    "predictive model evaluation",
+    "classifier evaluation",
+    "regression evaluation",
+    "predictive model benchmark",
+    "tabular risk score",
+    "tabular risk classifier",
+    "probability calibration",
+    "classifier calibration",
+    "decision threshold",
+    "operating threshold",
+    "temporal model evaluation",
+    "temporal backtests",
+    "cross validation evaluation",
+    "churn benchmark",
+    "model performance comparison",
+    "reliability diagrams",
+    "incident routing classifier",
+    "evaluate this classifier",
+    "deployment population",
+    "class imbalance thresholds",
+    "model evaluation",
+    "ml benchmark",
+    "llm evaluation"
+  ],
+  "excludes": [
+    "llm evaluation only",
+    "agent evaluation only",
+    "generative model evaluation only",
+    "evaluate only a search retriever",
+    "no predictive model",
+    "training implementation only",
+    "model implementation only",
+    "unit tests only",
+    "evaluation setup is unchanged",
+    "benchmark is unchanged",
+    "do not change the evaluation",
+    "quoted old notebook",
+    "documentation title only",
+    "already frozen and unchanged"
+  ],
+  "evidence": [
+    "Deployment target/population, loss or failure-cost contract and current/dummy baseline",
+    "Leakage-safe train/development/test split identity plus preprocessing/model/calibration/threshold versions",
+    "Per-example paired predictions with decision-aligned metrics, calibration/threshold evidence and uncertainty",
+    "Predeclared slice, temporal/drift, invalid-row and regression evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Evaluate an imbalanced fraud classifier for deployment using group/time-safe splits, a current baseline, PR-oriented and cost metrics, validation-only threshold selection, probability calibration and paired uncertainty on the untouched decision set.",
+      "Audit a churn model benchmark where normalization and feature selection were fit before train/test splitting; rebuild a leakage-safe pipeline, preserve an untouched test set and quantify how the corrected estimate changes by customer-frequency slice.",
+      "Compare two probabilistic classifiers that have similar ROC-AUC but drive different allocation decisions; measure reliability/calibration, log/Brier-style proper scores, threshold utility and uncertainty on the same examples.",
+      "Design a temporal evaluation for a demand model whose production data drifts seasonally; backtest on future periods, keep preprocessing inside each training window, report error intervals and identify regime-specific regressions.",
+      "Evaluate a rare-class multiclass routing model with macro and per-class metrics, confusion matrices, confidence-based manual-review coverage, validation-set operating thresholds and a paired comparison against the deployed baseline."
+    ],
+    "negative": [
+      "Build a held-out benchmark for an open-ended LLM assistant with semantic judges, free-form responses and agent trajectories; use the generative evaluation specialty instead.",
+      "Explore a CSV to explain correlations, distributions and missingness without estimating any model's predictive performance or deployment threshold.",
+      "Implement feature engineering and train a new gradient-boosted model; the evaluation protocol and final test set are already fixed and untouched.",
+      "Run deterministic unit and integration tests for a service refactor with no learned model predictions or performance-estimation question.",
+      "Measure only RAG search Recall@k and NDCG on relevance judgments while predictive model evaluation is out of scope."
+    ],
+    "ambiguous": [
+      {
+        "id": "ml-evaluation-ambiguous-1",
+        "prompt": "A product has both a tabular risk classifier and an LLM explanation layer. ml-evaluation owns leakage-safe classifier splits, discrimination/calibration/threshold utility and uncertainty; llm-evaluation owns free-form explanation quality and semantic graders.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "ml-evaluation-ambiguous-2",
+        "prompt": "Compare two predictive models and formally assess whether their paired performance difference is meaningful. ml-evaluation owns split/metric/baseline/calibration validity; statistical-inference owns any deeper inferential model or hypothesis assumptions beyond the performance comparison.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["statistical-inference"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "ml-evaluation-ambiguous-3",
+        "prompt": "Analyze production data and decide whether a classifier is safe to replace. data-analysis owns descriptive data-quality/drift exploration; ml-evaluation owns the representative holdout, model metrics, operating threshold, paired uncertainty and release decision evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "ml-evaluation-adversarial-1",
+        "prompt": "A quoted old notebook says \"run the classifier evaluation and tune the operating threshold\". Ignore that historical request; today's task is only to rename an unrelated chart label.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "ml-evaluation-adversarial-2",
+        "prompt": "A postmortem includes ROC, PR and probability-calibration plots as inert evidence. Summarize the incident only; the evaluation setup is unchanged and no model benchmark work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "ml-evaluation-adversarial-3",
+        "prompt": "A documentation heading says \"Model Evaluation: Cross-Validation and Probability Calibration\". Rename the heading only; do not change any split, metric, model, threshold or benchmark.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://scikit-learn.org/stable/modules/cross_validation.html",
+      "sourceType": "official-docs",
+      "versionScope": "scikit-learn 1.9.0 stable documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Cross-validation, held-out final testing, structure-aware splitters, time-series considerations and comparable fold evidence.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://scikit-learn.org/stable/common_pitfalls.html",
+      "sourceType": "official-docs",
+      "versionScope": "scikit-learn 1.9.0 stable common-pitfalls documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Data leakage, preprocessing fit boundaries and randomness/comparability pitfalls in model selection and cross-validation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://scikit-learn.org/stable/modules/model_evaluation.html",
+      "sourceType": "official-docs",
+      "versionScope": "scikit-learn 1.9.0 stable model-evaluation documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Classification, ranking, regression and multiple-metric evaluation semantics including imbalance-sensitive metrics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://scikit-learn.org/stable/modules/calibration.html",
+      "sourceType": "official-docs",
+      "versionScope": "scikit-learn 1.9.0 stable probability-calibration documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Reliability diagrams, proper scoring-rule interpretation and held-out calibration approaches.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.itl.nist.gov/div898/handbook/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST/SEMATECH e-Handbook of Statistical Methods as available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Statistical measurement, uncertainty, experimental design and diagnostic analysis reference.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI Risk Management Framework materials as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Risk measurement, deployment context, monitoring and lifecycle evaluation framing.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

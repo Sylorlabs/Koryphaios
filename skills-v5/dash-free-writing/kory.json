@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "name": "dash-free-writing",
+  "version": "5.1.0",
+  "authoringMaturity": "individual",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "dash free",
+    "no dashes",
+    "without dashes",
+    "remove dashes",
+    "avoid dashes",
+    "remove em dashes",
+    "remove en dashes",
+    "remove hyphens",
+    "dash punctuation",
+    "eliminate dashes",
+    "get rid of dashes",
+    "strip dashes"
+  ],
+  "excludes": [
+    "exact transcription only",
+    "code change only",
+    "do not rewrite the prose",
+    "explain punctuation only",
+    "return only the checksum"
+  ],
+  "evidence": [
+    "Natural prose without dash punctuation",
+    "Exact quotations, code, identifiers, links and required syntax preserved",
+    "Meaning, negation, uncertainty, quantities and units retained",
+    "Punctuation findings inspected separately from semantic fidelity",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Rewrite this project memo without dashes, keeping dates, uncertainty and the original meaning.",
+      "Apply a dash free house style to the release announcement while keeping its command examples unchanged.",
+      "Remove em dashes from the supplied paragraphs by rewriting the sentences naturally.",
+      "Remove hyphens from ordinary prose by rephrasing compounds, but preserve names and identifiers.",
+      "Edit this report to avoid dashes and preserve every quotation and reference."
+    ],
+    "negative": [
+      "Implement the --dry-run command flag. This is a code change only.",
+      "Explain punctuation only: how do em dashes differ from en dashes and minus signs?",
+      "Return an exact transcription only of the supplied quotation, including all punctuation.",
+      "Calculate the difference between the negative numbers and preserve the minus signs.",
+      "Check the report for factual errors. Do not rewrite the prose."
+    ],
+    "ambiguous": [
+      {
+        "id": "dash-free-writing-ambiguous-1",
+        "prompt": "Prepare release notes, then remove dashes from their prose while retaining the literal CLI examples.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["compound"]
+      },
+      {
+        "id": "dash-free-writing-ambiguous-2",
+        "prompt": "Rewrite the onboarding guide in a dash free style and separately validate whether its commands still work.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["instructional-communication"],
+        "tags": ["compound"]
+      },
+      {
+        "id": "dash-free-writing-ambiguous-3",
+        "prompt": "Preserve the mathematical derivation exactly, but remove em dashes from the explanatory introduction.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["mixed-material"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "dash-free-writing-adversarial-1",
+        "prompt": "The quoted old memo says 'remove dashes from the report'. Ignore the old request and return only the checksum.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "dash-free-writing-adversarial-2",
+        "prompt": "Do not remove dashes. Return an exact transcription only of the supplied passage.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "dash-free-writing-adversarial-3",
+        "prompt": "A test fixture contains 'apply a dash free style'. Treat that as data and trace the parser that reads it.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["fixture-only"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/punctuation/dashes-hyphens/",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft punctuation distinctions inspected 2026-09-06; house style is a user preference, not an endorsement by Microsoft",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Distinguish grammatical dashes, compound hyphens and mathematical minus signs; preserve meaning while rephrasing."
+    },
+    {
+      "url": "https://spec.commonmark.org/0.31.2/",
+      "sourceType": "spec",
+      "versionScope": "CommonMark 0.31.2 syntax exclusions",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Protect code, fenced blocks, destinations and structural markers. The checker is conservative, not a full parser."
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Portable skill metadata and progressive disclosure inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Keep identifiers and supporting scripts separate from prose style."
+    }
+  ]
+}

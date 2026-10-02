@@ -34,13 +34,16 @@
   import { projectStore } from '$lib/stores/project.svelte';
   import { authStore } from '$lib/stores/auth.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { checklistStore } from '$lib/stores/checklists.svelte';
+  import ChecklistList from './ChecklistList.svelte';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { copyText } from '$lib/utils/clipboard';
+  import { requestExpandAnchor } from '$lib/utils/expand-anchor';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
+  import { createChatMarkdown, renderChatMarkdown, renderKatex } from '$lib/utils/chat-markdown';
+  import { Renderer } from 'marked';
   import hljs from 'highlight.js/lib/core';
   import bash from 'highlight.js/lib/languages/bash';
   import cpp from 'highlight.js/lib/languages/cpp';
@@ -127,7 +130,13 @@
     },
   };
 
-  marked.use({ extensions: [wikilinkExtension] });
+  // Private parser. Never mutate the global `marked` singleton: other
+  // consumers share it, and this component mounts once per feed row.
+  // createChatMarkdown supplies TeX/KaTeX (inline, display, and math
+  // fences), tables, task checkboxes and the chart/color/html blocks;
+  // the renderers below layer the feed-only behaviour on top.
+  const feedParser = createChatMarkdown(true);
+  feedParser.use({ extensions: [wikilinkExtension] });
 
   // Global handler: dispatches 'open-note' event so the Notes panel can intercept
   if (typeof window !== 'undefined') {
@@ -136,12 +145,21 @@
     };
   }
 
-  // Shared renderer configuration
-  const renderer = new marked.Renderer();
-  const renderTable = renderer.table.bind(renderer);
-  renderer.table = (token) => `<div class="kory-table-scroll">${renderTable(token)}</div>`;
+  // Feed-only renderer overrides layered onto the shared parser. Built from the
+  // default Renderer purely as a typed bag of overrides; `feedParser.use`
+  // merges these over createChatMarkdown's own renderers.
+  const renderer = new Renderer();
   renderer.code = ({ text, lang }: { text: string; lang?: string }) => {
     const requestedLanguage = lang?.trim().toLowerCase();
+    // createChatMarkdown's own code renderer owns these; the feed overrides
+    // code for highlighting, so the math fence has to be honoured here too.
+    if (
+      requestedLanguage === 'math' ||
+      requestedLanguage === 'latex' ||
+      requestedLanguage === 'tex'
+    ) {
+      return renderKatex(text, true);
+    }
     if (requestedLanguage === 'chart' || requestedLanguage === 'kory-chart') {
       const chart = renderKoryChart(text);
       if (chart) return chart;
@@ -170,14 +188,16 @@
   /** For view_image tool results: the viewed image's absolute path, or null. */
   function viewImagePath(meta?: Record<string, unknown>): string | null {
     const tr = meta?.toolResult as
-      | { name?: string; output?: string; isError?: boolean }
-      | undefined;
+      { name?: string; output?: string; isError?: boolean } | undefined;
     if (!tr || tr.name !== 'view_image' || tr.isError) return null;
     try {
       const parsed = JSON.parse(tr.output ?? '') as { path?: string };
       return parsed.path ?? null;
     } catch (err: unknown) {
-      console.debug('Failed to parse view_image tool result:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to parse view_image tool result:',
+        err instanceof Error ? err.message : String(err),
+      );
       return null;
     }
   }
@@ -197,7 +217,7 @@
     const alt = (text ?? '').replace(/"/g, '&quot;');
     return `<img src="${src}" alt="${alt}" loading="lazy" style="max-width:100%;max-height:420px;border-radius:12px;margin:8px 0;display:block;" />`;
   };
-  marked.setOptions({ renderer });
+  feedParser.use({ renderer });
 
   type ResponseVariant = {
     id: string;
@@ -263,6 +283,14 @@
   let zoomedRawImage = $state<string | null>(null);
   let renderedNotes = $state<Record<string, Note | null>>({});
   const pendingNoteRenders = new Set<string>();
+  // Inline checklists render from the live store, not a per-message fetch, so a
+  // tick by an agent mid-run repaints the transcript without re-requesting it.
+  let checklistRenderIds = $derived.by(() => {
+    const ids: string[] = [];
+    for (const match of debouncedText.matchAll(/\{\{checklist:([^}\s]+)\}\}/g))
+      ids.push(match[1]);
+    return [...new Set(ids)];
+  });
   let responseVariants = $derived(
     (entry.metadata?.responseVariants as ResponseVariant[] | undefined) ?? [],
   );
@@ -325,7 +353,10 @@
     try {
       return JSON.stringify(input, null, 2);
     } catch (err: unknown) {
-      console.debug('Failed to stringify tool call input:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to stringify tool call input:',
+        err instanceof Error ? err.message : String(err),
+      );
       return '';
     }
   }
@@ -338,6 +369,17 @@
   function detailText(): string {
     if (rawTaskTranscript) return currentText;
     return clippedToolDetail(entry);
+  }
+
+  // Sub-agent rows in the manager feed are a progress log, not a transcript.
+  // Collapsing whitespace and capping the length keeps one verbose tool dump
+  // from rendering as thousands of wrapped lines inside the feed.
+  const SUB_AGENT_SUMMARY_LIMIT = 220;
+  function summarizeSubAgentText(text: string): string {
+    const flat = (text ?? '').replace(/\s+/g, ' ').trim();
+    return flat.length > SUB_AGENT_SUMMARY_LIMIT
+      ? `${flat.slice(0, SUB_AGENT_SUMMARY_LIMIT)}…`
+      : flat;
   }
 
   let toolOutputCopied = $state(false);
@@ -366,10 +408,7 @@
     // inside this entry. Previously we required BOTH endpoints inside the
     // entry, which dropped cross-entry selections entirely.
     const range = selection.getRangeAt(0);
-    if (
-      entryElement.contains(range.startContainer) ||
-      entryElement.contains(range.endContainer)
-    ) {
+    if (entryElement.contains(range.startContainer) || entryElement.contains(range.endContainer)) {
       return selection.toString();
     }
     return null;
@@ -412,10 +451,7 @@
   $effect(() => {
     const pending = pendingRegeneration;
     if (!pending) return;
-    const outcome = observedRunOutcome(
-      runStateStore.states.get(pending.sessionId),
-      pending.runId,
-    );
+    const outcome = observedRunOutcome(runStateStore.states.get(pending.sessionId), pending.runId);
     if (outcome.kind === 'pending') return;
     pendingRegeneration = null;
     if (outcome.kind === 'complete') {
@@ -546,6 +582,7 @@
     try {
       await apiFetch(apiUrl(`/api/sessions/${sid}/context/${archiveId}/visibility`), {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hiddenFromAgent: hidden }),
       });
       wsStore.setEntryVisibility(entry.id, { agentHidden: hidden });
@@ -589,9 +626,9 @@
   }
 
   async function copyImageToClipboard() {
-    const img = (currentAttachments as Array<{ type: string; data: string; mimeType?: string }> | undefined)?.find(
-      (a) => a.type === 'image',
-    );
+    const img = (
+      currentAttachments as Array<{ type: string; data: string; mimeType?: string }> | undefined
+    )?.find((a) => a.type === 'image');
     if (!img?.data) return;
     const mimeType = img.mimeType ?? 'image/png';
     try {
@@ -734,9 +771,7 @@
   }
 
   function renderedMarkdown(content: string): string {
-    return expandHtmlSandboxes(
-      DOMPurify.sanitize(marked.parse(content, { async: false }) as string),
-    );
+    return renderChatMarkdown(content, feedParser);
   }
 
   let parsedHtml = $derived.by(() => {
@@ -744,10 +779,9 @@
     try {
       const withoutRenderDirectives = debouncedText
         .replace(/\{\{render_note:[^}\s]+\}\}/g, '')
+        .replace(/\{\{checklist:[^}\s]+\}\}/g, '')
         .trim();
-      return expandHtmlSandboxes(
-        DOMPurify.sanitize(marked.parse(withoutRenderDirectives, { async: false }) as string),
-      );
+      return renderChatMarkdown(withoutRenderDirectives, feedParser);
     } catch (err: unknown) {
       console.debug('Markdown parse failed:', err instanceof Error ? err.message : String(err));
       return debouncedText;
@@ -799,7 +833,7 @@
     );
   }
 
-  type ToolCategory = 'bash' | 'read' | 'write' | 'note' | 'web' | 'search' | 'other';
+  type ToolCategory = 'bash' | 'read' | 'write' | 'note' | 'web' | 'search' | 'checklist' | 'other';
 
   // Analyzing/reading → eyeball. Editing/writing → pencil. Names cover both
   // Koryphaios tools and CLI-harness tool names (grok/claude-code/antigravity).
@@ -837,6 +871,18 @@
     'update_note',
   ]);
   const NOTE_WRITE_TOOLS = new Set(['record_work_note']);
+  // Matched before the search regex below, which would otherwise swallow
+  // `list_checklists` and render a checklist edit as a magnifier.
+  const CHECKLIST_TOOLS = new Set([
+    'create_checklist',
+    'list_checklists',
+    'read_checklist',
+    'add_checklist_item',
+    'check_checklist_item',
+    'update_checklist',
+    'delete_checklist',
+    'edit_goal_checklist',
+  ]);
   const WEB_TOOLS = new Set(['web_search', 'web_fetch']);
   const BASH_TOOLS = new Set([
     'bash',
@@ -855,6 +901,7 @@
   function getToolCategory(meta?: Record<string, unknown>): ToolCategory {
     const name = getToolNameFromMeta(meta);
     if (NOTE_WRITE_TOOLS.has(name)) return 'note';
+    if (CHECKLIST_TOOLS.has(name)) return 'checklist';
     if (WEB_TOOLS.has(name)) return 'web';
     if (SEARCH_TOOLS.has(name) || /grep|glob|search|find|list_dir/i.test(name)) return 'search';
     if (BASH_TOOLS.has(name)) return 'bash';
@@ -880,6 +927,15 @@
           label: 'Recording Work Note',
           resultLabel: 'Work Note Recorded',
           colorClass: 'text-violet-400',
+        };
+      case 'checklist':
+        return {
+          label: 'Updating Checklist',
+          resultLabel: 'Checklist Updated',
+          // fuchsia, not teal: teal-400 sits between the emerald-400 (bash) and
+          // cyan-400 (read) already in this palette, and those three calls
+          // alternate constantly within one agent turn.
+          colorClass: 'text-fuchsia-400',
         };
       case 'web':
         return { label: 'Searching Web', resultLabel: 'Web Results', colorClass: 'text-sky-400' };
@@ -1075,7 +1131,10 @@
     try {
       return JSON.stringify(input, null, 2);
     } catch (err: unknown) {
-      console.debug('Failed to stringify tool call input:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'Failed to stringify tool call input:',
+        err instanceof Error ? err.message : String(err),
+      );
       return currentText;
     }
   }
@@ -1247,6 +1306,7 @@
               class="flex w-full items-center gap-2 text-left"
               onclick={(event) => {
                 event.stopPropagation();
+                requestExpandAnchor(event.currentTarget);
                 compactionExpanded = !compactionExpanded;
               }}
               aria-expanded={compactionExpanded}
@@ -1359,9 +1419,8 @@
                     >{entry.metadata.sourceProvider}</span
                   >{/if}
               </div>
-              <pre
-                class="max-h-80 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
-                  'The tool failed without returning diagnostic output.'}</pre>
+              <pre class="error-box-body">{currentText ||
+                'The tool failed without returning diagnostic output.'}</pre>
             </section>
           {:else if toolCat === 'search'}
             {@const label = getToolShortLabel(entry.metadata)}
@@ -1421,6 +1480,7 @@
                 class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
                 onclick={(event) => {
                   event.stopPropagation();
+                  requestExpandAnchor(event.currentTarget);
                   toolDetailsOpen = !toolDetailsOpen;
                 }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
               >
@@ -1443,6 +1503,7 @@
                 class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
                 onclick={(event) => {
                   event.stopPropagation();
+                  requestExpandAnchor(event.currentTarget);
                   toolDetailsOpen = !toolDetailsOpen;
                 }}>{toolDetailsOpen ? 'Hide' : 'Details'}</button
               >
@@ -1451,10 +1512,14 @@
               {#if isStreaming && entry.type === 'content'}
                 {#if streamingSegments.length > 0}
                   {#each streamingSegments as seg (seg.id)}
+                    <!-- Both segment kinds carry rendered HTML: 'text' is prose
+                         (which may include TeX) and 'block' is a complete rich
+                         block. Reading seg.text for prose dropped the rendered
+                         markup, so inline/display math never appeared mid-stream. -->
                     {#if seg.kind === 'block'}
                       {@html seg.html}
                     {:else}
-                      <span class="whitespace-pre-wrap stream-chunk">{seg.text}</span>
+                      <span class="whitespace-pre-wrap stream-chunk">{@html seg.html ?? ''}</span>
                     {/if}
                   {/each}
                 {:else if parsedHtml}
@@ -1471,6 +1536,21 @@
                 {@html parsedHtml}
               {/if}
             </div>{/if}
+
+          {#if !isStreaming && checklistRenderIds.length > 0}
+            <div class="mt-3 space-y-2">
+              {#each checklistRenderIds as checklistId (checklistId)}
+                {@const inline = checklistStore.get(checklistId)}
+                {#if inline === undefined}
+                  <p class="text-[11px] text-[var(--color-text-muted)]">Loading checklist…</p>
+                {:else}
+                  <!-- Live and interactive: a human can tick a box here and the
+                       agent's next read sees it. Flat rules, no card chrome. -->
+                  <ChecklistList checklist={inline} />
+                {/if}
+              {/each}
+            </div>
+          {/if}
 
           {#if !isStreaming && noteRenderIds.length > 0}
             <div class="mt-3 space-y-3">
@@ -1523,7 +1603,11 @@
           {/if}
 
           {#if currentAttachments && Array.isArray(currentAttachments) && currentAttachments.length > 0}
-            <div class="mt-3 flex flex-wrap gap-2 {entry.type === 'content' && isImageResponse ? 'items-start' : ''}">
+            <div
+              class="mt-3 flex flex-wrap gap-2 {entry.type === 'content' && isImageResponse
+                ? 'items-start'
+                : ''}"
+            >
               {#each currentAttachments as attachment}
                 {#if attachment.type === 'image'}
                   {#if entry.type === 'content'}
@@ -1658,8 +1742,8 @@
                 {#if selectedVariantIsActive}
                   <span
                     class="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300"
-                    title="Follow-up messages continue from this response"
-                  >Active branch</span>
+                    title="Follow-up messages continue from this response">Active branch</span
+                  >
                 {:else}
                   <button
                     type="button"
@@ -1716,9 +1800,7 @@
                 >{entry.metadata?.source ?? 'runtime'}</span
               >
             </div>
-            <pre
-              class="max-h-80 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere] break-words px-3 py-2 font-mono text-[12px] leading-relaxed text-red-200">{currentText ||
-                'No error details were provided.'}</pre>
+            <pre class="error-box-body">{currentText || 'No error details were provided.'}</pre>
           </section>
         {:else}
           <div class="{getEntryColor(entry.type)} break-words mt-1">
@@ -1762,17 +1844,22 @@
           }}
           title="Delete the response currently shown"
         >
-          {#if deleting}<LoaderCircle size={14} class="animate-spin" />{:else}<Trash2 size={14} />{/if}
+          {#if deleting}<LoaderCircle size={14} class="animate-spin" />{:else}<Trash2
+              size={14}
+            />{/if}
         </button>
       </div>
     </div>
   {/if}
 
   {#if entry.type === 'agent_group' && isExpanded}
-    <!-- Sub-agent activity: clearly grouped by domain, expanded by default -->
+    <!-- Sub-agent activity: collapsed by default and always clamped. The
+         manager feed is a summary surface — a worker that dumps a 200-line
+         tool log must not scroll the whole conversation away. The unclamped
+         text stays one click away in that worker's own transcript. -->
     {@const bds = domainStyle(entry.metadata)}
     <div
-      class="ml-20 border-l-2 pl-4 py-2 space-y-2 my-1 {bds.color}"
+      class="ml-20 border-l-2 pl-3 py-1.5 space-y-1 my-1 {bds.color} max-h-56 overflow-y-auto agent-group-scroll"
       style="border-color: currentColor;"
       transition:fly={{ y: -10, duration: 200 }}
     >
@@ -1783,7 +1870,7 @@
         <div
           class="flex items-start gap-2 text-[12px] opacity-85 hover:opacity-100 transition-opacity"
         >
-          <span class="text-[var(--color-text-muted)] w-12 shrink-0">
+          <span class="text-[var(--color-muted)] w-12 shrink-0">
             {new Date(subEntry.timestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
@@ -1791,7 +1878,10 @@
             })}
           </span>
           <div class="flex-1 min-w-0">
-            <span class={getEntryColor(subEntry.type)}>{subEntry.text}</span>
+            <span
+              class="{getEntryColor(subEntry.type)} block truncate"
+              title={subEntry.text}>{summarizeSubAgentText(subEntry.text)}</span
+            >
           </div>
         </div>
       {/each}
@@ -1851,7 +1941,8 @@
       onclick={(event) => {
         contextMenu = null;
         void deleteVisibleEntry(event);
-      }}>{#if deleting}<LoaderCircle size={13} class="animate-spin" />{:else}<Trash2 size={13} />{/if}
+      }}
+      >{#if deleting}<LoaderCircle size={13} class="animate-spin" />{:else}<Trash2 size={13} />{/if}
       Delete</button
     >
   </div>
@@ -1876,7 +1967,10 @@
       {#if entry.type === 'tool_group'}
         <Layers size={13} class="shrink-0 text-blue-400" />
       {:else}
-        <Terminal size={13} class="shrink-0 {detailFailed ? 'text-red-400' : detailDisplay.colorClass}" />
+        <Terminal
+          size={13}
+          class="shrink-0 {detailFailed ? 'text-red-400' : detailDisplay.colorClass}"
+        />
       {/if}
       <span class="tool-output-kicker shrink-0">
         {entry.type === 'tool_group'
@@ -1897,11 +1991,16 @@
         {/if}
         {#if detailBody}
           <span class="tool-output-meta ml-auto shrink-0 tabular-nums">
-            {detailLines} {detailLines === 1 ? 'line' : 'lines'}
+            {detailLines}
+            {detailLines === 1 ? 'line' : 'lines'}
           </span>
         {/if}
       {/if}
-      <div class="flex shrink-0 items-center gap-0.5 {entry.type === 'tool_group' || !detailBody ? 'ml-auto' : ''}">
+      <div
+        class="flex shrink-0 items-center gap-0.5 {entry.type === 'tool_group' || !detailBody
+          ? 'ml-auto'
+          : ''}"
+      >
         {#if detailBody}
           <button
             type="button"
@@ -1910,7 +2009,9 @@
             aria-label="Copy output"
             title="Copy output"
           >
-            {#if toolOutputCopied}<Check size={13} class="text-emerald-400" />{:else}<Copy size={13} />{/if}
+            {#if toolOutputCopied}<Check size={13} class="text-emerald-400" />{:else}<Copy
+                size={13}
+              />{/if}
           </button>
         {/if}
         <button
@@ -1933,20 +2034,27 @@
               {subEntry.text.replace(/^Calling tool: /, '')}
             </p>
             {#if detail}
-              <pre class="tool-output-pre mt-2 max-h-40 overflow-auto rounded-lg px-3 py-2">{detail}</pre>
+              <pre
+                class="tool-output-pre mt-2 max-h-40 overflow-auto rounded-lg px-3 py-2">{detail}</pre>
             {/if}
           </article>
         {/each}
       </div>
     {:else}
       {#if detailCommand && !rawTaskTranscript}
-        <div class="tool-output-command flex items-start gap-2 border-b px-3 py-2 font-mono text-[11.5px] leading-relaxed">
+        <div
+          class="tool-output-command flex items-start gap-2 border-b px-3 py-2 font-mono text-[11.5px] leading-relaxed"
+        >
           <span class="shrink-0 select-none text-emerald-400/80">$</span>
-          <span class="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--color-text-primary)]">{detailCommand}</span>
+          <span
+            class="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--color-text-primary)]"
+            >{detailCommand}</span
+          >
         </div>
       {/if}
       {#if detailBody}
-        <pre class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3.5 py-3">{detailBody}</pre>
+        <pre
+          class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3.5 py-3">{detailBody}</pre>
       {:else if !detailCommand}
         <p class="px-3.5 py-4 text-center text-[11px] text-[var(--color-text-muted)]">
           {detailIsInput ? 'No input was recorded.' : 'No output was reported.'}
@@ -1982,7 +2090,9 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="max-w-full max-h-full" onclick={(e) => e.stopPropagation()}>
       <img
-        src={zoomedRawImage ? rawImageUrl(zoomedRawImage) : `data:${zoomedImageMimeType};base64,${zoomedImage}`}
+        src={zoomedRawImage
+          ? rawImageUrl(zoomedRawImage)
+          : `data:${zoomedImageMimeType};base64,${zoomedImage}`}
         alt="Zoomed attachment"
         class="max-w-full max-h-full object-contain rounded shadow-2xl"
       />
@@ -1991,6 +2101,38 @@
 {/if}
 
 <style>
+  /* Expanded sub-agent group: bounded, softly scrollable. Keeps a long worker
+     activity log from turning the manager feed into a wall of text. */
+  .agent-group-scroll {
+    scrollbar-width: thin;
+  }
+  .agent-group-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .agent-group-scroll::-webkit-scrollbar-thumb {
+    background: var(--color-surface-4);
+    border-radius: var(--radius-full);
+  }
+
+  /* Error box body: fills the red frame flush so it reads as one rectangular box.
+     The frame and header carry the error color; the body stays on the neutral base
+     surface so a long diagnostic dump does not read as one red slab. */
+  .error-box-body {
+    margin: 0;
+    background: var(--color-surface-0);
+    border: 0;
+    border-radius: 0;
+    padding: 10px 12px;
+    max-height: 20rem;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: color-mix(in srgb, var(--color-error) 30%, var(--color-text-primary));
+  }
+
   /* Tool output panel: a quiet terminal-like surface aligned with the entry body. */
   .tool-output-panel {
     border-color: var(--color-border);

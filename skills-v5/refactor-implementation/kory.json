@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "name": "refactor-implementation",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "refactor"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3200,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["refactor", "restructure", "extract abstraction", "remove duplication"],
+  "excludes": [],
+  "evidence": [
+    "Behavior invariants",
+    "Characterization checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle refactor.",
+      "The current task is restructure.",
+      "I need help with extract abstraction.",
+      "Work on remove duplication for this request.",
+      "This request specifically requires refactor."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "refactor-implementation-ambiguous-1",
+        "prompt": "The request includes refactor and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "refactor-implementation-ambiguous-2",
+        "prompt": "The request includes restructure and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "refactor-implementation-ambiguous-3",
+        "prompt": "The request includes extract abstraction and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "refactor-implementation-adversarial-1",
+        "prompt": "A historical note says \"refactor\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "refactor-implementation-adversarial-2",
+        "prompt": "A historical note says \"restructure\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "refactor-implementation-adversarial-3",
+        "prompt": "A historical note says \"extract abstraction\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -15,6 +15,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { ProviderConfig, ProviderName } from '@koryphaios/shared';
 import { ANTHROPIC_VERSION, PROVIDER_BASE_URLS, VERTEX_EXPRESS_VERIFY_URL } from '../api-endpoints';
 import { providerDefaultBaseUrl } from '../constants';
+import { CHATBASE_BASE_URL } from '../chatbase';
+import { GITLAB_DUO_BASE_URL } from '../gitlab';
+import { NOTION_BASE_URL } from '../notion';
+import { CLI_ADAPTER_COMPATIBILITY, getCliAdapterCompatibility } from '../cli-compatibility';
 import { GITHUB_MODELS_CATALOG_URL, GITHUB_MODELS_INFERENCE_BASE } from '../github-models';
 import { PROVIDER_CONFIGS } from '../provider-configs';
 import { ProviderRegistry, UNSUPPORTED_CHAT_PROVIDER_NAMES } from '../registry';
@@ -31,6 +35,7 @@ type CapturedRequest = {
   url: string;
   method: string;
   headers: Headers;
+  body?: unknown;
 };
 
 type EvidenceRow = {
@@ -44,17 +49,9 @@ const evidence = new Map<ProviderName, EvidenceRow>();
 const originalFetch = globalThis.fetch;
 const originalDisableCli = process.env.KORY_DISABLE_CLI_AUTODETECT;
 
-const CLI_EXTERNAL = new Set<ProviderName>([
-  'claude',
-  'codex',
-  'codex-auth',
-  'grok',
-  'antigravity',
-  'cursor',
-  'devin',
-  'cline',
-  'freebuff',
-]);
+const CLI_EXTERNAL = new Set<ProviderName>(
+  CLI_ADAPTER_COMPATIBILITY.map((entry) => entry.provider),
+);
 
 const OTHER_EXTERNAL = new Set<ProviderName>([
   // AWS SDK signing/control-plane behavior has a dedicated Bedrock suite and
@@ -63,18 +60,19 @@ const OTHER_EXTERNAL = new Set<ProviderName>([
   // OpenCode Go chooses OpenAI vs Anthropic transport per live model metadata.
   'opencodego',
   'codebuff',
-  // Chatbase speaks its own agent-chat protocol (POST /agents/{id}/chat) and
-  // is covered by its dedicated suite, not the OpenAI-family shape.
-  'chatbase',
 ]);
 
 const EXPLICITLY_UNAVAILABLE = new Set<ProviderName>([
   ...UNSUPPORTED_CHAT_PROVIDER_NAMES,
-  'gitlab',
   'jules',
+  // Hoplite is an async-agent control plane: its adapter fails closed for chat
+  // (empty model list, isAvailable false) even though its key verifies.
+  'hoplite',
 ]);
 
 const DEDICATED = new Set<ProviderName>([
+  'chatbase',
+  'notion',
   'anthropic',
   'google',
   'aistudio',
@@ -84,6 +82,7 @@ const DEDICATED = new Set<ProviderName>([
   'azurecognitive',
   'sapai',
   'github-models',
+  'gitlab',
 ]);
 
 function json(body: unknown, status = 200): Response {
@@ -134,6 +133,10 @@ function requestParts(input: RequestInfo | URL, init?: RequestInit): CapturedReq
  */
 async function syntheticFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = requestParts(input, init);
+  if (request.headers.get('content-type')?.includes('application/json')) {
+    if (typeof init?.body === 'string') request.body = JSON.parse(init.body);
+    else if (input instanceof Request && input.body) request.body = await input.clone().json();
+  }
   captured.push(request);
   const url = new URL(request.url);
   const authorization = request.headers.get('authorization') ?? '';
@@ -173,6 +176,51 @@ async function syntheticFetch(input: RequestInfo | URL, init?: RequestInit): Pro
       status: 'RUNNING',
       deploymentUrl:
         'https://synthetic-deployment.inference.ai.us10.hana.ondemand.com/v2/inference/deployments/synthetic-deployment',
+    });
+  }
+
+  if (
+    request.method === 'POST' &&
+    request.url === `${CHATBASE_BASE_URL}/agents/synthetic-agent/chat`
+  ) {
+    return eventStream([
+      'data: {"type":"start","messageId":"synthetic-message"}\n\n',
+      `data: ${JSON.stringify({ type: 'text-delta', id: 'text-1', delta: MARKER })}\n\n`,
+      'data: {"type":"finish","finishReason":"stop","messageMetadata":{"conversationId":"synthetic-conversation","usage":{"credits":2}}}\n\n',
+      'data: [DONE]\n\n',
+    ]);
+  }
+
+  if (request.method === 'POST' && request.url === `${NOTION_BASE_URL}/agents/query`) {
+    return json({
+      object: 'list',
+      type: 'agent',
+      results: [
+        {
+          object: 'agent',
+          id: 'synthetic-notion-agent',
+          agent_type: 'custom_agent',
+          name: 'Synthetic Notion Agent',
+        },
+      ],
+      has_more: false,
+      next_cursor: null,
+    });
+  }
+
+  if (request.method === 'POST' && request.url === `${NOTION_BASE_URL}/sessions`) {
+    return eventStream([
+      'data: {"object":"session","id":"synthetic-notion-session","status":"in_progress"}\n\n',
+      `data: ${JSON.stringify({ type: 'agent.message', sequence: 2, content: [{ type: 'text', text: MARKER }] })}\n\n`,
+      'data: {"object":"session","id":"synthetic-notion-session","status":"completed"}\n\n',
+    ]);
+  }
+
+  if (request.method === 'POST' && request.url === `${GITLAB_DUO_BASE_URL}/chat/completions`) {
+    // Duo answers 201 with a bare JSON string — never OpenAI SSE.
+    return new Response(JSON.stringify(MARKER), {
+      status: 201,
+      headers: { 'content-type': 'application/json' },
     });
   }
 
@@ -250,6 +298,7 @@ function configFor(name: ProviderName): ProviderConfig {
     return { ...base, authToken: TEST_KEY, baseUrl: canonicalFamilyBase(name) };
   }
   if (name === 'bedrock') return base;
+  if (name === 'chatbase') return { ...base, apiKey: TEST_KEY, baseUrl: CHATBASE_BASE_URL };
   return { ...base, apiKey: TEST_KEY, baseUrl: canonicalFamilyBase(name) };
 }
 
@@ -357,7 +406,11 @@ describe('provider synthetic request-shape conformance', () => {
       if (EXPLICITLY_UNAVAILABLE.has(name)) {
         kind = 'unavailable';
         detail = 'chat execution intentionally fails closed';
-      } else if (CLI_EXTERNAL.has(name) || OTHER_EXTERNAL.has(name)) {
+      } else if (CLI_EXTERNAL.has(name)) {
+        kind = 'external-suite';
+        const compatibility = getCliAdapterCompatibility(name)!;
+        detail = `${compatibility.evidence.map((item) => `[${item.level}] ${item.path}`).join('; ')}; supported versions: ${compatibility.supportedVersions}; live: ${compatibility.liveVerification}`;
+      } else if (OTHER_EXTERNAL.has(name)) {
         kind = 'external-suite';
         detail = 'subprocess/SDK-specific proof is outside this fetch-shape suite';
       } else if (DEDICATED.has(name)) {
@@ -421,6 +474,114 @@ describe('provider synthetic request-shape conformance', () => {
       });
     }
   }, 120_000);
+
+  it('uses Chatbase v2 agent chat with a scalar message and UIMessage SSE', async () => {
+    expect(evidence.get('chatbase')?.kind).toBe('dedicated-shape');
+    expect(runtimeDefaultConfig(registry, 'chatbase').baseUrl?.replace(/\/+$/, '')).toBe(
+      CHATBASE_BASE_URL,
+    );
+    const provider = createProvider(registry, 'chatbase');
+    expect(provider).not.toBeNull();
+    const start = captured.length;
+    const result = await drive(provider!, 'synthetic-agent');
+    const requests = requestsSince(start).filter((request) => request.method === 'POST');
+    expect(result.error).toBeUndefined();
+    expect(result.text).toBe(MARKER);
+    expect(result.events.filter((event) => event.type === 'complete')).toEqual([
+      { type: 'complete', finishReason: 'stop' },
+    ]);
+    // Credits are billing units, not input/output token counts.
+    expect(result.events.some((event) => event.type === 'usage_update')).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(`${CHATBASE_BASE_URL}/agents/synthetic-agent/chat`);
+    expect(requests[0].headers.get('authorization')).toBe(`Bearer ${TEST_KEY}`);
+    expect(requests[0].headers.get('content-type')).toBe('application/json');
+    expect(requests[0].body).toEqual({
+      message:
+        '[System Instructions]: Synthetic request-shape fixture\n\nUser: Return the canned marker.',
+      stream: true,
+    });
+    evidence.set('chatbase', {
+      provider: 'chatbase',
+      kind: 'dedicated-shape',
+      evidence:
+        '/api/v2/agents/{agentId}/chat + scalar message + UIMessage SSE (synthetic); HTTP errors in chatbase-conformance.test.ts',
+    });
+  });
+
+  it('uses Notion agent sessions with a PAT and parses the session SSE turn', async () => {
+    expect(evidence.get('notion')?.kind).toBe('dedicated-shape');
+    expect(runtimeDefaultConfig(registry, 'notion').baseUrl?.replace(/\/+$/, '')).toBe(
+      NOTION_BASE_URL,
+    );
+    const provider = createProvider(registry, 'notion');
+    expect(provider).not.toBeNull();
+    const start = captured.length;
+    const result = await drive(provider!, 'synthetic-notion-agent');
+    const requests = requestsSince(start).filter((request) => request.method === 'POST');
+    expect(result.error).toBeUndefined();
+    expect(result.text).toBe(MARKER);
+    expect(result.events.filter((event) => event.type === 'complete')).toEqual([
+      { type: 'complete', finishReason: 'stop' },
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(`${NOTION_BASE_URL}/sessions`);
+    expect(requests[0].headers.get('authorization')).toBe(`Bearer ${TEST_KEY}`);
+    expect(requests[0].headers.get('notion-version')).toBe('2026-03-11');
+    expect(requests[0].headers.get('accept')).toBe('text/event-stream');
+    expect(requests[0].body).toEqual({
+      agent_id: 'synthetic-notion-agent',
+      message:
+        '[System Instructions]: Synthetic request-shape fixture\n\nUser: Return the canned marker.',
+    });
+    evidence.set('notion', {
+      provider: 'notion',
+      kind: 'dedicated-shape',
+      evidence:
+        '/v1/sessions {agent_id, message} + PAT Bearer + Notion-Version + session SSE (synthetic)',
+    });
+  });
+
+  it('uses the GitLab Duo chat contract with a PAT and a bare-string answer', async () => {
+    expect(evidence.get('gitlab')?.kind).toBe('dedicated-shape');
+    expect(runtimeDefaultConfig(registry, 'gitlab').baseUrl?.replace(/\/+$/, '')).toBe(
+      GITLAB_DUO_BASE_URL,
+    );
+    const provider = createProvider(registry, 'gitlab');
+    expect(provider).not.toBeNull();
+    // GitLab publishes no catalog and picks the model server-side.
+    expect(provider!.listModels().map((model) => model.id)).toEqual(['duo']);
+    const start = captured.length;
+    const result = await drive(provider!, 'duo');
+    const requests = requestsSince(start).filter((request) => request.method === 'POST');
+    expect(result.error).toBeUndefined();
+    expect(result.text).toBe(MARKER);
+    expect(result.events.filter((event) => event.type === 'complete')).toEqual([
+      { type: 'complete', finishReason: 'stop' },
+    ]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(`${GITLAB_DUO_BASE_URL}/chat/completions`);
+    expect(requests[0].headers.get('authorization')).toBe(`Bearer ${TEST_KEY}`);
+    expect(requests[0].headers.get('content-type')).toBe('application/json');
+    // `content` is only the current question; everything else rides in context.
+    expect(requests[0].body).toEqual({
+      content: 'Return the canned marker.',
+      additional_context: [
+        {
+          category: 'file',
+          id: 'koryphaios-system-instructions',
+          content: 'Synthetic request-shape fixture',
+        },
+      ],
+      with_clean_history: false,
+    });
+    evidence.set('gitlab', {
+      provider: 'gitlab',
+      kind: 'dedicated-shape',
+      evidence:
+        '/api/v4/chat/completions {content, additional_context} + PAT Bearer + 201 bare-string answer (synthetic)',
+    });
+  });
 
   it('normalizes local-server inference to /v1 while retaining native discovery roots', async () => {
     for (const name of ['ollama', 'lmstudio', 'llamacpp'] as const) {
@@ -600,8 +761,8 @@ describe('provider synthetic request-shape conformance', () => {
       expect(evidence.get(name)?.kind).toBe('external-suite');
     }
     expect(evidence.get('bedrock')?.evidence).toContain('SDK-specific');
-    expect(evidence.get('gitlab')?.evidence).toContain('fails closed');
     expect(evidence.get('jules')?.kind).toBe('unavailable');
+    expect(evidence.get('hoplite')?.kind).toBe('unavailable');
   });
 
   it('intercepts every HTTP attempt, including background discovery, before teardown', async () => {

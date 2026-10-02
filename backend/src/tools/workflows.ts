@@ -1,4 +1,5 @@
 import {
+  DEFAULT_WORKFLOW_ID,
   advanceWorkflow,
   createWorkflowDraft,
   getWorkflowDefinition,
@@ -19,7 +20,7 @@ function workflowCatalog(root: string): string {
 
 function resolveWorkflow(reference: string, root: string) {
   const normalized = reference.trim().toLowerCase();
-  if (!normalized) return undefined;
+  if (!normalized) return getWorkflowDefinition(DEFAULT_WORKFLOW_ID, root);
   return listWorkflowDefinitions(root).find(
     (item) => item.id.toLowerCase() === normalized || item.name.toLowerCase() === normalized,
   );
@@ -44,7 +45,7 @@ export class StartWorkflowTool implements Tool {
   readonly name = 'start_workflow';
   readonly role = 'manager' as const;
   readonly description =
-    'Start a registered, host-owned task workflow only when the user explicitly asks for it or its safe automatic selection is clearly relevant. Call list_workflows first when the exact ID or name is unknown. Workflows never grant tools, create Goals, or change permissions.';
+    'Start the general host-owned task workflow when the user explicitly asks for a workflow. A registered workflow ID or name may be supplied only when a specific saved workflow is requested. Workflows never grant tools, create Goals, or change permissions.';
   readonly inputSchema = {
     type: 'object',
     properties: {

@@ -1,0 +1,82 @@
+{
+  "id": "desktop-electron-tauri-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A Tauri desktop app lets the renderer choose a workspace folder and then invokes a Rust command with a raw path string. Symlink changes between selection and use can escape the chosen root, and cancellation currently returns an empty path that is treated as the home directory. Correct the desktop command/file-dialog boundary with typed cancellation, canonical root enforcement at use time, narrow command exposure, and tests for symlink swap, cancel, reopen, and app restart state restoration.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://desktop-electron-tauri/tauri-file-dialog-command-boundary",
+    "requirements": [
+      "Tauri renderer and Rust command fixture with folder-selection capability",
+      "temporary filesystem roots including a symlink that can be retargeted after selection",
+      "cancel/no-selection state and persisted workspace state across restart",
+      "command allowlist/capability configuration for the pinned Tauri version",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "desktop-electron-tauri-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "desktop-electron-tauri decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "desktop-electron-tauri-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "tauri-file-dialog-command-boundary scenario evidence",
+    "desktop-electron-tauri decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "desktop-electron-tauri-individual-scenario-2-result",
+    "desktop-electron-tauri-individual-scenario-2-verification",
+    "desktop-electron-tauri-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual desktop-electron-tauri boundary and relevant environment before acting, preserve the hierarchy relationship (broader=native-interface; near-neighbor=ios-swiftui), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Trace renderer/webview, privileged host process, IPC commands, filesystem paths, deep links, windows, tray behavior, updates, signing, and packaging as separate trust and lifecycle boundaries."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Native filesystem authority is checked at the command boundary against current canonical state, and cancellation never degrades into an implicit privileged default path."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise packaged builds, multi-window lifecycle, IPC denial paths, filesystem permissions, update/restart behavior, platform shortcuts, and native window state on supported operating systems."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose broad shell/filesystem primitives to the renderer, treat browser dev mode as packaged proof, disable web security for convenience, or conflate Electron and Tauri security models."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (desktop-electron-tauri decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

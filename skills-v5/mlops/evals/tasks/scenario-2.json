@@ -1,0 +1,91 @@
+{
+  "id": "mlops-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply mlops expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is mlops: Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage. The adjacent computer-vision discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://mlops/scenario-2",
+    "requirements": [
+      "monitoring windows for service health, feature freshness/schema, prediction drift and delayed outcome quality",
+      "immutable training-data/feature/model inputs with duplicate triggers and overlapping pipeline histories",
+      "failed/resumable pipeline-stage and candidate evaluation/registry fixtures",
+      "production serving state, promotion rules and rollback controls",
+      "paired same-model skill/no-skill execution",
+      "mlops parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual mlops boundary and relevant environment before acting, preserve the hierarchy relationship (broader=release-planning; near-neighbor=computer-vision), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Make dataset snapshots, feature definitions, training code, environment, model artifacts, evaluation, approvals, serving configuration, monitoring, and rollback one traceable lineage."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Reproduce a candidate from recorded inputs, compare offline and serving features, validate canary/rollback, test missing/stale features, and monitor performance/data drift with thresholds tied to action."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not deploy untraceable notebook artifacts, let online/offline feature logic diverge silently, retrain automatically on unvalidated drift, or call a registry entry production-ready without evaluation evidence."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Immutable code/data/feature/run/model/evaluation/registry/deployment lineage; Inference schema/package and offline-online feature/preprocessing parity evidence; Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence; Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "mlops-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Immutable code/data/feature/run/model/evaluation/registry/deployment lineage",
+        "Inference schema/package and offline-online feature/preprocessing parity evidence",
+        "Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence",
+        "Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "mlops-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Immutable code/data/feature/run/model/evaluation/registry/deployment lineage",
+    "Inference schema/package and offline-online feature/preprocessing parity evidence",
+    "Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence",
+    "Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "mlops-individual-scenario-2-result",
+    "mlops-individual-scenario-2-verification",
+    "mlops-individual-scenario-2-paired-evaluation"
+  ]
+}

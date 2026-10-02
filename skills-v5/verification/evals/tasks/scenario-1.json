@@ -1,0 +1,68 @@
+{
+  "id": "verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A completed patch claims the chat service has switched from the `legacy` provider to `nova`. Verify that completion claim without editing the repository. The supplied fixture deliberately makes a superficial health check uninformative: both providers return HTTP 200 for the same request. Establish the observable discriminator for provider identity, run the repository-supported focused checks, then exercise the actual `/chat` fixture path and independently inspect the recorded provider invocation. The starting state still routes the real request to `legacy` even though configuration reports `nova`, so the correct overall verdict is not success. Return a claim-to-oracle map, exact fresh evidence, a bounded verdict, and any evidence limitations; do not fix the routing bug.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://verification/provider-switch-false-success",
+    "requirements": [
+      "completed provider-switch patch is already present and repository edits are out of scope",
+      "both legacy and nova fixture providers return HTTP 200 so transport success cannot distinguish them",
+      "configuration inspection reports nova while the actual chat dispatch path still invokes legacy",
+      "fixture exposes deterministic provider invocation records through a read-only observation path",
+      "repository includes focused checks that pass despite the incorrect real dispatch"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "verification-provider-claim-oracle",
+      "assertion": "The result states that HTTP 200 cannot establish provider identity and names a direct observable discriminator for which provider handled the request."
+    },
+    {
+      "id": "verification-provider-real-path",
+      "assertion": "Fresh evidence exercises the actual chat fixture path and reads provider invocation state independently rather than treating configuration or a success response as proof of effect."
+    },
+    {
+      "id": "verification-provider-verdict",
+      "assertion": "The overall provider-switch completion claim is refuted because the real request is observed on legacy even though configuration reports nova; the verifier does not edit the defect."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "claim-to-oracle map for provider identity",
+        "fresh focused-check output",
+        "actual /chat fixture result",
+        "independent provider invocation record showing legacy",
+        "explicit refuted verdict for the completion claim"
+      ]
+    },
+    {
+      "id": "verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "verdict is no broader than the observed evidence",
+        "superficial HTTP success is not confused with the requested provider outcome",
+        "the verifier stays in verification scope instead of silently fixing the defect"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "claim-to-oracle map",
+    "fresh focused-check output",
+    "real chat-path evidence",
+    "independent provider-state readback",
+    "explicit refuted or inconclusive labels for unsupported claims",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "verification-scenario-1-result",
+    "verification-scenario-1-verification",
+    "verification-scenario-1-paired-evaluation"
+  ]
+}

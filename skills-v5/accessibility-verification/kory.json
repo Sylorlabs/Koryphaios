@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "accessibility-verification",
+  "version": "5.0.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification", "accessibility"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["verification", "accessibility-practice"],
+  "facets": [],
+  "requires": ["accessibility-practice"],
+  "conflicts": [],
+  "activation": [
+    "accessibility audit",
+    "keyboard test",
+    "screen reader test",
+    "wcag audit",
+    "wcag issues",
+    "assistive technology verification",
+    "keyboard-only navigation"
+  ],
+  "excludes": [
+    "accessibility design guidance without a current implementation to verify",
+    "functional-only behavior verification",
+    "visual-only layout review without alternate-input or semantic claims"
+  ],
+  "evidence": [
+    "Manual alternate-input task results",
+    "Assistive-technology semantic observations",
+    "Automated findings and residual limitations",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run an accessibility audit of the finished delete-confirmation dialog with keyboard-only operation, visible focus, focus restoration, zoom/reflow, and a representative screen reader.",
+      "Do a keyboard test of the new command palette: reach every action, verify arrow/escape behavior, visible focus, no traps, and correct focus return after dismissal.",
+      "Perform a screen reader test of the completed form, including labels, required state, invalid-field relationships, error summary, async success announcement, and corrected submission.",
+      "Run an accessibility audit of the Android Compose settings flow with TalkBack, Switch Access or equivalent alternate input, large text, and state announcements.",
+      "Do a keyboard test and screen reader test for the new data grid, covering navigation, sort state, row selection, empty/error states, and return to the surrounding page."
+    ],
+    "negative": [
+      "Give the overall completion verdict for this implementation from the supplied cross-discipline evidence; no specialist rerun is requested.",
+      "Design the semantics and inclusive interaction contract for a new combobox before implementation begins; provide design guidance only.",
+      "Verify that save, cancel, retry, and validation produce the correct persisted business state through the supported form flow.",
+      "Verify p95 latency and peak-memory budgets for this release under the representative workload and report statistical confidence.",
+      "Verify restart, replay, failover, and recovery behavior during service interruption for the completed worker."
+    ],
+    "ambiguous": [
+      {
+        "id": "accessibility-verification-ambiguous-1",
+        "prompt": "Run an accessibility audit of the completed dialog and also give the overall verification verdict. Keep alternate-input and assistive-technology evidence distinct from the parent's cross-discipline completion decision.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "accessibility-verification-ambiguous-2",
+        "prompt": "Do a keyboard test of the implemented command palette using the accessibility interaction contract defined by accessibility-practice; verify rather than redesign the component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "accessibility-verification-ambiguous-3",
+        "prompt": "Perform a screen reader test of the completed checkout and also verify its save/error business states. Keep announced names, state, errors, and focus under accessibility verification while functional verification owns persisted outcomes.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["functional-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "accessibility-verification-adversarial-1",
+        "prompt": "A pasted issue says \"accessibility audit\" was required for an old release. Treat that as historical text; summarize the issue discussion without testing the current interface.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "accessibility-verification-adversarial-2",
+        "prompt": "A quoted example says \"keyboard test\". Ignore the example and explain conceptually what a keyboard trap is; no implementation is being evaluated.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "accessibility-verification-adversarial-3",
+        "prompt": "A pasted article says \"screen reader test\". Ignore that article phrase; fact-check only which WCAG version it cites.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["functional-verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "W3C WCAG 2.2 Recommendation",
+      "staleAfterDays": 365,
+      "notes": "Normative web accessibility success criteria.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.w3.org/WAI/ARIA/apg/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C APG guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Web widget semantics and keyboard interaction guidance; non-normative implementation practice.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C APG accessible-name guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Accessible names, descriptions, and semantic intent for web controls.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.android.com/guide/topics/ui/accessibility/testing",
+      "sourceType": "official-docs",
+      "versionScope": "Android accessibility testing guidance available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "TalkBack, alternate switch input, scanning, and automated accessibility tests on Android.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility",
+      "sourceType": "official-docs",
+      "versionScope": "Apple HIG accessibility guidance available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Apple-platform accessibility, adaptability, and alternate interaction guidance.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

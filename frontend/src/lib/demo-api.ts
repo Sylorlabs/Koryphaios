@@ -374,8 +374,8 @@ let demoAgentSettings = {
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
-  contextKeepRecentTurns: 3,
-  contextPruneMinChars: 600,
+  contextKeepRecentTurns: 8,
+  contextPruneMinChars: 2000,
   contextSelfAwareness: true,
   reasoningExpandedByDefault: true,
 };
@@ -613,6 +613,7 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     return ok(demoMessages.get(sessionId) ?? []);
   }
   if (/^\/api\/sessions\/[^/]+\/(cancel|compact)$/.test(path)) return ok(true);
+  if (/^\/api\/agent\/[^/]+\/cancel$/.test(path)) return ok(true);
   if (/^\/api\/sessions\/[^/]+\/timetravel$/.test(path)) {
     return ok({
       currentHash: '',
@@ -859,6 +860,49 @@ export function demoFetch(url: string, init: RequestInit = {}): Response {
     const body = parseBody(init);
     if (!action && method === 'PATCH') {
       Object.assign(goal, body, { updatedAt: Date.now() });
+      return ok(goal);
+    }
+    if (action === 'checklist' && method === 'PATCH') {
+      const items = (parseBody(init) as { items?: Record<string, unknown>[] }).items;
+      if (!Array.isArray(items) || items.length === 0) {
+        return json({ ok: false, error: 'Goals require at least one checklist item.' }, 400);
+      }
+      if (goal.status === 'completed' || goal.status === 'cancelled') {
+        return json({ ok: false, error: `Goal is ${goal.status}; its checklist is closed.` }, 409);
+      }
+      const byId = new Map(goal.checklist.map((item) => [item.id, item]));
+      const kept = new Set(items.map((item) => String(item.id ?? '')));
+      // Mirrors the server: the running check cannot be deleted out from under
+      // the goal driver, and surviving checks keep their status and evidence.
+      const running = goal.checklist.find(
+        (item) => item.status === 'running' && !kept.has(item.id),
+      );
+      if (running) {
+        return json(
+          { ok: false, error: `Pause the goal before deleting "${running.title}".` },
+          409,
+        );
+      }
+      goal.checklist = items.map((item, index) => {
+        const prior = byId.get(String(item.id ?? ''));
+        return {
+          id: String(item.id ?? `trial-check-${Date.now()}-${index}`),
+          title: String(item.title ?? '').trim(),
+          status: prior?.status ?? 'pending',
+          order: typeof item.order === 'number' ? item.order : index,
+          dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn : [],
+          evidence: prior?.evidence ?? [],
+          startedAt: prior?.startedAt,
+          completedAt: prior?.completedAt,
+        };
+      });
+      goal.updatedAt = Date.now();
+      goal.activity.push({
+        id: `${id}-checklist-${Date.now()}`,
+        type: 'checklist_edited',
+        message: 'Checklist edited by you',
+        createdAt: Date.now(),
+      });
       return ok(goal);
     }
     if (action === 'drive' && method === 'POST') {

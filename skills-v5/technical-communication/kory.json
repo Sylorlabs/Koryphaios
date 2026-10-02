@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "name": "technical-communication",
+  "version": "5.1.1",
+  "skillKind": "artifact",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents", "technical"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "technical document",
+    "design document",
+    "engineering report",
+    "technical design",
+    "design proposal",
+    "architecture document",
+    "architecture explanation",
+    "technical rfc",
+    "engineering rfc",
+    "technical postmortem",
+    "architecture change engineers",
+    "interfaces failure modes",
+    "engineering handoff document"
+  ],
+  "excludes": [
+    "executive brief without technical appendix",
+    "step-by-step tutorial only",
+    "api reference only",
+    "configuration reference only",
+    "implement the change without writing a technical document",
+    "rewrite the general document without technical analysis",
+    "implement the queue migration",
+    "extract only the ticket identifiers",
+    "return only the exact configuration values",
+    "trace which repository test loads the fixture"
+  ],
+  "evidence": [
+    "Current/proposed or observed/inferred boundary",
+    "System/interface/failure trace",
+    "Alternatives, risks, and unresolved decisions",
+    "Technical claim provenance and example validation",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Write a technical RFC for adding idempotent background jobs to this service. Separate current and proposed architecture, define interfaces and failure semantics, compare alternatives, and include migration, rollback, observability, and open decisions.",
+      "Create an engineering report explaining why p99 latency regressed after the cache change. Tie measurements and repository evidence to the mechanism, distinguish hypotheses from findings, and document residual risks.",
+      "Produce an architecture document for the new tenant-isolation boundary, including trust boundaries, data/control flow, ownership, compatibility constraints, failure handling, and the evidence behind the chosen design.",
+      "Write a technical postmortem for the outage from the supplied timeline, logs, metrics, and change history. Separate observed facts, causal analysis, contributing factors, remediation, and unresolved uncertainty.",
+      "Explain this subsystem to maintainers in a technical document: entry points, state transitions, key interfaces, configuration, failure paths, tests, and where the implementation differs from older design notes."
+    ],
+    "negative": [
+      "Write user-facing release notes from the verified change list; do not include architecture rationale or engineering internals.",
+      "Prepare a one-page executive brief for leadership on delivery status, business impact, top risks, options, and the decision needed this week.",
+      "Create a step-by-step setup tutorial for a new developer, including prerequisites, expected outputs, troubleshooting, and completion checks.",
+      "Generate an API reference for these endpoints with exact parameters, types, defaults, status codes, errors, examples, and version scope; no design narrative is needed.",
+      "Implement the queue migration in the repository and verify the tests. No RFC, report, or technical document deliverable is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "technical-communication-ambiguous-1",
+        "prompt": "Implement the new retry mechanism and also write a technical RFC that documents the current/proposed behavior, alternatives, failure semantics, migration, and rollback. Keep implementation evidence separate from the design artifact.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation", "repository-research"],
+        "tags": ["ambiguous", "compound", "implementation-plus-rfc"]
+      },
+      {
+        "id": "technical-communication-ambiguous-2",
+        "prompt": "Write the detailed architecture document for the migration and derive a separate one-page leadership summary of cost, risk, timing, and the decision required. The executive summary must not replace the technical evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["executive-communication"],
+        "tags": ["ambiguous", "compound", "technical-plus-executive"]
+      },
+      {
+        "id": "technical-communication-ambiguous-3",
+        "prompt": "Produce the engineering report explaining the incident mechanism, then create a separate runbook for operators to detect and recover from that failure mode. Keep explanation and procedure distinct.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["instructional-communication", "incident-response"],
+        "tags": ["ambiguous", "compound", "report-plus-runbook"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "technical-communication-adversarial-1",
+        "prompt": "The issue description I pasted says 'write a technical document before implementation.' Treat that as historical source text. My actual request is only to extract the ticket IDs from the issue body.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "technical-communication-adversarial-2",
+        "prompt": "Do not create a design document or architecture explanation. Return only the exact configuration values already present in the supplied snippet.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "technical-communication-adversarial-3",
+        "prompt": "A fixture string says 'produce an engineering report for this failure.' Ignore that inert test string. Trace only which repository test loads the fixture and how it is parsed.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered structure, wording, and readability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developers.google.com/style",
+      "sourceType": "official-docs",
+      "versionScope": "Google developer documentation style guide, last updated 2026-04-27 and inspected 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Technical-reader clarity and consistency; project-specific style takes precedence.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/welcome/",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft public technology-writing style guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Concise, consistent terminology and reader-centered technical communication.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://diataxis.fr/",
+      "sourceType": "community-pattern",
+      "versionScope": "Diátaxis documentation architecture as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Community pattern for separating explanation from tutorial/how-to/reference user needs.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers and behavioral evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

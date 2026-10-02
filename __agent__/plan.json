@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "items": [
+    {
+      "title": "Create a reversible git checkpoint of the current state",
+      "status": "in-progress"
+    },
+    {
+      "title": "Audit UI surfaces and identify high-value cleanup targets",
+      "status": "pending"
+    },
+    {
+      "title": "Implement flatter spacing-conscious UI cleanup",
+      "status": "pending"
+    },
+    {
+      "title": "Run the app with Playwright and verify key screens",
+      "status": "pending"
+    },
+    {
+      "title": "Commit the cleanup and summarize revert points",
+      "status": "pending"
+    }
+  ],
+  "updated_at": "2026-10-02T05:21:19.739Z",
+  "session_id": "01a0faf8-d67d-705b-9632-3c007b99a7ae"
+}

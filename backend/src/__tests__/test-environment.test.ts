@@ -3,7 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createIsolatedTestEnvironment } from '../../../scripts/test-backend-isolated';
+import {
+  createIsolatedTestEnvironment,
+  parseTestSelection,
+} from '../../../scripts/test-backend-isolated';
 
 /** Normalize backslashes to forward slashes so path assertions work on both
  * Windows (where path.join uses \) and POSIX (where it uses /). */
@@ -12,6 +15,24 @@ function normalizePath(p: string | undefined): string {
 }
 
 describe('isolated backend test environment', () => {
+  test('focused selection preserves Bun flags and deduplicates explicit files', () => {
+    const root = join(import.meta.dir, '../../..');
+    const path = 'backend/src/__tests__/test-environment.test.ts';
+    const selection = parseTestSelection(
+      ['--file', path, '--file', path, '--test-name-pattern', 'boundary'],
+      root,
+    );
+    expect(selection.files).toHaveLength(1);
+    expect(selection.files[0]).toBe(join(root, path));
+    expect(selection.runnerArguments).toEqual(['--test-name-pattern', 'boundary']);
+    expect(() => parseTestSelection(['--file'], root)).toThrow('requires');
+    expect(() => parseTestSelection(['--file', '../outside.test.ts'], root)).toThrow(
+      'inside backend',
+    );
+    expect(() => parseTestSelection(['--file', 'backend/package.json'], root)).toThrow(
+      'inside backend',
+    );
+  });
   test('strips ambient provider authority and account locations from the default core gate', () => {
     const env = createIsolatedTestEnvironment(
       {

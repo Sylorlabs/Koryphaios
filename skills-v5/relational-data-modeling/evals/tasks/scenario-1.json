@@ -1,0 +1,82 @@
+{
+  "id": "relational-data-modeling-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Model workspace membership history where a user can leave and later rejoin, role changes must be auditable, and at most one active membership may exist per user/workspace at a time. Define keys, temporal representation, constraints/indexes, update transaction semantics, and migration from a current `memberships(user_id, workspace_id, role, active)` table. Verify duplicate active insert, leave/rejoin, role history, and rollback.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://relational-data-modeling/membership-temporal-constraint",
+    "requirements": [
+      "current membership table and sample history that overwrote prior role/active state",
+      "business invariants for one active membership and retained historical intervals",
+      "supported relational database constraint/index capabilities",
+      "migration/backfill corpus including duplicate current rows to remediate",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "relational-data-modeling-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "relational-data-modeling decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "relational-data-modeling-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "membership-temporal-constraint scenario evidence",
+    "relational-data-modeling decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "relational-data-modeling-individual-scenario-1-result",
+    "relational-data-modeling-individual-scenario-1-verification",
+    "relational-data-modeling-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual relational-data-modeling boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; children=mysql-engineering,postgres-engineering,sqlite-engineering; near-neighbor=mongodb-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Start from entities, identities, invariants, lifecycle, cardinality, ownership, retention, and access patterns."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Keys and constraints encode the declared entity/temporal invariants so concurrent writes cannot create two active memberships and history is not reconstructed from overwritten state."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Validate representative inserts, updates, deletes, concurrent transactions, migrations, uniqueness, referential integrity, and high-value query plans against realistic data shapes."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use JSON columns to postpone every modeling decision, rely solely on application validation for database invariants, or choose surrogate keys without understanding natural uniqueness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (relational-data-modeling decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

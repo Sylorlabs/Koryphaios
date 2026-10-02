@@ -1,0 +1,83 @@
+{
+  "id": "integration-implementation-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Integrate a vendor webhook for subscription status changes. Delivery is at least once, events may arrive out of order, signatures include a timestamp tolerance, and missed events must be recoverable through the vendor list API. Implement verification before parse/mutation, stable event dedup, ordering/reconciliation rules, bounded replay, and dead-letter evidence while preserving the application’s existing subscription state model.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://integration-implementation/webhook-signature-reconciliation",
+    "requirements": [
+      "signed webhook corpus with valid, invalid, stale-timestamp, duplicate, and out-of-order events",
+      "vendor reconciliation/list endpoint fixture exposing canonical current state",
+      "existing subscription-state transitions and stable vendor event ids",
+      "failure injection before/after local commit and acknowledgement",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "integration-implementation-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Boundary contract",
+        "Failure and compatibility tests",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "integration-implementation-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "webhook-signature-reconciliation scenario evidence",
+    "Boundary contract",
+    "Failure and compatibility tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "integration-implementation-individual-scenario-2-result",
+    "integration-implementation-individual-scenario-2-verification",
+    "integration-implementation-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual integration-implementation boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; children=email-delivery,payment-integration,webhook-integration; near-neighbor=csharp-dotnet-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm both sides, isolate translation, identity, lifecycle, retries, timeouts, cancellation, versioning, idempotency, and partial failure."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Only authenticated events mutate state, and duplicate/out-of-order/missed delivery converges through stable event identity plus authoritative reconciliation rather than arrival order alone."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Boundary contract; Failure and compatibility tests"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of integration-implementation correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Boundary contract; Failure and compatibility tests; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

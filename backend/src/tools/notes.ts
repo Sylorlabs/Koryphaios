@@ -583,7 +583,16 @@ export const searchNotesTool: Tool = {
     const start = Date.now();
     try {
       await notesService.syncProjectDocuments(ctx.workingDirectory);
-      const results = await notesService.searchNotes(String(input.query), 50, ctx.workingDirectory);
+      if (ctx.signal?.aborted) throw new Error('Notes search canceled');
+      const results = await notesService.searchNotes(
+        String(input.query),
+        50,
+        ctx.workingDirectory,
+        {
+          signal: ctx.signal,
+        },
+      );
+      if (ctx.signal?.aborted) throw new Error('Notes search canceled');
       if (!results.length) {
         return {
           callId: call.id,

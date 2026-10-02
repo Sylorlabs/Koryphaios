@@ -7,12 +7,31 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { getProviderHarnessCapabilities } from '../../providers/provider-harness';
-import { resolveTrustedContextWindow } from '../../providers/models';
+import { applyContextWindowOverride, resolveTrustedContextWindow } from '../../providers/models';
 import {
   deriveAuthoritativeTargetMedium,
+  deriveDefaultSkillContextBudget,
+  MAX_SKILL_CONTEXT_BUDGET,
+  MIN_SKILL_CONTEXT_BUDGET,
   resolveSkills,
+  TOKEN_CHARS,
   type SkillResolverResult,
 } from '../skills';
+import { routingRelevantText } from '../routing-text';
+import {
+  createSkillDeliveryEvidence,
+  normalizeSkillAssignment,
+  type SkillAssignment,
+  type SkillDeliveryEvidence,
+} from '../skill-assignment';
+import { CRITIC_OUTPUT_CONTRACT } from '../critic-util';
+
+export {
+  deriveDefaultSkillContextBudget,
+  MAX_SKILL_CONTEXT_BUDGET,
+  MIN_SKILL_CONTEXT_BUDGET,
+  TOKEN_CHARS,
+};
 
 export const PROMPT_VERSION = 'kory-workflow-v7-hierarchical-cache';
 
@@ -36,6 +55,8 @@ export interface TaskContract {
   acceptanceCriteria: string[];
   risk: 'low' | 'medium' | 'high';
   requiredEvidence: string[];
+  /** Manager supplied skills, preserved across worker retries and independent review. */
+  skillAssignment?: SkillAssignment;
   /** Durable Goal Mode context; preserved through manager, worker, critic, and retries. */
   goalContext?: {
     goalId: string;
@@ -93,7 +114,11 @@ export interface PromptManifest {
   targetMedium?: string;
   skillContextBudget: SkillContextBudgetDecision;
   skillContextCost: number;
-  /** Fail-closed UTF-8 byte upper bound for the compiled system prompt. */
+  /** Non-fatal skill-budget degradation notes (also surfaced via CompiledPrompt.warnings). */
+  skillWarnings: string[];
+  /** Auto-included ancestors pruned because every dependent rendered minimal. */
+  omittedLazyAncestors: string[];
+  /** Chars/4 planning estimate for the compiled system prompt. */
   systemPromptTokenUpperBound: number;
   /** Occupied context + compiled prompt + the actual reserved completion limit. */
   totalContextTokenUpperBound: number;
@@ -129,6 +154,7 @@ export interface CompiledPrompt {
   systemPrompt: string;
   promptCache: PromptCachePlan;
   manifest: PromptManifest;
+  skillDelivery: SkillDeliveryEvidence;
   /** Non-fatal issues encountered during compilation. Callers may surface
    *  these to the user as warnings (e.g. via a system.warning WS event). */
   warnings?: string[];
@@ -139,7 +165,7 @@ export interface SkillContextBudgetDecision {
   requestedBudget: number;
   source: 'planning-default' | 'trusted-model-window';
   contextWindowTokens?: number;
-  /** Legacy diagnostic retained for clients; live budgeting uses token upper bounds below. */
+  /** Legacy diagnostic retained for clients; live budgeting uses the chars/4 planning estimates below. */
   occupiedContextChars: number;
   nonSkillPromptChars: number;
   occupiedContextTokenUpperBound: number;
@@ -173,7 +199,7 @@ export interface PromptTemplate {
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export function classifyTask(goal: string, domain?: WorkerDomain): TaskKind {
-  const text = goal.toLowerCase();
+  const text = routingRelevantText(goal).toLowerCase();
   if (
     domain === 'ui' ||
     /\b(ui|ux|interface|layout|screen|component|responsive|accessibility|navigation|editor|findability|microcopy)\b/.test(
@@ -215,7 +241,7 @@ export function createTaskContract(
   options: Partial<Omit<TaskContract, 'goal' | 'taskKind'>> & { taskKind?: TaskKind } = {},
 ): TaskContract {
   const taskKind = options.taskKind ?? classifyTask(goal);
-  const normalizedGoal = goal.toLowerCase();
+  const normalizedGoal = routingRelevantText(goal).toLowerCase();
   const verificationOnly =
     /\b(assess|audit|review|verify|verification|fuzz|fuzzing|test|testing|benchmark|threat model)\b/.test(
       normalizedGoal,
@@ -257,6 +283,9 @@ export function createTaskContract(
             ]
           : ['Evidence-backed answer']),
     goalContext: options.goalContext,
+    ...(options.skillAssignment
+      ? { skillAssignment: normalizeSkillAssignment(options.skillAssignment) }
+      : {}),
   };
 }
 
@@ -349,19 +378,50 @@ const UNIVERSAL_CORE = `## Non-negotiable execution contract
 - Notice when the work would benefit from durable Goal Mode or a reusable workflow. Suggest Goal Mode for long-running, multi-session, dependency-heavy, or evidence-tracked outcomes. Suggest a workflow when the same ordered procedure is likely to recur. Make the suggestion briefly and at a natural boundary; do not interrupt active work, repeatedly ask, or suggest either for ordinary questions, one-off fixes, or small edits. Never create a goal or workflow without the user's explicit approval.
 - Work autonomously inside the granted project jail. Do not ask for routine edits, shell commands, tests, installs, network access, or delegation. Ask only immediately before catastrophic broad destruction such as recursively deleting a home/root directory, formatting a disk, destructive raw-device writes, or powering down the host.`;
 
-const DEFAULT_SKILL_CONTEXT_BUDGET = 30_000;
 export const MANAGER_OUTPUT_TOKEN_LIMIT = 16_384;
 export const WORKER_OUTPUT_TOKEN_LIMIT = 16_384;
 export const CRITIC_OUTPUT_TOKEN_LIMIT = 2_048;
 
 /**
- * A UTF-8 byte count is a tokenizer-independent upper bound for byte-fallback
- * provider tokenizers. It is deliberately much stricter than a universal
- * chars-per-token guess, which is unsafe for CJK, emoji, code, and binary-like
- * tool output.
+ * Chars-per-token planning estimate shared by skill budgeting, the
+ * context-usage bar, compaction accounting, and CLI bridges (see TOKEN_CHARS).
+ *
+ * Previously this was a UTF-8 byte count used as a fail-closed token upper
+ * bound. That counted 30k chars as 30k tokens in budgeting while the display
+ * showed chars/4 (7.5k) — a 4x mismatch that starved skills as chat grew.
+ * Unifying on TOKEN_CHARS keeps every surface consistent. It is NOT a
+ * fail-closed bound for non-ASCII text, so capacity checks keep the
+ * reserved-output margin instead of relying on this to overcount.
  */
-export function textTokenUpperBound(value: string): number {
-  return Buffer.byteLength(value, 'utf8');
+export function estimateTextTokens(value: string): number {
+  return Math.ceil(value.length / TOKEN_CHARS);
+}
+
+/** Chars-to-tokens planning estimate for already-measured char counts. */
+export function estimateCharsAsTokens(chars: number): number {
+  return Math.ceil(Math.max(0, chars) / TOKEN_CHARS);
+}
+
+/**
+ * @deprecated Use estimateTextTokens (chars/4 planning estimate). Kept under
+ * the old name for existing call sites.
+ */
+export const textTokenUpperBound = estimateTextTokens;
+
+/**
+ * Auto-compact trigger accounting. Provider-reported `tokensIn` already
+ * includes injected skill guidance, so without this subtraction a skill-heavy
+ * turn self-triggers compaction that pruning cannot relieve (skills are
+ * re-injected every turn). `skillContextCostChars` is the already-tracked
+ * `skillContextCost` manifest field (totalContextCost, which includes the
+ * manifest overhead). The result is clamped at zero and is a trigger
+ * heuristic, not a billing count.
+ */
+export function nonSkillTokensForCompaction(
+  tokensIn: number,
+  skillContextCostChars: number,
+): number {
+  return Math.max(0, Math.floor(tokensIn) - estimateCharsAsTokens(skillContextCostChars));
 }
 
 /**
@@ -379,9 +439,14 @@ export function deriveSkillContextBudget(input: {
   nonSkillPromptTokenUpperBound?: number;
   reservedOutputTokens?: number;
 }): SkillContextBudgetDecision {
+  const window = input.contextWindowTokens;
+  // Window-relative default: 10% of a verified model window clamped to
+  // [8_000, 30_000], so small windows don't starve and large windows don't
+  // waste a fixed 30k chars once chat grows. Unverified windows keep the
+  // planning-only ceiling.
   const requestedBudget = Math.max(
-    1,
-    Math.floor(input.requestedBudget ?? DEFAULT_SKILL_CONTEXT_BUDGET),
+    MIN_SKILL_CONTEXT_BUDGET,
+    Math.floor(input.requestedBudget ?? deriveDefaultSkillContextBudget(window)),
   );
   const occupiedContextChars = Math.max(0, Math.floor(input.occupiedContextChars ?? 0));
   const nonSkillPromptChars = Math.max(0, Math.floor(input.nonSkillPromptChars ?? 0));
@@ -393,7 +458,6 @@ export function deriveSkillContextBudget(input: {
     0,
     Math.floor(input.nonSkillPromptTokenUpperBound ?? nonSkillPromptChars),
   );
-  const window = input.contextWindowTokens;
   if (!window || !Number.isFinite(window) || window < 1_024) {
     return {
       budget: requestedBudget,
@@ -417,11 +481,13 @@ export function deriveSkillContextBudget(input: {
       reservedOutputTokens,
   );
   return {
-    // Skill definitions are currently budgeted in JS characters. Capping that
-    // count at the remaining token upper bound is safe for ASCII; compilePrompt
-    // performs a final UTF-8 bound over the exact provider-rendered prompt to
-    // catch non-ASCII skills and adapter framing before any provider call.
-    budget: Math.max(1, Math.min(requestedBudget, availableTokens)),
+    // Skill definitions are budgeted in JS characters against the remaining
+    // chars/4 planning estimate. compilePrompt performs a final chars/4 pass
+    // over the exact provider-rendered prompt (plus the reserved-output
+    // margin) before any provider call. The budget floors at
+    // MIN_SKILL_CONTEXT_BUDGET: a crowded window degrades to minimal-only
+    // guidance plus a warning instead of a `max(1, …)` dead end.
+    budget: Math.max(MIN_SKILL_CONTEXT_BUDGET, Math.min(requestedBudget, availableTokens)),
     requestedBudget,
     source: 'trusted-model-window',
     contextWindowTokens: Math.floor(window),
@@ -433,7 +499,7 @@ export function deriveSkillContextBudget(input: {
   };
 }
 
-/** Fail-closed tokenizer-independent upper bound for serialized conversation/tool context. */
+/** Chars/4 planning estimate for serialized conversation/tool context (legacy name retained for call-site stability). */
 export function estimateOccupiedContextTokenUpperBound(messages: readonly unknown[]): number {
   return messages.reduce<number>((total, message) => {
     try {
@@ -536,7 +602,7 @@ Non-goals: ${contract.nonGoals.join('; ')}
 Constraints: ${contract.constraints.length ? contract.constraints.join('; ') : 'none supplied'}
 Acceptance criteria:\n${contract.acceptanceCriteria.map((item) => `- ${item}`).join('\n')}
 Risk: ${contract.risk}
-Required evidence:\n${contract.requiredEvidence.map((item) => `- ${item}`).join('\n')}${goalContext}`;
+Required evidence:\n${contract.requiredEvidence.map((item) => `- ${item}`).join('\n')}${goalContext}${contract.skillAssignment ? `\nAssigned worker skills: ${contract.skillAssignment.worker.join(', ') || 'none'}\nAssigned critic skills: ${contract.skillAssignment.critic.join(', ') || 'none'}` : ''}`;
 }
 
 function renderForProvider(adapter: string, sections: string[]): string {
@@ -561,12 +627,14 @@ export function compilePrompt(input: {
   model?: string;
   /** Conversation/tool context already occupying the model window. */
   occupiedContextChars?: number;
-  /** Tokenizer-independent UTF-8 upper bound for live occupied context. */
+  /** Chars/4 planning estimate of live occupied context (see estimateTextTokens). */
   occupiedContextTokenUpperBound?: number;
   /** Exact maximum completion requested by the caller. */
   reservedOutputTokens?: number;
   /** Live execution must not guess a model window from its name or a default. */
   requireVerifiedContextWindow?: boolean;
+  /** Optional session context budget; honored only under the trusted window. */
+  contextWindowOverride?: number;
   workingDirectory: string;
   taskContract: TaskContract;
   contextPaths?: string[];
@@ -576,6 +644,7 @@ export function compilePrompt(input: {
     collisionChoices?: Record<string, 'personal' | 'project'>;
     targetMedium?: string;
     contextBudget?: number;
+    activePaths?: string[];
   };
 }): CompiledPrompt {
   const instructionState = inspectInstructionSources(input.workingDirectory, input.contextPaths);
@@ -584,14 +653,11 @@ export function compilePrompt(input: {
   const capabilityProfile = capabilities(input.provider);
   const roleRules =
     input.role === 'manager'
-      ? 'You are Kory, the user-facing manager. The user manually chose your model; never replace or auto-rank the manager. Choose subagents only from the user-enabled category pool. Prefer an agent identity distinct from yourself and prefer a different provider harness for material work, but when the user enabled only one eligible model, reuse it rather than blocking delegation. Disclose that the agent is not independent. Apply the same evidence standard to direct and delegated edits.'
+      ? 'You are Kory, the user-facing manager. The user manually chose your model; never replace or auto-rank the manager. Choose subagents only from the user-enabled category pool. Prefer an agent identity distinct from yourself and prefer a different provider harness for material work, but when the user enabled only one eligible model, reuse it rather than blocking delegation. Disclose that the agent is not independent. Apply the same evidence standard to direct and delegated edits. Use send_agent_message (exposed as kory__send_agent_message through the MCP bridge) for manager-to-manager cross-project coordination and same-project agent handoffs. Reply with replyToMessageId so message threads remain correlated.'
       : input.role === 'worker'
-        ? 'You are a bounded implementation worker. Preserve the immutable objective across retries, stay within granted paths, and return changed files plus exact verification evidence.'
+        ? 'You are a bounded implementation worker. Preserve the immutable objective across retries, stay within granted paths, and return changed files plus exact verification evidence. You may message your manager or same-project agents with send_agent_message. You cannot contact another project directly; use request_manager_relay and let your manager decide whether to forward the request.'
         : 'You are a fresh independent critic. You are read-only. Judge the actual diff and evidence against every acceptance criterion. Missing or malformed evidence is not a pass.';
-  const criticOutputContract =
-    input.role === 'critic'
-      ? 'Return JSON only with this exact shape: {"verdict":"PASS|FAIL","findings":[{"severity":"critical|major|minor","evidence":"file, line, artifact, or check","criterion":"affected acceptance criterion","finding":"actionable defect"}],"checksReviewed":["exact check or artifact"],"unmetCriteria":["criterion"]}. PASS requires no critical or major findings. Malformed output fails closed.'
-      : '';
+  const criticOutputContract = input.role === 'critic' ? CRITIC_OUTPUT_CONTRACT : '';
   const style =
     input.mode === 'beginner'
       ? 'Explain outcomes in plain, respectful language without weakening technical rigor or hiding failures.'
@@ -622,9 +688,12 @@ export function compilePrompt(input: {
   ];
   const taskSections = [renderTaskContract(input.taskContract)];
   const baseSections = [...stableSections, ...taskSections];
-  const trustedWindow = input.model
-    ? resolveTrustedContextWindow(input.model, input.provider as ProviderName)
-    : { contextKnown: false as const };
+  const trustedWindow = applyContextWindowOverride(
+    input.model
+      ? resolveTrustedContextWindow(input.model, input.provider as ProviderName)
+      : { contextKnown: false as const },
+    input.contextWindowOverride,
+  );
   const warnings: string[] = [];
   if (input.requireVerifiedContextWindow && !trustedWindow.contextKnown) {
     // Don't hard-block — warn instead.  Without a verified context window,
@@ -650,12 +719,28 @@ export function compilePrompt(input: {
   });
   const targetMedium =
     input.skillSelection?.targetMedium ?? deriveAuthoritativeTargetMedium(input.taskContract.goal);
+  const assignments = normalizeSkillAssignment(input.taskContract.skillAssignment);
+  const requiredSkills =
+    input.role === 'worker'
+      ? assignments.worker
+      : input.role === 'critic'
+        ? assignments.critic
+        : [];
+  const pins = [
+    ...new Set([
+      ...(input.skillSelection?.pins ?? []),
+      ...requiredSkills,
+      ...(input.role === 'critic' ? ['verification'] : []),
+    ]),
+  ];
   const skillResolution: SkillResolverResult = resolveSkills(
     input.workingDirectory,
     input.taskContract.goal,
     input.taskContract,
     {
       ...input.skillSelection,
+      pins,
+      activePaths: input.skillSelection?.activePaths ?? input.contextPaths,
       targetMedium,
       contextBudget: skillContextBudget.budget,
     },
@@ -668,6 +753,9 @@ export function compilePrompt(input: {
     ];
     throw new Error(`Skill resolution blocked before work starts: ${conflicts.join(', ')}`);
   }
+  // Budget overflow no longer blocks: surface the resolver's graceful-
+  // degradation notes as turn warnings and keep them in the manifest.
+  warnings.push(...skillResolution.warnings);
   const skillManifest = skillResolution.selected.map(
     ({ skill, reason, representation, contextCost, fullContextCost, omittedDetailChars }) => ({
       name: skill.name,
@@ -691,8 +779,18 @@ export function compilePrompt(input: {
     stableSystemPrompt,
     providerAdapter: adapter,
     role: input.role,
+    workspaceScope: input.workingDirectory,
+    stableComponents: {
+      header: stableSections[0] ?? '',
+      role: roleRules,
+      criticContract: criticOutputContract,
+      style,
+      universalCore: UNIVERSAL_CORE,
+      providerCapabilities: `## Provider capability truth\n${providerRules}`,
+      repositoryInstructions: `## Applicable repository instructions (broad to specific)\n${instructionText}`,
+    },
   });
-  const systemPromptTokenUpperBound = textTokenUpperBound(systemPrompt);
+  const systemPromptTokenUpperBound = estimateTextTokens(systemPrompt);
   const totalContextTokenUpperBound =
     occupiedContextTokenUpperBound +
     systemPromptTokenUpperBound +
@@ -705,7 +803,7 @@ export function compilePrompt(input: {
     totalContextTokenUpperBound > trustedWindow.contextWindow
   ) {
     throw new Error(
-      `Skill resolution blocked before work starts: exact provider-rendered context requires at most ${totalContextTokenUpperBound} tokens by the fail-closed UTF-8 bound, exceeding the verified ${trustedWindow.contextWindow}-token window`,
+      `Skill resolution blocked before work starts: estimated provider-rendered context requires ~${totalContextTokenUpperBound} tokens by the chars/4 planning estimate, exceeding the verified ${trustedWindow.contextWindow}-token window`,
     );
   }
   const manifestBase = {
@@ -720,6 +818,8 @@ export function compilePrompt(input: {
     ...(targetMedium ? { targetMedium } : {}),
     skillContextBudget,
     skillContextCost: skillResolution.totalContextCost,
+    skillWarnings: skillResolution.warnings,
+    omittedLazyAncestors: skillResolution.omittedLazyAncestors,
     systemPromptTokenUpperBound,
     totalContextTokenUpperBound,
     conflicts: instructionState.conflicts,
@@ -727,10 +827,12 @@ export function compilePrompt(input: {
     stablePrefixHash: promptCache.stablePrefixHash,
     stablePrefixTokenEstimate: promptCache.estimatedStableTokens,
   };
+  const manifest = { ...manifestBase, hash: sha256(JSON.stringify(manifestBase) + systemPrompt) };
   return {
     systemPrompt,
     promptCache,
-    manifest: { ...manifestBase, hash: sha256(JSON.stringify(manifestBase) + systemPrompt) },
+    manifest,
+    skillDelivery: createSkillDeliveryEvidence(manifest, skillResolution.selected, requiredSkills),
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

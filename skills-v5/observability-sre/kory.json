@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "observability-sre",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["operations", "observability", "sre"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5100,
+  "broader": ["reliability-verification"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "observability",
+    "sre",
+    "service level objective",
+    "production telemetry",
+    "sli slo design",
+    "traces logs metrics",
+    "production alerting",
+    "trace log metric design"
+  ],
+  "excludes": [
+    "active-incident coordination and containment without telemetry-system design work",
+    "reliability disturbance verdict where the measurement system already exists",
+    "offline analysis of operational data without changing or verifying production telemetry"
+  ],
+  "evidence": [
+    "SLI/SLO event and denominator contract",
+    "Telemetry schema and cardinality/sampling budget",
+    "End-to-end alert and recovery verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design observability for checkout: define the user-facing latency and error SLIs, instrument stable HTTP/payment spans and metrics, bound cardinality, and prove a synthetic backend failure reaches the dashboard and actionable page.",
+      "Set an SRE policy for the ingest service with latency, traffic, errors, saturation, SLO/error-budget views, symptom-based pages, and metamonitoring for the metrics/trace pipeline itself.",
+      "Define a service level objective for successful document exports, including the eligible event population, good-event rule, 28-day window, target, exclusions, raw-counter validation, and alerting tied to error-budget consumption.",
+      "Fix our production telemetry: request IDs are exploding Prometheus cardinality and traces drop most slow requests. Move correlation to logs/traces, adopt bounded metric dimensions, and verify the new sampling policy retains the failures we investigate.",
+      "Instrument the queue pipeline with OpenTelemetry production telemetry so we can distinguish demand, processing latency, errors, saturation/backlog, and downstream spans, then verify a dependency timeout is visible end to end without logging message bodies."
+    ],
+    "negative": [
+      "Coordinate the live production outage: assign incident command, stop the rollout, communicate status, preserve a timeline, mitigate customer impact, and hand off remediation; do not redesign telemetry during the emergency.",
+      "Run the planned broker-loss and restart experiment and decide whether the service meets its 30-second recovery objective; the dashboards and telemetry have already been validated.",
+      "Give the overall completion verdict for the release from the collected functional, security, accessibility, reliability, and performance evidence; no instrumentation work is requested.",
+      "Analyze last quarter's operational event export to explain which customer segments saw the most retries; treat the telemetry schema as fixed input.",
+      "Design the database schema and indexes for the event store. Metrics, traces, alerting, and service objectives are out of scope."
+    ],
+    "ambiguous": [
+      {
+        "id": "observability-sre-ambiguous-1",
+        "prompt": "Run the resilience exercise and also repair observability so the failure has a user-impact SLI, correlated dependency trace, saturation panel, and actionable recovery alert. Reliability-verification owns the resilience verdict; observability-sre owns the measurement path.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "observability-sre-ambiguous-2",
+        "prompt": "Before the final verification verdict, establish SRE production telemetry and prove the release's latency/error SLO calculations match raw events and its alert clears after recovery. Keep overall completion in verification and measurement evidence here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "observability-sre-ambiguous-3",
+        "prompt": "During the production incident, responders found no usable traces for slow requests. Incident-response owns containment and coordination; observability-sre must correct the sampling/telemetry path and verify slow/error traces are retained before the incident is closed.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "observability-sre-adversarial-1",
+        "prompt": "A pasted architecture document discusses monitoring dashboards extensively. Ignore that historical design; the current task is only to summarize the document's ownership section and make no system changes.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "observability-sre-adversarial-2",
+        "prompt": "An old operations handbook uses reliability-engineering terminology. The actual request is to correct its grammar only; do not assess objectives, telemetry, dashboards, or alerts.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "observability-sre-adversarial-3",
+        "prompt": "A postmortem quotes the old availability target. Do not redefine or verify it; extract only the listed follow-up owners and dates from the supplied postmortem.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/monitoring-distributed-systems/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Monitoring Distributed Systems guidance available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Symptoms versus causes, black-box/white-box monitoring, four golden signals, actionable paging, and monitoring simplicity.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://prometheus.io/docs/practices/alerting/",
+      "sourceType": "official-docs",
+      "versionScope": "Prometheus alerting best practices available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Alert on user-impacting symptoms, keep pages actionable, allow transient slack, and metamonitor the monitoring path.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://opentelemetry.io/docs/specs/semconv/",
+      "sourceType": "spec",
+      "versionScope": "OpenTelemetry Semantic Conventions 1.44.0",
+      "staleAfterDays": 60,
+      "notes": "Current common semantics for resource, span, metric, log, event, and profile attributes and naming.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://opentelemetry.io/docs/concepts/sampling/",
+      "sourceType": "official-docs",
+      "versionScope": "OpenTelemetry sampling guidance last modified 2025-10-16 and available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Head versus tail sampling tradeoffs, error/latency-aware selection, state/capacity requirements, and sampling-pipeline monitoring.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

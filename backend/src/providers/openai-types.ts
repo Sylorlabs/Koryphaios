@@ -22,7 +22,9 @@ export interface KoryOpenAIExtensions {
 
   // Reasoning effort for models that support it (OpenAI o-series, DeepSeek, etc.).
   // Extended beyond the SDK's 'low' | 'medium' | 'high' to include 'minimal' and 'max'.
-  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max';
+  // Kept as an open string: providers report new tiers at runtime and Koryphaios
+  // passes them through verbatim instead of gatekeeping a fixed list.
+  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | 'max' | (string & {});
 
   // DeepSeek / GLM / Kimi thinking toggle.
   thinking?: {
@@ -46,9 +48,18 @@ export interface KoryOpenAIExtensions {
 export type KoryOpenAIParams = Omit<
   OpenAI.ChatCompletionCreateParamsStreaming,
   'service_tier' | 'reasoning_effort'
-> & KoryOpenAIExtensions;
+> &
+  KoryOpenAIExtensions;
 
 // Reasoning effort values that Koryphaios supports (mapped to provider-specific
 // values at the call site).
-export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const REASONING_EFFORTS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];

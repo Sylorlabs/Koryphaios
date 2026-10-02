@@ -66,6 +66,11 @@ function isTerminalEvent(message: WSMessage): boolean {
 // queued terminal events once backpressure clears.
 const TERMINAL_RETRY_MS = 2_000;
 
+// Session replay page size. Reconnects page through history in small batches
+// through the same overload guard as live delivery instead of blasting up to
+// 2_048 events per tick over raw ws.send at a slow client.
+const REPLAY_PAGE_SIZE = 256;
+
 interface WSClient {
   ws: ServerWebSocket<WSClientData>;
   subscribedSessions: Set<string>;
@@ -180,6 +185,12 @@ export class WSManager {
    * Replays a session in sequence order. `replayFilter` may suppress stale
    * operational projections when a durable current-state lookup proves they
    * are no longer actionable; the cursor still advances across skipped rows.
+   *
+   * Replay honors the same backpressure guard as the live path: every event
+   * goes through deliverToClient (never raw ws.send), pages are capped at
+   * REPLAY_PAGE_SIZE, and the loop stops as soon as the client reports
+   * overloaded — terminal events are queued for retry while non-terminal
+   * history is skipped, so a slow client can never be replay-flooded.
    */
   subscribeClientToSession(
     clientId: string,
@@ -205,20 +216,42 @@ export class WSManager {
     const epoch = current.epoch;
     let after = cursor?.epoch === current.epoch ? Math.max(0, cursor?.sequence ?? 0) : 0;
     while (after < current.latestSequence) {
-      const events = log.getAfter(sessionId, epoch, after, 2_048);
+      const events = log.getAfter(sessionId, epoch, after, REPLAY_PAGE_SIZE);
       if (events.length === 0) break;
       for (const event of events) {
         if (client.ws.readyState !== 1) return;
         if (!replayFilter || replayFilter(event)) {
-          client.ws.send(JSON.stringify({ ...event, replayed: true } satisfies WSMessage));
+          const replayed = { ...event, replayed: true } satisfies WSMessage;
+          this.deliverToClient(client, replayed, JSON.stringify(replayed));
         }
         after = event.sequence ?? after;
+        // Same overload guard as the live path: stop flooding a slow client.
+        // Queued terminal events drain on the retry timer; the client resumes
+        // remaining history from its cursor on the next subscribe.
+        if (client.overloaded) return;
       }
     }
   }
 
   private persist(message: WSMessage): WSMessage {
-    return message.sessionId ? getOrderedEventLog().append(message) : message;
+    // Fire-and-forget durability: per-token disk work must never block or
+    // break live delivery. High-frequency stream chunks already arrive
+    // pre-batched (one persist per coalescer window, not per token), and a
+    // persist failure here falls back to delivering the unsequenced message
+    // rather than throwing before send.
+    try {
+      return message.sessionId ? getOrderedEventLog().append(message) : message;
+    } catch (err) {
+      serverLog.error(
+        {
+          type: message.type,
+          sessionId: message.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        'Ordered-event persist failed, delivering without sequence',
+      );
+      return message;
+    }
   }
 
   /**

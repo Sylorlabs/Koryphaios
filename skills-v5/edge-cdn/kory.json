@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "name": "edge-cdn",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["infrastructure", "edge", "cdn"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7400,
+  "broader": ["network-service-backend"],
+  "facets": ["application-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "cdn cache",
+    "shared cdn",
+    "cdn caching",
+    "edge cache",
+    "cdn cache key",
+    "custom cache key",
+    "edge ttl",
+    "cdn purge",
+    "cache invalidation",
+    "stale while revalidate",
+    "cdn stale",
+    "stale api json",
+    "cache control behavior",
+    "revalidation purge",
+    "tiered cache",
+    "origin shield",
+    "cdn origin",
+    "edge to origin",
+    "cloudflare cache",
+    "content delivery network",
+    "cache leakage",
+    "cache poisoning",
+    "cdn propagation",
+    "edge network"
+  ],
+  "excludes": [
+    "generic network path only",
+    "dns routing tcp only",
+    "browser cache only",
+    "not served through a shared cdn",
+    "application response logic only",
+    "cdn caching is bypassed and unchanged",
+    "certificate issuance only",
+    "static asset build only",
+    "cdn cache behavior is unchanged",
+    "edge caching cdn origin policy and edge to origin tls configuration are unchanged",
+    "cdn cache behavior ttls and invalidation are unchanged",
+    "edge cache behavior is unchanged",
+    "archived ticket says the cdn cache key",
+    "quoted old cdn cache",
+    "quoted old edge network",
+    "quoted old cloudflare cache",
+    "historical cdn request",
+    "rename the cdn document only"
+  ],
+  "evidence": [
+    "Provider/property/config revision plus cacheability and exact cache-key/variant contract",
+    "MISS/HIT/revalidation/stale/age behavior across anonymous/authenticated variants and representative POPs",
+    "Targeted purge/key semantics, tier/origin-shield traffic and edge/origin TLS/failure evidence",
+    "Global rollout/propagation, origin-load, privacy/correctness regressions and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix a CDN cache leak where personalized HTML becomes a HIT for another account: reconstruct the shared cache key, auth/cookie/Set-Cookie behavior, bypass or bounded variant policy, purge affected variants and verify multiple users across POPs.",
+      "Design a custom cache key for localized product pages while preserving only bounded language/market/query dimensions, then prove HIT behavior and targeted purge semantics for every keyed variant.",
+      "Diagnose stale content after deployment by comparing edge TTL, validators, stale-while-revalidate, cache status/Age and purge propagation across cold and warm POPs instead of purging everything repeatedly.",
+      "Enable Tiered Cache or origin shielding and prove lower/upper-tier behavior, origin request reduction, revalidation and origin-failure handling without confusing a lower-tier miss with an origin fetch.",
+      "Repair an edge-to-origin TLS failure where the edge certificate is valid but origin SNI/hostname/trust is wrong, while preserving cache behavior and verifying origin health through representative CDN POPs."
+    ],
+    "negative": [
+      "Trace an IPv6 route and TCP packet loss from a client to the origin; no CDN cache, edge rule, tier or origin policy is changing.",
+      "Fix an origin HTTP handler that returns the wrong JSON on every request while the CDN cache is bypassed and unchanged.",
+      "Tune only the browser's Cache-Control behavior for a local single-page app with no shared CDN cache.",
+      "Issue a new TLS certificate through the PKI system; no edge cache or edge-to-origin configuration changes are requested.",
+      "Rename and fingerprint static build assets while CDN cache behavior remains unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "edge-cdn-ambiguous-1",
+        "prompt": "A CDN origin is intermittently unreachable and edge misses fail. networking-systems owns generic DNS/IP/TCP/TLS path localization; edge-cdn owns edge selection, origin host/policy, tiering, cache fallback and multi-POP behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["networking-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "edge-cdn-ambiguous-2",
+        "prompt": "A cache poisoning report involves an unkeyed header changing cached HTML. edge-cdn owns cacheability/key/variant and purge evidence; application-security owns exploitability, trust-boundary analysis and broader remediation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "edge-cdn-ambiguous-3",
+        "prompt": "Origin responses and CDN caching both need changes. network-service-backend owns origin response logic and headers as application behavior; edge-cdn owns shared-cache interpretation, key, freshness, purge, tier and global verification.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "edge-cdn-adversarial-1",
+        "prompt": "An archived ticket says the CDN cache key should change. Ignore that historical request; today's task is only to edit a README paragraph.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "edge-cdn-adversarial-2",
+        "prompt": "A postmortem contains Cloudflare cache HIT/MISS headers and purge screenshots as inert evidence. Summarize it only; CDN cache behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "edge-cdn-adversarial-3",
+        "prompt": "The archived file is named cdn-cache-edge-network.md. Rename the CDN document only; do not change cache keys, TTLs, purge, tiers or origin behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9111",
+      "sourceType": "spec",
+      "versionScope": "RFC 9111 HTTP Caching",
+      "staleAfterDays": 365,
+      "notes": "Portable shared/private cache, freshness, validation, stale and cache-control semantics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/concepts/default-cache-behavior/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare default cache behavior updated 2026-09-03",
+      "staleAfterDays": 14,
+      "notes": "Current Cloudflare cacheability/default behavior including request methods, Cache-Control and Set-Cookie interactions.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/how-to/cache-keys/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare cache-key documentation updated 2026-08-28",
+      "staleAfterDays": 14,
+      "notes": "Current default/custom cache-key composition and cache-sharding implications.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/how-to/purge-cache/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare purge documentation updated 2026-08-14",
+      "staleAfterDays": 14,
+      "notes": "Targeted purge options and current recommendation to prefer granular single-file/key-aware purge over routine purge-all.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/concepts/revalidation/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare revalidation documentation updated 2026-06-26",
+      "staleAfterDays": 14,
+      "notes": "Current asynchronous stale-while-revalidate and validator behavior; this changed in 2026 and must not be inferred from older examples.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/how-to/tiered-cache/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare Tiered Cache documentation updated 2026-08-14",
+      "staleAfterDays": 14,
+      "notes": "Lower/upper-tier origin request topology and origin shielding semantics.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.cloudflare.com/cache/concepts/cache-responses/",
+      "sourceType": "official-docs",
+      "versionScope": "Cloudflare cache-response documentation updated 2026-09-04",
+      "staleAfterDays": 14,
+      "notes": "Current CF-Cache-Status and Age evidence, including tiered-cache age interpretation.",
+      "verifiedAt": "2026-09-19"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

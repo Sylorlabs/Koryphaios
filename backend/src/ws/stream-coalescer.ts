@@ -1,7 +1,12 @@
 import type { WSMessage } from '@koryphaios/shared';
 
 const COALESCE_TYPES = new Set(['stream.delta', 'stream.thinking']);
-const FLUSH_MS = 50;
+// Fixed micro-batch window (~one frame at 60fps). The timer starts ONCE when
+// a batch opens and is NEVER reset by later tokens: continuous token flow
+// flushes every FLUSH_MS instead of being deferred until the stream pauses
+// (the old clearTimeout+reset debounce turned steady streaming into one big
+// blob). Batching still collapses N tokens into one persist+send per window.
+const FLUSH_MS = 16;
 const MAX_TOOL_OUTPUT_CHARS = 8_192;
 
 type Pending = {
@@ -75,13 +80,14 @@ export class StreamCoalescer {
 
     const existing = this.pending.get(key);
     if (existing) {
+      // Merge into the open batch WITHOUT touching its timer. Resetting the
+      // timer here would turn this into a debounce: a steady token stream
+      // would never flush until it pauses, arriving as one big blob.
       existing.message = {
         ...existing.message,
         payload: mergePayload(existing.message.payload, sanitized.payload),
         timestamp: sanitized.timestamp,
       };
-      clearTimeout(existing.timer);
-      existing.timer = setTimeout(() => this.flush(key), FLUSH_MS);
       return;
     }
 

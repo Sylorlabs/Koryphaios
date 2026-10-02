@@ -44,8 +44,47 @@ describe('built-in provider catalog truth', () => {
 
   it('uses the official TokenRouter gateway contract', () => {
     expect(PROVIDER_CONFIG_MAP.get('tokenrouter')).toMatchObject({
-      baseUrl: 'https://api.tokenrouter.io/v1',
+      baseUrl: 'https://api.tokenrouter.com/v1',
       envKeys: ['TOKENROUTER_API_KEY'],
+    });
+  });
+
+  it('uses the official UnoRouter gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('unorouter')).toMatchObject({
+      baseUrl: 'https://api.unorouter.com/v1',
+      authMode: 'api_key',
+      envKeys: ['UNOROUTER_API_KEY'],
+    });
+  });
+
+  it('uses the official Experiential Labs gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('experientiallabs')).toMatchObject({
+      baseUrl: 'https://api.experientiallabs.ai/v1',
+      authMode: 'api_key',
+      envKeys: ['EXPERIENTIALLABS_API_KEY', 'EXPLABS_API_KEY'],
+    });
+  });
+
+  it('uses the official Command Code OpenAI-compatible gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('commandcode')).toMatchObject({
+      baseUrl: 'https://api.commandcode.ai/provider/v1',
+      authMode: 'api_key',
+      envKeys: ['COMMAND_CODE_API_KEY'],
+    });
+  });
+
+  it('uses the official WorkBuddy TokenHub gateway contract', () => {
+    expect(PROVIDER_CONFIG_MAP.get('workbuddy')).toMatchObject({
+      baseUrl: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
+      envKeys: ['WORKBUDDY_API_KEY'],
+    });
+  });
+
+  it('uses the local AutoClaw gateway contract (loopback, gateway token env)', () => {
+    expect(PROVIDER_CONFIG_MAP.get('autoclaw')).toMatchObject({
+      baseUrl: 'http://127.0.0.1:18789/v1',
+      authMode: 'api_key',
+      envKeys: ['AUTOCLAW_GATEWAY_TOKEN'],
     });
   });
 
@@ -69,7 +108,32 @@ describe('built-in provider catalog truth', () => {
       }
     ).buildProviderConfig.bind(registry);
 
-    expect(buildProviderConfig('tokenrouter').baseUrl).toBe('https://api.tokenrouter.io/v1');
+    expect(buildProviderConfig('tokenrouter').baseUrl).toBe('https://api.tokenrouter.com/v1');
+  });
+
+  it('migrates TokenRouter configs persisted with the retired .io default host', () => {
+    // Older builds shipped api.tokenrouter.io as the default and may have
+    // persisted it; it must be treated as "no explicit override" too.
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    Object.assign(registry, {
+      config: {
+        server: { port: 3001, host: '127.0.0.1' },
+        providers: {
+          tokenrouter: {
+            name: 'tokenrouter',
+            baseUrl: 'https://api.tokenrouter.io/v1',
+            disabled: true,
+          },
+        },
+      },
+    });
+    const buildProviderConfig = (
+      registry as unknown as {
+        buildProviderConfig(name: ProviderName): ProviderConfig;
+      }
+    ).buildProviderConfig.bind(registry);
+
+    expect(buildProviderConfig('tokenrouter').baseUrl).toBe('https://api.tokenrouter.com/v1');
   });
 
   it('provider names are unique', () => {

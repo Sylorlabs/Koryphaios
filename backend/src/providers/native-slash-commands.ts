@@ -1,7 +1,7 @@
 // Native CLI slash commands — provider-harness command surface.
 //
 // When the manager is a CLI-backed provider (Claude Code, Codex, Devin, Grok
-// Build, Cursor, Cline, Antigravity, Kimi Code), the user can invoke that
+// Build, Cursor, Antigravity, Kimi Code), the user can invoke that
 // harness's own `/command`s from the Koryphaios composer. These commands are
 // interactive-only inside the native CLIs (print mode rejects them, e.g.
 // `claude -p /help` → "/help isn't available in this environment"), so this
@@ -63,7 +63,6 @@ const PROVIDER_LABELS: Record<string, string> = {
   devin: 'Devin',
   grok: 'Grok Build',
   cursor: 'Cursor',
-  cline: 'Cline',
   antigravity: 'Antigravity',
   kimicode: 'Kimi Code',
 };
@@ -663,52 +662,6 @@ const CURSOR_COMMANDS: NativeCommandDefinition[] = [
   },
 ];
 
-const CLINE_COMMANDS: NativeCommandDefinition[] = [
-  {
-    command: 'version',
-    description: 'Show the installed Cline CLI version.',
-    category: 'Diagnostics',
-    execute: (ctx) => runCli('cline', ['--version'], ctx.workingDirectory, ctx),
-  },
-  {
-    command: 'diff',
-    description: 'Show uncommitted changes in the working tree.',
-    category: 'Review',
-    execute: runGitDiff,
-  },
-  {
-    command: 'models',
-    aliases: ['model'],
-    description: 'Quick model switching.',
-    category: 'Models',
-    execute: (ctx) =>
-      note(
-        interactiveNote(
-          'cline',
-          'models',
-          'opens quick model switching',
-          'use the model picker in the composer to switch Cline models',
-        ),
-        ctx,
-      ),
-  },
-  {
-    command: 'history',
-    description: 'Browse and resume previous tasks.',
-    category: 'Session',
-    execute: (ctx) =>
-      note(
-        interactiveNote(
-          'cline',
-          'history',
-          'browses and resumes previous tasks',
-          'use the session list in the sidebar to resume a chat',
-        ),
-        ctx,
-      ),
-  },
-];
-
 const ANTIGRAVITY_COMMANDS: NativeCommandDefinition[] = [
   {
     command: 'version',
@@ -855,7 +808,6 @@ const REGISTRY: Record<string, NativeCommandDefinition[]> = {
   devin: DEVIN_COMMANDS,
   grok: GROK_COMMANDS,
   cursor: CURSOR_COMMANDS,
-  cline: CLINE_COMMANDS,
   antigravity: ANTIGRAVITY_COMMANDS,
   kimicode: KIMICODE_COMMANDS,
 };

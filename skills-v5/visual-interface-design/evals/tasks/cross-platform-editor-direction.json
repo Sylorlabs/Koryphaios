@@ -1,0 +1,82 @@
+{
+  "id": "visual-interface-design-full-task-cross-platform-editor",
+  "prompt": "Create a visual direction for a cross-platform desktop editor whose interaction model is already approved. It must feel at home on macOS and Windows while retaining one product identity; users work in long sessions with dense sidebars, search results, diagnostics, and a central canvas; light and dark appearances are required; window sizes vary widely; long localized labels and large text must remain usable. Produce the visual system and verification matrix without redesigning workflows or inventing product content.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://visual-interface-design/cross-platform-editor",
+    "requirements": [
+      "current desktop screenshots and platform constraints",
+      "existing product identity and assets",
+      "representative content/state fixtures",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "editor-visual-platform-identity",
+      "assertion": "The direction identifies which visual decisions express shared product identity and which adapt to macOS/Windows conventions, with evidence-based rationale rather than making both platforms visually identical by default."
+    },
+    {
+      "id": "editor-visual-system-coherence",
+      "assertion": "Typography, spacing, color, iconography, emphasis, density, and light/dark appearance form a reusable system tied to supplied assets/content instead of a one-screen decoration."
+    },
+    {
+      "id": "editor-visual-state-resilience",
+      "assertion": "Representative dense/sparse, focus, selection, diagnostic, long/localized text, large-text, and supported window-size states remain legible and hierarchically coherent."
+    },
+    {
+      "id": "editor-visual-motion-access",
+      "assertion": "Where motion is introduced, its informational purpose and reduced-motion behavior are explicit; critical state is not conveyed only through animation or color."
+    },
+    {
+      "id": "editor-visual-boundary-proof",
+      "assertion": "The artifact changes visual treatment only, preserves the approved interaction/content contracts, and defines verification in representative native/rendered states rather than claiming quality from a single ideal screenshot."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "platform-aware-visual-system",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "platform-aware visual read",
+        "shared identity versus platform convention rationale",
+        "type/spacing/color/icon system",
+        "density and window-size behavior",
+        "light/dark treatment"
+      ]
+    },
+    {
+      "id": "representative-state-resilience",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "long/localized text",
+        "large-text behavior",
+        "focus/selection/diagnostic states",
+        "sparse/dense states",
+        "reduced-motion handling where motion is used",
+        "actual-medium verification plan"
+      ]
+    },
+    {
+      "id": "blind-cross-platform-visual-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "platform-aware visual read",
+    "coherent visual system",
+    "complete state/scale matrix",
+    "actual-medium verification strategy",
+    "unresolved cross-platform compromises"
+  ],
+  "requiredArtifacts": [
+    "cross-platform-visual-direction",
+    "state-and-scale-verification-matrix",
+    "paired-experiment-report"
+  ]
+}

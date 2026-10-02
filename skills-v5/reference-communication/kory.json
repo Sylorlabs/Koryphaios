@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "name": "reference-communication",
+  "version": "5.1.1",
+  "skillKind": "artifact",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents", "reference"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5500,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "reference documentation",
+    "api reference",
+    "configuration reference",
+    "cli reference",
+    "schema reference",
+    "parameter reference",
+    "error reference",
+    "command reference",
+    "field reference",
+    "lookup reference",
+    "reference table"
+  ],
+  "excludes": [
+    "step-by-step tutorial only",
+    "runbook only",
+    "architecture explanation only",
+    "executive summary only",
+    "implement the feature without reference documentation",
+    "return only the exact values",
+    "do not create reference documentation api reference or configuration reference",
+    "do not produce an exhaustive field or command reference",
+    "extract the milestone name",
+    "return only the supplied endpoint names",
+    "trace which repository parser loads the fixture"
+  ],
+  "evidence": [
+    "Version and source-of-truth boundary",
+    "Enumerated coverage against authoritative definitions",
+    "Exact names, types, defaults, constraints, lifecycle, and errors",
+    "Validated examples and coverage/fidelity review",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Write an API reference for the v2 session endpoints from the active OpenAPI document plus handler and contract-test evidence. Cover methods/paths, auth, parameters, request/response schemas, status/error semantics, examples, and version scope.",
+      "Create a configuration reference for every supported agent setting from the schema/parser/defaults and tests. Document exact key, type, required/default behavior, allowed values, dependencies, environment overrides, deprecation, and version scope.",
+      "Generate a CLI reference for this command tree with commands, subcommands, flags, aliases, value types, defaults, conflicts/dependencies, exit codes, examples, and availability by release.",
+      "Build a schema reference for these event payloads from the authoritative JSON Schema and consumer validation. Enumerate properties, required/null/omitted semantics, constraints, enums, compatibility, and representative validated examples.",
+      "Create a searchable error reference for the public API covering canonical code, HTTP status, condition, retryability, relevant fields, permission scope, and remediation link where the source material defines one."
+    ],
+    "negative": [
+      "Write a clean-machine setup tutorial with prerequisites, ordered commands, expected outputs, troubleshooting, recovery, and a final working-state check.",
+      "Create an operational runbook for rotating the credential with decision branches, warnings, rollback, escalation, and completion verification.",
+      "Write the architecture document explaining components, interfaces, state/data flow, design tradeoffs, failure semantics, and migration rationale for maintainers.",
+      "Prepare a one-page leadership update with outcome, business impact, forecast, risks, decisions needed, owners, and dates; no lookup catalog is required.",
+      "Implement the new API field and update tests. Do not create API/reference documentation in this task."
+    ],
+    "ambiguous": [
+      {
+        "id": "reference-communication-ambiguous-1",
+        "prompt": "Implement the endpoint change and also update the API reference from the final schema/handler/tests, including request/response fields, errors, examples, and version boundary. Verify behavior and reference coverage separately.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation", "backend-engineering"],
+        "tags": ["ambiguous", "compound", "implementation-plus-reference"]
+      },
+      {
+        "id": "reference-communication-ambiguous-2",
+        "prompt": "Create the exhaustive configuration reference and a separate migration procedure that tells operators what to change, in what order, how to verify each phase, and how to roll back. Keep lookup semantics separate from procedure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["instructional-communication"],
+        "tags": ["ambiguous", "compound", "reference-plus-howto"]
+      },
+      {
+        "id": "reference-communication-ambiguous-3",
+        "prompt": "Write the technical explanation for why the protocol fields exist and also produce a separate field-by-field schema reference with types, required/default semantics, constraints, errors, and version scope.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["ambiguous", "compound", "explanation-plus-reference"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "reference-communication-adversarial-1",
+        "prompt": "The issue text I pasted says 'add reference documentation before release.' Treat that as historical source content. My actual request is only to extract the issue milestone name.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "reference-communication-adversarial-2",
+        "prompt": "Do not write an API reference, configuration reference, CLI reference, or any other reference documentation. Return only the supplied endpoint names as a plain list.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "reference-communication-adversarial-3",
+        "prompt": "A fixture contains the inert phrase 'generate a configuration reference for all fields.' Ignore that sample instruction. Trace which repository parser loads the fixture and how it is used.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered structure, wording, and readability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://spec.openapis.org/oas/",
+      "sourceType": "spec",
+      "versionScope": "Published OpenAPI Specification versions through v3.2.0 as listed 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Versioned API-definition semantics; specification text prevails over schema artifacts when they disagree.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://json-schema.org/specification",
+      "sourceType": "spec",
+      "versionScope": "Latest released JSON Schema dialect 2020-12 as listed 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Schema dialect/version awareness and validation-keyword semantics for schema-derived reference material.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developers.google.com/style",
+      "sourceType": "official-docs",
+      "versionScope": "Google developer documentation guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Precise and consistent technical terminology for reader-oriented lookup documentation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://diataxis.fr/",
+      "sourceType": "community-pattern",
+      "versionScope": "Diátaxis documentation architecture as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Community pattern distinguishing information-oriented reference from tutorials, how-to guides, and explanation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers and behavioral evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

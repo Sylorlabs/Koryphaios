@@ -8,6 +8,9 @@ build/
 .svelte-kit/
 backend/dist/
 desktop/src-tauri/target/
+# Tauri regenerates these capability/permission schemas on every build; they are
+# codegen output, not source, and are not Prettier-clean by construction.
+desktop/src-tauri/gen/schemas/
 
 # Data & secrets
 .koryphaios/

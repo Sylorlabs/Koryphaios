@@ -9,7 +9,11 @@ import { withRetry } from './utils';
 import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
 import { applyModelsDevMetadata, warmModelsDevCache, modelsDevKeysFor } from './models-dev';
 import { providerLog } from '../logger';
-import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import {
+  providerStreamFailure,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from './provider-diagnostics';
 
 // ============================================================================
 // Error classification helpers
@@ -126,6 +130,22 @@ export class GoogleProvider implements Provider {
     if (this.fetchInProgress && !force) return;
     const apiKey = this.config.apiKey || (this.config.custom ? this.config.authToken : undefined);
     if (!apiKey && !this.config.custom) return;
+
+    // Vertex AI express mode exposes no model-list surface, and its credentials
+    // are a different provider contract from the consumer Gemini API. Probing
+    // generativelanguage with a Vertex key would send it to the wrong backend
+    // and cannot succeed, so keep the curated catalog instead of guessing.
+    if (this.name === 'vertexai') {
+      if (fallback.length > 0) {
+        this.cachedModels = applyModelsDevMetadata(
+          this.name,
+          mergeModelLists(fallback, this.cachedModels ?? []),
+          modelsDevKeysFor(this.name, this.config.kind),
+        );
+      }
+      this.lastFetch = Date.now();
+      return;
+    }
 
     this.fetchInProgress = true;
     const customBase = this.config.custom ? this.config.baseUrl?.replace(/\/+$/, '') : undefined;
@@ -297,10 +317,10 @@ export class GoogleProvider implements Provider {
     if (request.reasoningLevel !== undefined && request.reasoningLevel !== '') {
       const level = String(request.reasoningLevel).trim();
       if (isGemini3) {
-        const thinkingLevel = ['low', 'medium', 'high'].includes(level.toLowerCase())
-          ? level.toUpperCase()
-          : 'MEDIUM';
-        generationConfig.thinkingConfig = { thinkingLevel };
+        // Pass the provider-reported level through verbatim (uppercased per the
+        // API shape) instead of coercing unknown tiers to MEDIUM, so new
+        // provider tiers keep working.
+        generationConfig.thinkingConfig = { thinkingLevel: level.toUpperCase() };
       } else {
         const budget =
           level === '0' || level.toLowerCase() === 'off'
@@ -372,9 +392,12 @@ export class GoogleProvider implements Provider {
         if (candidate.finishReason) yield { type: 'complete', finishReason: 'end_turn' };
       }
     } catch (err: unknown) {
-      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
-      providerLog.error({ ...diagnostic, model: request.model }, 'Google provider stream error');
-      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
+      const failure = providerStreamFailure(this.name, 'sdk', err);
+      providerLog.error(
+        { ...failure.diagnostic, model: request.model },
+        'Google provider stream error',
+      );
+      yield failure.event;
     }
   }
 }

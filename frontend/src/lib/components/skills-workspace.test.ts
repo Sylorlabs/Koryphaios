@@ -65,6 +65,11 @@ describe('Skills workspace contracts', () => {
     expect(source).toContain('Test routing');
     expect(source).toContain('<SkillCodeEditor');
     expect(source).toContain('<SkillVisualEditor');
+    expect(source).toContain("{ id: 'health', label: 'Health' }");
+    expect(source).toContain('Skill library health');
+    expect(source).toContain('Routing precision');
+    expect(source).toContain('open regressions');
+    expect(source).toContain('selectedHealth?.steward?.displayLabel');
   });
 
   it('uses Kory controls and a locked-down HTML preview for every native format', () => {

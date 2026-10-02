@@ -1,32 +1,20 @@
-/**
- * Worker for embedding generation
- *
- * STUB: No real embedding provider is wired in. Per the AGENTS.md stub rule,
- * this worker logs a warning on every job and returns empty results
- * (success: false, no embedding vector) instead of producing meaningless
- * mock vectors. The prior implementation generated deterministic-but-random
- * vectors and reported success: true, which looked like a working embedding
- * pipeline in logs/dashboards but had no semantic meaning. Do not restore
- * mock vector generation — wire in a real provider or leave this returning
- * empty results.
- *
- * To enable real embeddings:
- *   1. Replace processEmbeddingJob's stub return with a real embedding API call.
- *   2. Wire an authenticated embedding provider into the active memory runtime.
- *   3. Update isEmbeddingServiceReady() to reflect real readiness.
- */
-
 import { Worker, Job } from 'bullmq';
 import { getRedisConnection } from '../connection';
 import { QUEUE_NAMES, type EmbeddingJobData, type EmbeddingJobResult } from '../types';
 import { serverLog } from '../../logger';
+import {
+  configuredEmbeddingClient,
+  EmbeddingError,
+  type EmbeddingClient,
+} from '../../memory/semantic-embeddings';
+export { cosineSimilarity } from '../../memory/semantic-embeddings';
 
 let embeddingWorker: Worker<EmbeddingJobData, EmbeddingJobResult> | null = null;
 
 export interface EmbeddingWorkerOptions {
   concurrency?: number;
-  embeddingModel?: string;
-  apiKey?: string;
+  /** Explicit client injection; otherwise uses opt-in environment configuration. */
+  client?: EmbeddingClient;
 }
 
 export function createEmbeddingWorker(
@@ -46,7 +34,7 @@ export function createEmbeddingWorker(
   try {
     embeddingWorker = new Worker<EmbeddingJobData, EmbeddingJobResult>(
       QUEUE_NAMES.EMBEDDING,
-      processEmbeddingJob,
+      (job) => processEmbeddingJob(job, options.client),
       {
         connection,
         concurrency: options.concurrency ?? 2,
@@ -80,9 +68,10 @@ export function createEmbeddingWorker(
       serverLog.error({ error: err.message }, 'Embedding worker error');
     });
 
-    serverLog.warn(
-      { concurrency: options.concurrency ?? 2 },
-      'Embedding worker started in STUB mode — jobs will be accepted but return empty results (no embedding provider configured)',
+    workerClient = options.client;
+    serverLog.info(
+      { concurrency: options.concurrency ?? 2, configured: isEmbeddingServiceReady() },
+      'Embedding worker started',
     );
     return embeddingWorker;
   } catch (err) {
@@ -91,43 +80,31 @@ export function createEmbeddingWorker(
   }
 }
 
-async function processEmbeddingJob(job: Job<EmbeddingJobData>): Promise<EmbeddingJobResult> {
-  const { content, contentId, contentType, filePath } = job.data;
-
-  // STUB: No embedding provider is configured. Per the AGENTS.md stub rule,
-  // log a warning and return empty results (success: false, no vector) rather
-  // than generating meaningless mock vectors. The job "completes" (so BullMQ
-  // does not retry it forever) but carries success: false so callers and
-  // dashboards can see nothing was produced.
-  serverLog.warn(
-    { jobId: job.id, contentId, contentType, filePath, contentLength: content?.length ?? 0 },
-    'Embedding job accepted but no embedding provider is configured — returning empty result (stub)',
-  );
-
-  await job.updateProgress(100);
-
-  return {
-    success: false,
-    isStub: true,
-    error: 'No embedding provider configured; stub returns empty results',
-  };
-}
-
-/**
- * Calculate cosine similarity between two embeddings.
- *
- * Pure utility retained for when a real provider is wired in. Not currently
- * used by the stub path, which produces no vectors.
- */
-export function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new Error('Embeddings must have same dimensions');
+/** Shared with active memory retrieval; failures contain only bounded, sanitized codes. */
+export async function processEmbeddingJob(
+  job: Pick<Job<EmbeddingJobData>, 'data' | 'updateProgress'>,
+  client?: EmbeddingClient | null,
+): Promise<EmbeddingJobResult> {
+  try {
+    const effectiveClient = client === undefined ? configuredEmbeddingClient() : client;
+    if (!effectiveClient) {
+      await job.updateProgress(100);
+      return {
+        success: false,
+        isStub: true,
+        error: 'Embeddings disabled; explicit configuration required',
+      };
+    }
+    const [embedding] = await effectiveClient.embed([job.data.content]);
+    await job.updateProgress(100);
+    return { success: true, isStub: false, embedding, dimensions: embedding.length };
+  } catch (error) {
+    return {
+      success: false,
+      isStub: false,
+      error: error instanceof EmbeddingError ? error.message : 'Embedding job failed',
+    };
   }
-  let dotProduct = 0;
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-  }
-  return dotProduct;
 }
 
 export async function pauseEmbeddingWorker(): Promise<void> {
@@ -152,7 +129,7 @@ export function getEmbeddingWorkerStatus(): {
   return {
     running: embeddingWorker !== null,
     concurrency: embeddingWorker?.opts?.concurrency ?? 0,
-    isStub: true,
+    isStub: !isEmbeddingServiceReady(),
   };
 }
 
@@ -160,20 +137,19 @@ export async function closeEmbeddingWorker(): Promise<void> {
   if (embeddingWorker) {
     await embeddingWorker.close();
     embeddingWorker = null;
+    workerClient = undefined;
     serverLog.info('Embedding worker closed');
   }
 }
 
-/**
- * Check if the embedding service is ready.
- *
- * Returns false until a real embedding provider is wired in. The prior stub
- * returned true, which misled callers into thinking semantic search was
- * available. Do not flip this to true until processEmbeddingJob produces real
- * vectors.
- */
+/** Configuration readiness only; does not assert remote availability or valid billing. */
+let workerClient: EmbeddingClient | undefined;
 export function isEmbeddingServiceReady(): boolean {
-  return false;
+  try {
+    return !!(workerClient ?? configuredEmbeddingClient());
+  } catch {
+    return false;
+  }
 }
 
 export { embeddingWorker as embeddingWorkerInstance };

@@ -1,0 +1,67 @@
+{
+  "id": "debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "The supplied async job runner intermittently records a completed job as `cancelled` when cancellation is requested at nearly the same time as the provider resolves. Debug the failure rather than applying a timing delay. Use the deterministic scheduling hooks in the fixture to reproduce both event orders, trace the state transition that commits the terminal status, test competing ordering/lifecycle hypotheses, implement the narrow correction that preserves exactly one valid terminal transition, and add a regression covering both schedules. Keep cancellation semantics for genuinely in-flight jobs unchanged. Return the reproductions, causal evidence, diff, and regression output.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://debugging/cancel-complete-race",
+    "requirements": [
+      "fixture exposes deterministic barriers for completion and cancellation order",
+      "one schedule reproduces an incorrect cancelled terminal state after provider completion",
+      "normal cancellation-before-completion behavior is currently valid and must remain valid",
+      "state machine exposes a single terminal-state persistence boundary",
+      "arbitrary sleeps are prohibited as a fix"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "debugging-race-two-orders",
+      "assertion": "The evaluation exercises completion-before-cancellation and cancellation-before-completion under deterministic scheduling."
+    },
+    {
+      "id": "debugging-race-cause",
+      "assertion": "The causal evidence identifies the invalid terminal-state transition or ownership condition rather than attributing the bug generically to timing."
+    },
+    {
+      "id": "debugging-race-regression",
+      "assertion": "The fix preserves completed when completion wins, preserves cancelled when cancellation legitimately wins, and does not use timing sleeps as correctness logic."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "deterministic pre-fix schedule reproductions",
+        "tested ordering hypotheses",
+        "actual focused state-transition diff",
+        "post-fix two-order regression output"
+      ]
+    },
+    {
+      "id": "debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "root cause is expressed as an invariant or lifecycle violation",
+        "fix does not rely on probabilistic timing",
+        "existing cancellation contract is preserved"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "both deterministic starting-revision schedules",
+    "root-cause hypothesis evidence",
+    "actual diff",
+    "both post-fix schedule regressions"
+  ],
+  "requiredArtifacts": [
+    "debugging-scenario-2-reproduction",
+    "debugging-scenario-2-root-cause",
+    "debugging-scenario-2-diff",
+    "debugging-scenario-2-regression",
+    "debugging-scenario-2-paired-evaluation"
+  ]
+}

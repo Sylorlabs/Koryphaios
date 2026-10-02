@@ -1,0 +1,64 @@
+{
+  "id": "implementation-full-task-2",
+  "maturity": "individual",
+  "prompt": "In the supplied Node/TypeScript service, the request timeout is already defined in `RuntimeOptions.timeoutMs` and is correctly populated from configuration, but one existing call to `runProvider()` still uses a literal `30000`. Make this code change: pass the existing `timeoutMs` value through that call site, update the focused test to prove a non-default value is honored, and keep the public configuration contract unchanged. Do not refactor the provider layer or add a second timeout abstraction. Return the diff and executable verification evidence.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://implementation/use-existing-timeout",
+    "requirements": [
+      "RuntimeOptions.timeoutMs already exists and is populated before the target call",
+      "target runProvider call currently hard-codes 30000",
+      "focused provider-call test can observe the timeout argument",
+      "public configuration schema is already correct",
+      "no provider-layer redesign is required"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "implementation-timeout-path",
+      "assertion": "The target call uses the existing RuntimeOptions.timeoutMs value and the literal 30000 is removed from that path."
+    },
+    {
+      "id": "implementation-timeout-nondefault",
+      "assertion": "A focused test supplies a non-default timeout and observes that exact value at runProvider()."
+    },
+    {
+      "id": "implementation-timeout-no-parallel-abstraction",
+      "assertion": "The change does not introduce another timeout configuration field or provider abstraction."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "implementation-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "actual focused diff",
+        "existing timeoutMs value reaches runProvider",
+        "non-default timeout test output",
+        "public configuration contract remains unchanged"
+      ]
+    },
+    {
+      "id": "implementation-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "minimum sufficient change",
+        "no speculative abstraction",
+        "verification is proportional and reproducible"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "actual diff at the timeout call path",
+    "focused passing test with a non-default timeout",
+    "confirmation that no public configuration schema changed"
+  ],
+  "requiredArtifacts": [
+    "implementation-scenario-2-diff",
+    "implementation-scenario-2-test-output",
+    "implementation-scenario-2-paired-evaluation"
+  ]
+}

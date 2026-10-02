@@ -72,9 +72,12 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   aistudio: compatible(['chat'], 'provider-specific-contract'),
   xai: compatible(['chat'], 'openai-compatible-contract'),
   openrouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  unorouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   tokenrouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  experientiallabs: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   groq: compatible(['chat'], 'openai-compatible-contract'),
   digitalocean: compatible(['chat'], 'openai-compatible-contract'),
+  commandcode: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   copilot: compatible(['chat'], 'provider-specific-contract'),
   azure: compatible(['chat'], 'provider-specific-contract'),
   azurecognitive: compatible(['chat'], 'provider-specific-contract'),
@@ -89,6 +92,7 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   kimicode: compatible(['chat', 'coding-agent'], 'provider-specific-contract'),
   opencodego: compatible(['chat', 'gateway'], 'provider-specific-contract'),
   chatbase: compatible(['chat'], 'provider-specific-contract'),
+  notion: compatible(['chat'], 'provider-specific-contract'),
 
   claude: preview(
     ['chat', 'coding-agent'],
@@ -106,10 +110,9 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
     'The managed Codex app-server route is version-sensitive and remains Preview until its packaged live matrix passes.',
   ),
   cline: preview(
-    ['chat', 'coding-agent'],
-    'cli-contract',
-    'The adapter supports current agent_event JSON envelopes and legacy say/ask streams, feature-detects CLI flags, and fails closed on unknown protocols. A real authenticated Cline run is still required before certification.',
-    'current CLI contract as of 2026-08-22',
+    ['chat', 'gateway'],
+    'openai-compatible-contract',
+    'Cline\u2019s hosted API is an OpenAI-compatible Chat Completions surface reached directly with a Cline API key (no CLI subprocess). Model ids, context windows, output limits, pricing, input modalities and supported parameters are read from Cline\u2019s live catalog; per-model reasoning ladders come from Cline\u2019s published catalog because the API reports only whether reasoning is accepted, never which values are legal. Live-verified against api.cline.bot: streaming content, tool calling, `delta.reasoning` (OpenRouter shape) alongside `delta.reasoning_content`, and usage that arrives on the same chunk as finish_reason with `completion_tokens_details.reasoning_tokens`. Only zero-priced models were executed, because the verification key had no credit, so a paid-model turn is not yet attested.',
   ),
   cursor: preview(
     ['chat', 'coding-agent'],
@@ -132,9 +135,11 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
     'Antigravity is a moving CLI integration and requires a live installed-version check.',
   ),
 
-  gitlab: unavailable(
+  gitlab: preview(
     ['chat'],
-    'GitLab Duo chat is intentionally unavailable because this build has no supported inference contract; no generic OpenAI fallback is used.',
+    'provider-specific-contract',
+    'Sends the real Duo chat request shape (POST /api/v4/chat/completions, `{ content, additional_context }`, PAT Bearer) and parses the single bare-string answer. Access is instance-gated — gitlab.com restricts this endpoint to GitLab team members and self-managed needs access_rest_chat — so credential scope, flag state, and Duo entitlement are only proven by a live request.',
+    'access_rest_chat contract as of 2026-09-27',
   ),
   freebuff: preview(
     ['chat', 'coding-agent'],
@@ -151,6 +156,10 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   jules: unavailable(
     ['async-agent'],
     'Jules mutation requires an approval-capable remote workflow that is not safely implemented in this release.',
+  ),
+  hoplite: unavailable(
+    ['async-agent'],
+    'Hoplite runs tasks in Hoplite cloud sandboxes or on a local Codex/Claude agent and opens PRs; live delegation requires an approval-capable remote workflow that is not safely implemented in this release.',
   ),
   replicate: unavailable(['image'], 'Replicate requires a dedicated non-chat capability adapter.'),
   modal: unavailable(['async-agent'], 'Modal requires a dedicated non-chat capability adapter.'),

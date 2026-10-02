@@ -1,0 +1,82 @@
+{
+  "id": "php-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Harden a PHP API boundary that decodes JSON into associative arrays and relies on loose comparisons, allowing `\"0\"`, `0`, `false`, and missing values to collapse into the same validation branch. Introduce explicit decoding/validation and typed domain conversion while preserving the public error contract, and test null/missing, numeric strings, booleans, large integers, invalid UTF-8/JSON, and valid backward-compatible payloads.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://php-engineering/strict-json-boundary",
+    "requirements": [
+      "PHP request decoder/validator with current loose-comparison behavior",
+      "payload corpus distinguishing missing, null, false, numeric string, number, and overflow cases",
+      "existing public validation error shape/status to preserve",
+      "domain constructor/DTO boundary for typed validated values",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "php-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "php-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "php-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "strict-json-boundary scenario evidence",
+    "php-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "php-engineering-individual-scenario-2-result",
+    "php-engineering-individual-scenario-2-verification",
+    "php-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual php-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=csharp-dotnet-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm PHP target versions, Composer constraints, request lifecycle, autoloading, strict-types policy, framework container scope, and persistence boundaries."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "External JSON types are validated before domain conversion; PHP coercion cannot merge semantically distinct missing/null/string/number/boolean states."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run Composer validation plus configured static analysis and tests."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not depend on mutable process globals, hide dynamic-property behavior behind suppressions, weaken Composer constraints casually, or confuse framework helper availability with portable PHP."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (php-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

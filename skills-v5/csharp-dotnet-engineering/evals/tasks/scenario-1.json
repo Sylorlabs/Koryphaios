@@ -1,0 +1,82 @@
+{
+  "id": "csharp-dotnet-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a .NET background importer that creates an async database scope per file but leaks connections when cancellation arrives between parsing and SaveChangesAsync. Preserve the public importer API, propagate CancellationToken correctly, make disposal deterministic, and avoid sync-over-async. Verify cancellation at each await boundary, normal completion, parser failure, and that pooled connection counts return to baseline.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://csharp-dotnet-engineering/async-disposal-cancellation",
+    "requirements": [
+      ".NET project using async EF-style scopes with instrumented connection-pool counts",
+      "cancellation injection before parse, before save, during save, and after commit",
+      "existing public importer contract and result/error types",
+      "tests that detect sync blocking and undisposed async resources",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "csharp-dotnet-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "csharp-dotnet-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "csharp-dotnet-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "async-disposal-cancellation scenario evidence",
+    "csharp-dotnet-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "csharp-dotnet-engineering-individual-scenario-1-result",
+    "csharp-dotnet-engineering-individual-scenario-1-verification",
+    "csharp-dotnet-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual csharp-dotnet-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm target frameworks, nullable context, hosting model, dependency lifetimes, async flow, and serializer configuration."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Async lifetime and cancellation ownership are explicit: every acquired disposable is released exactly once and cancellation cannot be converted into partial success."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run dotnet build/test for supported target frameworks, exercise cancellation and disposal, and validate serialization, trimming, or AOT paths when affected."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not block async tasks with .Result or .Wait in request paths, capture scoped services in singletons, suppress nullable warnings without proof, or depend on reflection that deployment modes remove."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (csharp-dotnet-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

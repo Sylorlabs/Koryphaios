@@ -25,8 +25,13 @@ import {
 import { promisify } from 'node:util';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { isTransientStreamErrorText } from './provider-diagnostics';
 import { providerLog } from '../logger';
-import { sandboxCapabilities, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  inferenceSandboxPolicy,
+  sandboxCapabilities,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
@@ -660,7 +665,9 @@ export class FreebuffProvider implements Provider {
         homeDir: runHome,
         configDirs: [runRoot],
         readonlyConfigDirs: readonlyRuntimeDirs,
-        policy: runtimePolicy,
+        // The TUI child is the inference transport — it must reach the
+        // model endpoint. See inferenceSandboxPolicy.
+        policy: inferenceSandboxPolicy(runtimePolicy),
       });
       if (!wrapped.isolated) throw new Error('Freebuff refused to run without OS isolation');
 
@@ -881,6 +888,9 @@ export class FreebuffProvider implements Provider {
         error: aborted
           ? 'Freebuff PTY turn cancelled.'
           : `Freebuff PTY failed: ${err instanceof Error ? err.message : String(err)}`,
+        // A PTY that dies mid-turn is a transport failure, not a bad prompt:
+        // repeat the turn instead of surfacing it.
+        errorTransient: !aborted && isTransientStreamErrorText(err),
       };
     } finally {
       if (session) {

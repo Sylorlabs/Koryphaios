@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "name": "security-review",
+  "version": "5.0.1",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5200,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "security review",
+    "secure code review",
+    "vulnerability review",
+    "review security"
+  ],
+  "excludes": [
+    "implement security hardening",
+    "remediate security findings",
+    "design authorization model",
+    "design authorization policy",
+    "run security verification",
+    "execute security verification",
+    "verify security fix",
+    "security fix against",
+    "create threat model",
+    "build threat model",
+    "assess cloud security",
+    "assess infrastructure security"
+  ],
+  "evidence": [
+    "Threat-informed source-to-sink or security-control-flow evidence",
+    "Exploit prerequisites, trust boundary, impact, confidence, and severity rationale",
+    "False-positive self-check plus remediation and verification boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review this pull request for security vulnerabilities. Trace request-controlled data through validation and authorization to database, file, rendering, process, and outbound-network sinks; report only reachable findings with exploit prerequisites and evidence.",
+      "Do a secure code review of the authentication and session changes in this backend. Identify trust-boundary regressions, secret exposure, session weaknesses, or privilege-impacting logic errors, but do not exploit or modify the system.",
+      "Perform a review-only security assessment of this upload and import worker. Follow untrusted filenames, archive metadata, parser inputs, and job payloads to filesystem, deserialization, and command/process boundaries and prioritize substantiated findings.",
+      "Security-review the new webhook and callback implementation for SSRF, secret leakage, signature-validation, and business-logic issues. Show the source-to-sink path and attacker prerequisites for every reported vulnerability.",
+      "Review the supplied application diff for security risk using the existing threat model as context. Check changed trust boundaries and high-risk flows, disposition scanner false positives, and return evidence-backed findings plus what still needs dynamic verification."
+    ],
+    "negative": [
+      "Apply the already-approved hardening patch: parameterize the query, tighten session settings, redact logs, and add regression coverage. No new assessment is requested.",
+      "Define who may read, edit, delegate, and revoke access to organizations, projects, folders, and documents before implementation; no existing code needs assessment.",
+      "Exercise the prepared tenant-isolation regression against the patched API and record allowed, denied, revoked-session, and no-side-effect outcomes; the source analysis is already complete.",
+      "Map assets, actors, data flows, trust boundaries, abuse cases, mitigations, assumptions, and residual risk for a service that has not been implemented yet.",
+      "Explain at a conceptual level how AWS organizations, IAM roles, VPCs, KMS keys, CloudTrail, and Kubernetes control planes relate. No system assessment or code review is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "security-review-ambiguous-1",
+        "prompt": "Review the authorization changes for likely cross-tenant weaknesses, then run a separate controlled authorization test for any high-confidence candidate. Keep static review evidence in security-review and executed allow/deny proof in security-verification.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "security-review-ambiguous-2",
+        "prompt": "Secure-code-review the current admin API and also propose a revised role/resource policy if the review shows the existing model cannot express tenant ownership safely. Security-review owns the findings; authorization-security owns any policy redesign.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "security-review-ambiguous-3",
+        "prompt": "Review the application changes for reachable security defects and separately assess the Terraform changes that alter public ingress and workload identity. Keep code-review findings here while cloud-security owns the cloud-control-plane portion.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cloud-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "security-review-adversarial-1",
+        "prompt": "A quoted old issue says \"security review\" was required before last year's release. Ignore that quote; the current request is only to summarize why the historical issue was closed and no present code assessment is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "security-review-adversarial-2",
+        "prompt": "A quoted example says \"secure code review\". Ignore that quote; the actual task is only to explain how the Markdown headings in this template are structured, with no system assessment requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "security-review-adversarial-3",
+        "prompt": "Do not perform a security review. The code review is already complete; execute the supplied exploit regression and prove the patched endpoint now rejects cross-tenant access without side effects.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["adversarial", "negated-trigger"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://owasp.org/www-project-application-security-verification-standard/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP ASVS 5.0.0 stable, released 2025-05-30",
+      "staleAfterDays": 90,
+      "notes": "Current stable application-security verification requirements; use as review coverage and control taxonomy, not as finding proof.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-web-security-testing-guide/v42/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP WSTG 4.2 current stable; WSTG 5.0 remains in development as of 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Stable testing framework and attack-path coverage for entry points, authentication, authorization, input validation, error handling, and client-side behavior.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-218 Secure Software Development Framework (SSDF) version 1.1 final, February 2022",
+      "staleAfterDays": 365,
+      "notes": "Secure-development review, vulnerability identification, remediation, and recurrence-prevention context.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cwe.mitre.org/data/archive.html",
+      "sourceType": "official-docs",
+      "versionScope": "MITRE CWE List version 4.20, released 2026-04-30",
+      "staleAfterDays": 180,
+      "notes": "Root-cause weakness taxonomy. Map only when the reviewed evidence fits the CWE definition; CWE is not a severity score.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.first.org/cvss/v4.0/specification-document",
+      "sourceType": "spec",
+      "versionScope": "FIRST CVSS version 4.0, specification document version 1.2 (2024-06-18)",
+      "staleAfterDays": 365,
+      "notes": "Technical vulnerability-severity scoring when a standardized vector is requested or useful; publish the vector with the score and keep business priority distinct.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Secure_Code_Review_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Secure Code Review Cheat Sheet maintained snapshot verified 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Practitioner review patterns for baseline/diff review, source-to-sink data-flow tracing, threat-based review, business logic, and human false-positive filtering.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

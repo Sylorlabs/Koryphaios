@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConflictError, PayloadTooLargeError, ValidationError } from '../../errors/types';
@@ -205,6 +205,39 @@ function v2Manifest(): VaultArchiveManifest {
 }
 
 describe('vault archive integrity boundary', () => {
+  test.each(['_portable-note', '-portable-note'])(
+    'accepts the Nano ID prefix in %s and its references',
+    async (id) => {
+      const manifest = v2Manifest();
+      manifest.notes[0]!.id = id;
+      manifest.revisions[0]!.noteId = id;
+      manifest.attachments[0]!.noteId = id;
+      manifest.attachments[0]!.id = `${id}-attachment`;
+      manifest.links = [{ fromNoteId: id, toNoteId: id }];
+      manifest.drafts[0]!.noteId = id;
+      manifest.drafts[0]!.id = `${id}-draft`;
+      manifest.bases[0]!.id = `${id}-base`;
+      const archive = await parseVaultArchive(archiveFromManifest(manifest));
+      expect(archive.manifest.notes[0]!.id).toBe(id);
+      expect(archive.manifest.drafts[0]!.noteId).toBe(id);
+    },
+  );
+
+  test.each([
+    '../note',
+    '/note',
+    'note/child',
+    'note\\child',
+    '.note',
+    'note\n',
+    'note\0',
+    'note id',
+  ])('rejects unsafe identity %j', async (id) => {
+    const manifest = baseManifest();
+    manifest.notes[0]!.id = id;
+    await expect(parseVaultArchive(archiveFromManifest(manifest))).rejects.toThrow(ValidationError);
+  });
+
   test('parses Buffer and File inputs, verifies all payloads, and accepts v1 and v2', async () => {
     const v1Bytes = archiveFromManifest(baseManifest());
     const v1 = await parseVaultArchive(v1Bytes);
@@ -313,6 +346,18 @@ describe('vault archive integrity boundary', () => {
 });
 
 describe('vault safe-merge preview and restore', () => {
+  test('binds a project alias and its canonical directory to the same preview identity', async () => {
+    const project = join(fixtureRoot, 'canonical-target');
+    const alias = join(fixtureRoot, 'project-alias');
+    mkdirSync(project);
+    symlinkSync(project, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const bytes = archiveFromManifest(baseManifest());
+    const direct = await previewVaultArchiveRestore(bytes, { projectRoot: project });
+    const aliased = await previewVaultArchiveRestore(bytes, { projectRoot: alias });
+    expect(aliased.projectRoot).toBe(realpathSync(project));
+    expect(aliased.planToken).toBe(direct.planToken);
+  });
+
   test('builds a project-scoped preview only after archive and file hashes verify', async () => {
     const project = join(fixtureRoot, 'preview-clean');
     mkdirSync(project, { recursive: true });
@@ -398,7 +443,7 @@ describe('vault safe-merge preview and restore', () => {
         },
       },
     });
-    expect(inspectedRoot).toBe(project);
+    expect(inspectedRoot).toBe(realpathSync(project));
     expect(commitCalls).toBe(1);
     expect(result).toMatchObject({ ...counts, canRestore: true, archiveSha256: digest(bytes) });
     expect('archive' in result).toBe(false);

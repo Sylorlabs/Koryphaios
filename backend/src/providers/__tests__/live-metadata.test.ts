@@ -39,6 +39,26 @@ describe('enrichFromRemoteMetadata', () => {
     expect(out.contextVerified).toBe(true);
   });
 
+  test('ingests gateway-style context_window, output tokens, vision, and reasoning levels', () => {
+    const raw = {
+      id: 'fable-5',
+      display_name: 'Fable 5',
+      context_window: 1_000_000,
+      max_output_tokens: 128_000,
+      reasoning: true,
+      reasoning_levels: ['low', 'medium', 'high'],
+      capabilities: { supports: { vision: true } },
+    };
+    const out = enrichFromRemoteMetadata(raw, def());
+    expect(out.contextWindow).toBe(1_000_000);
+    expect(out.contextVerified).toBe(true);
+    expect(out.maxOutputTokens).toBe(128_000);
+    expect(out.canReason).toBe(true);
+    expect(out.reasoningLevels).toEqual(['low', 'medium', 'high']);
+    expect(out.vision).toBe(true);
+    expect(out.name).toBe('Fable 5');
+  });
+
   test('leaves the def untouched when the raw entry has no metadata', () => {
     const base = def({ contextWindow: 128_000 });
     const out = enrichFromRemoteMetadata({ id: 'x' }, base);
@@ -95,7 +115,9 @@ describe('trusted context metadata', () => {
 
   test('rejects a boolean-like live window and reports context as unknown', async () => {
     const { resolveTrustedContextWindow, registerLiveModelResolver } = await import('../models');
-    registerLiveModelResolver(() => def({ provider: 'codex', contextWindow: 1, contextVerified: true }));
+    registerLiveModelResolver(() =>
+      def({ provider: 'codex', contextWindow: 1, contextVerified: true }),
+    );
     const resolved = resolveTrustedContextWindow('gpt-5.5', 'codex');
     // A contextWindow of 1 is below the 1024 minimum, so it's rejected.
     // With no static catalog fallback, context is reported as unknown.

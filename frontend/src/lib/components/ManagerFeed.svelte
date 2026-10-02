@@ -6,13 +6,11 @@
   import { untrack } from 'svelte';
   import { fade } from 'svelte/transition';
   import { projectStore } from '$lib/stores/project.svelte';
-  import MessageSquare from 'lucide-svelte/icons/message-square';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
   import Trash2 from 'lucide-svelte/icons/trash-2';
   import Paintbrush from 'lucide-svelte/icons/paintbrush';
   import Bug from 'lucide-svelte/icons/bug';
   import Zap from 'lucide-svelte/icons/zap';
-  import Beaker from 'lucide-svelte/icons/beaker';
   import GitBranch from 'lucide-svelte/icons/git-branch';
   import Pencil from 'lucide-svelte/icons/pencil';
   import Check from 'lucide-svelte/icons/check';
@@ -94,7 +92,7 @@
       label: 'Manage projects',
       icon: Paintbrush,
       prompt:
-        'Help me manage the projects in this workspace — add, remove, or organize them, and recommend the most important setup fixes.',
+        'Help me manage the projects in this workspace. Add, remove, or organize them, and recommend the most important setup fixes.',
     },
     {
       id: 'debug-workspace',
@@ -135,6 +133,12 @@
   );
   const autoScrollCtl = createAutoScroll(() => scrollEl, { threshold: 100 });
 
+  // A transcript that has just opened only knows where its bottom is from row
+  // estimates, so the view starts near the end and walks down as the real
+  // heights come back. Keep it out of sight until it has landed on the last
+  // message, which is what "opening a chat shows the chat" has to look like.
+  let landing = $state(false);
+
   // Attach the scroll/observer listeners whenever the container element
   // changes (e.g. empty-state ↔ VirtualList). We do this in an effect
   // that reads `scrollEl` and explicitly calls `attach()`. The `attach`
@@ -144,12 +148,26 @@
     untrack(() => autoScrollCtl.attach());
   });
 
-  // Per-token streaming signal: tracks the text length of the last
-  // (streaming) entry so we can keep the view pinned during fast
-  // streaming.
+  // Rows that render as live this tick. Answer text keeps streaming into the
+  // row its turn opened even when tool cards were added after it, so the
+  // streaming treatment follows the text row, not just the last row.
+  let streamingRowIndexes = $derived.by(() => {
+    const indexes = new Set<number>();
+    if (!isManagerStreaming) return indexes;
+    if (filteredFeed.length > 0) indexes.add(filteredFeed.length - 1);
+    const lastContent = filteredFeed.findLastIndex((entry) => entry.type === 'content');
+    if (lastContent >= 0) indexes.add(lastContent);
+    return indexes;
+  });
+
+  // Per-token streaming signal: tracks the text length of the streaming rows
+  // so we can keep the view pinned during fast streaming.
   let streamingTextSig = $derived.by(() => {
-    const last = filteredFeed[filteredFeed.length - 1];
-    return last?.text?.length ?? 0;
+    let length = 0;
+    for (const index of streamingRowIndexes) {
+      length += filteredFeed[index]?.text?.length ?? 0;
+    }
+    return length;
   });
 
   // Pin on per-token text growth (no counter increment).
@@ -166,8 +184,12 @@
   });
 
   // Switching chats must not inherit the previous chat's scroll state
-  // (follow=false + a stale "N new" badge). Re-engage follow and land at
-  // the bottom of the newly opened chat.
+  // (follow=false + a stale "N new" badge). Re-engage follow and land at the
+  // bottom of the newly opened chat. The instant jump only re-pins for a few
+  // frames — the transcript is still converging from estimated row heights at
+  // this point, and one pin against those estimates lands well short of the
+  // real bottom, which is what left a reopened chat showing the reader's very
+  // first message.
   $effect(() => {
     void sessionStore.activeSessionId;
     untrack(() => autoScrollCtl.jumpToBottom('instant'));
@@ -183,6 +205,10 @@
       case 'tool_result':
       case 'tool_group':
         return 80;
+      // Sub-agent groups render as a clamped summary, never as a full
+      // transcript dump, so a flat estimate stays close to the real height.
+      case 'agent_group':
+        return 44;
       default:
         return 100;
     }
@@ -241,14 +267,6 @@
 </script>
 
 <div class="flex flex-col flex-1 overflow-hidden">
-  <div class="panel-header flex items-center justify-between">
-    <span class="panel-title flex items-center gap-2">
-      <MessageSquare size={16} />
-      Agent feed
-    </span>
-    <div class="flex items-center gap-2"></div>
-  </div>
-
   <div class="relative flex-1 min-h-0 overflow-hidden">
     {#if wsStore.isLoadingSession && filteredFeed.length === 0}
       <div
@@ -275,6 +293,7 @@
       </div>
     {:else if filteredFeed.length === 0}
       <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
+        {#if welcomePreferencesStore.preferences.enabled.suggestions}
         <div class="px-6 py-10 max-w-5xl mx-auto">
           <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div class="flex-1 space-y-6 min-w-0">
@@ -299,192 +318,116 @@
                   your task in the composer below.
                 </p>
 
-                {#if welcomePreferencesStore.preferences.enabled.suggestions}
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
                     {#each suggestions as suggestion (suggestion.id)}
-                    {@const Icon = suggestion.icon}
-                    <div
-                      class="suggestion-card relative flex flex-col items-start p-5 rounded-2xl border text-left transition-all duration-300 group overflow-hidden {editingSuggestionId ===
-                      suggestion.id
-                        ? ''
-                        : 'cursor-pointer'}"
-                      style="background: rgba(12, 10, 9, 0.4); border-color: var(--color-border);"
-                    >
-                      {#if editingSuggestionId !== suggestion.id}
-                        <button
-                          type="button"
-                          class="absolute inset-0 z-0 rounded-2xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
-                          aria-label={`Load ${suggestion.label} into composer`}
-                          onclick={() => runSuggestion(suggestion.prompt)}
-                        ></button>
-                      {/if}
+                      {@const Icon = suggestion.icon}
                       <div
-                        class="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
-                      ></div>
-
-                      <button
-                        type="button"
-                        class="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-surface-3)]"
-                        style="color: var(--color-text-muted);"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          startEditingSuggestion(suggestion);
-                        }}
-                        title="Edit suggestion"
-                        aria-label={`Edit ${suggestion.label}`}
-                      >
-                        <Pencil size={14} />
-                      </button>
-
-                      <div
-                        class="relative z-[1] w-full text-left {editingSuggestionId ===
+                        class="suggestion-card relative flex flex-col items-start p-5 rounded-2xl border text-left transition-all duration-300 group overflow-hidden {editingSuggestionId ===
                         suggestion.id
                           ? ''
-                          : 'pointer-events-none'}"
+                          : 'cursor-pointer'}"
+                        style="background: rgba(12, 10, 9, 0.4); border-color: var(--color-border);"
                       >
-                        <div
-                          class="w-11 h-11 rounded-xl flex items-center justify-center mb-5 bg-[var(--color-surface-3)] group-hover:scale-110 group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)] transition-all duration-300"
-                          style="color: var(--color-text-secondary);"
-                        >
-                          <Icon size={19} />
-                        </div>
-
-                        <span
-                          class="text-sm font-bold mb-2 block pr-10 tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]"
-                          style="color: var(--color-text-secondary);">{suggestion.label}</span
-                        >
-
-                        {#if editingSuggestionId === suggestion.id}
-                          <textarea
-                            bind:value={editingSuggestionText}
-                            class="w-full min-h-[120px] rounded-xl border px-3 py-2 text-xs leading-relaxed focus:ring-1 focus:ring-[var(--color-accent)]/30 outline-none"
-                            style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
-                            onclick={(e) => e.stopPropagation()}
-                          ></textarea>
-                        {:else}
-                          <span
-                            class="text-xs leading-relaxed block transition-colors duration-300 group-hover:text-[var(--color-text-secondary)]"
-                            style="color: var(--color-text-muted);">{suggestion.prompt}</span
-                          >
+                        {#if editingSuggestionId !== suggestion.id}
+                          <button
+                            type="button"
+                            class="absolute inset-0 z-0 rounded-2xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
+                            aria-label={`Load ${suggestion.label} into composer`}
+                            onclick={() => runSuggestion(suggestion.prompt)}
+                          ></button>
                         {/if}
-                      </div>
-
-                      {#if editingSuggestionId === suggestion.id}
-                        <div class="relative mt-4 flex items-center gap-2">
-                          <button
-                            type="button"
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
-                            onclick={(e) => {
-                              e.stopPropagation();
-                              saveSuggestionEdit(suggestion.id);
-                            }}
-                          >
-                            <Check size={12} />
-                            Save
-                          </button>
-                          <button
-                            type="button"
-                            class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
-                            onclick={(e) => {
-                              e.stopPropagation();
-                              cancelEditingSuggestion();
-                            }}
-                          >
-                            <X size={12} />
-                            Cancel
-                          </button>
-                        </div>
-                      {:else}
                         <div
-                          class="relative mt-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.15em] opacity-0 group-hover:opacity-40 transition-all duration-300 translate-y-2 group-hover:translate-y-0"
-                          style="color: var(--color-text-muted);"
-                        >
-                          Load into composer <ArrowDown size={10} />
-                        </div>
-                      {/if}
-                    </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
+                          class="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+                        ></div>
 
-              {#if welcomePreferencesStore.preferences.enabled.proTips || welcomePreferencesStore.preferences.enabled.workflow}
-                <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {#if welcomePreferencesStore.preferences.enabled.proTips}
-                <div
-                  class="rounded-[24px] border p-6 flex flex-col justify-between transition-all hover:border-[var(--color-accent)]/20"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                >
-                  <div>
-                    <div
-                      class="text-[10px] font-bold uppercase tracking-[0.2em] mb-4"
-                      style="color: var(--color-text-muted);"
-                    >
-                      Pro Tips
-                    </div>
-                    <div class="space-y-4">
-                      {#each welcomePreferencesStore.preferences.proTips as tip}
-                        <div class="flex items-start gap-3">
+                        <button
+                          type="button"
+                          class="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-surface-3)]"
+                          style="color: var(--color-text-muted);"
+                          onclick={(e) => {
+                            e.stopPropagation();
+                            startEditingSuggestion(suggestion);
+                          }}
+                          title="Edit suggestion"
+                          aria-label={`Edit ${suggestion.label}`}
+                        >
+                          <Pencil size={14} />
+                        </button>
+
+                        <div
+                          class="relative z-[1] w-full text-left {editingSuggestionId ===
+                          suggestion.id
+                            ? ''
+                            : 'pointer-events-none'}"
+                        >
                           <div
-                            class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-amber-500/40"
-                          ></div>
-                          <p
-                            class="text-xs leading-relaxed"
+                            class="w-11 h-11 rounded-xl flex items-center justify-center mb-5 bg-[var(--color-surface-3)] group-hover:scale-110 group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)] transition-all duration-300"
                             style="color: var(--color-text-secondary);"
                           >
-                            {tip}
-                          </p>
+                            <Icon size={19} />
+                          </div>
+
+                          <span
+                            class="text-sm font-bold mb-2 block pr-10 tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]"
+                            style="color: var(--color-text-secondary);">{suggestion.label}</span
+                          >
+
+                          {#if editingSuggestionId === suggestion.id}
+                            <textarea
+                              bind:value={editingSuggestionText}
+                              class="w-full min-h-[120px] rounded-xl border px-3 py-2 text-xs leading-relaxed focus:ring-1 focus:ring-[var(--color-accent)]/30 outline-none"
+                              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
+                              onclick={(e) => e.stopPropagation()}
+                            ></textarea>
+                          {:else}
+                            <span
+                              class="text-xs leading-relaxed block transition-colors duration-300 group-hover:text-[var(--color-text-secondary)]"
+                              style="color: var(--color-text-muted);">{suggestion.prompt}</span
+                            >
+                          {/if}
                         </div>
-                      {/each}
-                    </div>
-                  </div>
 
-                  <button
-                    type="button"
-                    class="w-full mt-6 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border text-xs font-bold transition-all hover:bg-[var(--color-surface-3)] border-[var(--color-border)]"
-                    style="color: var(--color-text-secondary);"
-                    onclick={() =>
-                      runSuggestion(
-                        'Write a concrete implementation plan for the highest-priority improvement in this project.',
-                      )}
-                  >
-                    <Beaker size={14} />
-                    Plan next improvement
-                  </button>
-                </div>
-                {/if}
-
-                {#if welcomePreferencesStore.preferences.enabled.workflow}
-                <div
-                  class="rounded-[24px] border p-6 transition-all hover:border-[var(--color-accent)]/20"
-                  style="background: var(--color-surface-2); border-color: var(--color-border);"
-                >
-                  <div
-                    class="text-[10px] font-bold uppercase tracking-[0.2em] mb-4"
-                    style="color: var(--color-text-muted);"
-                  >
-                    Workflow
-                  </div>
-                  <div class="space-y-4">
-                    {#each welcomePreferencesStore.preferences.workflow as tip}
-                      <div class="flex items-start gap-3">
-                        <div class="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-blue-500/40"></div>
-                        <p
-                          class="text-xs leading-relaxed"
-                          style="color: var(--color-text-secondary);"
-                        >
-                          {tip}
-                        </p>
+                        {#if editingSuggestionId === suggestion.id}
+                          <div class="relative mt-4 flex items-center gap-2">
+                            <button
+                              type="button"
+                              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                saveSuggestionEdit(suggestion.id);
+                              }}
+                            >
+                              <Check size={12} />
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                cancelEditingSuggestion();
+                              }}
+                            >
+                              <X size={12} />
+                              Cancel
+                            </button>
+                          </div>
+                        {:else}
+                          <div
+                            class="relative mt-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.15em] opacity-0 group-hover:opacity-40 transition-all duration-300 translate-y-2 group-hover:translate-y-0"
+                            style="color: var(--color-text-muted);"
+                          >
+                            Load into composer <ArrowDown size={10} />
+                          </div>
+                        {/if}
                       </div>
                     {/each}
                   </div>
-                </div>
-                {/if}
               </div>
-              {/if}
             </div>
           </div>
         </div>
+        {/if}
       </div>
     {:else}
       <div class="absolute inset-0">
@@ -493,17 +436,17 @@
           items={filteredFeed}
           estimateHeight={estimateFeedHeight}
           follow={autoScrollCtl.follow}
-          class="h-full p-4 feed-scroll"
+          resetKey={sessionStore.activeSessionId}
+          onLandingChange={(value) => (landing = value)}
+          class="h-full p-4 feed-scroll {landing ? 'opacity-0' : ''}"
         >
           {#snippet row(entry, i)}
             <div class="pb-3">
               <FeedEntry
                 {entry}
                 isSelected={false}
-                isExpanded={entry.type === 'agent_group'
-                  ? !expandedGroups.has(entry.id)
-                  : expandedGroups.has(entry.id)}
-                isStreaming={i === filteredFeed.length - 1 && isManagerStreaming}
+                isExpanded={expandedGroups.has(entry.id)}
+                isStreaming={streamingRowIndexes.has(i)}
                 onSelect={(e) => handleEntryClick(entry, e)}
                 onToggleGroup={() => toggleGroup(entry.id)}
                 onDelete={(_event, target) => deleteSingle(entry, target?.messageId)}

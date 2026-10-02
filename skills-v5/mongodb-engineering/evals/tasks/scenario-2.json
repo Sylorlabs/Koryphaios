@@ -1,0 +1,82 @@
+{
+  "id": "mongodb-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A MongoDB query for recent unresolved alerts scans most of a 20M-document collection for one high-volume tenant. Candidate indexes differ in tenant/status/time ordering and one low-cardinality field tempts a poor prefix. Capture actual query shapes/selectivity, choose and validate a compound index, measure read/write/storage effects, and verify sort coverage plus neighboring query regressions under representative tenant skew.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://mongodb-engineering/compound-index-query-shape",
+    "requirements": [
+      "representative collection stats with tenant skew and status cardinality",
+      "query profiler/explain output for target and neighboring query shapes",
+      "candidate compound indexes and write-rate/storage budget",
+      "before/after keys/docs examined and latency distribution",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "mongodb-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "mongodb-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "mongodb-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "compound-index-query-shape scenario evidence",
+    "mongodb-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "mongodb-engineering-individual-scenario-2-result",
+    "mongodb-engineering-individual-scenario-2-verification",
+    "mongodb-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual mongodb-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; near-neighbor=relational-data-modeling), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Model documents around ownership, atomic update boundaries, cardinality, growth, and dominant access patterns."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Index order is justified by actual predicates/sort/selectivity and representative skew; improvement must include measured cost to writes/storage and neighboring queries."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Inspect explain plans and index coverage, test document growth and migration, concurrent updates, transaction/retry behavior, read/write concern, and representative aggregation cardinalities."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not model every relation as embedded, use unbounded arrays, add indexes without write/storage cost analysis, or assume eventual consistency is acceptable without a product contract."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (mongodb-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

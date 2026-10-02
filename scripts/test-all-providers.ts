@@ -23,7 +23,6 @@ const CLI_BINARY_MAP: Record<string, string> = {
   antigravity: 'agy',
   cursor: 'cursor-agent',
   devin: 'devin',
-  cline: 'cline',
 };
 
 function hasBin(bin: string): boolean {

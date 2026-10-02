@@ -22,9 +22,18 @@ import {
   mergeModelLists,
   modelFromRemoteId,
 } from './model-list-cache';
-import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import { providerStreamFailure } from './provider-diagnostics';
 import { withOpenRouterAttribution } from './api-endpoints';
-import { deriveProviderPromptCacheKey, resolvePromptCacheSegments } from './prompt-cache';
+import {
+  canonicalizeProviderTools,
+  derivePromptCacheLane,
+  deriveProviderPromptCacheKey,
+  observePromptCacheDispatch,
+  resolvePromptCacheSegments,
+} from './prompt-cache';
+import { promptCacheMaintenance } from './cache-maintenance';
+import { promptCacheDiagnostics } from './cache-fabric';
+import { resolvePricing } from '../pricing';
 
 export class OpenAIProvider implements Provider {
   protected _client: OpenAI | null = null;
@@ -193,6 +202,52 @@ export class OpenAIProvider implements Provider {
     return this.refreshInProgress;
   }
 
+  /**
+   * Apply this provider's reasoning control to a request under construction.
+   *
+   * Gate conditions (`canReason` plus a level this model actually declares) are
+   * resolved by the caller so every provider gates on the same evidence.
+   * Subclasses whose reasoning control is a different shape than OpenAI's
+   * `reasoning_effort` string override this instead of adding a branch to the
+   * shared request builder.
+   */
+  protected applyReasoningControls(
+    params: Record<string, unknown>,
+    options: {
+      canReason: boolean;
+      effort: string | undefined;
+      supported: ReadonlySet<string>;
+      modelDef?: ModelDef;
+      /** The model this request targets, even when live discovery has not run.
+       *  Providers whose reasoning control comes from a committed static catalog
+       *  must not silently drop the selection just because the async model
+       *  list has not arrived yet. */
+      requestModel: string;
+    },
+  ): void {
+    const { canReason, effort, supported } = options;
+    if (!canReason || !effort || !supported.has(effort)) return;
+    if (this.name === 'deepseek') {
+      // DeepSeek 2026 (V4): uses "thinking" parameter object
+      params.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' };
+      // Use reasoning_effort string directly (low, medium, high, max)
+      if (effort !== 'none') params.reasoning_effort = effort === 'xhigh' ? 'max' : effort;
+    } else if (this.name === 'zai' || this.name === 'moonshot') {
+      // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
+      // effort tiers ("none" = disabled, anything else = enabled).
+      params.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' };
+    } else if (this.name === 'togetherai') {
+      // Qwen 3.5 thinking is on by default; "none" turns it off. Together
+      // reads the flag both top-level and via chat_template_kwargs.
+      if (effort === 'none') {
+        params.enable_thinking = false;
+        params.chat_template_kwargs = { enable_thinking: false };
+      }
+    } else {
+      params.reasoning_effort = effort;
+    }
+  }
+
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     let messages = this.convertMessages(request);
 
@@ -209,12 +264,31 @@ export class OpenAIProvider implements Provider {
         messages = stripImageParts(messages);
         providerLog.debug(
           { provider: this.name, model: request.model },
-          'Model does not support images — attachments replaced with a text note',
+          'This model may not support image input — attachments replaced with a text note',
         );
       }
     }
 
-    const tools = request.tools?.map((t) => ({
+    const canonicalTools = canonicalizeProviderTools(request.tools);
+    // OpenAI-compatible custom gateways can expose the same cached-token usage
+    // fields as OpenAI/OpenRouter. Track their Kory lane outcomes, but keep
+    // provider-specific request controls below gated to the providers that
+    // explicitly support them so arbitrary compatible endpoints never receive
+    // prompt_cache_key, prompt_cache_options, or session_id by accident.
+    const tracksPromptCache =
+      this.name === 'openai' ||
+      this.name === 'openrouter' ||
+      (this.config.custom === true && (this.config.kind ?? 'openai') === 'openai');
+    const cacheRoutingContext = {
+      provider: String(this.name),
+      custom: this.config.custom === true,
+      reasoningScopeOverride: request.cacheReasoningScopeOverride,
+    };
+    const cacheLane = tracksPromptCache
+      ? derivePromptCacheLane(request, canonicalTools, cacheRoutingContext)
+      : undefined;
+    let cacheDiagnostic: ReturnType<typeof observePromptCacheDispatch> | undefined;
+    const tools = canonicalTools.map((t) => ({
       type: 'function' as const,
       function: {
         name: t.name,
@@ -243,20 +317,34 @@ export class OpenAIProvider implements Provider {
     }
     // 'max' is offered per-model (e.g. Copilot's claude-opus-4.6) — the UI only
     // shows levels the model's own metadata/config declares, so passing it
-    // through is safe; without it the selection was silently dropped.
-    const supportedEfforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+    // through is safe; without it the selection was silently dropped. The same
+    // applies to any tier a provider reports that this list has never seen:
+    // accept the model's own live-reported levels verbatim so new provider
+    // tiers keep working instead of being silently dropped.
+    const supportedEfforts = new Set([
+      'none',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+      ...(liveDef?.reasoningLevels ?? []).map((level) => level.toLowerCase()),
+    ]);
 
     const params: OpenAI.ChatCompletionCreateParamsStreaming & {
       service_tier?: string;
       thinking?: { type: string };
       reasoning_effort?: string;
+      include_reasoning?: boolean;
       enable_thinking?: boolean;
       chat_template_kwargs?: { enable_thinking?: boolean };
       prompt_cache_key?: string;
       prompt_cache_options?: { mode: 'implicit'; ttl: '30m' };
+      session_id?: string;
     } = {
       model: modelDef?.apiModelId ?? request.model,
-      messages,
+      messages: this.name === 'openrouter' ? markOpenRouterTailCacheBreakpoint(messages) : messages,
       stream: true,
       stream_options: { include_usage: true },
       ...(request.maxTokens && { max_completion_tokens: request.maxTokens }),
@@ -264,15 +352,65 @@ export class OpenAIProvider implements Provider {
       ...(tools?.length && { tools }),
     };
 
+    if (tracksPromptCache) {
+      cacheDiagnostic = observePromptCacheDispatch(request, canonicalTools, cacheRoutingContext);
+      if (cacheDiagnostic) {
+        providerLog.debug(
+          {
+            provider: this.name,
+            model: request.model,
+            cacheState: cacheDiagnostic.state,
+            cacheLane: cacheDiagnostic.laneKey,
+            cacheLaneKind: cacheDiagnostic.laneKind,
+            cacheBreakReasons: cacheDiagnostic.reasons,
+          },
+          'Prompt cache lane dispatch',
+        );
+      }
+    }
+
     if (this.name === 'openai') {
-      params.prompt_cache_key = deriveProviderPromptCacheKey(request, request.tools);
+      if (tools.length > 0 && request.allowedToolNames) {
+        const declaredNames = new Set(canonicalTools.map((tool) => tool.name));
+        const allowedNames = [...new Set(request.allowedToolNames)]
+          .filter((name) => declaredNames.has(name))
+          .sort();
+        // Current Chat Completions supports a dynamic allowed_tools choice.
+        // Keep the full declaration byte-stable for caching and vary only this
+        // small eligibility control; the host still enforces the same set.
+        (params as unknown as Record<string, unknown>).tool_choice =
+          allowedNames.length > 0
+            ? {
+                type: 'allowed_tools',
+                allowed_tools: {
+                  mode: 'auto',
+                  tools: allowedNames.map((name) => ({
+                    type: 'function',
+                    function: { name },
+                  })),
+                },
+              }
+            : 'none';
+      }
+      params.prompt_cache_key = deriveProviderPromptCacheKey(
+        request,
+        canonicalTools,
+        cacheRoutingContext,
+      );
       const apiModel = modelDef?.apiModelId ?? request.model;
       if (/^gpt-5\.6(?:-|$)/i.test(apiModel)) {
-        // Keep the provider's rolling implicit breakpoint and add Kory's
-        // explicit immutable-system boundary. This spends at most two of the
-        // four write slots and caches both cross-task policy and conversation.
         params.prompt_cache_options = { mode: 'implicit', ttl: '30m' };
       }
+    }
+
+    if (this.name === 'openrouter') {
+      // OpenRouter uses session_id as the sticky-routing key. Use Kory's
+      // workspace-scoped provider cache route so sibling tabs with an
+      // identical stable prefix land back on the upstream that owns the warm
+      // cache, while different workspaces/models/reasoning lanes stay isolated.
+      params.session_id =
+        deriveProviderPromptCacheKey(request, canonicalTools, cacheRoutingContext) ??
+        (request.sessionId ? `kory-${request.sessionId}` : undefined);
     }
 
     // This is deliberately API Priority, not Codex Fast mode. Fast is a
@@ -283,34 +421,16 @@ export class OpenAIProvider implements Provider {
     }
 
     // Only send reasoning_effort if model + selected level supports it.
-    if (canReason && reasoningEffort && supportedEfforts.includes(reasoningEffort)) {
-      if (this.name === 'deepseek') {
-        // DeepSeek 2026 (V4): uses "thinking" parameter object
-        params.thinking = {
-          type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
-        };
-        // Use reasoning_effort string directly (low, medium, high, max)
-        if (reasoningEffort !== 'none') {
-          (params as unknown as Record<string, unknown>).reasoning_effort =
-            reasoningEffort === 'xhigh' ? 'max' : reasoningEffort;
-        }
-      } else if (this.name === 'zai' || this.name === 'moonshot') {
-        // GLM / Kimi K2.5: only a round-level thinking toggle exists — no
-        // effort tiers ("none" = disabled, anything else = enabled).
-        params.thinking = {
-          type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
-        };
-      } else if (this.name === 'togetherai') {
-        // Qwen 3.5 thinking is on by default; "none" turns it off. Together
-        // reads the flag both top-level and via chat_template_kwargs.
-        if (reasoningEffort === 'none') {
-          params.enable_thinking = false;
-          params.chat_template_kwargs = { enable_thinking: false };
-        }
-      } else {
-        (params as unknown as Record<string, unknown>).reasoning_effort = reasoningEffort;
-      }
-    }
+    this.applyReasoningControls(
+      params as unknown as Record<string, unknown>,
+      {
+        canReason,
+        effort: reasoningEffort,
+        supported: supportedEfforts,
+        modelDef: liveDef,
+        requestModel: modelDef?.apiModelId ?? request.model,
+      },
+    );
 
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
@@ -357,28 +477,57 @@ export class OpenAIProvider implements Provider {
       }
 
       const toolCallBuffers = new Map<number, { id: string; name: string; args: string }>();
+      let observedPromptTokens: number | undefined;
+      let observedCacheReadTokens = 0;
+      let observedCacheWriteTokens = 0;
+
+      let sawFinishReason = false;
 
       for await (const chunk of stream) {
         const choice = chunk.choices?.[0];
-        if (!choice) {
-          if (chunk.usage) {
-            const rawUsage = chunk.usage as unknown as {
-              prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
-              input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
-            };
-            const details = rawUsage.prompt_tokens_details ?? rawUsage.input_tokens_details;
-            yield {
-              type: 'usage_update',
-              // prompt_tokens already includes cached tokens — omit tokensCache
-              // so context occupancy isn't double counted downstream.
-              tokensIn: chunk.usage.prompt_tokens,
-              tokensOut: chunk.usage.completion_tokens,
-              tokensCacheRead: details?.cached_tokens,
-              tokensCacheWrite: details?.cache_write_tokens,
-            };
-          }
-          continue;
+
+        // Usage is NOT always on a trailing usage-only chunk. Some providers
+        // (Cline among them) attach `usage` to the same chunk that carries
+        // `finish_reason`, so gating this on an empty `choices` array silently
+        // drops the turn's token counts and breaks the context meter and
+        // billing. Read usage whenever it is present, independently of choices.
+        if (chunk.usage) {
+          const rawUsage = chunk.usage as unknown as {
+            prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+            input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
+            completion_tokens_details?: { reasoning_tokens?: number };
+          };
+          const details = rawUsage.prompt_tokens_details ?? rawUsage.input_tokens_details;
+          observedPromptTokens = chunk.usage.prompt_tokens;
+          observedCacheReadTokens = details?.cached_tokens ?? 0;
+          observedCacheWriteTokens = details?.cache_write_tokens ?? 0;
+          const cacheOutcome = cacheDiagnostic
+            ? promptCacheDiagnostics.recordProviderOutcome(cacheDiagnostic, {
+                inputTokens: chunk.usage.prompt_tokens,
+                cacheReadTokens: observedCacheReadTokens,
+                cacheWriteTokens: observedCacheWriteTokens,
+              })
+            : undefined;
+          yield {
+            type: 'usage_update',
+            // prompt_tokens already includes cached tokens — omit tokensCache
+            // so context occupancy isn't double counted downstream.
+            tokensIn: chunk.usage.prompt_tokens,
+            tokensOut: chunk.usage.completion_tokens,
+            tokensCacheRead: details?.cached_tokens,
+            tokensCacheWrite: details?.cache_write_tokens,
+            // Providers that bill/stream reasoning separately report it here
+            // (Cline's completion_tokens_details.reasoning_tokens).
+            ...(rawUsage.completion_tokens_details?.reasoning_tokens !== undefined && {
+              thinkingTokens: rawUsage.completion_tokens_details.reasoning_tokens,
+            }),
+            cacheExpectedWarm: cacheOutcome?.expectedWarm,
+            cacheUnexpectedMiss: cacheOutcome?.unexpectedMiss,
+            cacheLaneKind: cacheDiagnostic?.laneKind,
+          };
         }
+
+        if (!choice) continue;
 
         const delta = choice.delta;
 
@@ -387,9 +536,14 @@ export class OpenAIProvider implements Provider {
           yield { type: 'content_delta', content: delta.content };
         }
 
-        // Reasoning content (O-series models)
-        const reasoningContent = (delta as { reasoning_content?: string } | undefined)
-          ?.reasoning_content;
+        // Reasoning content. OpenAI-family providers stream it as
+        // `reasoning_content`; OpenAI-compatible gateways that follow the
+        // OpenRouter shape use plain `reasoning` (Cline documents `reasoning`
+        // plus `reasoning_details` for encrypted reasoning blocks).
+        const reasoningContent =
+          (delta as { reasoning_content?: string; reasoning?: string } | undefined)
+            ?.reasoning_content ??
+          (delta as { reasoning?: string } | undefined)?.reasoning;
         if (reasoningContent) {
           yield { type: 'thinking_delta', thinking: reasoningContent };
         }
@@ -426,8 +580,10 @@ export class OpenAIProvider implements Provider {
           }
         }
 
-        // Completion
-        if (choice.finish_reason) {
+        // Completion. A provider may repeat `finish_reason` on more than one
+        // trailing chunk; emitting more than one completion ends the turn twice.
+        if (choice.finish_reason && !sawFinishReason) {
+          sawFinishReason = true;
           yield* this.flushToolCalls(toolCallBuffers);
           yield {
             type: 'complete',
@@ -435,31 +591,91 @@ export class OpenAIProvider implements Provider {
           };
         }
       }
+
+      const apiModel = modelDef?.apiModelId ?? request.model;
+      if (
+        this.name === 'openai' &&
+        /^gpt-5\.6(?:-|$)/i.test(apiModel) &&
+        request.promptCache &&
+        cacheLane &&
+        cacheDiagnostic
+      ) {
+        const pricing = resolvePricing(this.name, request.model);
+        const stableTokens =
+          request.promptCache.estimatedStableTokens +
+          Math.ceil(Buffer.byteLength(JSON.stringify(canonicalTools), 'utf8') / 4);
+        const refreshInputTokens = Math.max(stableTokens, observedPromptTokens ?? stableTokens);
+        const refreshCachedTokens = Math.min(
+          refreshInputTokens,
+          Math.max(stableTokens, observedCacheReadTokens + observedCacheWriteTokens),
+        );
+        const maintenanceParams = {
+          model: params.model,
+          // Keep the complete successful lane hot. Replaying only the system
+          // prefix leaves long conversation history cold after an idle gap.
+          messages: params.messages,
+          stream: false,
+          max_completion_tokens: 1,
+          ...(tools.length > 0 ? { tools } : {}),
+          ...((params as unknown as Record<string, unknown>).tool_choice !== undefined
+            ? { tool_choice: (params as unknown as Record<string, unknown>).tool_choice }
+            : {}),
+          prompt_cache_key: params.prompt_cache_key,
+          prompt_cache_options: params.prompt_cache_options,
+        } as unknown as OpenAI.ChatCompletionCreateParamsNonStreaming;
+        promptCacheMaintenance.observe({
+          provider: this.name,
+          sessionId: request.sessionId,
+          routingKey: cacheLane.routingKey,
+          slotKey: cacheLane.slotKey,
+          stableTokens,
+          refreshInputTokens,
+          refreshCachedTokens,
+          ttlMs: 30 * 60_000,
+          diagnostic: cacheDiagnostic,
+          mode: request.promptCacheKeepaliveMode,
+          pricing: pricing
+            ? {
+                freshInputPerMillion: pricing.inPerM,
+                cacheReadPerMillion: pricing.cacheReadPerM,
+                cacheWritePerMillion: pricing.cacheWritePerM,
+              }
+            : null,
+          refresh: async () => {
+            await withRetry(
+              () =>
+                this.client.chat.completions.create(maintenanceParams, {
+                  signal: withTimeoutSignal(undefined, 20_000),
+                }),
+              { providerName: this.name, modelName: request.model },
+            );
+          },
+        });
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'TimeoutError') {
-        const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+        const failure = providerStreamFailure(this.name, 'sdk', err, {
+          message: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
+        });
         providerLog.error(
-          { ...diagnostic, model: request.model },
+          { ...failure.diagnostic, model: request.model },
           'OpenAI provider stream timed out',
         );
-        yield {
-          type: 'error',
-          error: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
-        };
+        yield { ...failure.event, errorTransient: true };
         return;
       }
       if (err instanceof Error && (err.name === 'AbortError' || err.name === 'AbortSignal')) return;
 
-      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+      const failure = providerStreamFailure(this.name, 'sdk', err);
       providerLog.error(
         {
-          ...diagnostic,
+          ...failure.diagnostic,
           model: request.model,
           rawMessage: err instanceof Error ? err.message.slice(0, 800) : String(err).slice(0, 800),
         },
         'OpenAI provider stream error',
       );
-      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
+      yield failure.event;
     }
   }
 
@@ -604,6 +820,53 @@ export class OpenAIProvider implements Provider {
   }
 }
 
+/**
+ * OpenRouter forwards cache_control breakpoints to providers that support
+ * explicit prompt caching. Put the breakpoint on the latest textual message
+ * so the reusable conversation tail can advance every turn while the opening
+ * system/tool prefix remains byte-stable.
+ */
+function markOpenRouterTailCacheBreakpoint(
+  messages: OpenAI.ChatCompletionMessageParam[],
+): OpenAI.ChatCompletionMessageParam[] {
+  const next = [...messages];
+  for (let index = next.length - 1; index >= 0; index--) {
+    const message = next[index] as unknown as Record<string, unknown>;
+    const content = message.content;
+    if (typeof content === 'string' && content.length > 0) {
+      next[index] = {
+        ...message,
+        content: [
+          {
+            type: 'text',
+            text: content,
+            cache_control: { type: 'ephemeral' },
+          },
+        ],
+      } as unknown as OpenAI.ChatCompletionMessageParam;
+      return next;
+    }
+    if (!Array.isArray(content)) continue;
+    for (let partIndex = content.length - 1; partIndex >= 0; partIndex--) {
+      const part = content[partIndex];
+      if (!part || typeof part !== 'object' || (part as Record<string, unknown>).type !== 'text') {
+        continue;
+      }
+      const parts = [...content];
+      parts[partIndex] = {
+        ...(part as Record<string, unknown>),
+        cache_control: { type: 'ephemeral' },
+      };
+      next[index] = {
+        ...message,
+        content: parts,
+      } as unknown as OpenAI.ChatCompletionMessageParam;
+      return next;
+    }
+  }
+  return next;
+}
+
 // ─── Vision fallback helpers ─────────────────────────────────────────────────
 
 const IMAGE_OMITTED_NOTE =
@@ -657,13 +920,14 @@ export function isParameterRejectionError(err: unknown): boolean {
   const status = rejectionStatus(err);
   if (status === 400 || status === 422) return true;
   const msg = err instanceof Error ? err.message : String(err);
-  return /reasoning[_ ]?effort|unsupported[_ ](?:parameter|value|field)|unexpected[_ ](?:keyword|argument)|extra[_ ](?:inputs|fields)|unknown[_ ](?:parameter|field|argument)|unrecognized[_ ](?:parameter|argument|keyword)|not (?:a )?supported (?:parameter|argument|for this model)/i.test(
+  return /reasoning[_ ]?effort|include[_ ]reasoning|unsupported[_ ](?:parameter|value|field)|unexpected[_ ](?:keyword|argument)|extra[_ ](?:inputs|fields)|unknown[_ ](?:parameter|field|argument)|unrecognized[_ ](?:parameter|argument|keyword)|not (?:a )?supported (?:parameter|argument|for this model)/i.test(
     msg,
   );
 }
 
 const REASONING_PARAM_KEYS = [
   'reasoning_effort',
+  'include_reasoning',
   'thinking',
   'enable_thinking',
   'chat_template_kwargs',
@@ -743,6 +1007,274 @@ export class OpenRouterProvider extends OpenAIProvider {
 export class XAIProvider extends OpenAIProvider {
   constructor(config: ProviderConfig) {
     super(config, 'xai', 'https://api.x.ai/v1');
+  }
+}
+
+// UnoRouter — open-source OpenAI-compatible gateway (one key, 200+ models).
+// Standard Bearer auth, no app-attribution headers. The /v1/models catalog
+// carries context_length / max_output_tokens, ingested by the base class.
+export class UnoRouterProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'unorouter', 'https://api.unorouter.com/v1');
+  }
+}
+
+// Experiential Labs — open-source AI gateway (one key, hosted/BYOK/local models).
+// Standard Bearer auth, no app-attribution headers.
+//
+// Discovery is two-step because the authenticated OpenAI-shaped
+// `GET /v1/models` returns bare slugs only ("the models this key can call").
+// The rich capability catalog lives at the public `GET /api/models`
+// (display name, context window, modalities, per-deployment reasoning tiers
+// and nano-USD pricing), which the provider publishes for exactly this use.
+// Slugs from /v1/models gate availability; /api/models supplies the numbers.
+const EXPERIENTIAL_CATALOG_URL = 'https://api.experientiallabs.ai/api/models';
+const EXPERIENTIAL_CATALOG_PAGE_LIMIT = 1000;
+const EXPERIENTIAL_CATALOG_TIMEOUT_MS = 15_000;
+
+/** Canonical reasoning-effort ladder used to order provider-reported tiers. */
+const EXPERIENTIAL_EFFORT_LADDER = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'ultra',
+  'max',
+];
+
+interface ExperientialCatalogDeployment {
+  billing_source?: unknown;
+  pricing_source?: unknown;
+  input_nano_usd_per_million?: unknown;
+  cached_input_nano_usd_per_million?: unknown;
+  output_nano_usd_per_million?: unknown;
+  capabilities?: {
+    supports_reasoning?: unknown;
+    supported_reasoning_efforts?: unknown;
+    maximum_output_tokens?: unknown;
+  };
+}
+
+interface ExperientialCatalogRow {
+  model?: {
+    slug?: unknown;
+    display_name?: unknown;
+    context_window?: unknown;
+    max_output_tokens?: unknown;
+    input_modalities?: unknown;
+    supported_params?: { reasoning?: unknown };
+  };
+  providers?: ExperientialCatalogDeployment[];
+}
+
+/** nano-USD per million tokens → USD per million tokens. */
+function experientialNanoToUsdPerMillion(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined;
+  return value / 1_000_000_000;
+}
+
+export class ExperientialLabsProvider extends OpenAIProvider {
+  constructor(config: ProviderConfig) {
+    super(config, 'experientiallabs', 'https://api.experientiallabs.ai/v1');
+  }
+
+  override isAvailable(): boolean {
+    // Endpoint-authenticated like the other gateways. Discovery is owned
+    // below; the base implementation would kick its own bare-slug refresh.
+    return !this.config.disabled && !!(this.config.apiKey || this.config.authToken);
+  }
+
+  private explabsModels: ModelDef[] | null = null;
+  private explabsFetchedAt = 0;
+  private explabsRefresh: Promise<void> | null = null;
+
+  override refreshModels(forceRefresh = false): Promise<void> {
+    if (!forceRefresh) return Promise.resolve();
+    this.explabsModels = null;
+    this.explabsFetchedAt = 0;
+    return this.refreshExplabsCatalog();
+  }
+
+  override listModels(): ModelDef[] {
+    if (!this.isAvailable()) return [];
+    if (this.explabsModels && isModelListCacheFresh(this.explabsFetchedAt))
+      return this.explabsModels;
+    void this.refreshExplabsCatalog();
+    return this.explabsModels ?? [];
+  }
+
+  private refreshExplabsCatalog(): Promise<void> {
+    if (this.explabsRefresh) return this.explabsRefresh;
+    this.explabsRefresh = (async () => {
+      try {
+        const token = this.config.apiKey || this.config.authToken;
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Koryphaios/1.0',
+        };
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const timed = { signal: AbortSignal.timeout(EXPERIENTIAL_CATALOG_TIMEOUT_MS) };
+        // 1. Slugs this key can actually call (authenticated, OpenAI-shaped).
+        const slugsRes = await fetch(`${this.baseUrl ?? this.config.baseUrl}/models`, {
+          headers,
+          ...timed,
+        });
+        if (!slugsRes.ok) throw new Error(`Experiential Labs models ${slugsRes.status}`);
+        const slugsJson = (await slugsRes.json()) as { data?: unknown };
+        const rawById = new Map<string, unknown>();
+        if (Array.isArray(slugsJson.data)) {
+          for (const entry of slugsJson.data) {
+            if (!entry || typeof entry !== 'object') continue;
+            const id = (entry as Record<string, unknown>).id;
+            if (typeof id === 'string' && id.trim() && !rawById.has(id.trim())) {
+              rawById.set(id.trim(), entry);
+            }
+          }
+        }
+        // 2. Rich public catalog (the key also adds org custom/local rows).
+        // Catalog reads are public and keyless; a credential the gateway
+        // rejects must not take the capability metadata down with it, so a
+        // 401/403 falls back to the keyless public rows.
+        const rows = new Map<string, ExperientialCatalogRow>();
+        const publicHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Koryphaios/1.0',
+        };
+        let offset = 0;
+        for (;;) {
+          let catRes = await fetch(
+            `${EXPERIENTIAL_CATALOG_URL}?limit=${EXPERIENTIAL_CATALOG_PAGE_LIMIT}&offset=${offset}`,
+            { headers, ...timed },
+          );
+          if ((catRes.status === 401 || catRes.status === 403) && token) {
+            catRes = await fetch(
+              `${EXPERIENTIAL_CATALOG_URL}?limit=${EXPERIENTIAL_CATALOG_PAGE_LIMIT}&offset=${offset}`,
+              { headers: publicHeaders, ...timed },
+            );
+          }
+          if (!catRes.ok) throw new Error(`Experiential Labs catalog ${catRes.status}`);
+          const catJson = (await catRes.json()) as {
+            models?: ExperientialCatalogRow[];
+            total?: unknown;
+          };
+          const page = Array.isArray(catJson.models) ? catJson.models : [];
+          for (const row of page) {
+            const slug = row?.model?.slug;
+            if (typeof slug === 'string' && slug && !rows.has(slug)) rows.set(slug, row);
+          }
+          offset += page.length;
+          if (page.length < EXPERIENTIAL_CATALOG_PAGE_LIMIT) break;
+          if (typeof catJson.total === 'number' && offset >= catJson.total) break;
+        }
+        const defs: ModelDef[] = [];
+        for (const slug of rawById.keys()) {
+          if (!isLikelyChatModelId(slug, this.name)) continue;
+          defs.push(this.explabsModelDef(slug, rawById.get(slug), rows.get(slug)));
+        }
+        if (defs.length > 0) {
+          this.explabsModels = defs;
+          providerLog.debug(
+            { provider: this.name, count: defs.length },
+            'Model list refreshed from Experiential Labs catalog',
+          );
+        }
+        this.explabsFetchedAt = Date.now();
+      } catch (err) {
+        // Cache failures for the normal discovery TTL too. Otherwise every
+        // status render triggers another failing catalog request.
+        this.explabsFetchedAt = Date.now();
+        providerLog.debug(
+          { provider: this.name, err: err instanceof Error ? err.message : String(err) },
+          'Experiential Labs catalog refresh failed; leaving catalog empty rather than exposing a fallback list',
+        );
+      } finally {
+        this.explabsRefresh = null;
+      }
+    })();
+    return this.explabsRefresh;
+  }
+
+  private explabsModelDef(
+    slug: string,
+    raw: unknown,
+    row: ExperientialCatalogRow | undefined,
+  ): ModelDef {
+    // Standard OpenAI-style fields first (harmless when the gateway sends
+    // bare slugs), then the provider's own rich catalog row.
+    let def = this.enrichDiscoveredModel(
+      raw ?? { id: slug },
+      modelFromRemoteId(slug, this.name, []),
+    );
+    if (!row?.model) return def;
+    const m = row.model;
+    const ctx =
+      typeof m.context_window === 'number' && m.context_window > 0 ? m.context_window : undefined;
+    const deps = Array.isArray(row.providers) ? row.providers : [];
+    const depMaxOut = (d: ExperientialCatalogDeployment): number | undefined => {
+      const v = d?.capabilities?.maximum_output_tokens;
+      return typeof v === 'number' && v > 0 ? v : undefined;
+    };
+    const maxOut =
+      typeof m.max_output_tokens === 'number' && m.max_output_tokens > 0
+        ? m.max_output_tokens
+        : deps.map(depMaxOut).find((v) => v !== undefined);
+    const modalities = Array.isArray(m.input_modalities)
+      ? m.input_modalities.map((modality) => String(modality).toLowerCase())
+      : [];
+    const vision = modalities.includes('image');
+    const canReason =
+      m.supported_params?.reasoning === true ||
+      deps.some((d) => d?.capabilities?.supports_reasoning === true);
+    const efforts = new Set<string>();
+    for (const d of deps) {
+      const list = d?.capabilities?.supported_reasoning_efforts;
+      if (!Array.isArray(list)) continue;
+      for (const effort of list) {
+        if (typeof effort === 'string' && effort.trim()) efforts.add(effort.trim().toLowerCase());
+      }
+    }
+    // Accept every effort tier the provider reports, even ones this codebase
+    // has never seen. Known tiers sort along the canonical ladder; anything
+    // new appends in provider-reported order so the picker stays adaptable.
+    const known = [...efforts].filter((effort) => EXPERIENTIAL_EFFORT_LADDER.includes(effort));
+    const novel = [...efforts].filter((effort) => !EXPERIENTIAL_EFFORT_LADDER.includes(effort));
+    const reasoningLevels = [
+      ...known.sort(
+        (a, b) => EXPERIENTIAL_EFFORT_LADDER.indexOf(a) - EXPERIENTIAL_EFFORT_LADDER.indexOf(b),
+      ),
+      ...novel.sort(),
+    ];
+    // Pricing is display-only metadata. Estimated rows are never billed, so
+    // only real (non-estimate) deployments feed cost attribution. Prefer the
+    // platform-funded lane, which is priced from the public catalog.
+    const priced = deps.filter(
+      (d) =>
+        d?.pricing_source !== 'estimate' &&
+        (d?.input_nano_usd_per_million !== undefined ||
+          d?.output_nano_usd_per_million !== undefined),
+    );
+    const pick = priced.find((d) => d?.billing_source === 'host_managed') ?? priced[0];
+    const inPerM = experientialNanoToUsdPerMillion(pick?.input_nano_usd_per_million);
+    const outPerM = experientialNanoToUsdPerMillion(pick?.output_nano_usd_per_million);
+    const cachePerM = experientialNanoToUsdPerMillion(pick?.cached_input_nano_usd_per_million);
+    const name =
+      typeof m.display_name === 'string' && m.display_name.trim()
+        ? m.display_name.trim()
+        : undefined;
+    return {
+      ...def,
+      ...(name ? { name } : {}),
+      ...(ctx !== undefined ? { contextWindow: ctx, contextVerified: true } : {}),
+      ...(maxOut !== undefined ? { maxOutputTokens: maxOut } : {}),
+      ...(canReason ? { canReason: true } : {}),
+      ...(reasoningLevels.length > 0 ? { reasoningLevels } : {}),
+      ...(vision ? { vision, supportsAttachments: true } : {}),
+      ...(inPerM !== undefined ? { costPerMInputTokens: inPerM } : {}),
+      ...(outPerM !== undefined ? { costPerMOutputTokens: outPerM } : {}),
+      ...(cachePerM !== undefined ? { costPerMInputCached: cachePerM } : {}),
+    };
   }
 }
 

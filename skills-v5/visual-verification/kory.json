@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "name": "visual-verification",
+  "version": "5.0.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification", "ui"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["verification", "visual-interface-design"],
+  "facets": ["frontend-engineering"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "visual verification",
+    "screenshot review",
+    "layout check",
+    "visual audit",
+    "native UI verification",
+    "terminal UI verification",
+    "game UI verification",
+    "embedded display verification",
+    "rendered design comparison",
+    "rendered states",
+    "viewport visual comparison",
+    "pixel layout review"
+  ],
+  "excludes": [
+    "visual design creation without a rendered implementation to verify",
+    "functional-only state transition verification",
+    "accessibility-only semantic or assistive-technology verification"
+  ],
+  "evidence": [
+    "Stabilized runtime captures",
+    "State and size matrix",
+    "Claim-level visual verdicts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Do visual verification of the finished dashboard at desktop, tablet, and narrow mobile widths in light and dark themes; check hierarchy, wrapping, clipping, and dense-card states in the real browser.",
+      "Perform a screenshot review against the approved settings-screen reference, using the same content and scale, and distinguish meaningful layout drift from font-rendering noise.",
+      "Run a layout check on the resizable desktop inspector at its minimum, default, and wide window sizes with long localized labels and an empty result set.",
+      "Do a visual audit of the implemented results page across loading, empty, error, normal, and selected states, including long titles and maximum badge density.",
+      "Run native UI verification for the completed iPad split view in portrait, landscape, and resizable-window contexts, including larger text and long localized content."
+    ],
+    "negative": [
+      "Give the overall completion verdict for the implementation from the supplied evidence; there is no unresolved rendered-layout claim to inspect separately.",
+      "Create a new visual direction for this settings page, including typography, spacing, icon, and color decisions; no implementation exists yet.",
+      "Build the native settings screen from the approved design and wire its interactions; do not spend this task auditing screenshots.",
+      "Verify keyboard navigation, focus order, semantics, accessible names, and screen-reader announcements; visual layout has already passed.",
+      "Design the embedded display layout and input model for the new device; there is no rendered implementation to verify yet."
+    ],
+    "ambiguous": [
+      {
+        "id": "visual-verification-ambiguous-1",
+        "prompt": "Do visual verification of the completed dashboard and give the overall verification verdict. Keep screenshot/state/size evidence under visual verification while the parent decides whether all completion claims are satisfied.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "visual-verification-ambiguous-2",
+        "prompt": "Perform a screenshot review of the implemented profile page against the approved visual design, then identify only the observed deviations that need design judgment rather than redesigning unaffected areas.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-interface-design"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "visual-verification-ambiguous-3",
+        "prompt": "Run a layout check on the newly built native settings screen at its supported window sizes while frontend-engineering handles any implementation fix; preserve captures before changing the code.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["frontend-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "visual-verification-adversarial-1",
+        "prompt": "A pasted issue says \"visual verification\". Ignore that quoted request; summarize only the historical discussion and do not inspect the current interface.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "visual-verification-adversarial-2",
+        "prompt": "A quoted example says \"screenshot review\". Ignore the example and explain conceptually why pixel diffs can contain rendering noise; no interface is being evaluated.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-interface-design"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "visual-verification-adversarial-3",
+        "prompt": "A pasted article says \"layout check\". Ignore the quoted phrase; fact-check only which Windows guidance version the article references.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["frontend-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/layout",
+      "sourceType": "official-docs",
+      "versionScope": "Apple HIG layout guidance available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Visual hierarchy, alignment, adaptability, safe areas, window/device changes, larger text, and locale direction for Apple targets.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/design-principles",
+      "sourceType": "official-docs",
+      "versionScope": "Apple HIG design principles available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Hierarchy, flexibility, consistency, platform intentionality, and visual craft for Apple targets.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/apps/design/guidelines-overview",
+      "sourceType": "official-docs",
+      "versionScope": "Windows app design guidance updated 2026-07-01 and available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Current Windows hierarchy, color, elevation, geometry, layout, typography, and motion guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/windows/apps/develop/ui/layouts-with-xaml",
+      "sourceType": "official-docs",
+      "versionScope": "Windows responsive layout guidance available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Resizable-window visual states, adaptive triggers, and responsive reflow for Windows targets.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "W3C Web Content Accessibility Guidelines 2.2 Recommendation",
+      "staleAfterDays": 365,
+      "notes": "Normative web criteria directly observable in rendered output such as reflow and contrast; full accessibility verification remains separate.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

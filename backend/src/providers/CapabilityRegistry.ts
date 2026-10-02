@@ -6,6 +6,9 @@ import type { ProviderRegistry } from './registry';
  * Capability-based model selection. Replaces the blind
  * getFirstAvailableRouting() "pick the first provider's first model" approach
  * with a scored selection that considers:
+ *   - Trust first: verified credentials and user-owned custom endpoints
+ *     outrank merely-detected auto-detection material (env-detected keys, CLI
+ *     login markers). Auto-detection is a fallback, never the primary pick.
  *   - Model tier (flagship > fast > cheap > reasoning)
  *   - Capability requirements (vision, function calling, reasoning)
  *   - Context window size
@@ -52,10 +55,12 @@ export class CapabilityRegistry {
 
   /** Find the best available model matching the given requirements.
    *  Returns undefined if no available model meets the requirements. */
-  findBestModel(requirements: CapabilityRequirements = {}): {
-    model: string;
-    provider: ProviderName;
-  } | undefined {
+  findBestModel(requirements: CapabilityRequirements = {}):
+    | {
+        model: string;
+        provider: ProviderName;
+      }
+    | undefined {
     const candidates = this.collectCandidates();
     if (candidates.length === 0) return undefined;
 
@@ -67,11 +72,16 @@ export class CapabilityRegistry {
         score: this.scoreModel(def, requirements),
       }))
       .filter((c) => c.score >= 0) // Negative score = doesn't meet requirements
-      .sort((a, b) => b.score - a.score);
+      // Trusted providers (verified or user-owned) first; auto-detected
+      // material only wins when nothing trusted qualifies. Score decides
+      // within each band.
+      .sort(
+        (a, b) =>
+          Number(this.providers.isTrustedForRouting(b.provider)) -
+            Number(this.providers.isTrustedForRouting(a.provider)) || b.score - a.score,
+      );
 
-    return scored[0]
-      ? { model: scored[0].model, provider: scored[0].provider }
-      : undefined;
+    return scored[0] ? { model: scored[0].model, provider: scored[0].provider } : undefined;
   }
 
   /** Collect all non-deprecated, non-legacy models from available providers
@@ -82,9 +92,7 @@ export class CapabilityRegistry {
       // Skip providers with open circuit breakers
       // (isCircuitOpen is private — we check via resolveProvider instead)
       if (provider.name === 'vertexai') continue;
-      const models = provider.listModels().filter(
-        (m) => !isLegacyModel(m) && !m.deprecated,
-      );
+      const models = provider.listModels().filter((m) => !isLegacyModel(m) && !m.deprecated);
       candidates.push(...models);
     }
     return candidates;

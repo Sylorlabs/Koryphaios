@@ -1,0 +1,82 @@
+{
+  "id": "frontend-engineering-full-task-confirmed-native",
+  "prompt": "Improve an existing native desktop operations interface used during long-running jobs. Preserve its platform and product conventions while clarifying navigation, state ownership, actions, progress, partial results, errors, cancellation, recovery, destructive confirmation, and return after interruption. The window can resize and operators primarily use keyboard and precision pointer input. Produce a frontend engineering plan and verification contract that delegates native-specific mechanics to the native-interface specialist instead of importing browser patterns.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://frontend-engineering/native-operations-app",
+    "requirements": [
+      "native desktop application fixture",
+      "platform and toolkit identity",
+      "existing navigation, components, and state model",
+      "representative job and failure fixtures",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "native-frontend-platform-boundary",
+      "assertion": "The plan preserves confirmed native desktop/product conventions or justifies specific divergence, and delegates toolkit/platform mechanics to native-interface instead of importing browser-only assumptions."
+    },
+    {
+      "id": "native-frontend-state-ownership",
+      "assertion": "Domain job state and presentation state are separated, with explicit running, loading, partial, stale/error, success, cancellation, failed-cancellation, disabled, and recovery behavior."
+    },
+    {
+      "id": "native-frontend-consequence-and-recovery",
+      "assertion": "Destructive actions, cancellation boundaries, interruption/return, and recovery have explicit preconditions, feedback, and outcome handling instead of assuming optimistic success."
+    },
+    {
+      "id": "native-frontend-input-layout",
+      "assertion": "Verification covers keyboard and precision-pointer operation, focus order/visibility, resizing/overflow, and relevant accessibility states in the native runtime."
+    },
+    {
+      "id": "native-frontend-runtime-proof",
+      "assertion": "Completion requires evidence from the real native surface for representative states; screenshots or browser-rendered substitutes alone cannot establish native behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "frontend-structure-and-boundaries",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "existing product and platform conventions preserved or divergence justified",
+        "domain versus presentation state ownership",
+        "navigation, action, feedback, and recovery contract",
+        "native-specific mechanics delegated rather than replaced with web assumptions",
+        "destructive and interrupted flows explicit"
+      ]
+    },
+    {
+      "id": "native-runtime-state-coverage",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "keyboard and pointer operation",
+        "focus visibility and order",
+        "window resizing and overflow",
+        "loading, partial, error, disabled, success, and cancellation states",
+        "real native runtime verification"
+      ]
+    },
+    {
+      "id": "blind-native-frontend-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "platform and runtime contract",
+    "state ownership and flow model",
+    "failure, cancellation, and recovery matrix",
+    "input, focus, resize, and accessibility checks",
+    "native runtime evidence plan"
+  ],
+  "requiredArtifacts": [
+    "native-frontend-engineering-plan",
+    "runtime-state-verification-contract",
+    "paired-experiment-report"
+  ]
+}

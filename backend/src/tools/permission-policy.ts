@@ -178,6 +178,8 @@ export const READ_ONLY_TOOLS = new Set([
   'get_note_graph_summary',
   'get_note_properties',
   'query_note_base',
+  'list_checklists',
+  'read_checklist',
   'detect-errors',
   'analyze-error',
   'suggest-fixes',
@@ -198,6 +200,7 @@ const RISKY_TOOLS = new Set([
   'delegate_to_jules',
   'commit_and_create_pr',
   'manage_mcp_server',
+  'delete_checklist',
 ]);
 
 export function resolveToolPermissionPolicy(

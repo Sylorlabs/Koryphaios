@@ -8,6 +8,8 @@ import {
   getCorsHeaders,
 } from '../../security';
 import { RateLimiter } from '../rate-limit';
+import { IMPLEMENTED_PROVIDERS } from '@koryphaios/shared';
+import { PROVIDER_CONFIGS } from '../../providers/provider-configs';
 
 describe('validateBashCommand', () => {
   test('allows safe commands', () => {
@@ -71,6 +73,20 @@ describe('validateProviderName', () => {
     expect(validateProviderName('invalid')).toBeNull();
     expect(validateProviderName('')).toBeNull();
     expect(validateProviderName(123)).toBeNull();
+  });
+
+  // Guards against the drift that previously left `commandcode`, `kilocode`
+  // and `cortecs` unrecognised by this validator.
+  test('accepts every provider in the configured and implemented catalogs', () => {
+    const missing = [...PROVIDER_CONFIGS.map((c) => c.name), ...IMPLEMENTED_PROVIDERS].filter(
+      (name) => validateProviderName(name) !== name,
+    );
+
+    expect(missing).toEqual([]);
+  });
+
+  test('accepts the Command Code provider', () => {
+    expect(validateProviderName('commandcode')).toBe('commandcode');
   });
 });
 

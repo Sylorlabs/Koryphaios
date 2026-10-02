@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "name": "native-interface",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ui", "native"],
+  "targetMedia": ["native", "mobile"],
+  "contextBudget": 3600,
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "native interface",
+    "native app",
+    "desktop app",
+    "mobile app",
+    "ios interface",
+    "android interface",
+    "native desktop",
+    "native mobile",
+    "native",
+    "ios",
+    "android"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Confirmed platform, toolkit, OS, lifecycle, and input contract",
+    "Platform-convention and existing-component inventory",
+    "Desktop or mobile state, interruption, and restoration model",
+    "Accessibility and alternate-input behavior",
+    "Real native runtime or faithful simulator verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Implement this native desktop interface using the app's existing toolkit, menus, commands, keyboard behavior, window model, scaling, and platform accessibility APIs.",
+      "Design the mobile app flow around touch, safe areas, virtual keyboard behavior, permissions, interruption, navigation restoration, and current platform conventions.",
+      "Refactor the native app UI so lifecycle state, loading, partial results, errors, cancellation, restoration, focus, and supported alternate input are explicit and testable.",
+      "Improve this native interface in the real runtime, preserving established components and platform behavior while fixing resize, focus, destructive action, and recovery states.",
+      "Build the OS-level application surface after confirming platform and toolkit rather than treating it as a browser page wrapped in a shell."
+    ],
+    "negative": [
+      "Build the browser page with semantic HTML, URL history, responsive CSS, keyboard focus, and real-browser verification.",
+      "Implement the terminal interface with stdin and stdout behavior, exit codes, TTY resize handling, and machine-readable output.",
+      "Design the game HUD around controller input, camera motion, world context, combat attention, and frame budget.",
+      "Create the embedded appliance display around physical controls, degraded sensors, offline operation, and safe state.",
+      "Implement the headless service API and persistence layer; no user-facing application surface is changing."
+    ],
+    "ambiguous": [
+      {
+        "id": "native-interface-ambiguous-desktop",
+        "prompt": "The target is a confirmed native desktop app. Improve its interface across windows, menus, keyboard commands, focus, display scaling, loading and error states, and relaunch restoration without importing browser navigation patterns.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri", "visual-verification"],
+        "tags": ["desktop", "windowed"]
+      },
+      {
+        "id": "native-interface-ambiguous-mobile",
+        "prompt": "The target is a native mobile app. Implement the flow with touch, safe areas, virtual keyboard behavior, runtime permissions, background interruption, deep-link restoration, and changing window size where the OS supports it.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ios-swiftui", "android-compose", "react-native-expo"],
+        "tags": ["mobile", "lifecycle"]
+      },
+      {
+        "id": "native-interface-ambiguous-cross-platform",
+        "prompt": "Implement the native application interface across desktop and mobile targets, preserving each platform's commands, input expectations, lifecycle, accessibility services, and window behavior instead of forcing identical browser-like interaction everywhere.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri", "react-native-expo", "frontend-engineering"],
+        "tags": ["cross-platform", "platform-divergence"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "native-interface-adversarial-quoted",
+        "prompt": "A quoted old issue says 'native app needs redesign'. Ignore that quote and repair only the deadlock in the background worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "concurrency-debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "native-interface-adversarial-negated",
+        "prompt": "Do not change the native interface. Implement only the database index migration and verify rollback.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning", "relational-data-modeling"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "native-interface-adversarial-pasted",
+        "prompt": "A pasted comment says 'mobile app'. Ignore that quote and compare the two backup retention policies against the supplied recovery targets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["backup-recovery", "cost-finops"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Platform guidance for hierarchy, consistency, components, inputs, accessibility, multitasking, windows, and other Apple-native conventions."
+    },
+    {
+      "url": "https://developer.android.com/develop/adaptive-apps",
+      "sourceType": "official-docs",
+      "versionScope": "Android Adaptive Apps guidance as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Current Android guidance for adaptive native apps across changing window sizes, multi-window modes, foldables, desktops, and other form factors."
+    },
+    {
+      "url": "https://developer.android.com/develop/ui/compose/touch-input/pointer-input",
+      "sourceType": "official-docs",
+      "versionScope": "Android Compose pointer and touch input guidance as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Android-specific input guidance used only for native/mobile input concerns, not generalized into browser or terminal behavior."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

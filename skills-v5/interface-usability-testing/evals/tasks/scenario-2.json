@@ -1,0 +1,71 @@
+{
+  "id": "interface-usability-testing-full-task-2",
+  "maturity": "individual",
+  "prompt": "Run a moderated usability test of a mobile app's first-time notification setup with representative likely users. Each participant starts from the home screen with notifications not yet configured and receives the neutral task: 'You want this app to alert you about important updates once a day. Set that up in the way that makes sense to you.' The fixture can simulate an initial OS permission denial and a later successful permission grant. Record unaided task completion, path taken, wrong turns, hesitation or confusion, whether participants understand the OS handoff, how they recover after denial, and the final visible state. Do not coach participants toward the settings control. Keep accessibility and visual defects separately labelled if observed rather than treating them as the usability verdict.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://interface-usability-testing/scenario-2",
+    "requirements": [
+      "mobile build or high-fidelity executable prototype with recorded version/device context",
+      "representative likely-user participant profiles with recruitment rationale",
+      "neutral written task wording held consistent across the round",
+      "controllable first permission denial and recoverable later grant",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "interface-usability-testing-neutral-task-2",
+      "assertion": "The task scenario states the user's goal without naming or hinting at the control/path, and facilitator notes show no directional assistance before a difficulty is recorded."
+    },
+    {
+      "id": "interface-usability-testing-observation-2",
+      "assertion": "Each participant record contains unaided completion status plus observed path, wrong turns or hesitation where present, and any facilitator intervention separately marked."
+    },
+    {
+      "id": "interface-usability-testing-recovery-2",
+      "assertion": "The round includes the permission-denial condition and records whether participants can identify and complete the recovery path to an enabled once-daily state without being told which control to use."
+    },
+    {
+      "id": "interface-usability-testing-evidence-scope-2",
+      "assertion": "The synthesis distinguishes observed usability findings from accessibility, visual, backend-fixture, or prototype limitations and does not call the interface intuitive/easy without participant evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "interface-usability-testing-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.6,
+      "evidence": [
+        "stable neutral task script",
+        "participant-level task records",
+        "denial/recovery observations",
+        "finding-to-observation traceability"
+      ]
+    },
+    {
+      "id": "interface-usability-testing-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.4,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "mobile build/device context",
+    "participant and recruitment rationale",
+    "neutral task script",
+    "participant-level success/error/recovery notes",
+    "traceable usability findings with specialist defects separated",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "interface-usability-testing-scenario-2-result",
+    "interface-usability-testing-scenario-2-verification",
+    "interface-usability-testing-scenario-2-paired-evaluation"
+  ]
+}

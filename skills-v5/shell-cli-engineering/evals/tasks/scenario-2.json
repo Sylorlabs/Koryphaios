@@ -1,0 +1,82 @@
+{
+  "id": "shell-cli-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Fix a POSIX-oriented shell command that streams JSON through several tools but reports success when the first producer fails because only the final pipeline status is observed. Establish supported shell/runtime features, capture meaningful stage failure without swallowing stderr, preserve streaming/bounded memory, clean temporary files, and verify producer failure, malformed JSON, consumer early exit, SIGINT, empty input, and successful output.",
+  "environment": {
+    "kind": "cli",
+    "startingState": "fixture://shell-cli-engineering/json-pipeline-exit-status",
+    "requirements": [
+      "pipeline fixture with controllable producer/parser/consumer failures",
+      "documented supported shell (or explicit Bash-only contract if pipefail is used)",
+      "large streamed input preventing read-all workaround",
+      "exit-code/stderr/temp-file cleanup assertions for each failure stage",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "shell-cli-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "shell-cli-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "shell-cli-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "json-pipeline-exit-status scenario evidence",
+    "shell-cli-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "shell-cli-engineering-individual-scenario-2-result",
+    "shell-cli-engineering-individual-scenario-2-verification",
+    "shell-cli-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual shell-cli-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=terminal-interface; near-neighbor=android-compose), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Treat quoting, word splitting, globbing, environment inheritance, signals, stdin/stdout/stderr, working directories, and exit codes as interfaces."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "CLI exit status reflects the first semantically fatal stage under the declared shell contract, while streaming and cleanup behavior remain bounded and observable."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise paths with spaces and special characters, missing inputs, failed child commands, interrupted execution, non-interactive use, and the supported shell/runtime."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not eval untrusted text, parse human-formatted output when a stable interface exists, overwrite broad paths through unresolved variables, or make success depend on interactive shell configuration."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (shell-cli-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

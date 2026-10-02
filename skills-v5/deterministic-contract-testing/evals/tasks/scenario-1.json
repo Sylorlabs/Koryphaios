@@ -1,0 +1,73 @@
+{
+  "id": "deterministic-contract-testing-full-task-1",
+  "maturity": "individual",
+  "prompt": "The fixture contains a local `renewLease(lease, clock, nonceSource)` function and an existing test harness. Its contract is: renewal succeeds only while `now < expiresAt`; at exact equality or later it returns canonical error `LEASE_EXPIRED` and must not consume a nonce; a successful renewal sets `expiresAt` to exactly 15 minutes after the injected current instant and creates the token from the injected nonce bytes. Add deterministic unit/example coverage for one millisecond before, exact equality, and one millisecond after the deadline, plus a successful renewal using the provided fixed clock and deterministic nonce source. Assert public results and nonce consumption, not private helper calls. Demonstrate that the equality case fails under the supplied controlled mutation changing `now >= expiresAt` to `now > expiresAt`, then restore the production implementation and rerun the focused tests twice from fresh fixtures. Do not add network, database, fuzz, or wall-clock sleeps.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://deterministic-contract-testing/lease-renewal-boundaries",
+    "requirements": [
+      "the lease expires at 2026-09-05T12:00:00.000Z and starts with a known token",
+      "the harness supplies an injectable fixed clock and a nonce source whose fresh-fixture byte sequence is documented",
+      "the fixture can apply and restore the single comparison mutation `>=` to `>` without other code changes",
+      "nonce consumption can be observed independently from the returned lease",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "lease-deadline-partition",
+      "assertion": "One millisecond before the deadline renews successfully, while exact equality and one millisecond after return LEASE_EXPIRED with no nonce consumption."
+    },
+    {
+      "id": "lease-controlled-time-randomness",
+      "assertion": "Successful renewal uses only the injected clock and nonce source, produces the documented deterministic token/expiry, and contains no sleep or assertion against ambient wall time or entropy."
+    },
+    {
+      "id": "lease-mutation-proof",
+      "assertion": "Changing the expiration comparison from `>=` to `>` makes the exact-equality regression fail, and restoring the implementation makes it pass."
+    },
+    {
+      "id": "lease-repeatability",
+      "assertion": "The restored focused test command passes twice from fresh fixtures with identical contract outcomes."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "deterministic-contract-testing-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Contract-to-case mapping for before/equal/after deadline partitions",
+        "fixed clock and deterministic nonce-source identity",
+        "exact focused test command and two fresh-fixture results",
+        "controlled mutation red/green evidence"
+      ]
+    },
+    {
+      "id": "deterministic-contract-testing-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "assertions describe public lease behavior rather than helper implementation",
+        "clock/randomness control preserves the production contract rather than mocking the result into existence",
+        "mutation evidence directly targets the equality boundary claimed by the regression"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Contract-to-case mapping",
+    "fixed clock and nonce fixture identity",
+    "before/equal/after observable results",
+    "controlled mutation failing result and restored passing result",
+    "two fresh-fixture focused test runs",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "deterministic-contract-testing-scenario-1-case-matrix",
+    "deterministic-contract-testing-scenario-1-test-results",
+    "deterministic-contract-testing-scenario-1-mutation-proof",
+    "deterministic-contract-testing-scenario-1-paired-evaluation"
+  ]
+}

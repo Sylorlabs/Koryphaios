@@ -17,7 +17,7 @@ export interface SpendCapConfig {
   globalHourlyCents: number;
   globalDailyCents: number;
   perRequestCents: number;
-  action: 'pause' | 'warn' | 'block';
+  action: 'pause' | 'warn' | 'block' | 'continue';
   notifyAtPercent: number[];
 }
 
@@ -30,15 +30,18 @@ export interface PausedSession {
   limit: number;
 }
 
+/** Every safety limit is off until the user opts in. A 0 window means "no
+ *  limit" and `continue` never pauses a turn, so a fresh install cannot stop
+ *  work on spend it never agreed to bound. */
 export const DEFAULT_SPEND_CAP_CONFIG: SpendCapConfig = {
-  enabled: true,
-  sessionHourlyCents: 200,
-  sessionDailyCents: 1_000,
-  globalHourlyCents: 1_000,
-  globalDailyCents: 5_000,
-  perRequestCents: 50,
-  action: 'pause',
-  notifyAtPercent: [80, 95],
+  enabled: false,
+  sessionHourlyCents: 0,
+  sessionDailyCents: 0,
+  globalHourlyCents: 0,
+  globalDailyCents: 0,
+  perRequestCents: 0,
+  action: 'continue',
+  notifyAtPercent: [],
 };
 
 function createExperimentalStore() {

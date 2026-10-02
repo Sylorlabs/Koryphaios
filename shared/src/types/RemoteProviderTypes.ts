@@ -36,7 +36,9 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   xai: { risk: 'ok', reason: 'Your xAI API key — you pay for their usage.' },
   groq: { risk: 'ok', reason: 'Your Groq API key — you pay for their usage.' },
   openrouter: { risk: 'ok', reason: 'Your OpenRouter key — you pay for their usage.' },
+  unorouter: { risk: 'ok', reason: 'Your UnoRouter key — you pay for their usage.' },
   tokenrouter: { risk: 'ok', reason: 'Your TokenRouter key — you pay for their usage.' },
+  experientiallabs: { risk: 'ok', reason: 'Your Experiential Labs key — you pay for their usage.' },
   digitalocean: { risk: 'ok', reason: 'Your DigitalOcean API key — you pay for their usage.' },
   mistral: { risk: 'ok', reason: 'Your API key — you pay for their usage.' },
   azure: { risk: 'ok', reason: 'Your Azure deployment — you pay for their usage.' },
@@ -88,8 +90,8 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
     reason: 'Sharing a Google/Antigravity subscription is risky; a metered API key is safer.',
   },
   cline: {
-    risk: 'ok',
-    reason: 'Cline is BYO-key and open source — nothing subscription-bound to share.',
+    risk: 'caution',
+    reason: 'A Cline API key is metered against shared Cline credits; sharing it spends the owner\u2019s balance.',
   },
 };
 

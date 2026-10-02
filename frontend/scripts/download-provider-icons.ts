@@ -16,6 +16,7 @@ const providers = [
   'google',
   'xai',
   'openrouter',
+  'unorouter',
   'groq',
   'copilot',
   'azure',
@@ -60,6 +61,7 @@ const providers = [
   'claude',
   'codex',
   'jules',
+  'hoplite',
   'mistral',
   'cohere',
   'perplexity',
@@ -96,6 +98,7 @@ const providers = [
   'wandb',
   'poe',
   'github-models',
+  'commandcode',
   'submodel',
   'synthetic',
   'moark',
@@ -189,8 +192,55 @@ async function run() {
       }
     }
 
-    const siKey = simpleIconsMap[p];
+    if (p === 'hoplite') {
+      try {
+        const res = await fetch('https://app.hoplite.sh/branding/mark-compact.svg');
+        if (res.ok) {
+          const raw = await res.text();
+          // The official compact asset ships the mark plus a © lockup. Provider
+          // icons render at 20–24px, where the © is illegible, so keep the mark
+          // path only and re-wrap it with a currentColor fill.
+          const pathData = raw.match(/<path d="([^"]+)"/)?.[1];
+          if (pathData) {
+            const body =
+              '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 179" role="img" aria-label="Hoplite">\n' +
+              `  <path fill="currentColor" d="${pathData}"/>\n` +
+              '</svg>\n';
+            await fs.writeFile(targetPath, body);
+            await fs.writeFile(
+              path.join(OUT_DIR, 'hoplite-color.svg'),
+              body.replace('fill="currentColor"', 'fill="#FF3616"'),
+            );
+            console.log(`Downloaded icon for ${p}`);
+            continue;
+          }
+        }
+      } catch {
+        /* fall through to placeholder */
+      }
+    }
 
+    if (p === 'commandcode') {
+      try {
+        // Command Code publishes its official logomark in its own repository.
+        // It is a fixed two-colour mark (black rounded square + white command
+        // glyph), so it ships only as the -color variant: treating it as a
+        // theme-adaptive monochrome asset would invert the square to white on
+        // dark backgrounds and erase the glyph.
+        const res = await fetch(
+          'https://raw.githubusercontent.com/CommandCodeAI/command-code/main/.github/commandcode/symbols/symbol.svg',
+        );
+        if (res.ok) {
+          await fs.writeFile(path.join(OUT_DIR, 'commandcode-color.svg'), await res.text());
+          console.log(`Downloaded icon for ${p}`);
+          continue;
+        }
+      } catch {
+        /* fall through to placeholder */
+      }
+    }
+
+    const siKey = simpleIconsMap[p];
     if (siKey) {
       const si = (simpleIcons as any)[siKey];
       if (si) {

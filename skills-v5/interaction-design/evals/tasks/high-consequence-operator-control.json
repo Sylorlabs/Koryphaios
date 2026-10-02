@@ -1,0 +1,82 @@
+{
+  "id": "interaction-design-full-task-high-consequence-control",
+  "prompt": "Specify the interaction for an operator control that can stop a production machine. The action has preconditions, some failures are recoverable, the stop itself is not instantly reversible, connectivity can be degraded, and another operator may take over mid-incident. Produce the behavior contract, state/recovery model, and verification gates for the confirmed input methods without inventing visual styling or hardware guarantees.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://interaction-design/high-consequence-control",
+    "requirements": [
+      "operational preconditions",
+      "supported input methods",
+      "hardware capability limits",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "interaction-control-state-contract",
+      "assertion": "The behavior contract distinguishes ready, blocked-precondition, armed/confirmed, submitted/pending, unknown-outcome, stopped, recoverable-failure, and operator-handoff states, with transitions determined by observable events rather than visual styling."
+    },
+    {
+      "id": "interaction-control-commit-boundary",
+      "assertion": "The consequential stop requires satisfied preconditions plus a deliberate commit step, and once the stop is confirmed the contract does not fabricate undo, reversal, or instant recovery for an operation that is not instantly reversible."
+    },
+    {
+      "id": "interaction-control-unknown-outcome",
+      "assertion": "Connectivity or acknowledgement loss after submission produces an explicit unknown-outcome state that resolves only from fresh evidence of machine state; loss of acknowledgement is never treated as proof that the stop either failed or succeeded."
+    },
+    {
+      "id": "interaction-control-handoff",
+      "assertion": "Operator handoff preserves the unresolved incident state, consequence, and next safe actions instead of resetting the flow or silently transferring unsupported authority."
+    },
+    {
+      "id": "interaction-control-boundary",
+      "assertion": "The result stays at the observable interaction/state/recovery boundary and does not invent visual styling, control placement, certified emergency-stop semantics, or hardware delivery guarantees."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "consequence-and-control-model",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "preconditions",
+        "predictable consequence",
+        "guarded commitment",
+        "feedback",
+        "handoff",
+        "irreversible boundary"
+      ]
+    },
+    {
+      "id": "failure-and-verification-rigor",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "degraded connectivity",
+        "failure recovery",
+        "safe cancellation limits",
+        "input-method contract",
+        "runtime or faithful-prototype verification"
+      ]
+    },
+    {
+      "id": "blind-operator-interaction-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "operator task model",
+    "action consequence contract",
+    "state and recovery matrix",
+    "input-method boundary",
+    "verification plan"
+  ],
+  "requiredArtifacts": [
+    "operator-interaction-contract",
+    "state-recovery-matrix",
+    "paired-experiment-report"
+  ]
+}

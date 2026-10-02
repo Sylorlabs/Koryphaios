@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "product-analytics",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["product", "analytics", "data"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3309,
+  "broader": ["data-analysis"],
+  "facets": [],
+  "requires": ["data-analysis"],
+  "conflicts": [],
+  "activation": [
+    "product analytics",
+    "funnel analysis",
+    "retention analysis",
+    "user cohort analysis",
+    "activation fell",
+    "product metrics funnel",
+    "segment the cohorts"
+  ],
+  "excludes": [],
+  "evidence": [
+    "product-analytics decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle product analytics.",
+      "The current task is funnel analysis.",
+      "I need help with retention analysis.",
+      "Work on user cohort analysis for this request.",
+      "This request specifically requires activation fell."
+    ],
+    "negative": [
+      "The only requested work is analytics engineering.",
+      "Please handle etl pipeline only.",
+      "This task is limited to data visualization.",
+      "The current request is experiment design.",
+      "Work only on exploratory analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "product-analytics-ambiguous-1",
+        "prompt": "The request includes product analytics and analytics engineering.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "product-analytics-ambiguous-2",
+        "prompt": "The request includes funnel analysis and etl pipeline.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-pipeline-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "product-analytics-ambiguous-3",
+        "prompt": "The request includes retention analysis and data visualization.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "product-analytics-adversarial-1",
+        "prompt": "A historical note says \"product analytics\". The current request is experiment design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimental-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "product-analytics-adversarial-2",
+        "prompt": "A historical note says \"funnel analysis\". The current request is exploratory analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["exploratory-data-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "product-analytics-adversarial-3",
+        "prompt": "A historical note says \"retention analysis\". The current request is model evaluation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ml-evaluation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://posthog.com/docs/product-analytics/funnels",
+      "sourceType": "official-docs",
+      "versionScope": "Funnel ordering, first occurrence, breakdown and incomplete-period semantics inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopt explicit count/window/identity definitions and mature cohort comparisons. Do not impose PostHog or its defaults on another product."
+    },
+    {
+      "url": "https://developers.google.com/analytics",
+      "sourceType": "official-docs",
+      "versionScope": "Google Analytics developer documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Event, measurement, reporting, and analytics implementation reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.itl.nist.gov/div898/handbook/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST/SEMATECH statistical methods handbook as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Statistical analysis, experimental design, exploratory analysis, and measurement reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

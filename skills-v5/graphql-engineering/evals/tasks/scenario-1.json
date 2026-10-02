@@ -1,0 +1,82 @@
+{
+  "id": "graphql-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Evolve a GraphQL User field from a guaranteed legacy `avatarUrl` string to a richer optional avatar object while old mobile clients still query `avatarUrl`. Define a staged schema/resolver/deprecation path, null/error semantics, compatibility tests, and introspection/deprecation evidence. Avoid a breaking non-null change and do not move backend storage concerns into the schema contract.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://graphql-engineering/nullable-field-evolution",
+    "requirements": [
+      "current GraphQL schema/resolvers and persisted query from an old mobile client",
+      "new avatar object shape with legitimately absent avatars",
+      "compatibility window requiring legacy avatarUrl query to keep working",
+      "schema-diff and execution tests for null, present, and resolver-error cases",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "graphql-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "graphql-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "graphql-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "nullable-field-evolution scenario evidence",
+    "graphql-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "graphql-engineering-individual-scenario-1-result",
+    "graphql-engineering-individual-scenario-1-verification",
+    "graphql-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual graphql-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=grpc-protobuf), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Design schema types from durable domain semantics and client composition needs."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Schema evolution preserves the supported query contract and makes nullability/deprecation explicit; old clients do not fail because new richer data is optional."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Test representative queries/mutations, N+1/batching, partial errors, null propagation, pagination, authorization bypass attempts, schema compatibility, and query-cost controls."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose arbitrary database graphs, make every field nullable to avoid schema decisions, put authorization only in top-level resolvers, or break clients by changing nullability/enums casually."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (graphql-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

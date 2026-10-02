@@ -5,6 +5,8 @@ export interface VoiceSettings {
   output: { provider: string; modelId: string; voiceId: string; speed: number };
   autoReadFinalReplies: boolean;
   voiceModeEnabled: boolean;
+  /** One-time migration marker for the built-in local transcription flow. */
+  localVoiceSetupVersion?: number;
 }
 
 export interface VoiceProviderDescriptor {

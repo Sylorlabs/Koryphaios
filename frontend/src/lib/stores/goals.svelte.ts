@@ -4,10 +4,13 @@ import { apiUrl } from '$lib/utils/api-url';
 import { parseProviderModelSelection } from '$lib/utils/model-config';
 import { browser } from '$app/environment';
 import { sessionStore } from './sessions.svelte';
+import { onSessionRemoved } from './session-removal';
 
 let goals = $state<Goal[]>([]);
 let selectedGoalId = $state('');
-let loaded = false;
+// Reactive: the Goal Mode bubble gates on `loaded`, so a plain variable here
+// would leave the bubble permanently hidden after the first fetch.
+let loaded = $state(false);
 async function refresh() {
   if (!browser) return;
   const res = await apiFetch(apiUrl('/api/goals'));
@@ -111,6 +114,23 @@ async function lifecycle(id: string, action: 'pause' | 'resume' | 'stop') {
   goals = goals.map((g) => (g.id === id ? data.data : g));
   return data.data as Goal;
 }
+/** Add, rename, reorder, and delete checks on a goal that has not finished.
+ *  Only the plan's shape is sent: the server keeps each surviving check's
+ *  status, evidence, and timestamps, so a client cannot forge completion. */
+async function editChecklist(
+  id: string,
+  items: { id?: string; title: string; order?: number; dependsOn?: string[] }[],
+) {
+  const res = await apiFetch(apiUrl(`/api/goals/${id}/checklist`), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'Could not edit the checklist');
+  goals = goals.map((g) => (g.id === id ? data.data : g));
+  return data.data as Goal;
+}
 function handleUpdated(payload: { goal?: Goal; deletedId?: string }) {
   if (payload.deletedId) {
     goals = goals.filter((g) => g.id !== payload.deletedId);
@@ -128,6 +148,39 @@ function handleUpdated(payload: { goal?: Goal; deletedId?: string }) {
       isNew && payload.goal.activity.some((event) => event.type === 'manager_created'),
   };
 }
+
+// Deleting a chat rewrites durable goal rows in the same transaction: goals the
+// chat owned are deleted, and goals that merely ran or were linked in it are
+// paused and scrubbed of that link. No goals.updated is published for the
+// erasure itself, so the client prunes first — otherwise the Goal Mode bubble
+// keeps rendering a running goal for a chat that no longer exists — and then
+// resyncs so survivors carry the server's post-erasure status and blocker.
+let resyncQueued = false;
+function scheduleResync(): void {
+  if (resyncQueued || !browser) return;
+  resyncQueued = true;
+  queueMicrotask(() => {
+    resyncQueued = false;
+    void refresh().catch((err: unknown) => {
+      if (import.meta.env.DEV) console.error('goalStore resync failed:', err);
+    });
+  });
+}
+
+function forgetSession(sessionId: string): void {
+  goals = goals
+    .filter((goal) => goal.sessionId !== sessionId && goal.execution?.sessionId !== sessionId)
+    .map((goal) =>
+      goal.linkedSessionIds.includes(sessionId)
+        ? { ...goal, linkedSessionIds: goal.linkedSessionIds.filter((id) => id !== sessionId) }
+        : goal,
+    );
+  if (!goals.some((goal) => goal.id === selectedGoalId)) selectedGoalId = '';
+  scheduleResync();
+}
+
+onSessionRemoved(forgetSession);
+
 export const goalStore = {
   get goals() {
     return goals;
@@ -153,5 +206,7 @@ export const goalStore = {
   pause: (id: string) => lifecycle(id, 'pause'),
   resume: (id: string) => lifecycle(id, 'resume'),
   stop: (id: string) => lifecycle(id, 'stop'),
+  editChecklist,
   handleUpdated,
+  forgetSession,
 };

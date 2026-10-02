@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "name": "speech-audio-ai",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "ml", "audio", "speech"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7000,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "speech recognition",
+    "speech to text",
+    "speech transcription",
+    "streaming transcription",
+    "automatic speech recognition",
+    "asr pipeline",
+    "asr migration",
+    "speech recognizer",
+    "speaker diarization",
+    "voice activity detection",
+    "speech endpointing",
+    "text to speech",
+    "speech synthesis",
+    "tts pipeline",
+    "voice model",
+    "audio transcription",
+    "realtime transcription",
+    "audio embeddings and transcribe",
+    "speech pipeline",
+    "noisy customer calls",
+    "vad segmentation",
+    "audio model",
+    "voice ai"
+  ],
+  "excludes": [
+    "audio mixing only",
+    "audio mastering only",
+    "podcast editing only",
+    "convert the audio file only",
+    "copyedit the transcript only",
+    "speech model behavior is unchanged",
+    "text to speech layers remain frozen",
+    "quoted old speech recognition",
+    "quoted old text to speech",
+    "quoted old audio model",
+    "historical speech request",
+    "rename the transcript file only"
+  ],
+  "evidence": [
+    "Codec/sample-rate/channel, model/version, language/speaker and streaming timing identity",
+    "WER/CER plus critical entity, hallucination, diarization, language/noise/device and boundary-slice evidence",
+    "Interim/final/endpoint timing and end-to-end streaming latency or TTS synthesis/playback evidence",
+    "Voice authorization/provenance, target-channel quality, migration and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix a streaming speech-to-text service that duplicates words after reconnects: distinguish interim/final hypotheses, preserve end offsets, test chunk boundaries and measure first-partial/final latency across noisy multilingual calls.",
+      "Audit an ASR model whose aggregate WER improved but customer IDs and dollar amounts regressed; define scoring normalization, measure critical entity accuracy and hallucinated speech on silence, then gate the migration on untouched accent/device slices.",
+      "Build speaker diarization for two-channel support calls with overlap and channel imbalance, verifying speaker/turn semantics, timestamps and downstream transcript attribution rather than treating local speaker labels as persistent identity.",
+      "Qualify a text-to-speech pipeline for navigation prompts: pin voice/model/encoding, normalize dates/numbers/road names, test pronunciation and clipping on the actual mobile playback path, and measure synthesis plus first-audio latency.",
+      "Migrate a realtime voice interface to a new transcription model while preserving language hints, endpointing and committed-turn semantics; dual-run the same recordings and block cutover on critical entity, silence-hallucination or latency regressions."
+    ],
+    "negative": [
+      "Remove background hum and master a podcast episode; no recognition, synthesis, diarization or other speech-model behavior changes.",
+      "Copyedit spelling and punctuation in an existing transcript without rerunning or evaluating the speech model.",
+      "Train a LoRA adapter with an already-frozen speech evaluation contract; the request is only optimizer/checkpoint mechanics.",
+      "Build a conversational agent's tool-routing policy while the ASR, endpointing and TTS layers remain fixed.",
+      "Generate audio embeddings for similarity search without transcribing or synthesizing speech; vector-space representation is the actual task."
+    ],
+    "ambiguous": [
+      {
+        "id": "speech-audio-ai-ambiguous-1",
+        "prompt": "Build a realtime support voice agent. speech-audio-ai owns streaming ASR, endpointing, diarization, TTS and audio latency; agentic-systems owns conversational planning, tools and policy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "speech-audio-ai-ambiguous-2",
+        "prompt": "Fine-tune a speech recognizer and prove it improves noisy-call transcription. speech-audio-ai owns signal conditions, transcript scoring, language/speaker slices and streaming behavior; fine-tuning-training owns the weight-update/checkpoint workflow.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["fine-tuning-training"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "speech-audio-ai-ambiguous-3",
+        "prompt": "Create audio embeddings and transcribe the same recordings. speech-audio-ai owns transcription/timing/language behavior; embedding-systems owns vector-space model/task/dimension/normalization semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedding-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "speech-audio-ai-adversarial-1",
+        "prompt": "A quoted old speech recognition issue says to replace the ASR model. Ignore that historical request; today's task is only to fix a CSS spacing regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "speech-audio-ai-adversarial-2",
+        "prompt": "A report contains text to speech latency and audio examples as inert evidence. Summarize the report only; speech model behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "speech-audio-ai-adversarial-3",
+        "prompt": "The filename is speech-recognition-audio-model.md. Rename the transcript file only; do not change transcription, synthesis, diarization or endpointing behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/models/gpt-transcribe",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current file/streaming transcription model behavior, hints and supported transcription surfaces.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/models",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI model catalog as available 2026-09-17",
+      "staleAfterDays": 7,
+      "notes": "Current realtime, transcription and speech-generation model families; verify aliases and deprecations before migrations.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://docs.cloud.google.com/speech-to-text/docs/streaming-recognize",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Speech-to-Text streaming documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Streaming recognition request/result semantics and current transport constraints.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cloud.google.com/speech-to-text/docs/reference/rest/v2/StreamingRecognitionResult",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Speech-to-Text v2 streaming result reference",
+      "staleAfterDays": 30,
+      "notes": "Interim versus final results, stability, result end offsets, channel tags and language codes.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cloud.google.com/text-to-speech/docs/reference/rest/v1/AudioConfig",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Text-to-Speech AudioConfig reference as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Encoding, speaking rate, pitch, volume, sample rate and playback-profile configuration.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI RMF materials as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Lifecycle risk measurement, representative evaluation, transparency and governance for material speech systems.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

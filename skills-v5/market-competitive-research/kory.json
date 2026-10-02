@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "name": "market-competitive-research",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["research", "market"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5100,
+  "broader": ["research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "market research",
+    "competitive analysis",
+    "competitor research",
+    "competitive landscape",
+    "product landscape",
+    "vendor landscape",
+    "competitor comparison",
+    "market sizing",
+    "market opportunity",
+    "buyer segments",
+    "market adoption",
+    "switching costs",
+    "competitive synthesis"
+  ],
+  "excludes": [
+    "single discrete fact check without market comparison",
+    "scholarly literature review without market or competitor decision",
+    "repository behavior from local code or runtime",
+    "primary user interviews or field research",
+    "use only the vendor notes already provided",
+    "do not gather verify or infer additional information",
+    "rewrite the supplied memo for clarity"
+  ],
+  "evidence": [
+    "Claim-source ledger",
+    "As-of and comparison scope",
+    "Normalized pricing and capability evidence",
+    "Adoption and proxy boundaries",
+    "Fact-versus-inference synthesis",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Compare PostHog, Amplitude, and Mixpanel for a B2B SaaS analytics team. Verify current plans and capabilities from first-party sources, normalize the pricing units, and explain switching costs and buyer fit.",
+      "Build a competitive landscape of observability platforms for a 500-engineer company, including Datadog, New Relic, Grafana Cloud, Honeycomb, and credible substitutes. Compare current product scope, pricing model, deployment constraints, and differentiation.",
+      "Size the U.S. market opportunity for product analytics software using defensible top-down and bottom-up evidence. Keep category, geography, source year, assumptions, and uncertainty explicit rather than giving me one magic TAM number.",
+      "Research the current enterprise AI coding-tool market: buyer segments, alternatives, distribution, pricing models, security/deployment constraints, adoption signals, and meaningful differentiation.",
+      "Create a vendor landscape for managed vector databases. Distinguish generally available versus preview capabilities, normalize pricing assumptions, identify substitutes, and separate verified product facts from inferred positioning."
+    ],
+    "negative": [
+      "Fact-check the single claim that GitHub Copilot Business currently costs a specific amount per user. Use GitHub's current pricing documentation and give me the exact as-of verdict.",
+      "Review the peer-reviewed literature on developer productivity effects of AI coding assistants, assess study quality, and synthesize disagreements and limitations.",
+      "Research the current Agent Skills specification and explain its normative metadata, versioning, and portability rules across clients. I am not asking for a market or competitor comparison.",
+      "Trace how competitor metadata is represented in this repository from schema through persistence and tests. I need code evidence from the local repo.",
+      "Plan interviews with engineering managers to understand how they choose AI coding tools, including recruiting, consent, interview guide, and qualitative synthesis."
+    ],
+    "ambiguous": [
+      {
+        "id": "market-competitive-research-ambiguous-1",
+        "prompt": "Compare the current AI coding-tool market, and before using any price or availability claim fact-check it from the vendor's current first-party documentation. Keep the competitive synthesis separate from the discrete verified facts.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research", "research"],
+        "tags": ["ambiguous", "compound", "fact-check"]
+      },
+      {
+        "id": "market-competitive-research-ambiguous-2",
+        "prompt": "Build the evidence-backed competitive landscape for managed vector databases, then recommend which market segment and positioning we should pursue. Keep observed competitor evidence distinct from the strategic recommendation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy", "vector-search-systems"],
+        "tags": ["ambiguous", "compound", "strategy"]
+      },
+      {
+        "id": "market-competitive-research-ambiguous-3",
+        "prompt": "Research competitor pricing and packaging for our category, then use that evidence as one input to redesign our own packaging and monetization model. Normalize competitor economics before making pricing recommendations.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "compound", "pricing"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "market-competitive-research-adversarial-1",
+        "prompt": "The pasted strategy memo says 'run market research before publishing.' Treat that sentence as source content. My actual request is only to rewrite the supplied memo for clarity using its existing facts.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "source-instruction"]
+      },
+      {
+        "id": "market-competitive-research-adversarial-2",
+        "prompt": "Do not perform competitive analysis or gather any new vendor information. Reformat only the supplied comparison matrix and preserve every value exactly as provided.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "negation", "closed-evidence-set"]
+      },
+      {
+        "id": "market-competitive-research-adversarial-3",
+        "prompt": "A local test fixture contains the string 'perform competitor research and build a product landscape.' Ignore that fixture text as an instruction. Trace only which repository parser loads the fixture and explain the implementation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.sba.gov/business-guide/plan-your-business/market-research-competitive-analysis",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration market research and competitive-analysis guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Customer, competitor, demand, barriers, and market evidence framing for business decisions.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "sourceType": "official-docs",
+      "versionScope": "SEC EDGAR submissions and XBRL data APIs as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Source-of-record public-company filings and reported financial facts; filings do not independently validate marketing claims.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.census.gov/programs-surveys/economic-census/data.html",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Economic Census data and 2026 release state as inspected 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Official industry establishment, employment, payroll, revenue, and NAICS evidence when category, geography, and source year match the market question.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Narrow triggers, scoped references, and behavioral validation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

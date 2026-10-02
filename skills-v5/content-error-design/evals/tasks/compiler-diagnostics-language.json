@@ -1,0 +1,81 @@
+{
+  "id": "content-error-design-full-task-compiler-diagnostics",
+  "prompt": "Improve a compiler's diagnostic language across parse, name-resolution, type, capability, and code-generation failures. The compiler already supplies structured source spans, error categories, related symbols, optional candidate fixes, and internal correlation data. Existing messages are inconsistent, sometimes expose raw internal names, overstate guessed causes, and often say only 'invalid' or 'failed'. Produce a diagnostic-language contract and representative rewrites without changing compiler semantics.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://content-error-design/compiler-diagnostics",
+    "requirements": [
+      "structured diagnostic fixtures",
+      "existing public terminology",
+      "safe versus internal diagnostic fields",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "compiler-diagnostic-certainty",
+      "assertion": "Each representative rewrite distinguishes observed failure from inferred cause, preserves uncertainty when the compiler only has candidates, and never presents a guessed cause or fix as established fact."
+    },
+    {
+      "id": "compiler-diagnostic-actionability",
+      "assertion": "Messages identify the failed construct and useful source/symbol context, use stable public terminology, and offer a candidate action only when structured evidence supports that action."
+    },
+    {
+      "id": "compiler-diagnostic-privacy",
+      "assertion": "Raw internal-only names, private correlation data, and other non-public implementation details are excluded or transformed before entering user-facing diagnostics."
+    },
+    {
+      "id": "compiler-diagnostic-family-consistency",
+      "assertion": "Parse, name-resolution, type, capability, and code-generation examples follow one explicit terminology/certainty structure while retaining category-specific information rather than collapsing to generic 'invalid' or 'failed' messages."
+    },
+    {
+      "id": "compiler-content-boundary",
+      "assertion": "The artifact changes diagnostic language and its validation contract only; it does not silently change compiler semantics, error classification, source-span generation, or fix-generation behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "diagnostic-actionability-and-accuracy",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "failed construct and location made clear",
+        "stable domain terminology",
+        "cause confidence preserved",
+        "candidate fixes only when justified",
+        "actionable context without implementation trivia"
+      ]
+    },
+    {
+      "id": "privacy-consistency-and-validation",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "internal/private data filtered",
+        "message family consistency",
+        "representative failure coverage",
+        "developer comprehension/actionability test",
+        "clear boundary from compiler behavior"
+      ]
+    },
+    {
+      "id": "blind-diagnostic-language-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "diagnostic state/category inventory",
+    "terminology and certainty rules",
+    "representative diagnostic rewrites",
+    "privacy/internal-data review",
+    "developer comprehension/actionability validation plan"
+  ],
+  "requiredArtifacts": [
+    "compiler-diagnostic-language-contract",
+    "diagnostic-rewrite-set",
+    "paired-experiment-report"
+  ]
+}

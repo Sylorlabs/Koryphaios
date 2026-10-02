@@ -77,7 +77,7 @@ export class ApiClient {
     return this.getJson<{
       ok: boolean;
       data: {
-        messages: unknown[];
+        messages: Array<{ role: string; content?: string }>;
         activeMessageId: string | null;
         conversationRevision: number;
         providerConversationRevision: number;

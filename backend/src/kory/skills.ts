@@ -15,18 +15,64 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { TextDecoder } from 'node:util';
 import type { TaskContract, TaskKind } from './prompts';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from './professional-skill-definitions';
+import {
+  SPECIALIST_SKILL_COUNT,
+  SPECIALIST_SKILL_DEFINITIONS,
+} from './specialist-skill-definitions';
 import { skillPlaybook } from './skill-playbooks';
 import { PLAN_MODE_SKILL_INSTRUCTIONS } from './plan-mode-skill';
+import {
+  DEFAULT_RESPONSE_STYLE_INSTRUCTIONS,
+  RESPONSE_STYLE_SKILL_NAME,
+} from './response-style-skill';
+import { isSuppliedArtifactOnlyTask, routingClauses, routingRelevantText } from './routing-text';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { loadV5SkillPackages, type V5CompiledSkillPackage } from './skill-packages';
 
 export type SkillSource = 'personal' | 'project';
 export type SkillState = 'active' | 'draft';
 export type SkillFormatKind = 'markdown' | 'text' | 'html' | 'custom';
 export type SkillRenderer = 'markdown' | 'plain' | 'html';
+
+/**
+ * Shared chars-per-token planning estimate. Skill budgeting, the context-usage
+ * bar, compaction accounting, and CLI bridges all divide character counts by
+ * this single constant so a "token" means the same thing on every surface. It
+ * is a planning estimate, not a fail-closed tokenizer bound: non-ASCII text
+ * (CJK, emoji) can encode to more tokens, so capacity checks keep the
+ * reserved-output margin instead of relying on this to overcount.
+ */
+export const TOKEN_CHARS = 4;
+
+/** Hard ceiling for skill prompt injection; the window-relative default below stays under it. */
+export const MAX_SKILL_CONTEXT_BUDGET = 30_000;
+/**
+ * Skill budget never collapses below this. A tiny remaining window degrades to
+ * minimal-only guidance plus a warning instead of a `max(1, …)` dead end that
+ * throws Mandatory skill guidance on every turn as chat grows.
+ */
+export const MIN_SKILL_CONTEXT_BUDGET = 4_000;
+
+/**
+ * Window-relative default skill budget: 10% of a verified model window,
+ * clamped to [8_000, MAX_SKILL_CONTEXT_BUDGET]. Small windows still fit
+ * mandatory minimal guidance; large windows stop donating a fixed 30k chars
+ * once chat grows.
+ */
+export function deriveDefaultSkillContextBudget(contextWindowTokens?: number): number {
+  if (
+    contextWindowTokens === undefined ||
+    !Number.isFinite(contextWindowTokens) ||
+    contextWindowTokens < 1_024
+  ) {
+    return MAX_SKILL_CONTEXT_BUDGET;
+  }
+  return Math.min(MAX_SKILL_CONTEXT_BUDGET, Math.max(8_000, Math.floor(contextWindowTokens * 0.1)));
+}
 
 export interface SkillDocumentSpec {
   kind: SkillFormatKind;
@@ -58,6 +104,8 @@ export interface KorySkillMetadata {
   conflicts: string[];
   activation: string[];
   excludes: string[];
+  invocationMode: 'model-invoked' | 'user-invoked';
+  pathScopes: string[];
 }
 
 export interface SkillRevision {
@@ -124,6 +172,8 @@ export interface SkillCollision {
 export interface ResolvedSkill {
   skill: SkillRevision;
   reason: string;
+  /** Direct responsibility selection versus inherited/supporting guidance. */
+  directSelection?: boolean;
   representation: SkillRepresentation;
   /** Exact prompt block injected for this skill, including any leading separator. */
   promptText: string;
@@ -133,6 +183,21 @@ export interface ResolvedSkill {
 }
 
 export type SkillRepresentation = 'full' | 'compact' | 'minimal';
+
+/** Older persisted resolutions have only human-readable reasons. */
+export function isDirectSkillSelection(
+  item: Pick<ResolvedSkill, 'reason' | 'directSelection'>,
+): boolean {
+  return (
+    item.directSelection ??
+    !(
+      item.reason.startsWith('Broader concept of ') ||
+      item.reason.startsWith('Required by ') ||
+      item.reason.startsWith('Professional facet of ') ||
+      item.reason === 'Selected hierarchy dependency'
+    )
+  );
+}
 
 export interface SkillEvidence {
   taskKind: TaskKind;
@@ -147,6 +212,7 @@ export interface SkillEvidence {
   toolkits: string[];
   topologies: string[];
   artifacts: string[];
+  contextPaths: string[];
 }
 
 export interface SkillResolverResult {
@@ -166,6 +232,15 @@ export interface SkillResolverResult {
   rejectedCandidateCount: number;
   rejectedCandidatesTruncated: boolean;
   blocked: boolean;
+  /**
+   * Non-fatal degradation notes (e.g. mandatory minimal guidance exceeded the
+   * budget, so optional skills and minimal-only ancestors were omitted).
+   * Callers surface these as warnings; they never block the turn. Full detail
+   * stays one load_skill_detail call away.
+   */
+  warnings: string[];
+  /** Auto-included parents/requires/facets dropped because every dependent rendered minimal. */
+  omittedLazyAncestors: string[];
   manifestHash: string;
   /** Exact injected section, including heading, manifest, hash, and separators. */
   promptText: string;
@@ -332,17 +407,26 @@ const GENERIC_TRIGGER_WORDS = new Set([
   'build',
   'check',
   'create',
+  'current',
   'design',
+  'handle',
+  'help',
   'implement',
   'implementation',
   'improve',
   'interface',
+  'need',
+  'request',
+  'require',
   'review',
   'run',
+  'specifically',
   'system',
+  'task',
   'test',
   'tests',
   'verify',
+  'work',
   'write',
 ]);
 const PRIMARY_MEDIUM_SKILLS: Readonly<Record<string, string>> = {
@@ -404,7 +488,89 @@ export function normalizeSkillTokens(value: string): string[] {
       .normalize('NFKC')
       .toLowerCase()
       .match(/[\p{L}\p{N}+#]+/gu) ?? []
-  ).map((token) => TOKEN_ALIASES[token] ?? token);
+  ).map((token) => {
+    const aliased = TOKEN_ALIASES[token] ?? token;
+    // Routing metadata is authored in natural language, so tolerate the most
+    // common singular/plural variation without introducing unrestricted
+    // stemming (which can collapse unrelated technical terms).
+    if (aliased.length > 4 && aliased.endsWith('ies')) return `${aliased.slice(0, -3)}y`;
+    if (
+      aliased.length > 4 &&
+      ['sses', 'shes', 'ches', 'xes', 'zes'].some((suffix) => aliased.endsWith(suffix))
+    ) {
+      return aliased.slice(0, -2);
+    }
+    if (
+      aliased.length > 4 &&
+      aliased.endsWith('s') &&
+      !aliased.endsWith('ss') &&
+      !aliased.endsWith('us') &&
+      !aliased.endsWith('is')
+    ) {
+      return aliased.slice(0, -1);
+    }
+    return aliased;
+  });
+}
+
+const RESERVED_DIRECT_SLASH_COMMANDS = new Set([
+  'agents',
+  'clear',
+  'goal',
+  'help',
+  'settings',
+  'sidebar',
+  'theme',
+  'workflow',
+  'workflows',
+  'zen',
+]);
+
+/**
+ * Read explicit skill invocation syntax from the start of a user prompt.
+ *
+ * `/skill name` and `$name` are unambiguous requests and therefore preserve an
+ * unknown name so normal pin validation can surface a useful error. Direct
+ * `/name` syntax is accepted only for a known skill and only when it does not
+ * collide with a Kory local command. Provider native slash commands are
+ * consumed by the client before prompt compilation, so they keep precedence.
+ */
+export function explicitSkillPinsFromPrompt(
+  prompt: string,
+  knownSkillNames: Iterable<string> = [],
+): string[] {
+  const known = new Set([...knownSkillNames].map((name) => name.toLowerCase()));
+  const pins: string[] = [];
+  let remaining = prompt.trimStart();
+
+  while (remaining) {
+    const skillCommand = remaining.match(/^\/skill\s+([a-z][a-z0-9-]{0,63})(?=\s|$)/i);
+    if (skillCommand) {
+      pins.push(skillCommand[1]!.toLowerCase());
+      remaining = remaining.slice(skillCommand[0].length).trimStart();
+      continue;
+    }
+
+    const dollar = remaining.match(/^\$([a-z][a-z0-9-]{0,63})(?=\s|$)/i);
+    if (dollar) {
+      pins.push(dollar[1]!.toLowerCase());
+      remaining = remaining.slice(dollar[0].length).trimStart();
+      continue;
+    }
+
+    const slash = remaining.match(/^\/([a-z][a-z0-9-]{0,63})(?=\s|$)/i);
+    if (slash) {
+      const name = slash[1]!.toLowerCase();
+      if (!known.has(name) || RESERVED_DIRECT_SLASH_COMMANDS.has(name)) break;
+      pins.push(name);
+      remaining = remaining.slice(slash[0].length).trimStart();
+      continue;
+    }
+
+    break;
+  }
+
+  return unique(pins);
 }
 
 function containsTokenPhrase(tokens: string[], phrase: string): boolean {
@@ -421,16 +587,58 @@ function hasAnyPhrase(tokens: string[], phrases: string[]): boolean {
   return phrases.some((phrase) => containsTokenPhrase(tokens, phrase));
 }
 
-const NEGATION_TOKENS = new Set([
-  'avoid',
-  'excluding',
-  'exclude',
-  'never',
-  'no',
-  'non',
-  'not',
-  'without',
-]);
+function hasAnyPositivePhrase(tokens: string[], phrases: string[]): boolean {
+  return phrases.some(
+    (phrase) => containsTokenPhrase(tokens, phrase) && !isPhraseNegated(tokens, phrase),
+  );
+}
+
+function isConceptualExplanationOnlyTask(prompt: string, contract?: TaskContract): boolean {
+  if (contract?.taskKind !== 'question') return false;
+  const relevant = routingRelevantText(prompt);
+  const promptTokens = normalizeSkillTokens(relevant);
+  const conceptualCue = hasAnyPhrase(promptTokens, [
+    'conceptually',
+    'conceptual explanation',
+    'in general',
+    'at a conceptual level',
+  ]);
+  if (!conceptualCue) return false;
+
+  const operationalPhrases = [
+    'implement',
+    'build',
+    'fix',
+    'repair',
+    'configure',
+    'deploy',
+    'change',
+    'modify',
+    'design',
+    'assess',
+    'audit',
+    'review',
+    'investigate',
+    'inspect',
+    'debug',
+    'test',
+    'verify',
+    'plan',
+    'migrate',
+    'upgrade',
+    'optimize',
+    'run',
+  ];
+  return !routingClauses(relevant)
+    .map(normalizeSkillTokens)
+    .some((tokens) =>
+      operationalPhrases.some(
+        (phrase) => containsTokenPhrase(tokens, phrase) && !isPhraseNegated(tokens, phrase),
+      ),
+    );
+}
+
+const NEGATION_TOKENS = new Set(['avoid', 'excluding', 'exclude', 'never', 'no', 'not', 'without']);
 
 function phraseStarts(tokens: string[], phrase: string): number[] {
   const phraseTokens = normalizeSkillTokens(phrase);
@@ -449,16 +657,96 @@ function phraseStarts(tokens: string[], phrase: string): number[] {
  */
 function isPhraseNegated(tokens: string[], phrase: string): boolean {
   const phraseLength = normalizeSkillTokens(phrase).length;
-  return phraseStarts(tokens, phrase).some((start) => {
-    const preceding = tokens.slice(Math.max(0, start - 5), start);
-    if (preceding.some((token) => NEGATION_TOKENS.has(token))) return true;
-    // Common scope phrase: "do not assume/use/build with web technologies".
-    if (preceding.join(' ').match(/\b(?:do not|don t|cannot|can t)\b/) !== null) return true;
-    const following = tokens.slice(start + phraseLength, start + phraseLength + 4).join(' ');
-    return /^(?:(?:is|must|should|can) not\b|(?:is )?(?:forbidden|excluded|unsupported)\b)/.test(
-      following,
-    );
-  });
+  const occurrences = phraseStarts(tokens, phrase);
+  return (
+    occurrences.length > 0 &&
+    occurrences.every((start) => {
+      const preceding = tokens.slice(Math.max(0, start - 32), start);
+      // A normalized `non-*` prefix only negates the phrase it directly modifies.
+      // Do not let an earlier adjective such as "non-leading" suppress a later
+      // trigger like "interview guide".
+      if (preceding.at(-1) === 'non') return true;
+      const before = preceding.join(' ');
+      const directive = [
+        ...before.matchAll(/\b(?:do not|don t|never|avoid|exclude|excluding)\b/gu),
+      ].at(-1);
+      if (directive) {
+        const governed = before
+          .slice(directive.index! + directive[0].length)
+          .trim()
+          .split(/\s+/u)
+          .filter(Boolean);
+        // Propagate a scope prohibition through its coordinated objects, not
+        // through a later affirmative action or a new task clause.
+        const reset = governed
+          .slice(1)
+          .some((word) =>
+            [
+              'instead',
+              'then',
+              'however',
+              'but',
+              'actual',
+              'current',
+              'fix',
+              'repair',
+              'implement',
+            ].includes(word),
+          );
+        if (!reset && !governed.includes('only')) return true;
+      }
+      const nearby = preceding.slice(-5);
+      const cue = nearby.findLastIndex((token) => NEGATION_TOKENS.has(token));
+      if (cue >= 0) {
+        const word = nearby[cue];
+        const tail = nearby.slice(cue + 1);
+        if (!tail.includes('only') && word !== 'not') return true;
+        if (
+          word === 'not' &&
+          !tail.includes('only') &&
+          tail.every((token) => ['a', 'an', 'the', 'any'].includes(token))
+        ) {
+          return true;
+        }
+        if (
+          word === 'not' &&
+          /\b(?:is|are|was|were|do|must|should) not\b/u.test(nearby.join(' ')) &&
+          !tail.includes('only')
+        )
+          return true;
+        if (
+          word === 'not' &&
+          /\b(?:will|would) not (?:be )?(?:saved|stored|used|treated|published|included)\b/u.test(
+            before,
+          ) &&
+          !tail.includes('only')
+        )
+          return true;
+      }
+      // "cannot link CMake" describes a failure requiring the skill, not an
+      // instruction to exclude it. Only actual scope constraints negate it.
+      const following = tokens.slice(start + phraseLength, start + phraseLength + 12).join(' ');
+      return (
+        /^(?:(?:is|must|should|can) not\b|(?:is )?(?:forbidden|excluded|unsupported)\b)/.test(
+          following,
+        ) ||
+        /\b(?:is|are|was|were)?\s*not\s+(?:the\s+)?(?:task|goal|request|scope|focus)\b/.test(
+          following,
+        ) ||
+        /^(?:(?:model\s+)?(?:is|are|was|were)\s+(?:already\s+)?(?:fixed|frozen|unchanged|settled)\b|(?:remains?|stays?)\s+(?:fixed|frozen|unchanged|settled)\b)/.test(
+          following,
+        ) ||
+        /\b(?:fixed|frozen|unchanged|settled)\s+(?:dependency|boundary|component|architecture|implementation|model|workflow)\b/.test(
+          following,
+        ) ||
+        /\b(?:can|could|should)\s+(?:come|wait until)\s+later\b/.test(following) ||
+        /\b(?:out of scope|not requested|defer(?:red)? until later)\b/.test(following) ||
+        /^(?:(?:target|code|source|runtime|interop|behavior|setting|project|file|component|implementation)\s+){0,3}(?:is|are|was|were)?\s*(?:(?:explicitly\s+)?unchanged|not\s+(?:being\s+)?(?:changed|modified|edited|requested))\b/u.test(
+          following,
+        )
+      );
+    })
+  );
 }
 
 const MEDIUM_PHRASES: Readonly<Record<string, string[]>> = {
@@ -472,8 +760,7 @@ const MEDIUM_PHRASES: Readonly<Record<string, string[]>> = {
 };
 
 function promptMediumEvidence(prompt: string): { positive: string[]; negated: string[] } {
-  const clauses = prompt
-    .split(/(?:[.!?;]|,(?=\s)|\bbut\b|\bhowever\b)/giu)
+  const clauses = routingClauses(routingRelevantText(prompt))
     .map((clause) => normalizeSkillTokens(clause))
     .filter((tokens) => tokens.length > 0);
   const positive: string[] = [];
@@ -507,11 +794,24 @@ export function collectSkillEvidence(
   prompt: string,
   contract: TaskContract,
   targetMedium?: string,
+  activePaths: readonly string[] = [],
 ): SkillEvidence {
-  const text = prompt.toLowerCase();
-  const promptTokens = normalizeSkillTokens(prompt);
-  const promptMedia = promptMediumEvidence(prompt);
+  const relevantPrompt = routingRelevantText(prompt);
+  const text = relevantPrompt.toLowerCase();
+  const promptTokens = normalizeSkillTokens(relevantPrompt);
+  const promptMedia = promptMediumEvidence(relevantPrompt);
   const root = resolve(projectRoot);
+  const contextPaths = unique(
+    activePaths
+      .map((path) => {
+        const absolute = isAbsolute(path) ? resolve(path) : resolve(root, path);
+        const scoped = relative(root, absolute).replaceAll('\\', '/');
+        return !scoped || scoped === '.' || scoped.startsWith('../') || isAbsolute(scoped)
+          ? ''
+          : scoped;
+      })
+      .filter(Boolean),
+  );
   const artifacts = [
     'package.json',
     'Cargo.toml',
@@ -588,10 +888,10 @@ export function collectSkillEvidence(
   ]);
   const topologies = unique([
     ...(containsTokenPhrase(promptTokens, 'in process') ? ['in-process'] : []),
-    ...(hasAnyPhrase(promptTokens, ['local service', 'daemon', 'ipc', 'sidecar'])
+    ...(hasAnyPositivePhrase(promptTokens, ['local service', 'daemon', 'ipc', 'sidecar'])
       ? ['local-service']
       : []),
-    ...(hasAnyPhrase(promptTokens, ['network service', 'api server', 'http api', 'rpc'])
+    ...(hasAnyPositivePhrase(promptTokens, ['network service', 'api server', 'http api', 'rpc'])
       ? ['network-service']
       : []),
     ...(containsTokenPhrase(promptTokens, 'distributed') ? ['distributed'] : []),
@@ -682,7 +982,7 @@ export function collectSkillEvidence(
     ])
       ? ['instructional-communication']
       : []),
-    ...(hasAnyPhrase(promptTokens, ['verify', 'verification', 'test', 'audit', 'assess'])
+    ...(hasAnyPositivePhrase(promptTokens, ['verify', 'verification', 'test', 'audit', 'assess'])
       ? ['verification']
       : []),
   ]);
@@ -697,7 +997,42 @@ export function collectSkillEvidence(
     toolkits,
     topologies,
     artifacts,
+    contextPaths,
   };
+}
+
+function matchingPathScope(skill: SkillRevision, evidence?: SkillEvidence): string | undefined {
+  if (!evidence?.contextPaths.length || !skill.metadata.pathScopes.length) return undefined;
+  const globMatches = (path: string, scope: string): boolean => {
+    let pattern = '^';
+    for (let index = 0; index < scope.length; index += 1) {
+      const character = scope[index]!;
+      if (character === '*' && scope[index + 1] === '*') {
+        index += 1;
+        if (scope[index + 1] === '/') {
+          index += 1;
+          // Standard globstar semantics: **/ may match zero or more directories.
+          pattern += '(?:.*/)?';
+        } else {
+          pattern += '.*';
+        }
+        continue;
+      }
+      if (character === '*') {
+        pattern += '[^/]*';
+        continue;
+      }
+      if (character === '?') {
+        pattern += '[^/]';
+        continue;
+      }
+      pattern += character.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+    }
+    return new RegExp(`${pattern}$`).test(path);
+  };
+  return skill.metadata.pathScopes.find((scope) =>
+    evidence.contextPaths.some((path) => globMatches(path, scope)),
+  );
 }
 
 export interface SkillDefinition {
@@ -716,9 +1051,45 @@ export interface SkillDefinition {
   conflicts?: string[];
   activation?: string[];
   excludes?: string[];
+  invocationMode?: 'model-invoked' | 'user-invoked';
+  pathScopes?: string[];
 }
 
 const BASE_SKILL_DEFINITIONS: SkillDefinition[] = [
+  {
+    name: 'dash-free-writing',
+    description:
+      'Revise authored prose without dash punctuation while preserving exact technical content. Use when a dash free rewrite is requested.',
+    domains: ['documents'],
+    broader: ['documents-communication'],
+    activation: [
+      'no dashes',
+      'remove dashes',
+      'dash free',
+      'without dashes',
+      'remove hyphens',
+      'remove em dashes',
+      'remove en dashes',
+    ],
+    instructions:
+      'Rewrite prose naturally to the requested punctuation style. Preserve meaning, quotations, code, identifiers, links, mathematical notation and format syntax; never delete characters globally.',
+    should: ['Rewrite this memo without dashes.'],
+    shouldNot: ['Change the --dry-run command flag.'],
+    evidence: ['Prose punctuation review', 'Protected literals and source meaning preserved'],
+  },
+  {
+    // User-scoped voice contract. Seeded into the personal library and pinned
+    // on every manager turn (see manager.ts); never routed by prompt keywords.
+    name: RESPONSE_STYLE_SKILL_NAME,
+    description:
+      "Apply the user's personal response style: length, tone, structure, and how to finish a task. Use when composing any reply to the user.",
+    domains: ['documents'],
+    broader: ['documents-communication'],
+    instructions: DEFAULT_RESPONSE_STYLE_INSTRUCTIONS,
+    should: ['Reply to the user in my preferred style.', 'Explain what you changed.'],
+    shouldNot: ['Rewrite this README without dashes.'],
+    evidence: ['Reply follows the personal response style contract'],
+  },
   {
     name: 'task-routing',
     description: 'Classify the task and select only relevant local guidance.',
@@ -766,6 +1137,7 @@ const BASE_SKILL_DEFINITIONS: SkillDefinition[] = [
     name: 'plan-mode',
     description: 'Run a question-led, Notes-backed planning engagement before implementation.',
     domains: ['planning'],
+    broader: ['planning'],
     activation: ['plan mode'],
     instructions: PLAN_MODE_SKILL_INSTRUCTIONS,
     should: ['use Plan mode', 'create a durable implementation plan'],
@@ -1177,11 +1549,41 @@ Exercise timing, sensor and actuator ranges, noise, saturation, disconnects, pow
   },
 ];
 
-/** The complete TypeScript-defined library. Stable IDs are part of the persisted skill contract. */
-export const BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] = [
+/** The complete legacy TypeScript-defined library used while skills migrate to first-class V5 packages. */
+const GENERATED_BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] = [
   ...BASE_SKILL_DEFINITIONS,
   ...PROFESSIONAL_SKILL_DEFINITIONS,
+  ...SPECIALIST_SKILL_DEFINITIONS,
 ];
+
+/** Immutable TypeScript-defined source catalog used by V5 migration tooling. */
+export const LEGACY_BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] =
+  GENERATED_BUNDLED_SKILL_DEFINITIONS;
+
+export const V5_SKILL_PACKAGE_CATALOG = loadV5SkillPackages();
+const V5_SKILL_PACKAGES_BY_NAME = new Map<string, V5CompiledSkillPackage>(
+  V5_SKILL_PACKAGE_CATALOG.packages.map((skillPackage) => [
+    skillPackage.sidecar.name,
+    skillPackage,
+  ]),
+);
+
+/**
+ * The deployed catalog preserves existing stable skill IDs while allowing an
+ * individually-authored V5 package to replace its generated TypeScript
+ * source one skill at a time.
+ */
+export const BUNDLED_SKILL_DEFINITIONS: readonly SkillDefinition[] =
+  GENERATED_BUNDLED_SKILL_DEFINITIONS.map((definition) => {
+    const skillPackage = V5_SKILL_PACKAGES_BY_NAME.get(definition.name);
+    if (!skillPackage) return definition;
+    return {
+      ...skillPackage.definition,
+      kinds: definition.kinds,
+      invocationMode: skillPackage.sidecar.invocationMode,
+      pathScopes: skillPackage.sidecar.pathScopes,
+    } satisfies SkillDefinition;
+  });
 
 function yamlList(values: string[]): string {
   return `[${values.map((value) => JSON.stringify(value)).join(', ')}]`;
@@ -1196,10 +1598,14 @@ function definitionDepth(
   if (cached !== undefined) return cached;
   if (visiting.has(definition.name)) return 0;
   visiting.add(definition.name);
-  const depths = (definition.broader ?? []).map((name) => {
-    const broader = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
-    return broader ? 1 + definitionDepth(broader, visiting, memo) : 1;
-  });
+  const depths = (definition.broader ?? [])
+    .map((name) => {
+      const broader = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name);
+      // An unresolved relation is reported separately by hierarchy validation;
+      // it must not inflate the derived depth of the current skill.
+      return broader ? 1 + definitionDepth(broader, visiting, memo) : null;
+    })
+    .filter((depth): depth is number => depth !== null);
   visiting.delete(definition.name);
   const depth = depths.length > 0 ? Math.max(...depths) : 0;
   memo.set(definition.name, depth);
@@ -1209,7 +1615,17 @@ function definitionDepth(
 const MAX_TRIGGER_DESCRIPTION_LENGTH = 360;
 
 function triggerDescription(definition: SkillDefinition): string {
+  // A first-class package owns its discovery contract, including its final
+  // neighbor exclusions. Validate it at the Kory boundary instead of silently
+  // truncating or expanding authored text. The portable format allows longer
+  // descriptions than this runtime, so its independent validator stays intact.
+  if (V5_SKILL_PACKAGES_BY_NAME.has(definition.name)) return definition.description;
   const summary = definition.description.trim().replace(/[.!?]+$/, '');
+  if (definition.description.includes('Use when ')) {
+    return definition.description.length <= MAX_TRIGGER_DESCRIPTION_LENGTH
+      ? definition.description
+      : `${definition.description.slice(0, MAX_TRIGGER_DESCRIPTION_LENGTH - 2).trimEnd()}.`;
+  }
   const triggerTerms = (definition.activation?.length ? definition.activation : definition.should)
     .slice(0, 4)
     .join(', ');
@@ -1226,6 +1642,7 @@ export interface BundledSkillDefinitionAudit {
   definitionCount: number;
   baseCount: number;
   professionalCount: number;
+  specialistCount: number;
 }
 
 /**
@@ -1234,7 +1651,16 @@ export interface BundledSkillDefinitionAudit {
  * lenses and must not duplicate a hierarchical relationship.
  */
 export function auditBundledSkillDefinitions(): BundledSkillDefinitionAudit {
-  const errors: string[] = [];
+  const errors: string[] = [...V5_SKILL_PACKAGE_CATALOG.errors];
+  for (const skillPackage of V5_SKILL_PACKAGE_CATALOG.packages) {
+    if (
+      !GENERATED_BUNDLED_SKILL_DEFINITIONS.some((item) => item.name === skillPackage.sidecar.name)
+    ) {
+      errors.push(
+        `V5 package ${skillPackage.sidecar.name} does not correspond to a stable bundled skill ID`,
+      );
+    }
+  }
   const byName = new Map<string, SkillDefinition>();
   const namePattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
   for (const definition of BUNDLED_SKILL_DEFINITIONS) {
@@ -1348,14 +1774,20 @@ export function auditBundledSkillDefinitions(): BundledSkillDefinitionAudit {
     definitionCount: BUNDLED_SKILL_DEFINITIONS.length,
     baseCount: BASE_SKILL_DEFINITIONS.length,
     professionalCount: PROFESSIONAL_SKILL_DEFINITIONS.length,
+    specialistCount: SPECIALIST_SKILL_COUNT,
   };
 }
 
 function template(definition: SkillDefinition): string {
   const broader = definition.broader ?? [];
-  const version = '3.0.0';
-  const playbook = skillPlaybook(definition.name);
-  const content = `---\nname: ${definition.name}\ndescription: ${triggerDescription(definition)}\nmetadata:\n  koryphaios:\n    version: ${version}\n    baseVersion: ${version}\n    baseHash: __BASE_HASH__\n    parent: ${broader[0] ?? ''}\n    broader: ${yamlList(broader)}\n    facets: ${yamlList(definition.facets ?? [])}\n    depth: ${definitionDepth(definition)}\n    requires: ${yamlList(definition.requires ?? [])}\n    conflicts: ${yamlList(definition.conflicts ?? [])}\n    activation: ${yamlList(definition.activation ?? [])}\n    excludes: ${yamlList(definition.excludes ?? [])}\n    domains: ${yamlList(definition.domains)}\n    targetMedia: ${yamlList(definition.media ?? ['any'])}\n    shouldTrigger: ${yamlList(definition.should)}\n    shouldNotTrigger: ${yamlList(definition.shouldNot)}\n    evidence: ${yamlList(definition.evidence)}\n    contextBudget: ${broader.length > 0 ? 5000 : 4000}\n    sourceScope: local-only\n---\n# ${definition.name}\n\n${definition.instructions}${playbook ? `\n\n${playbook}` : ''}\n`;
+  const skillPackage = V5_SKILL_PACKAGES_BY_NAME.get(definition.name);
+  const version = skillPackage?.sidecar.version ?? '3.0.0';
+  const playbook = skillPackage ? '' : skillPlaybook(definition.name);
+  const contextBudget = skillPackage?.sidecar.contextBudget ?? (broader.length > 0 ? 5000 : 4000);
+  const packageResourceGuide = skillPackage?.supportingResources.length
+    ? `\n\n## Kory package resources\n\nRoot: ${JSON.stringify(skillPackage.directory)}. Resolve links there; read selectively. The presence of scripts or other files does not grant execution authority.`
+    : '';
+  const content = `---\nname: ${definition.name}\ndescription: ${triggerDescription(definition)}\nmetadata:\n  koryphaios:\n    version: ${version}\n    baseVersion: ${version}\n    baseHash: __BASE_HASH__\n    parent: ${broader[0] ?? ''}\n    broader: ${yamlList(broader)}\n    facets: ${yamlList(definition.facets ?? [])}\n    depth: ${definitionDepth(definition)}\n    requires: ${yamlList(definition.requires ?? [])}\n    conflicts: ${yamlList(definition.conflicts ?? [])}\n    activation: ${yamlList(definition.activation ?? [])}\n    excludes: ${yamlList(definition.excludes ?? [])}\n    invocationMode: ${definition.invocationMode ?? 'model-invoked'}\n    pathScopes: ${yamlList(definition.pathScopes ?? [])}\n    domains: ${yamlList(definition.domains)}\n    targetMedia: ${yamlList(definition.media ?? ['any'])}\n    shouldTrigger: ${yamlList(definition.should)}\n    shouldNotTrigger: ${yamlList(definition.shouldNot)}\n    evidence: ${yamlList(definition.evidence)}\n    contextBudget: ${contextBudget}\n    sourceScope: local-only\n---\n# ${definition.name}\n\n${definition.instructions}${packageResourceGuide}${playbook ? `\n\n${playbook}` : ''}\n`;
   return content.replace('__BASE_HASH__', contentFingerprint(content));
 }
 
@@ -1365,6 +1797,100 @@ function contentFingerprint(content: string): string {
 
 export function personalRoot(): string {
   return process.env.KORYPHAIOS_SKILLS_HOME || join(homedir(), '.koryphaios', 'skills');
+}
+
+// ─── Personal skill body access (user-scoped skills such as response-style) ──
+
+export interface PersonalSkillInstructions {
+  name: string;
+  path: string;
+  /** Markdown body below the `# name` heading, without frontmatter. */
+  instructions: string;
+  /** True when the body still matches the shipped default. */
+  isDefault: boolean;
+  valid: boolean;
+  errors: string[];
+}
+
+function personalSkillPath(name: string): string {
+  return join(personalRoot(), name, 'SKILL.md');
+}
+
+function bundledDefinition(name: string): SkillDefinition | undefined {
+  return BUNDLED_SKILL_DEFINITIONS.find((definition) => definition.name === name);
+}
+
+/** Body text of a SKILL.md without frontmatter or the leading `# name` heading. */
+function skillBody(content: string, name: string): string {
+  const match = content.match(/^---\n[\s\S]*?\n---\n?/);
+  const body = match ? content.slice(match[0].length) : content;
+  return body
+    .replace(new RegExp(`^\\s*# ${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\n`), '')
+    .trim();
+}
+
+/**
+ * Read the editable instructions of a personal (user-scoped) bundled skill.
+ * Seeds the skill from its bundled default if the personal copy is missing so
+ * the editor always has something to show.
+ */
+export function readPersonalSkillInstructions(name: string): PersonalSkillInstructions | null {
+  const definition = bundledDefinition(name);
+  if (!definition) return null;
+  const path = personalSkillPath(name);
+  if (!existsSync(path)) writeSeedIfWritable(path, template(definition));
+  const revision = readRevision(path, 'personal', 'active');
+  const content = revision?.content ?? (existsSync(path) ? readFileSync(path, 'utf8') : '');
+  const instructions = skillBody(content, name);
+  return {
+    name,
+    path,
+    instructions,
+    isDefault: instructions.trim() === definition.instructions.trim(),
+    valid: revision?.validation.valid ?? false,
+    errors: revision?.validation.errors ?? ['Skill file could not be read'],
+  };
+}
+
+/**
+ * Replace the instructions body of a personal bundled skill, keeping its
+ * frontmatter contract intact. The stored baseHash stops matching, which is
+ * exactly how the seeder recognizes an edited copy it must not overwrite.
+ */
+export function writePersonalSkillInstructions(
+  name: string,
+  instructions: string,
+): PersonalSkillInstructions {
+  const definition = bundledDefinition(name);
+  if (!definition) throw new Error(`Unknown bundled skill ${name}`);
+  const body = instructions.trim();
+  if (!body) throw new Error('Skill instructions cannot be empty');
+  const path = personalSkillPath(name);
+  const current = existsSync(path) ? readFileSync(path, 'utf8') : template(definition);
+  const frontmatter =
+    current.match(/^---\n[\s\S]*?\n---\n?/)?.[0] ??
+    template(definition).match(/^---\n[\s\S]*?\n---\n?/)![0];
+  const next = `${frontmatter}# ${name}\n\n${body}\n`;
+  const validation = validateSkillContent(next);
+  if (!validation.valid) {
+    throw new Error(`Skill instructions are invalid: ${validation.errors.join('; ')}`);
+  }
+  atomicWrite(path, next);
+  return readPersonalSkillInstructions(name)!;
+}
+
+/** Restore a personal bundled skill to its shipped default. */
+export function resetPersonalSkillInstructions(name: string): PersonalSkillInstructions {
+  const definition = bundledDefinition(name);
+  if (!definition) throw new Error(`Unknown bundled skill ${name}`);
+  atomicWrite(personalSkillPath(name), template(definition));
+  return readPersonalSkillInstructions(name)!;
+}
+
+/** True when the personal skill exists and parses cleanly enough to be pinned. */
+export function isPersonalSkillPinnable(name: string): boolean {
+  const revision = readRevision(personalSkillPath(name), 'personal', 'active');
+  return revision !== null && revision.validation.valid;
 }
 
 function atomicWrite(path: string, content: string | Uint8Array): void {
@@ -1610,7 +2136,84 @@ function writeSeedIfWritable(path: string, content: string): boolean {
   }
 }
 
+/** Marker tracking which bundled library version seeded a personal skills root. */
+const SEED_STATE_FILENAME = '.seed-state.json';
+const SEED_STATE_SCHEMA_VERSION = 2;
+
+let bundledSeedFingerprint: string | null = null;
+
+function currentBundledSeedFingerprint(): string {
+  if (!bundledSeedFingerprint) {
+    bundledSeedFingerprint = sha256(
+      BUNDLED_SKILL_DEFINITIONS.map((definition) => contentFingerprint(template(definition))).join(
+        '\n',
+      ),
+    );
+  }
+  return bundledSeedFingerprint;
+}
+
+interface SeedStateMarker {
+  librarySize?: unknown;
+  bundledVersion?: unknown;
+  seedSchemaVersion?: unknown;
+}
+
+function readSeedStateMarker(root: string): SeedStateMarker | null {
+  try {
+    return JSON.parse(readFileSync(join(root, SEED_STATE_FILENAME), 'utf8')) as SeedStateMarker;
+  } catch {
+    return null;
+  }
+}
+
+function seedLibraryComplete(root: string): boolean {
+  // Metadata-only sweep: ~180 existsSync stats, no SKILL.md parses. This is
+  // the cheap per-call check that replaces ~180 readRevision parses when the
+  // library is already seeded at the current bundled version.
+  return BUNDLED_SKILL_DEFINITIONS.every((definition) =>
+    existsSync(join(root, definition.name, 'SKILL.md')),
+  );
+}
+
+function writeSeedStateMarker(root: string): void {
+  try {
+    writeFileSync(
+      join(root, SEED_STATE_FILENAME),
+      `${JSON.stringify(
+        {
+          seedSchemaVersion: SEED_STATE_SCHEMA_VERSION,
+          librarySize: BUNDLED_SKILL_DEFINITIONS.length,
+          bundledVersion: currentBundledSeedFingerprint(),
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+  } catch {
+    // A read-only or racy skills home must not fail skill resolution; the next
+    // call simply re-runs the seed sweep.
+  }
+}
+
 export function seedDefaultSkills(): void {
+  const root = personalRoot();
+  const marker = readSeedStateMarker(root);
+  // Cheap guard: listSkills() calls this on every resolution, but seeding is
+  // only needed when skills are missing or the bundled version moved (version
+  // mismatch). One marker read plus a metadata-only presence sweep replaces
+  // ~180 readRevision parses per call. Note the v5 audit ledger
+  // (skills-v5/audit-ledger.json) is project-scoped; this marker tracks the
+  // personal library the seeder actually writes.
+  if (
+    marker?.seedSchemaVersion === SEED_STATE_SCHEMA_VERSION &&
+    marker?.librarySize === BUNDLED_SKILL_DEFINITIONS.length &&
+    marker?.bundledVersion === currentBundledSeedFingerprint() &&
+    seedLibraryComplete(root)
+  ) {
+    return;
+  }
   const definitionAudit = auditBundledSkillDefinitions();
   if (!definitionAudit.valid) {
     throw new Error(`Bundled skill definitions are invalid: ${definitionAudit.errors.join('; ')}`);
@@ -1632,6 +2235,13 @@ export function seedDefaultSkills(): void {
     // content and flow through the explicit replace/merge/keep-local UI.
     const local = readRevision(path, 'personal', 'active');
     const legacyBodyHash = sha256(local?.instructions.replace(/^# .+\n+/, '').trim() ?? '');
+    const generatedDefinition = GENERATED_BUNDLED_SKILL_DEFINITIONS.find(
+      (candidate) => candidate.name === definition.name,
+    );
+    const generatedUntouched =
+      local !== null &&
+      generatedDefinition !== undefined &&
+      local.content.trim() === template(generatedDefinition).trim();
     const legacyUntouched =
       local?.metadata.baseHash === legacyBodyHash &&
       local.metadata.parent === definition.broader?.[0] &&
@@ -1641,11 +2251,16 @@ export function seedDefaultSkills(): void {
       JSON.stringify(local.metadata.targetMedia) === JSON.stringify(definition.media ?? ['any']);
     if (
       local?.metadata.baseHash &&
-      (local.metadata.baseHash === contentFingerprint(local.content) || legacyUntouched)
+      (local.metadata.baseHash === contentFingerprint(local.content) ||
+        legacyUntouched ||
+        generatedUntouched)
     ) {
       writeSeedIfWritable(path, template(definition));
     }
   }
+  // Record the seeded version only when the library is actually complete, so a
+  // partial (read-only FS, crash) seed retries instead of being skipped.
+  if (seedLibraryComplete(root)) writeSeedStateMarker(root);
 }
 
 /**
@@ -1807,6 +2422,9 @@ function revisionFromContent(
       conflicts: list(frontmatter, 'conflicts'),
       activation: list(frontmatter, 'activation'),
       excludes: list(frontmatter, 'excludes'),
+      invocationMode:
+        scalar(frontmatter, 'invocationMode') === 'user-invoked' ? 'user-invoked' : 'model-invoked',
+      pathScopes: list(frontmatter, 'pathScopes'),
       domains: list(frontmatter, 'domains'),
       targetMedia: list(frontmatter, 'targetMedia'),
       shouldTrigger: list(frontmatter, 'shouldTrigger'),
@@ -1844,6 +2462,8 @@ function emptySkillMetadata(): KorySkillMetadata {
     conflicts: [],
     activation: [],
     excludes: [],
+    invocationMode: 'model-invoked',
+    pathScopes: [],
     domains: [],
     targetMedia: [],
     shouldTrigger: [],
@@ -1942,6 +2562,8 @@ function safeV2Metadata(input: unknown, errors: string[]): KorySkillMetadata {
   const conflicts = stringList('conflicts');
   const activation = stringList('activation');
   const excludes = stringList('excludes');
+  const invocationMode = value.invocationMode;
+  const pathScopes = stringList('pathScopes');
   const domains = stringList('domains');
   const targetMedia = stringList('targetMedia');
   const shouldTrigger = stringList('shouldTrigger');
@@ -1960,6 +2582,9 @@ function safeV2Metadata(input: unknown, errors: string[]): KorySkillMetadata {
     errors.push('contextBudget must be an integer from 100 to 20000');
   }
   if (value.sourceScope !== 'local-only') errors.push('sourceScope must be local-only');
+  if (invocationMode !== 'model-invoked' && invocationMode !== 'user-invoked') {
+    errors.push('metadata.invocationMode must be model-invoked or user-invoked');
+  }
   if (!version || !baseVersion || !baseHash) {
     errors.push('metadata version, baseVersion, and baseHash are required');
   }
@@ -1979,6 +2604,8 @@ function safeV2Metadata(input: unknown, errors: string[]): KorySkillMetadata {
     conflicts,
     activation,
     excludes,
+    invocationMode: invocationMode === 'user-invoked' ? 'user-invoked' : 'model-invoked',
+    pathScopes,
     domains,
     targetMedia,
     shouldTrigger,
@@ -2544,6 +3171,17 @@ export interface SkillTriggerDecision {
   evidenceUsed: string[];
 }
 
+function isGeneratedRoutingFrameExample(example: string): boolean {
+  const normalized = example.trim().toLowerCase();
+  return [
+    /^please handle .+\.?$/u,
+    /^the current task is .+\.?$/u,
+    /^i need help with .+\.?$/u,
+    /^work on .+ for this request\.?$/u,
+    /^this request specifically requires .+\.?$/u,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 function evidenceMatch(skill: SkillRevision, evidence?: SkillEvidence): string[] {
   if (!evidence) return [];
   const matches: string[] = [];
@@ -2618,9 +3256,36 @@ export function evaluateSkillTrigger(
   targetMedium?: string,
   evidence?: SkillEvidence,
 ): SkillTriggerDecision {
-  const promptTokens = normalizeSkillTokens(prompt);
+  const relevantPrompt = routingRelevantText(prompt);
+  const promptTokens = normalizeSkillTokens(relevantPrompt);
+  const clauses = routingClauses(relevantPrompt).map(normalizeSkillTokens);
+  const positivePhrase = (term: string) => {
+    // A final explicit scope restriction governs an earlier background mention.
+    // A later affirmative request can still supersede an earlier prohibition.
+    const matching = clauses.filter((tokens) => containsTokenPhrase(tokens, term));
+    const latest = matching.at(-1);
+    return Boolean(latest && !isPhraseNegated(latest, term));
+  };
   if (skill.name === 'task-routing') {
     return { matched: true, reason: 'Universal task-routing contract', evidenceUsed: [] };
+  }
+  if (isConceptualExplanationOnlyTask(prompt, contract)) {
+    return {
+      matched: false,
+      reason: 'Rejected: conceptual explanation only; no procedural specialty is requested',
+      evidenceUsed: ['scope:conceptual-explanation-only'],
+    };
+  }
+  if (
+    isSuppliedArtifactOnlyTask(prompt) &&
+    (skill.metadata.domains.includes('code') || skill.metadata.broader.includes('implementation'))
+  ) {
+    return {
+      matched: false,
+      reason:
+        'Rejected: supplied-artifact transformation does not request implementation of its subject',
+      evidenceUsed: ['scope:supplied-artifact-only'],
+    };
   }
   // A user-confirmed medium is stronger evidence than a coincidental keyword
   // in the request (for example, "do not assume web technologies").
@@ -2650,7 +3315,11 @@ export function evaluateSkillTrigger(
       evidenceUsed: negatedMedia.map((medium) => `negated-medium:${medium}`),
     };
   }
-  const exclusion = skill.metadata.excludes.find((term) => containsTokenPhrase(promptTokens, term));
+  // Exclusions are task boundaries, so a phrase mentioned only inside a
+  // negated scope clause must not veto an otherwise live request. Reuse the
+  // same latest-clause semantics as activation phrases so "without changing
+  // deployment mechanics" does not behave like "change deployment mechanics".
+  const exclusion = skill.metadata.excludes.find(positivePhrase);
   if (exclusion)
     return {
       matched: false,
@@ -2658,14 +3327,49 @@ export function evaluateSkillTrigger(
       evidenceUsed: [`exclusion:${exclusion}`],
     };
 
-  const activation = skill.metadata.activation.find((term) =>
-    containsTokenPhrase(promptTokens, term),
+  // `shouldNotTrigger` examples are executable routing boundaries, not merely
+  // documentation. Reject exact embedded cases and very high-coverage
+  // paraphrases before a narrower activation phrase inside the negative case
+  // can win (for example, "CDN cache ... remains unchanged").
+  const promptWords = new Set(
+    promptTokens.filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
   );
+  const negativeExample = skill.metadata.shouldNotTrigger.find((example) => {
+    if (containsTokenPhrase(promptTokens, example)) return true;
+    const exampleWords = unique(
+      normalizeSkillTokens(example).filter(
+        (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
+      ),
+    );
+    if (exampleWords.length < 6) return false;
+    const overlapping = exampleWords.filter((word) => promptWords.has(word));
+    const specificOverlap = overlapping.filter((word) => !GENERIC_TRIGGER_WORDS.has(word));
+    return overlapping.length / exampleWords.length >= 0.82 && specificOverlap.length >= 3;
+  });
+  if (negativeExample) {
+    return {
+      matched: false,
+      reason: `Rejected: matched non-trigger example boundary "${negativeExample}"`,
+      evidenceUsed: [`negative-example:${negativeExample}`],
+    };
+  }
+
+  const activation = skill.metadata.activation.find(positivePhrase);
   if (activation) {
     return {
       matched: true,
       reason: `Matched trigger phrase "${activation}"`,
       evidenceUsed: [`trigger:${activation}`],
+    };
+  }
+  const negatedActivation = skill.metadata.activation.find(
+    (term) => containsTokenPhrase(promptTokens, term) && !positivePhrase(term),
+  );
+  if (negatedActivation) {
+    return {
+      matched: false,
+      reason: `Rejected: trigger phrase "${negatedActivation}" is explicitly negated`,
+      evidenceUsed: [`negated-trigger:${negatedActivation}`],
     };
   }
 
@@ -2675,6 +3379,15 @@ export function evaluateSkillTrigger(
       matched: true,
       reason: `Matched collected ${collectedEvidence.join(', ')} evidence`,
       evidenceUsed: collectedEvidence,
+    };
+  }
+
+  const pathScope = matchingPathScope(skill, evidence);
+  if (pathScope) {
+    return {
+      matched: true,
+      reason: `Matched active repository path scope "${pathScope}"`,
+      evidenceUsed: [`path-scope:${pathScope}`],
     };
   }
 
@@ -2691,9 +3404,6 @@ export function evaluateSkillTrigger(
     };
   }
 
-  const promptWords = new Set(
-    promptTokens.filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
-  );
   for (const example of skill.metadata.shouldTrigger) {
     if (containsTokenPhrase(promptTokens, example)) {
       return {
@@ -2702,20 +3412,24 @@ export function evaluateSkillTrigger(
         evidenceUsed: [`example:${example}`],
       };
     }
-    if (skill.metadata.activation.length > 0) continue;
+    // Generated V5 routing examples deliberately reuse a small set of framing
+    // sentences. Their discriminating phrase is already represented in
+    // `activation`, so fuzzy matching the whole scaffold would let words such
+    // as "task", "request", or "engineering" route unrelated specialties.
+    if (isGeneratedRoutingFrameExample(example)) continue;
     const exampleWords = unique(
       normalizeSkillTokens(example).filter(
         (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
       ),
     );
-    const overlapping = exampleWords.filter((word) => promptWords.has(word));
-    const specificOverlap = overlapping.filter((word) => !GENERIC_TRIGGER_WORDS.has(word));
-    const threshold = Math.max(1, Math.ceil(exampleWords.length * 0.6));
-    if (exampleWords.length > 0 && overlapping.length >= threshold && specificOverlap.length > 0) {
+    const specificExampleWords = exampleWords.filter((word) => !GENERIC_TRIGGER_WORDS.has(word));
+    const specificOverlap = specificExampleWords.filter((word) => promptWords.has(word));
+    const threshold = Math.max(1, Math.ceil(specificExampleWords.length * 0.6));
+    if (specificExampleWords.length > 0 && specificOverlap.length >= threshold) {
       return {
         matched: true,
-        reason: `Matched trigger-example terms: ${overlapping.slice(0, 4).join(', ')}`,
-        evidenceUsed: overlapping.map((word) => `example-token:${word}`),
+        reason: `Matched trigger-example terms: ${specificOverlap.slice(0, 4).join(', ')}`,
+        evidenceUsed: specificOverlap.map((word) => `example-token:${word}`),
       };
     }
   }
@@ -2789,6 +3503,16 @@ export function validateSkillHierarchy(skills: SkillRevision[]): string[] {
       ...skill.metadata.facets,
       ...skill.metadata.requires,
     ]);
+    // Local edits and imported revisions must obey the same invocation
+    // boundary as bundled packages. Requesting one explicit skill does not
+    // implicitly request a second explicit skill through its dependencies.
+    for (const relation of includedRelations) {
+      if (byName.get(relation)?.metadata.invocationMode === 'user-invoked') {
+        hierarchyErrors.push(
+          `${skill.name}: ${skill.metadata.invocationMode} composition cannot implicitly depend on user-invoked skill ${relation}`,
+        );
+      }
+    }
     for (const conflict of skill.metadata.conflicts) {
       if (includedRelations.has(conflict)) {
         hierarchyErrors.push(`${skill.name} both includes and conflicts with ${conflict}`);
@@ -2886,6 +3610,19 @@ export function validateSkillHierarchy(skills: SkillRevision[]): string[] {
     }
   }
   return [...new Set(hierarchyErrors)];
+}
+
+export function partitionRuntimeSkillHierarchyIssues(issues: string[]): {
+  errors: string[];
+  warnings: string[];
+} {
+  const depthIssues = issues.filter(
+    (issue) => issue.includes(' declares depth ') && issue.includes(', expected '),
+  );
+  return {
+    errors: issues.filter((issue) => !depthIssues.includes(issue)),
+    warnings: depthIssues.map((issue) => `Skill metadata warning: ${issue}`),
+  };
 }
 
 export function activateSkill(
@@ -3037,12 +3774,37 @@ function withoutSkillTitle(instructions: string): string {
   return instructions.replace(/^#\s+[^\n]+\n+/, '').trim();
 }
 
+function hierarchyBreadcrumbs(
+  skill: SkillRevision,
+  representation: SkillRepresentation,
+  availableSkills: readonly SkillRevision[],
+): string[] {
+  const narrower = availableSkills
+    .filter((candidate) => candidate.metadata.broader.includes(skill.name))
+    .map((candidate) => candidate.name)
+    .sort();
+  // Minimal is the context-pressure fallback. Hierarchy closure is still
+  // enforced by the resolver; compact/full forms expose the readable graph.
+  if (representation === 'minimal') return [];
+  const visibleNarrower = representation === 'compact' ? narrower.slice(0, 6) : narrower;
+  const hiddenNarrower = narrower.length - visibleNarrower.length;
+  return [
+    skill.metadata.broader.length ? `Broader skills: ${skill.metadata.broader.join(', ')}` : '',
+    skill.metadata.facets.length ? `Cross-cutting facets: ${skill.metadata.facets.join(', ')}` : '',
+    visibleNarrower.length
+      ? `Narrower available skills: ${visibleNarrower.join(', ')}${hiddenNarrower > 0 ? ` (+${hiddenNarrower} more)` : ''}. Prefer a narrower child when the task establishes that child boundary; keep the broader skill for shared invariants.`
+      : '',
+  ].filter(Boolean);
+}
+
 function representationInstructions(
   skill: SkillRevision,
   representation: SkillRepresentation,
+  availableSkills: readonly SkillRevision[],
 ): string {
   if (skill.storageVersion === 2) {
     const boundaries = [
+      ...hierarchyBreadcrumbs(skill, representation, availableSkills),
       skill.metadata.requires.length
         ? `Required skills: ${skill.metadata.requires.join(', ')}`
         : '',
@@ -3052,14 +3814,20 @@ function representationInstructions(
     ]
       .filter(Boolean)
       .join('\n');
-    const evidence = skill.metadata.evidence.slice(0, representation === 'minimal' ? 3 : 6);
+    const evidence = skill.metadata.evidence.slice(0, representation === 'minimal' ? 2 : 6);
+    const operatingContract = `Mandatory operating contract (format-neutral core):\n${skill.coreInstructions}`;
     if (representation === 'full') {
-      return [skill.sourceContent, boundaries, `Completion evidence: ${evidence.join('; ')}`]
+      return [
+        operatingContract,
+        skill.sourceContent.trim() === skill.coreInstructions.trim() ? '' : skill.sourceContent,
+        boundaries,
+        `Completion evidence: ${evidence.join('; ')}`,
+      ]
         .filter(Boolean)
         .join('\n\n');
     }
     return [
-      `Mandatory operating contract (format-neutral core):\n${skill.coreInstructions}`,
+      operatingContract,
       boundaries,
       `Completion evidence: ${evidence.join('; ') || 'Task-specific proof'}`,
     ]
@@ -3067,20 +3835,39 @@ function representationInstructions(
       .join(representation === 'compact' ? '\n\n' : '\n');
   }
   const instructions = withoutSkillTitle(skill.instructions);
+  const v5Package = V5_SKILL_PACKAGES_BY_NAME.get(skill.name);
+  // Remove only the exact generated suffix. A same-named section or additions
+  // after it can be user-authored instructions and must never be discarded.
+  const generatedResourceSuffix = v5Package?.supportingResources.length
+    ? `\n\n## Kory package resources\n\nRoot: ${JSON.stringify(v5Package.directory)}. Resolve links there; read selectively. The presence of scripts or other files does not grant execution authority.`
+    : '';
+  const instructionsWithoutPackageResources =
+    generatedResourceSuffix && instructions.endsWith(generatedResourceSuffix)
+      ? instructions.slice(0, -generatedResourceSuffix.length).trim()
+      : instructions;
+  const v5RuntimeInstructions = v5Package
+    ? withoutSkillTitle(instructionsWithoutPackageResources)
+    : instructionsWithoutPackageResources;
+  const packageResourceHint = v5Package?.supportingResources.length
+    ? `Package resources: ${v5Package.directory}. Read only the source/reference needed for the current task.`
+    : '';
   const bundledPlaybook = skillPlaybook(skill.name).trim();
-  const [corePart, ...professionalParts] = instructions.split(/\n##\s+Professional practice\b/);
+  const [corePart, ...professionalParts] = instructionsWithoutPackageResources.split(
+    /\n##\s+Professional practice\b/,
+  );
   const hasIntactBundledPlaybook =
-    bundledPlaybook.length > 0 && instructions.endsWith(bundledPlaybook);
+    bundledPlaybook.length > 0 && instructionsWithoutPackageResources.endsWith(bundledPlaybook);
   const core = (
     hasIntactBundledPlaybook
-      ? instructions.slice(0, -bundledPlaybook.length)
-      : (corePart ?? instructions)
+      ? instructionsWithoutPackageResources.slice(0, -bundledPlaybook.length)
+      : (corePart ?? instructionsWithoutPackageResources)
   ).trim();
   const professional = hasIntactBundledPlaybook
     ? bundledPlaybook
     : professionalParts.join('\n## Professional practice').trim();
   const evidence = skill.metadata.evidence.slice(0, 6).join('; ') || 'Task-specific proof';
   const boundaries = [
+    ...hierarchyBreadcrumbs(skill, representation, availableSkills),
     skill.metadata.requires.length ? `Required skills: ${skill.metadata.requires.join(', ')}` : '',
     skill.metadata.excludes.length
       ? `Do not activate for: ${skill.metadata.excludes.join('; ')}`
@@ -3090,7 +3877,18 @@ function representationInstructions(
     .join('\n');
   const footer = [boundaries, `Completion evidence: ${evidence}`].filter(Boolean).join('\n\n');
   if (representation === 'full') {
-    return [skill.instructions, footer].filter(Boolean).join('\n\n');
+    return [v5Package ? v5RuntimeInstructions : skill.instructions, packageResourceHint, footer]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+  if (v5Package) {
+    // Progressive disclosure selects packages and conditional resources. It
+    // must not cut sentences, drop later prohibitions, flatten code, or guess
+    // which author-written constraints are expendable. Pressure only reduces
+    // discovery metadata; mandatory entrypoints remain complete or fail closed.
+    return [v5RuntimeInstructions, packageResourceHint, footer]
+      .filter(Boolean)
+      .join(representation === 'compact' ? '\n\n' : '\n');
   }
   if (representation === 'compact') {
     const professionalSummary = professional
@@ -3109,8 +3907,8 @@ function representationInstructions(
   }
   const minimalEvidence =
     skill.metadata.evidence
-      .slice(0, 3)
-      .map((item) => item.slice(0, 120))
+      .slice(0, 2)
+      .map((item) => item.slice(0, 90))
       .join('; ') || 'Task-specific proof';
   return [
     `Mandatory operating contract (lossless core):\n${core}`,
@@ -3125,8 +3923,16 @@ function renderSkillPromptBlock(
   skill: SkillRevision,
   reason: string,
   representation: SkillRepresentation,
+  availableSkills: readonly SkillRevision[],
 ): string {
-  return `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${representation})\nReason: ${reason}\n${representationInstructions(skill, representation)}`;
+  const reasonLine = representation === 'minimal' ? '' : `Reason: ${reason}`;
+  return [
+    `### ${skill.name} v${skill.metadata.version} (${skill.source}; ${representation})`,
+    reasonLine,
+    representationInstructions(skill, representation, availableSkills),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function skillManifest(selected: ResolvedSkill[]) {
@@ -3181,10 +3987,18 @@ export function resolveSkills(
     collisionChoices?: Record<string, SkillSource>;
     targetMedium?: string;
     contextBudget?: number;
+    skillRevisions?: readonly SkillRevision[];
+    activePaths?: string[];
   } = {},
 ): SkillResolverResult {
-  const evidence = collectSkillEvidence(projectRoot, prompt, contract, options.targetMedium);
-  const listed = listSkills(projectRoot);
+  const evidence = collectSkillEvidence(
+    projectRoot,
+    prompt,
+    contract,
+    options.targetMedium,
+    options.activePaths,
+  );
+  const listed = options.skillRevisions ? [...options.skillRevisions] : listSkills(projectRoot);
   const active = listed.filter((skill) => skill.state === 'active' && skill.validation.valid);
   const candidateRejections = new Map<string, string>();
   for (const skill of listed.filter(
@@ -3218,10 +4032,16 @@ export function resolveSkills(
       candidates.push(explicit ?? defaultSelection);
     }
   }
-  const removed = new Set(options.remove ?? []);
-  const pins = new Set(options.pins ?? []);
   const byName = new Map(candidates.map((skill) => [skill.name, skill]));
-  const hierarchyErrors = validateSkillHierarchy(candidates);
+  const removed = new Set(options.remove ?? []);
+  const pins = new Set([
+    ...(options.pins ?? []),
+    ...explicitSkillPinsFromPrompt(prompt, byName.keys()),
+  ]);
+  const hierarchyValidation = partitionRuntimeSkillHierarchyIssues(
+    validateSkillHierarchy(candidates),
+  );
+  const hierarchyErrors = hierarchyValidation.errors;
   const directDecisions = new Map<string, SkillTriggerDecision>();
   for (const skill of candidates) {
     if (removed.has(skill.name)) {
@@ -3234,6 +4054,10 @@ export function resolveSkills(
         reason: 'Pinned explicitly for this task',
         evidenceUsed: ['pin'],
       });
+      continue;
+    }
+    if (skill.metadata.invocationMode === 'user-invoked') {
+      candidateRejections.set(skill.name, 'Rejected: skill requires explicit user invocation');
       continue;
     }
     const decision = evaluateSkillTrigger(skill, prompt, contract, options.targetMedium, evidence);
@@ -3263,6 +4087,32 @@ export function resolveSkills(
     if (removed.has(name)) hierarchyErrors.push(`Skill ${name} cannot be both pinned and removed`);
     else if (!byName.has(name))
       hierarchyErrors.push(`Pinned skill ${name} is unavailable or invalid`);
+  }
+
+  // If a more-specific child is already a direct match, do not also claim that
+  // its broader parent was independently requested merely because the prompt
+  // contains one generic parent token (for example `typography` while doing a
+  // rendered-state visual verification). The parent still enters the bundle
+  // through normal hierarchy expansion, so guidance is preserved while direct
+  // routing provenance stays precise. Multi-token parent activations, pins and
+  // required-core selections remain direct because they carry stronger intent.
+  for (const [parentName, decision] of [...directDecisions]) {
+    if (pins.has(parentName) || requiredCore.includes(parentName)) continue;
+    const trigger = decision.evidenceUsed.find((item) => item.startsWith('trigger:'))?.slice(8);
+    if (!trigger || normalizeSkillTokens(trigger).length !== 1) continue;
+    const hasDirectChild = candidates.some(
+      (candidate) =>
+        candidate.name !== parentName &&
+        directDecisions.has(candidate.name) &&
+        candidate.metadata.broader.includes(parentName),
+    );
+    if (hasDirectChild) {
+      directDecisions.delete(parentName);
+      candidateRejections.set(
+        parentName,
+        `Rejected as direct match: broader parent is already selected through a more-specific child`,
+      );
+    }
   }
 
   const directlySelected = candidates.filter((skill) => directDecisions.has(skill.name));
@@ -3331,17 +4181,32 @@ export function resolveSkills(
   });
   const ordered: SkillRevision[] = [];
   const orderedNames = new Set<string>();
+  const ordering = new Set<string>();
   const appendWithDependencies = (skill: SkillRevision): void => {
-    if (orderedNames.has(skill.name)) return;
+    if (orderedNames.has(skill.name) || ordering.has(skill.name)) return;
+    ordering.add(skill.name);
     for (const name of [...skill.metadata.broader, ...skill.metadata.requires]) {
       const dependency = expanded.get(name);
       if (dependency) appendWithDependencies(dependency);
     }
     orderedNames.add(skill.name);
+    ordering.delete(skill.name);
     ordered.push(skill);
   };
   roots.forEach(appendWithDependencies);
-  const mandatory = new Set<string>(directlySelected.map((skill) => skill.name));
+  // Broad task-kind matches are routing defaults rather than mandatory
+  // context. Explicit/evidence/medium selections remain mandatory, as do the
+  // core execution skills and pins; hierarchy dependencies are closed below.
+  const mandatory = new Set<string>([
+    ...requiredCore,
+    ...pins,
+    ...directlySelected
+      .filter((skill) => {
+        const evidenceUsed = directDecisions.get(skill.name)?.evidenceUsed ?? [];
+        return !(evidenceUsed.length === 1 && evidenceUsed[0]?.startsWith('task-kind:'));
+      })
+      .map((skill) => skill.name),
+  ]);
   const markDependencies = (name: string): void => {
     const skill = byName.get(name);
     if (!skill) return;
@@ -3357,12 +4222,22 @@ export function resolveSkills(
     }
   };
   [...mandatory].forEach(markDependencies);
-  const contextBudget = Math.max(1, options.contextBudget ?? 30_000);
+  // The budget floor keeps tiny remaining windows usable: mandatory guidance
+  // renders minimal and any overflow degrades to a warning (see below) instead
+  // of collapsing to `max(1, …)` and throwing Mandatory skill guidance.
+  const contextBudget = Math.max(
+    MIN_SKILL_CONTEXT_BUDGET,
+    Math.floor(options.contextBudget ?? MAX_SKILL_CONTEXT_BUDGET),
+  );
   const reasonFor = (skill: SkillRevision): string => {
     const directReason = directDecisions.get(skill.name)?.reason;
     if (directReason) return directReason;
     const reasons = relationReasons.get(skill.name) ?? [];
-    return reasons.length > 0 ? reasons.slice(0, 3).join('; ') : 'Selected hierarchy dependency';
+    // One provenance edge is enough to explain why a transitive dependency is
+    // present. Concatenating every inbound edge makes the rendered guidance
+    // size depend on how many siblings happened to select the same parent and
+    // can push an otherwise valid complete entrypoint over its package budget.
+    return reasons[0] ?? 'Selected hierarchy dependency';
   };
   const representations = new Map<
     string,
@@ -3371,9 +4246,9 @@ export function resolveSkills(
   for (const skill of ordered) {
     const reason = reasonFor(skill);
     representations.set(skill.name, {
-      full: { block: renderSkillPromptBlock(skill, reason, 'full'), cost: 0 },
-      compact: { block: renderSkillPromptBlock(skill, reason, 'compact'), cost: 0 },
-      minimal: { block: renderSkillPromptBlock(skill, reason, 'minimal'), cost: 0 },
+      full: { block: renderSkillPromptBlock(skill, reason, 'full', candidates), cost: 0 },
+      compact: { block: renderSkillPromptBlock(skill, reason, 'compact', candidates), cost: 0 },
+      minimal: { block: renderSkillPromptBlock(skill, reason, 'minimal', candidates), cost: 0 },
     });
     const variants = representations.get(skill.name)!;
     for (const representation of ['full', 'compact', 'minimal'] as const) {
@@ -3381,9 +4256,10 @@ export function resolveSkills(
     }
   }
 
-  const included: SkillRevision[] = [];
+  const includedNames = new Set<string>();
   const chosenRepresentation = new Map<string, SkillRepresentation>();
   const omittedByBudget: string[] = [];
+  const minimalOverSkillBudget = new Map<string, string>();
   const materialize = (
     skills: SkillRevision[],
     choices: Map<string, SkillRepresentation>,
@@ -3394,10 +4270,11 @@ export function resolveSkills(
       const variants = representations.get(skill.name)!;
       const prefix = index > 0 ? '\n\n' : '';
       const promptText = `${prefix}${variants[representation].block}`;
-      const fullContextCost = prefix.length + variants.full.cost;
+      const fullContextCost = Math.max(prefix.length + variants.full.cost, promptText.length);
       return {
         skill,
         reason,
+        directSelection: directDecisions.has(skill.name),
         representation,
         promptText,
         contextCost: promptText.length,
@@ -3405,51 +4282,71 @@ export function resolveSkills(
         omittedDetailChars: Math.max(0, fullContextCost - promptText.length),
       };
     });
+  // Reserve the complete mandatory closure before considering optional routing
+  // defaults. Otherwise an optional skill encountered early can fit against a
+  // partial bundle, only for later mandatory skills to push the final prompt
+  // over budget.
+  for (const skill of ordered.filter((item) => mandatory.has(item.name))) {
+    const variants = representations.get(skill.name)!;
+    includedNames.add(skill.name);
+    chosenRepresentation.set(skill.name, 'minimal');
+    // Deferred: a pruned lazy ancestor must not fail the turn for a per-skill
+    // budget its dependents no longer need. Errors are reported below only for
+    // skills that survive pruning.
+    if (variants.minimal.cost > skill.metadata.contextBudget) {
+      minimalOverSkillBudget.set(
+        skill.name,
+        `Mandatory skill ${skill.name} minimal representation exceeds its ${skill.metadata.contextBudget}-character skill budget`,
+      );
+    }
+  }
+
   for (const skill of ordered) {
+    if (mandatory.has(skill.name)) continue;
     const variants = representations.get(skill.name)!;
     const dependencies = [...skill.metadata.broader, ...skill.metadata.requires].filter((name) =>
       expanded.has(name),
     );
-    const dependencyMissing = dependencies.some(
-      (name) => !included.some((item) => item.name === name),
-    );
-    if (mandatory.has(skill.name)) {
-      included.push(skill);
+    const dependencyMissing = dependencies.some((name) => !includedNames.has(name));
+    const trialIncludedNames = new Set(includedNames).add(skill.name);
+    const trialSkills = ordered.filter((item) => trialIncludedNames.has(item.name));
+    const trialChoices = new Map(chosenRepresentation).set(skill.name, 'minimal');
+    const trialCost = renderResolvedSkillSection(
+      materialize(trialSkills, trialChoices),
+    ).totalContextCost;
+    if (
+      !dependencyMissing &&
+      variants.minimal.cost <= skill.metadata.contextBudget &&
+      trialCost <= contextBudget
+    ) {
+      includedNames.add(skill.name);
       chosenRepresentation.set(skill.name, 'minimal');
-      if (variants.minimal.cost > skill.metadata.contextBudget) {
-        hierarchyErrors.push(
-          `Mandatory skill ${skill.name} minimal representation exceeds its ${skill.metadata.contextBudget}-character skill budget`,
-        );
-      }
     } else {
-      const trialSkills = [...included, skill];
-      const trialChoices = new Map(chosenRepresentation).set(skill.name, 'minimal');
-      const trialCost = renderResolvedSkillSection(
-        materialize(trialSkills, trialChoices),
-      ).totalContextCost;
-      if (
-        !dependencyMissing &&
-        variants.minimal.cost <= skill.metadata.contextBudget &&
-        trialCost <= contextBudget
-      ) {
-        included.push(skill);
-        chosenRepresentation.set(skill.name, 'minimal');
-      } else {
-        omittedByBudget.push(skill.name);
-        candidateRejections.set(
-          skill.name,
-          `Rejected: ${dependencyMissing ? 'required hierarchy dependency was not selected' : 'omitted by context budget'}`,
-        );
-      }
+      omittedByBudget.push(skill.name);
+      candidateRejections.set(
+        skill.name,
+        `Rejected: ${dependencyMissing ? 'required hierarchy dependency was not selected' : 'omitted by context budget'}`,
+      );
     }
   }
 
-  const upgradeOrder = [...included].sort((left, right) => {
-    const priority = routingPriority(right) - routingPriority(left);
-    return (
-      priority || right.metadata.depth - left.metadata.depth || left.name.localeCompare(right.name)
-    );
-  });
+  const included = ordered.filter((skill) => includedNames.has(skill.name));
+
+  const upgradeOrder = [...included]
+    // Lazy hierarchy: only directly-selected skills are eligible for
+    // compact/full upgrades. Auto-included parents/requires/facets default to
+    // minimal and stay there — full detail is one load_skill_detail call away —
+    // so closure expansion costs ~minimal per ancestor instead of 8–20k chars
+    // of full text per turn per role.
+    .filter((skill) => directlySelectedNames.has(skill.name))
+    .sort((left, right) => {
+      const priority = routingPriority(right) - routingPriority(left);
+      return (
+        priority ||
+        right.metadata.depth - left.metadata.depth ||
+        left.name.localeCompare(right.name)
+      );
+    });
   for (const skill of upgradeOrder) {
     const variants = representations.get(skill.name)!;
     for (const next of ['compact', 'full'] as const) {
@@ -3466,7 +4363,57 @@ export function resolveSkills(
     }
   }
 
-  const selected = materialize(included, chosenRepresentation);
+  // Lazy-hierarchy prune: drop only auto-included parents/requires/facets that
+  // became orphans after an optional dependent was omitted by budget. Never
+  // prune a live dependency: the selected manifest must remain hierarchy closed
+  // even when both the dependency and its dependent render minimally.
+  const hierarchyAdded = new Set(
+    [...expanded.keys()].filter((name) => !directlySelectedNames.has(name)),
+  );
+  const omittedLazyAncestors: string[] = [];
+  if (hierarchyAdded.size > 0) {
+    let trialSelected = materialize(included, chosenRepresentation);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const includedSet = new Set(trialSelected.map((item) => item.skill.name));
+      for (const name of [...hierarchyAdded]) {
+        if (!includedNames.has(name)) {
+          hierarchyAdded.delete(name);
+          continue;
+        }
+        const liveDependents = trialSelected
+          .filter((item) => item.skill.name !== name && includedSet.has(item.skill.name))
+          .filter(
+            (item) =>
+              item.skill.metadata.broader.includes(name) ||
+              item.skill.metadata.requires.includes(name) ||
+              (facetReasons.get(name) ?? []).includes(item.skill.name),
+          )
+          .map((item) => item.skill.name);
+        const orphaned = liveDependents.length === 0;
+        if (orphaned) {
+          includedNames.delete(name);
+          chosenRepresentation.delete(name);
+          mandatory.delete(name);
+          omittedLazyAncestors.push(name);
+          hierarchyAdded.delete(name);
+          changed = true;
+        }
+      }
+      if (changed) {
+        const stillIncluded = ordered.filter((skill) => includedNames.has(skill.name));
+        trialSelected = materialize(stillIncluded, chosenRepresentation);
+      }
+    }
+  }
+
+  const finalIncluded = ordered.filter((skill) => includedNames.has(skill.name));
+  // Report deferred per-skill budget errors only for surviving skills.
+  for (const [name, error] of minimalOverSkillBudget) {
+    if (includedNames.has(name)) hierarchyErrors.push(error);
+  }
+  const selected = materialize(finalIncluded, chosenRepresentation);
   const selectedSkillNames = new Set(selected.map((item) => item.skill.name));
   const selectionConflicts: Array<{ left: string; right: string }> = [];
   const conflictKeys = new Set<string>();
@@ -3502,7 +4449,8 @@ export function resolveSkills(
       reason.includes('explicitly excludes') ||
       reason.includes('incompatible') ||
       reason.includes('exclusion phrase') ||
-      reason.includes('unavailable or invalid')
+      reason.includes('unavailable or invalid') ||
+      reason.includes('requires explicit user invocation')
     )
       return 3;
     if (reason.includes('removed explicitly')) return 2;
@@ -3517,9 +4465,20 @@ export function resolveSkills(
         left.name.localeCompare(right.name),
     );
   const rejectedCandidates = allRejectedCandidates.slice(0, 24);
+  const warnings: string[] = [...hierarchyValidation.warnings];
   if (mandatory.size > 0 && totalContextCost > contextBudget) {
-    hierarchyErrors.push(
-      `Mandatory skill guidance requires ${totalContextCost} characters but the context budget is ${contextBudget}`,
+    // Graceful degradation instead of a fail-closed throw: the mandatory
+    // minimal closure is still injected (required-core guidance must not
+    // silently vanish), but budget overflow no longer blocks the turn. Optional
+    // skills were already omitted and minimal-only ancestors pruned; full
+    // detail stays one load_skill_detail call away.
+    warnings.push(
+      `Mandatory skill guidance requires ${totalContextCost} characters but the context budget is ${contextBudget}; optional skills and minimal-only hierarchy detail were omitted, load full detail on demand with load_skill_detail`,
+    );
+  }
+  if (omittedLazyAncestors.length > 0) {
+    warnings.push(
+      `Lazy hierarchy pruned ${omittedLazyAncestors.length} ancestor${omittedLazyAncestors.length === 1 ? '' : 's'} whose dependents all rendered minimal (${omittedLazyAncestors.slice(0, 8).join(', ')}${omittedLazyAncestors.length > 8 ? ', …' : ''}); load full detail on demand with load_skill_detail`,
     );
   }
   return {
@@ -3533,16 +4492,15 @@ export function resolveSkills(
     rejectedCandidateCount: allRejectedCandidates.length,
     rejectedCandidatesTruncated: allRejectedCandidates.length > rejectedCandidates.length,
     blocked:
-      effectiveCollisions.length > 0 ||
-      selectionConflicts.length > 0 ||
-      hierarchyErrors.length > 0 ||
-      totalContextCost > contextBudget,
+      effectiveCollisions.length > 0 || selectionConflicts.length > 0 || hierarchyErrors.length > 0,
     manifestHash: renderedSection.manifestHash,
     promptText: renderedSection.promptText,
     contextBudget,
     contextOverheadCost: renderedSection.contextOverheadCost,
     totalContextCost,
     evidence,
+    warnings,
+    omittedLazyAncestors,
   };
 }
 

@@ -174,17 +174,56 @@ export class EventEmitterService {
     usageKnown: boolean,
     breakdown?: ContextBreakdown,
     cachedInputTokens?: number,
+    estimated?: boolean,
+    cacheWriteInputTokens?: number,
+    estimatedCostUsd?: number,
+    cacheSavingsUsd?: number,
+    /**
+     * The window the caller already reconciled occupancy against — the
+     * provider-verified window layered with the session context budget. It
+     * MUST be passed whenever the caller clamped or priced against an
+     * effective window, because re-resolving the bare provider window here
+     * would advertise a different denominator than the tokens in this very
+     * event: a 200k session budget on a 1M model would report 180k/1M
+     * (18%) instead of the real 180k/200k (90%).
+     */
+    effectiveContext?: {
+      contextWindow?: number;
+      contextKnown: boolean;
+      contextSource?: 'live';
+    },
   ): void {
-    const context = resolveTrustedContextWindow(model, provider);
+    const context = effectiveContext ?? resolveTrustedContextWindow(model, provider);
+    // Defense in depth for the meter: provider totals that exceed the trusted
+    // window (Codex cumulative turn totals) are clamped here too, so no
+    // caller can render an impossible ratio like 860k / 285k. The manager
+    // applies the same clamp before persisting; this keeps the live event
+    // consistent with the durable snapshot.
+    let used = tokensIn + tokensOut;
+    let isEstimated = estimated === true;
+    if (
+      usageKnown &&
+      context.contextKnown &&
+      typeof context.contextWindow === 'number' &&
+      context.contextWindow > 0 &&
+      used > context.contextWindow
+    ) {
+      used = context.contextWindow;
+      isEstimated = true;
+    }
     const payload: StreamUsagePayload = {
       agentId,
       model,
       provider,
       tokensIn,
       tokensOut,
-      tokensUsed: tokensIn + tokensOut,
+      tokensUsed: used,
       usageKnown,
+      ...(isEstimated ? { estimated: true } : {}),
       ...(typeof cachedInputTokens === 'number' ? { cachedInputTokens } : {}),
+      ...(typeof cacheWriteInputTokens === 'number' ? { cacheWriteInputTokens } : {}),
+      ...(typeof estimatedCostUsd === 'number' ? { estimatedCostUsd } : {}),
+      ...(typeof cacheSavingsUsd === 'number' ? { cacheSavingsUsd } : {}),
       contextKnown: context.contextKnown,
       ...(context.contextSource ? { contextSource: context.contextSource } : {}),
       ...(context.contextWindow ? { contextWindow: context.contextWindow } : {}),

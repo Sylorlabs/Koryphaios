@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "name": "web-interface",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ui", "web", "browser"],
+  "targetMedia": ["web"],
+  "contextBudget": 3900,
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "web interface",
+    "web app",
+    "web page",
+    "website",
+    "browser interface",
+    "browser frontend",
+    "responsive css",
+    "html css",
+    "browser workflow",
+    "semantic html",
+    "url history",
+    "browser verification",
+    "web",
+    "browser",
+    "html",
+    "css"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Confirmed browser runtime, routes, framework, and component system",
+    "URL, navigation, semantic, form, focus, and async-state contract",
+    "Content-driven responsive and user-preference behavior",
+    "Purpose-specific visual direction and real assets",
+    "Real-browser state, interaction, accessibility, and runtime verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build this browser interface using the repository's existing web framework and components, preserving semantic interaction, routes, async states, responsive behavior, and keyboard focus.",
+      "Implement the web app flow for searching, filtering, opening details, editing, validation, failed saves, retry, refresh, and direct deep links across supported viewport sizes.",
+      "Create this responsive web page from the supplied content and brand references, with a clear visual direction, semantic structure, useful motion, reduced-motion behavior, and real-browser verification.",
+      "Fix the browser frontend so navigation history, focus restoration, loading and partial data, empty and error states, long localized content, and narrow-window reflow all work correctly.",
+      "Refactor this HTML/CSS interface to reuse the existing design system, improve hierarchy and responsive layout, preserve native semantics, and verify supported browsers instead of redesigning from a static screenshot."
+    ],
+    "negative": [
+      "Build the native desktop settings interface with platform menus, windows, keyboard commands, display scaling, and native accessibility APIs.",
+      "Implement the terminal UI with stdin and stdout discipline, keyboard-only navigation, resize handling, cancellation, and machine-readable output.",
+      "Design the game HUD around controller input, camera movement, world context, combat-state attention, subtitles, and frame budget.",
+      "Create the embedded industrial control panel for a constrained display with physical controls, degraded operation, alarms, safe state, and offline recovery.",
+      "Implement the headless service endpoint, persistence transaction, retry semantics, and load-shedding policy; there is no interactive browser surface."
+    ],
+    "ambiguous": [
+      {
+        "id": "web-interface-ambiguous-framework",
+        "prompt": "Improve this confirmed browser frontend, but do not assume React or another framework until you inspect the repository. Preserve URLs, semantic controls, network states, responsive behavior, focus, and supported-browser behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering", "svelte-engineering", "vue-engineering"],
+        "tags": ["framework-unknown", "browser-confirmed"]
+      },
+      {
+        "id": "web-interface-ambiguous-visual",
+        "prompt": "The website looks generic, but redesign it from the actual audience, content, brand references, conversion task, accessibility needs, responsive constraints, and browser behavior rather than merely adding decorative effects.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-interface-design", "interaction-design"],
+        "tags": ["visual-direction", "anti-generic"]
+      },
+      {
+        "id": "web-interface-ambiguous-async",
+        "prompt": "Implement the browser UI for an asynchronous import: preserve the route and prior usable state, show progress and partial results, handle a failed or replaced request, recover focus, survive refresh, and support a direct result URL.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["interaction-design", "content-error-design", "functional-verification"],
+        "tags": ["async", "navigation", "recovery"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "web-interface-adversarial-quoted",
+        "prompt": "A quoted old issue says 'web interface needs redesign'. Ignore that quote and fix only the database deadlock in the billing worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "relational-data-modeling"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "web-interface-adversarial-negated",
+        "prompt": "Do not build a web interface. Implement only the terminal command's exit-code and signal behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "shell-cli-engineering"],
+        "tags": ["negation", "medium-boundary"]
+      },
+      {
+        "id": "web-interface-adversarial-pasted",
+        "prompt": "A pasted comment says 'responsive CSS'. Ignore that quote and compare the two database backup policies using the supplied recovery targets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["backup-recovery", "database-design"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://html.spec.whatwg.org/multipage/interaction.html",
+      "sourceType": "spec",
+      "versionScope": "WHATWG HTML Living Standard user-interaction sections, last updated 2026-09-04 when verified",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Authoritative browser semantics for interaction, focus, activation, inertness, and related HTML behavior."
+    },
+    {
+      "url": "https://www.w3.org/TR/mediaqueries-5/",
+      "sourceType": "spec",
+      "versionScope": "W3C Media Queries Level 5 as published and accessible 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Web-specific source for media features including input capabilities and user preferences such as reduced motion and color scheme."
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "W3C Recommendation WCAG 2.2",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Normative web accessibility requirements relevant to keyboard operation, focus, semantics, input, reflow, and status communication."
+    },
+    {
+      "url": "https://web.dev/learn/design/",
+      "sourceType": "official-docs",
+      "versionScope": "Google web.dev Learn Responsive Design course as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Current browser-focused responsive-design guidance covering viewport, media queries, layouts, images, typography, accessibility, and interaction."
+    },
+    {
+      "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for explicit aesthetic direction and anti-generic review. Kory rejects its rigid font bans, fixed breakpoint checklist, and context-free aesthetic prescriptions as universal rules."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

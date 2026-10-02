@@ -1,0 +1,91 @@
+{
+  "id": "privacy-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"review personal-data handling\". The evidence packet contains a surprising subgroup result, a stale or weak source field, and uncertainty that must not be converted into unsupported precision. The acceptance boundary is privacy-engineering: Map subjects, purposes, fields, sensitivity, collection, transformations, storage, access, sharing, retention, deletion, and inferences. The adjacent applied-cryptography discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://privacy-engineering/scenario-2",
+    "requirements": [
+      "synthetic primary database, object storage, warehouse, search/vector index, support export, personalization store, and at-least-once CDC queue",
+      "documented product privacy policy defining the intended deletion/suppression outcome without jurisdiction-specific legal interpretation",
+      "30-day immutable backup set plus restore fixture that initially reintroduces pre-deletion rows",
+      "durable-state inspection and event-trace capability for every live store in the fixture",
+      "paired same-model skill/no-skill execution",
+      "privacy-engineering parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual privacy-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=security-review; near-neighbor=applied-cryptography), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Map subjects, purposes, fields, sensitivity, collection, transformations, storage, access, sharing, retention, deletion, and inferences."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Data lifecycle map; Necessity rationale; Access and deletion verification"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of privacy-engineering correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Field-level personal-data lifecycle map; Purpose and necessity rationale; Retention and deletion propagation matrix; Preference/control behavior with durable-state verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "privacy-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Field-level personal-data lifecycle map",
+        "Purpose and necessity rationale",
+        "Retention and deletion propagation matrix",
+        "Preference/control behavior with durable-state verification",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "privacy-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Field-level personal-data lifecycle map",
+    "Purpose and necessity rationale",
+    "Retention and deletion propagation matrix",
+    "Preference/control behavior with durable-state verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "privacy-engineering-individual-scenario-2-result",
+    "privacy-engineering-individual-scenario-2-verification",
+    "privacy-engineering-individual-scenario-2-paired-evaluation"
+  ]
+}

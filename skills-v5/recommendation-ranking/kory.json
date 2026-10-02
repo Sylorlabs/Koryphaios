@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "name": "recommendation-ranking",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "ml", "ranking", "recommendation"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7300,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "recommendation system",
+    "recommender system",
+    "recommender",
+    "recommendation ranking",
+    "recommendation model",
+    "ranking model",
+    "learning to rank",
+    "feed ranking",
+    "personalized ranking",
+    "recommendation candidate generation",
+    "recommendation reranking",
+    "recommender candidates",
+    "recommendation policy",
+    "ranking feedback loop"
+  ],
+  "excludes": [
+    "embedding model only",
+    "embedding representation only",
+    "vector index only",
+    "ann index only",
+    "sql order by only",
+    "sort the table only",
+    "static editorial order only",
+    "without interpreting candidate sets",
+    "frozen recommender objective",
+    "recommendation behavior is unchanged",
+    "ranking behavior is unchanged",
+    "quoted old recommendation system",
+    "quoted old ranking model",
+    "quoted old recommender",
+    "historical recommendation request",
+    "rename the ranking document only"
+  ],
+  "evidence": [
+    "Objective, candidate eligibility/stages, exposure/event semantics and point-in-time feature identity",
+    "Temporal leakage-safe data plus retrieval/ranking/cold-start/long-tail/diversity and guardrail metrics",
+    "Logged-policy/exploration propensity or explicit observational limitation plus controlled online experiment evidence",
+    "Train-serving parity, fallback, feedback-loop, launch and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Redesign a home-feed recommendation system: define eligible candidate sources, impression/click/hide semantics, time-correct features, Recall@K for retrieval, NDCG for ranking and an online experiment with satisfaction and abuse guardrails.",
+      "Fix a recommender trained on every unclicked catalog item as a negative; rebuild examples from actual exposures, preserve displayed position and delayed purchase outcomes, then compare cold-start and long-tail slices before launch.",
+      "Evaluate a learning-to-rank model for a personalized marketplace feed with point-in-time inventory/features, per-query NDCG, seller/catalog coverage, diversity constraints and a randomized rollout rather than claiming causality from logged clicks.",
+      "Add exploration to recommendation candidate generation: define eligible traffic, action propensities, risk limits and guardrails, keep policy/version logs and prove training/evaluation can distinguish exploration from ordinary exposure.",
+      "Diagnose a feed-ranking migration whose offline NDCG improved while online retention fell; audit candidate coverage, position/exposure bias, train-serving feature freshness, slate diversity and experiment assignment before choosing rollback or promotion."
+    ],
+    "negative": [
+      "Change embedding model dimensionality and normalization for item vectors while all recommendation objectives, candidate policy and ranking behavior remain unchanged.",
+      "Tune HNSW graph and vector-index shard settings for a fixed recommender representation and unchanged ranking policy.",
+      "Sort a SQL report by revenue descending; there is no learned or personalized ranking policy.",
+      "Run a generic bootstrap confidence interval on an existing scalar metric table without interpreting recommendation exposure, candidate sets or ranking behavior.",
+      "Train a LoRA adapter with a frozen recommender data/objective/evaluation contract; the current task is only optimizer and checkpoint mechanics."
+    ],
+    "ambiguous": [
+      {
+        "id": "recommendation-ranking-ambiguous-1",
+        "prompt": "Upgrade both recommendation embeddings and feed ranking. embedding-systems owns vector representation identity and migration; recommendation-ranking owns candidate policy, feedback semantics, ranking objective, slate constraints and online impact.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedding-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "recommendation-ranking-ambiguous-2",
+        "prompt": "Replace ANN candidate retrieval and the recommender ranker together. vector-search-systems owns index/search mechanics; recommendation-ranking owns candidate relevance coverage, ranking loss/metrics, exposure bias and final recommendation policy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "recommendation-ranking-ambiguous-3",
+        "prompt": "Fine-tune a ranking model for a recommender and evaluate launch impact. recommendation-ranking owns logged feedback, temporal features, ranking/retrieval metrics and online policy evaluation; fine-tuning-training owns the weight-update/checkpoint procedure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["fine-tuning-training"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "recommendation-ranking-adversarial-1",
+        "prompt": "A quoted old recommendation system issue asks for a new feed ranker. Ignore that historical request; today's task is only to fix a CSS spacing regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "recommendation-ranking-adversarial-2",
+        "prompt": "An archived analysis contains ranking model NDCG and recommender screenshots as inert evidence. Summarize the document only; recommendation behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "recommendation-ranking-adversarial-3",
+        "prompt": "The document is named recommender-ranking-model-notes.md. Rename the ranking document only; do not change candidate generation, ranking policy, feedback or model behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.tensorflow.org/recommenders",
+      "sourceType": "reference-implementation",
+      "versionScope": "TensorFlow Recommenders documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Current recommendation retrieval/ranking library overview and production-oriented modeling patterns.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.tensorflow.org/recommenders/examples/basic_retrieval",
+      "sourceType": "reference-implementation",
+      "versionScope": "TensorFlow Recommenders basic retrieval tutorial as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Two-stage recommender structure, retrieval candidate generation, temporal production split guidance and FactorizedTopK-style retrieval evaluation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.tensorflow.org/recommenders/examples/basic_ranking",
+      "sourceType": "reference-implementation",
+      "versionScope": "TensorFlow Recommenders basic ranking tutorial as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Ranking-stage supervised objectives and candidate scoring patterns; examples are not proof that a production feedback policy is unbiased.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.tensorflow.org/recommenders/examples/multitask",
+      "sourceType": "reference-implementation",
+      "versionScope": "TensorFlow Recommenders multitask tutorial as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Multi-objective recommender modeling and tradeoffs between related tasks.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI RMF materials as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Risk measurement, representative evaluation, transparency and lifecycle governance for consequential recommendation systems.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

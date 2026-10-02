@@ -1,0 +1,89 @@
+{
+  "id": "supply-chain-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Qualify a release candidate for supply-chain integrity from the supplied synthetic repository and registry evidence. The release is an OCI image identified by digest and has a committed package lockfile, a CycloneDX SBOM, CI logs, a SLSA provenance attestation, a keyless cosign signature bundle, and a clean-room rebuild fixture. Establish the expected source revision, approved release workflow/builder identity, and allowed build parameters before judging the evidence. Verify that the lockfile is actually enforced and inventory build/release inputs including actions, reusable workflows, plugins, base images, and package-manager/toolchain versions. Reconcile the SBOM against the resolved lockfile/build graph and report its omissions rather than treating it as completeness proof. The fixture deliberately includes a mutable third-party setup action, while the published artifact's signature and subject digest are cryptographically valid but the certificate/workflow identity belongs to an unapproved forked release workflow. A clean rebuild produces the same image digest. Verify the provenance/signature/identity/policy facts and reject the release despite signature validity and reproducibility. Preserve exact evidence and do not silently rewrite the release pipeline or trust policy.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://supply-chain-security/scenario-1",
+    "requirements": [
+      "OCI release candidate with immutable artifact digest and expected source revision",
+      "committed lockfile plus deterministic evidence showing whether the release install path enforces it",
+      "CycloneDX SBOM and independent resolved dependency/build-input graph with at least one intentional SBOM omission",
+      "release workflow containing one mutable third-party setup action and inspectable job permissions/identity-token boundaries",
+      "SLSA provenance plus keyless cosign verification bundle whose artifact subject is correct but signer/workflow identity is not approved",
+      "clean-room rebuild fixture that reproduces the same artifact digest",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "supply-chain-security-release-subject-1",
+      "assertion": "The result records the immutable artifact digest, expected source revision, approved builder/release workflow identity, and allowed build-parameter expectations before interpreting signature or provenance success.",
+      "source": "https://slsa.dev/spec/v1.2/verifying-artifacts"
+    },
+    {
+      "id": "supply-chain-security-lockfile-toolchain-1",
+      "assertion": "The audit proves whether the release install/build path enforces the committed lockfile and inventories dependency/toolchain inputs that can change the artifact, explicitly flagging the supplied mutable third-party setup action instead of treating only application packages as dependencies."
+    },
+    {
+      "id": "supply-chain-security-sbom-limit-1",
+      "assertion": "The CycloneDX SBOM is reconciled against the independent resolved graph, the supplied omitted build input is identified, and the result states that SBOM presence alone does not prove completeness, provenance, or non-compromise.",
+      "source": "https://cyclonedx.org/specification/overview/"
+    },
+    {
+      "id": "supply-chain-security-ci-boundary-1",
+      "assertion": "The release workflow review records the mutable action reference plus the jobs that can obtain release/signing identity or publish authority, and distinguishes ordinary untrusted execution from the privileged release boundary."
+    },
+    {
+      "id": "supply-chain-security-provenance-policy-1",
+      "assertion": "Verification acknowledges that the artifact subject digest and cryptographic signature are valid, then rejects the release because the observed certificate/workflow and builder identity are outside the predeclared trust policy; cryptographic validity is not reported as authorization.",
+      "source": "https://docs.sigstore.dev/cosign/verifying/verify/"
+    },
+    {
+      "id": "supply-chain-security-reproducibility-boundary-1",
+      "assertion": "The matching clean-room rebuild is recorded as corroborative reproducibility evidence but is not used to override the failed signer/builder policy or to claim an approved SLSA Build level."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "supply-chain-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "immutable artifact/source/trust expectation record",
+        "lockfile enforcement and build/toolchain inventory evidence",
+        "SBOM reconciliation with explicit omission",
+        "CI privileged-boundary and mutable-action evidence",
+        "signature/provenance verification showing valid cryptography but unapproved identity",
+        "clean rebuild result kept distinct from trust-policy verdict"
+      ]
+    },
+    {
+      "id": "supply-chain-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "trust verdict is no broader than observed evidence",
+        "inventory, provenance, signature, and reproducibility evidence are not conflated",
+        "release is rejected for the policy failure without unauthorized pipeline edits"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "artifact digest, expected source revision, approved builder/signer identity, and allowed-parameter policy",
+    "manifest/lockfile enforcement and dependency/toolchain inventory",
+    "SBOM version/generation point plus reconciliation and omission record",
+    "CI release trust-boundary and mutable action/plugin findings",
+    "exact provenance/signature/identity/policy verification output",
+    "clean-room reproducibility result with bounded interpretation",
+    "explicit rejected release verdict and unresolved evidence limits",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "supply-chain-security-scenario-1-result",
+    "supply-chain-security-scenario-1-verification",
+    "supply-chain-security-scenario-1-paired-evaluation"
+  ]
+}

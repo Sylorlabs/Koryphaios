@@ -8,7 +8,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import type { SessionAgentOverrides } from '@koryphaios/shared';
 import { wsBroker } from './pubsub';
+import { getSessionAgentOverrides } from './stores/session-agent-overrides';
 import { resolveMemoryRoot } from './memory/unified-memory';
 import { serverLog } from './logger';
 
@@ -87,6 +89,11 @@ export interface AgentSettings {
   /** Require confirmation for rule violations */
   confirmRuleViolations: boolean;
 
+  /** Inter-agent messaging (AgentMail) policy. 'open' delivers automatically
+   *  (default); 'approval-cross-project' holds cross-project mail for user
+   *  approval; 'off' disables the mailbox entirely. */
+  agentMessaging: 'open' | 'approval-cross-project' | 'off';
+
   /** In Custom mode, allow routine non-edit tools without a per-action prompt. */
   autoRunTools: boolean;
 
@@ -113,6 +120,14 @@ export interface AgentSettings {
 
   /** Context management: auto-stub stale tool outputs (recoverable via fetch_context). */
   contextPruningEnabled: boolean;
+
+  /** Allow a billable first-turn provider prewarm while the user is typing.
+   * Warm-lane refreshes remain automatic and economics-gated regardless. */
+  promptCacheColdPrewarmEnabled: boolean;
+
+  /** Warm-cache refresh policy. `economic` only buys positive-EV refreshes;
+   * `always` keeps eligible lanes armed; `off` disables unattended refresh. */
+  promptCacheKeepaliveMode: 'economic' | 'always' | 'off';
 
   /** Turns whose tool outputs stay full before auto-stubbing kicks in. */
   contextKeepRecentTurns: number;
@@ -167,8 +182,10 @@ export interface AgentSettings {
 
   /** Per-tier tool overrides so each permission preset can be customized
    *  independently. Keys are permissionMode values (ask, edits, guarded, yolo,
-   *  custom). Each entry stores allow/block lists scoped to that tier. */
-  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[] }>;
+   *  custom). Each entry stores allow/block lists scoped to that tier, plus an
+   *  explicit ask list so tools whose preset default is Allow can be forced to
+   *  prompt. */
+  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[]; ask?: string[] }>;
 
   /** Bash base-command patterns that bypass the sandbox safety prompt.
    *  Populated when the user chooses "Allow and add to allowlist" in the
@@ -227,6 +244,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  agentMessaging: 'open',
   // Default to false for fresh installs. Existing koryphaios.json files that
   // explicitly set autoRunTools keep their value via the merge at the bottom
   // of loadAgentSettings ({ ...DEFAULT_AGENT_SETTINGS, ...userSettings }).
@@ -240,8 +258,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
-  contextKeepRecentTurns: 3,
-  contextPruneMinChars: 600,
+  promptCacheColdPrewarmEnabled: false,
+  promptCacheKeepaliveMode: 'economic',
+  contextKeepRecentTurns: 8,
+  contextPruneMinChars: 2000,
   contextSelfAwareness: true,
   autoCompactEnabled: true,
   autoCompactThreshold: 80,
@@ -469,7 +489,15 @@ export function getPreferencesPath(projectRoot: string): string {
 /**
  * Load agent settings from koryphaios.json
  * All settings live in the main config file - no separate file needed
+ *
+ * One-time loosening migration: configs that still carry the old aggressive
+ * pruning defaults (keep 3 turns / stub at 600 chars) are bumped to the new
+ * defaults in memory and persisted back. Values the user customized to
+ * anything else are never touched.
  */
+export const LEGACY_CONTEXT_KEEP_RECENT_TURNS = 3;
+export const LEGACY_CONTEXT_PRUNE_MIN_CHARS = 600;
+
 export function loadAgentSettings(projectRoot: string): AgentSettings {
   const config = loadKoryphaiosConfig(projectRoot);
 
@@ -479,12 +507,71 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
   // Backward compatibility: enableCritic in koryphaios.json maps to criticGateEnabled
   const enableCritic = config.enableCritic as boolean | undefined;
 
-  return {
+  const merged: AgentSettings = {
     ...DEFAULT_AGENT_SETTINGS,
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
   };
+
+  let migrated = false;
+  if (persistedSettings?.contextKeepRecentTurns === LEGACY_CONTEXT_KEEP_RECENT_TURNS) {
+    merged.contextKeepRecentTurns = DEFAULT_AGENT_SETTINGS.contextKeepRecentTurns;
+    migrated = true;
+  }
+  if (persistedSettings?.contextPruneMinChars === LEGACY_CONTEXT_PRUNE_MIN_CHARS) {
+    merged.contextPruneMinChars = DEFAULT_AGENT_SETTINGS.contextPruneMinChars;
+    migrated = true;
+  }
+  if (migrated) {
+    try {
+      saveKoryphaiosConfig(projectRoot, {
+        ...config,
+        agentSettings: {
+          ...(persistedSettings ?? {}),
+          contextKeepRecentTurns: merged.contextKeepRecentTurns,
+          contextPruneMinChars: merged.contextPruneMinChars,
+        },
+      });
+    } catch {
+      // Best-effort persistence only; the effective values above are already migrated.
+    }
+  }
+
+  return merged;
+}
+
+/** Layer a chat's own approval/agent-mode/critic choices over the project
+ *  defaults. Anything the chat never set stays on the project value, so the
+ *  Settings drawer keeps working as the default for new chats. */
+export function applySessionAgentOverrides(
+  settings: AgentSettings,
+  overrides: SessionAgentOverrides | undefined,
+): AgentSettings {
+  if (!overrides) return settings;
+  const next: AgentSettings = { ...settings };
+  if (overrides.permissionMode) next.permissionMode = overrides.permissionMode;
+  if (overrides.agentExecutionMode) next.agentExecutionMode = overrides.agentExecutionMode;
+  if (typeof overrides.criticGateEnabled === 'boolean') {
+    next.criticGateEnabled = overrides.criticGateEnabled;
+  }
+  return next;
+}
+
+/**
+ * Load project agent settings and layer this chat's overrides on top.
+ *
+ * Every turn-path caller that has a session id must use this instead of
+ * `loadAgentSettings`, otherwise a chat's YOLO/critic/agent-mode choice leaks
+ * into every other chat (or is ignored for the chat that set it).
+ */
+export function loadAgentSettingsForSession(
+  projectRoot: string,
+  sessionId?: string,
+): AgentSettings {
+  const settings = loadAgentSettings(projectRoot);
+  if (!sessionId) return settings;
+  return applySessionAgentOverrides(settings, getSessionAgentOverrides(sessionId));
 }
 
 /** Resolve explicit layers in increasing authority: global, workspace, session. */
@@ -551,12 +638,14 @@ const SETTING_ENUMS: Partial<Record<keyof AgentSettings, readonly string[]>> = {
   ruleEnforcementLevel: ['strict', 'moderate', 'lenient'],
   agentExecutionMode: ['auto', 'single', 'multi'],
   gateStrictness: ['strict', 'advisory', 'off'],
+  agentMessaging: ['open', 'approval-cross-project', 'off'],
   intentInterview: ['off', 'adaptive', 'deep'],
   goalPlanningDepth: ['minimal', 'adaptive', 'structured'],
   planApproval: ['always', 'material', 'never'],
   modelQualification: ['enforce', 'warn', 'off'],
   skillLearningMode: ['human-only', 'propose-then-verify', 'automatic'],
   localWebSearch: ['off', 'on', 'fallback'],
+  promptCacheKeepaliveMode: ['economic', 'always', 'off'],
   permissionMode: ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'],
   subAgentApproval: ['manager', 'user', 'auto'],
 };
@@ -647,13 +736,14 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
     }
     if (typedKey === 'toolPermissionsByTier') {
       if (!isPlainRecord(value)) continue;
-      const tierMap: Record<string, { allow: string[]; block: string[] }> = {};
+      const tierMap: Record<string, { allow: string[]; block: string[]; ask?: string[] }> = {};
       for (const [tier, entry] of Object.entries(value).slice(0, 20)) {
         if (!/^[a-z][a-z0-9_-]{0,31}$/i.test(tier)) continue;
         if (!isPlainRecord(entry)) continue;
         const allow = boundedStringList((entry as Record<string, unknown>).allow);
         const block = boundedStringList((entry as Record<string, unknown>).block);
-        tierMap[tier] = { allow: allow ?? [], block: block ?? [] };
+        const ask = boundedStringList((entry as Record<string, unknown>).ask);
+        tierMap[tier] = { allow: allow ?? [], block: block ?? [], ask: ask ?? [] };
       }
       next.toolPermissionsByTier = tierMap;
       continue;

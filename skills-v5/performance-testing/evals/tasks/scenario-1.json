@@ -1,0 +1,79 @@
+{
+  "id": "performance-testing-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design and run a reusable performance test for an HTTP search API that product traffic models as 300 new search requests per second, independent of response time. Use the supplied fixed 1M-record dataset and exact service/load-generator images. Use an open arrival-rate workload, separate a warmup phase from three measured repetitions, and preserve offered, started, completed, and dropped iterations. For each measured run report p50/p95/p99 successful-request latency, achieved throughput, error/check rate, CPU, memory, and connection-pool/resource saturation while independently validating response correctness. Record the load-generator resource headroom so client saturation is not mistaken for server saturation. Preserve raw per-run output and environment identity; do not diagnose any regression or issue a release pass/fail budget verdict in this task.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-testing/scenario-1",
+    "requirements": [
+      "fixed 1M-record service dataset and deterministic search corpus",
+      "versioned service image and k6-compatible load-generator image",
+      "dedicated resource metrics for both system under test and load generator",
+      "isolated warmup followed by three measured repetitions",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-testing-open-model-1",
+      "assertion": "The measured workload schedules 300 new iterations/requests per second independently of response duration and records offered/started/completed plus dropped iterations so coordinated-omission or generator-capacity effects are visible."
+    },
+    {
+      "id": "performance-testing-warmup-1",
+      "assertion": "Warmup samples are excluded from all three measured repetitions, and service/load-generator build, runtime, dataset, and machine identities remain fixed across those repetitions."
+    },
+    {
+      "id": "performance-testing-distribution-1",
+      "assertion": "Each repetition preserves p50/p95/p99 successful-request latency, achieved throughput, error/check rate, and CPU/memory/connection-pool or equivalent saturation metrics rather than only a mean latency."
+    },
+    {
+      "id": "performance-testing-correctness-1",
+      "assertion": "Representative responses are validated against the deterministic search corpus under load, and any incorrect/failed response is reported as an error rather than counted as a fast success."
+    },
+    {
+      "id": "performance-testing-generator-headroom-1",
+      "assertion": "Load-generator CPU/network/VU capacity and dropped-iteration evidence show whether the generator can sustain the requested arrival rate; any generator limitation is called out instead of attributed to the service."
+    },
+    {
+      "id": "performance-testing-repeatability-1",
+      "assertion": "The result preserves per-repetition raw artifacts and reports across-run variation without collapsing all samples into one opaque aggregate."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-testing-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "open-model workload config",
+        "warmup and per-repetition raw metrics",
+        "correctness checks under load",
+        "SUT and load-generator resource evidence"
+      ]
+    },
+    {
+      "id": "performance-testing-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "service/load-generator/runtime/dataset identity",
+    "open arrival-rate workload and warmup policy",
+    "three per-run latency/throughput/error/resource artifacts",
+    "response correctness evidence",
+    "load-generator headroom/dropped-iteration evidence",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "performance-testing-scenario-1-result",
+    "performance-testing-scenario-1-verification",
+    "performance-testing-scenario-1-paired-evaluation"
+  ]
+}

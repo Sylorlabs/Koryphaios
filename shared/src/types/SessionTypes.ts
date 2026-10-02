@@ -4,6 +4,21 @@
 import type { AgentRole, AgentStatus, WorkerDomain } from './AgentTypes';
 import type { ProviderName } from '../providers/ProviderNames';
 
+/**
+ * Per-chat overrides for the composer controls that must not leak between
+ * conversations. Anything omitted here falls back to the project-wide agent
+ * settings in `koryphaios.json`, so a chat that never touched a control keeps
+ * the project default while a chat that did keeps its own choice.
+ */
+export interface SessionAgentOverrides {
+  /** Approval preset (yolo / guarded / accept-edits / ask / plan / custom). */
+  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+  /** Delegation mode (Kory decides / solo / multi-agent). */
+  agentExecutionMode?: 'auto' | 'single' | 'multi';
+  /** Whether the independent critic gate runs for this chat. */
+  criticGateEnabled?: boolean;
+}
+
 export interface Session {
   id: string;
   userId?: string;
@@ -22,6 +37,8 @@ export interface Session {
   interactionMode?: 'act' | 'plan';
   /** Stable note owned by this planning conversation. */
   planNoteId?: string;
+  /** Per-chat approval preset, agent mode, and critic toggle. */
+  agentOverrides?: SessionAgentOverrides;
   messageCount: number;
   totalTokensIn: number;
   totalTokensOut: number;

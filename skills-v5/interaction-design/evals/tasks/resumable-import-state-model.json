@@ -1,0 +1,83 @@
+{
+  "id": "interaction-design-full-task-resumable-import",
+  "prompt": "Design the interaction for importing a large dataset. A user selects files, validation can find mixed valid/invalid rows, processing is asynchronous, the connection can drop, cancellation is possible only before commit, partial results may be useful, and a completed import can be reopened later. Produce an implementation-ready behavior and state contract without prescribing visual styling or backend queue internals.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://interaction-design/resumable-import",
+    "requirements": [
+      "current flow description",
+      "backend capability constraints",
+      "failure cases",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "interaction-import-state-contract",
+      "assertion": "The contract distinguishes selection, validation, mixed-validity review, asynchronous pre-commit processing, commit, disconnected/reattaching, partial-result, completed/reopened, cancelled, and failed states with explicit observable transitions."
+    },
+    {
+      "id": "interaction-import-cancellation-boundary",
+      "assertion": "Cancellation is available before commit begins and explicitly blocked once commit starts; the design does not present post-commit cancellation as rollback or undo."
+    },
+    {
+      "id": "interaction-import-reconnection",
+      "assertion": "A connection drop does not imply server-side work stopped: reconnection can reattach to still-running work or discover that the import already completed, while preserving stable import identity and user work."
+    },
+    {
+      "id": "interaction-import-partial-and-return",
+      "assertion": "Mixed validation and partial processing results remain distinguishable and actionable, and a completed import can be reopened later without re-running the import as if it were new."
+    },
+    {
+      "id": "interaction-import-boundary",
+      "assertion": "The result defines implementation-ready behavior, feedback, state, and recovery without prescribing visual styling or inventing backend queue/storage mechanics."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "task-and-transition-completeness",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "entry and preconditions",
+        "state-transition matrix",
+        "feedback",
+        "cancellation boundary",
+        "partial success",
+        "reconnection",
+        "completion and return"
+      ]
+    },
+    {
+      "id": "behavior-boundary-and-recovery",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "observable behavior only",
+        "preserved user work",
+        "failure recovery",
+        "no invented backend mechanics",
+        "acceptance criteria"
+      ]
+    },
+    {
+      "id": "blind-interaction-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "task model",
+    "state-transition matrix",
+    "feedback contract",
+    "recovery and cancellation boundaries",
+    "verification plan"
+  ],
+  "requiredArtifacts": [
+    "interaction-contract",
+    "state-transition-matrix",
+    "paired-experiment-report"
+  ]
+}

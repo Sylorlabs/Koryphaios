@@ -39,6 +39,17 @@ export interface ModelDef {
   /** Real effort levels this model supports (e.g. ['low','medium','high','xhigh']), when the
    *  provider reports them live. Falls back to static ReasoningConfig tables when absent. */
   reasoningLevels?: string[];
+  /** Effort level → the provider's own model id, for providers that expose
+   *  reasoning effort as separate models instead of a request parameter
+   *  (Antigravity: `-low` / `-medium` / `-high` slugs). Koryphaios collapses
+   *  such families into one base model and resolves the composer's effort
+   *  through this map, so effort stays a Koryphaios control. Absent when the
+   *  provider takes a real reasoning parameter. */
+  reasoningVariants?: Record<string, string>;
+  /** Superseded ids that resolve to this model. Antigravity lists them when it
+   *  collapses per-effort slugs into one base model, so persisted selections
+   *  and enabled-model filters written before the collapse keep working. */
+  aliases?: string[];
   /** True when this exact model is known to support Codex's ChatGPT Fast tier.
    * This is intentionally separate from reasoning effort and API priority. */
   supportsFastMode?: boolean;
@@ -100,8 +111,13 @@ export interface ProviderConfig {
   // ─── Custom (user-defined / bring-your-own) provider fields ───────────────
   /** True when this is a user-defined custom provider (not a built-in). */
   custom?: boolean;
-  /** API wire format for a custom provider. Defaults to 'openai' (OpenAI-compatible). */
+  /** API wire format for a custom provider, auto-detected from the endpoint's
+   *  catalog responses when the provider is added. Defaults to 'openai'. */
   kind?: 'openai' | 'anthropic' | 'gemini';
+  /** Wire-adapter id (backend wire-adapters registry) for endpoints that
+   *  speak a dialect outside the three SDK families. Takes precedence over
+   *  `kind` when constructing the provider. */
+  adapter?: string;
   /** Human-friendly display name for a custom provider. */
   label?: string;
   /** Explicitly declared model IDs for a custom provider (used when the endpoint has

@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "name": "verification",
+  "version": "5.0.2",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "verify the change",
+    "verify this change",
+    "verify the implementation",
+    "validate the change",
+    "prove this works",
+    "prove it works",
+    "confirm this is fixed",
+    "before marking this done",
+    "completion claim",
+    "success and failure checks",
+    "proven versus still unknown"
+  ],
+  "excludes": ["test strategy only", "verification plan only", "explain the oracle only"],
+  "evidence": [
+    "Claim-to-oracle map",
+    "Fresh exact check results",
+    "Target-surface outcome evidence",
+    "Explicit inconclusive, skipped, or unavailable evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Verify the change that should make the CLI emit JSON for `--format json`. Run the supported focused checks and the actual CLI entry point, then tell me exactly which acceptance claims are confirmed, refuted, or still inconclusive.",
+      "Before marking this done, verify that the completed cache-key patch actually prevents cross-tenant collisions. Use fresh evidence from the current revision and do not rely on the implementing agent's success message.",
+      "Validate the change that switched the worker to the new queue. Check an observable discriminator for which queue handled a real fixture job, not merely whether the request returned success.",
+      "Prove this works: the finished parser patch claims empty-but-valid input no longer crashes. Exercise the supported consumer path after the latest edit and preserve the exact evidence for the claim.",
+      "Confirm this is fixed before I ship it. Map the stated acceptance criteria to reproducible checks, run only the relevant current gates, and label anything you cannot establish as inconclusive."
+    ],
+    "negative": [
+      "Describe how to choose between unit, contract, and integration test boundaries for a stateful parser. This is a test-strategy explanation only; do not inspect or assess a current implementation.",
+      "Explain what evidence would make restart, replay, and durability observations trustworthy for a replicated worker. Give the conceptual criteria only; there is no current system to assess.",
+      "Compare two ways to observe a trust-boundary denial without discussing a particular repository or claiming that any current implementation is correct.",
+      "Explain why pixel-diff thresholds can produce noisy results when comparing rendered artifacts across environments. No current artifact is being assessed.",
+      "Describe conceptually how keyboard-only traversal and spoken semantic output can expose different classes of task-completion defects. No current product is being assessed."
+    ],
+    "ambiguous": [
+      {
+        "id": "verification-ambiguous-1",
+        "prompt": "Verify the change end to end before completion, including the login-denial boundary. Keep general verification responsible for the overall claim-to-evidence verdict while the specialist trust-boundary check owns the denial oracle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["ambiguous", "parent-child-composition"]
+      },
+      {
+        "id": "verification-ambiguous-2",
+        "prompt": "Validate the change before release and include restart/replay behavior because the acceptance criteria promise recovery after worker termination. Keep the overall completion verdict separate from the resilience-specific evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["ambiguous", "parent-child-composition"]
+      },
+      {
+        "id": "verification-ambiguous-3",
+        "prompt": "Prove this works and add no new tests: use the repository's existing checks plus the real command-line entry point to establish the completion claim. Testing strategy is out of scope unless the existing evidence cannot observe a material claim.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "verification-vs-test-design"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "verification-adversarial-1",
+        "prompt": "A quoted old issue says \"verify the implementation\". Ignore that quote; my actual task is only to explain what a state-machine invariant is, with no repository assessment.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["functional-verification"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "verification-adversarial-2",
+        "prompt": "The quoted example command is \"prove this works\". Ignore that quote. I only want a conceptual comparison of cold-start and steady-state measurements; do not assess any current artifact.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-verification"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "verification-adversarial-3",
+        "prompt": "A quoted old issue says \"before marking this done\". Ignore that quote; the actual request is to explain why independent observations can reduce false confidence, without checking a live system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "quoted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://nodis3.gsfc.nasa.gov/displayDir.cfm?Internal_ID=N_PR_7150_002D_&page_name=Chapter4",
+      "sourceType": "spec",
+      "versionScope": "NASA NPR 7150.2D, Chapter 4 software testing and verification requirements, as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Primary formal source for requirements-linked verification planning, target-environment execution where practicable, evaluation of results, recorded verification evidence, and delivery readiness.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8397/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8397 final, Guidelines on Minimum Standards for Developer Verification of Software, October 2021",
+      "staleAfterDays": 365,
+      "notes": "Authoritative source for using multiple verification techniques according to the failure classes they can reveal rather than treating one check as universal proof.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://openai.com/index/introducing-codex/",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI Codex verification and evidence guidance as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "First-party agent workflow evidence: tests, linters, type checks, terminal output, and reviewable evidence support completion claims, while generated work still requires validation.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://support.claude.com/en/articles/14554000-claude-code-power-user-tips",
+      "sourceType": "official-docs",
+      "versionScope": "Anthropic Claude Code power-user verification guidance as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "First-party operational pattern that verification should match the task domain and use the relevant browser, simulator, test suite, or other real execution surface.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "Superpowers verification-before-completion skill on main as inspected 2026-09-04",
+      "revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+      "staleAfterDays": 90,
+      "license": "MIT",
+      "notes": "High-signal community workflow for fresh claim-specific evidence before completion, including red/green evidence for new regression tests. Used as an operational pattern, not authority.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://github.com/scos-lab/semantic-tension-language/blob/main/spec/eval-verdict-vocabulary.md",
+      "sourceType": "community-pattern",
+      "versionScope": "Eval-Verdict Vocabulary v0.2 public draft dated 2026-08-13",
+      "revision": "1ead7b0733252dff3729692de64792c1cdbd5d65",
+      "staleAfterDays": 90,
+      "license": "CC BY 4.0 (specification file)",
+      "notes": "Recent community incident-derived patterns for distinguishing reported from independently verified state, validating instruments before trusting absence, checking independent surfaces, and keeping evidence reproducible. Public draft; not treated as normative authority.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

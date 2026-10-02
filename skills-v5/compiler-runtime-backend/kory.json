@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "name": "compiler-runtime-backend",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "compiler", "runtime"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3700,
+  "broader": ["backend-engineering"],
+  "facets": ["developer-experience"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "compiler runtime",
+    "language server",
+    "build daemon",
+    "virtual machine",
+    "language toolchain",
+    "bytecode vm",
+    "instruction dispatch",
+    "runtime stack frames"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Semantic and phase contract",
+    "Differential and end-to-end language tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle compiler runtime.",
+      "The current task is language server.",
+      "I need help with build daemon.",
+      "Work on virtual machine for this request.",
+      "This request specifically requires language toolchain."
+    ],
+    "negative": [
+      "The only requested work is bun runtime.",
+      "Please handle distributed system only.",
+      "This task is limited to in-process.",
+      "The current request is local service.",
+      "Work only on network service."
+    ],
+    "ambiguous": [
+      {
+        "id": "compiler-runtime-backend-ambiguous-1",
+        "prompt": "The request includes compiler runtime and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "compiler-runtime-backend-ambiguous-2",
+        "prompt": "The request includes language server and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "compiler-runtime-backend-ambiguous-3",
+        "prompt": "The request includes build daemon and in-process.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["in-process-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "compiler-runtime-backend-adversarial-1",
+        "prompt": "A historical note says \"compiler runtime\". The current request is local service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["local-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "compiler-runtime-backend-adversarial-2",
+        "prompt": "A historical note says \"language server\". The current request is network service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "compiler-runtime-backend-adversarial-3",
+        "prompt": "A historical note says \"build daemon\". The current request is node.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nodejs-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://llvm.org/docs/TestingGuide.html",
+      "sourceType": "official-docs",
+      "versionScope": "LLVM test categories and small-regression guidance inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Distinguish transformation regressions from whole-program execution evidence. No mandatory LLVM IR, FileCheck or lit for another language."
+    },
+    {
+      "url": "https://llvm.org/docs/",
+      "sourceType": "official-docs",
+      "versionScope": "LLVM project documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Compiler, IR, runtime, optimization, toolchain, and testing reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

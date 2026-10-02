@@ -41,8 +41,22 @@ import {
   updateUsage,
 } from './agents.svelte';
 
-const CLI_BREAKDOWN = { system: 1_200, memory: 10_200, tools: 0, chat: 1_200 };
-const API_BREAKDOWN = { system: 3_000, memory: 8_000, tools: 4_000, chat: 5_000 };
+const CLI_BREAKDOWN = {
+  system: 1_200,
+  memory: 10_200,
+  skills: 800,
+  tools: 0,
+  chat: 1_200,
+  output: 700,
+};
+const API_BREAKDOWN = {
+  system: 3_000,
+  memory: 8_000,
+  skills: 1_000,
+  tools: 4_000,
+  chat: 5_000,
+  output: 250,
+};
 
 function manager() {
   const state = agentStore.agents.get('kory-manager');
@@ -53,6 +67,43 @@ function manager() {
 describe('manager context preview provider transitions', () => {
   beforeEach(() => {
     sessionState.activeSessionId = `context-preview-${crypto.randomUUID()}`;
+  });
+
+  it('surfaces live prompt-cache receipt metrics for the selected manager route', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'openai', 'gpt-5.6', 262_144);
+    updateUsage(
+      'kory-manager',
+      {
+        agentId: 'kory-manager',
+        model: 'gpt-5.6',
+        provider: 'openai',
+        tokensIn: 20_000,
+        tokensOut: 250,
+        tokensUsed: 20_250,
+        usageKnown: true,
+        contextWindow: 262_144,
+        contextKnown: true,
+        cachedInputTokens: 12_000,
+        cacheWriteInputTokens: 3_000,
+        estimatedCostUsd: 0.0123,
+        cacheSavingsUsd: 0.0042,
+        breakdown: API_BREAKDOWN,
+      },
+      sessionId,
+    );
+
+    expect(getContextUsage()).toMatchObject({
+      cachedInputTokens: 12_000,
+      cacheWriteInputTokens: 3_000,
+      estimatedCostUsd: 0.0123,
+      cacheSavingsUsd: 0.0042,
+    });
+
+    beginManagerContextPreview(sessionId, 'anthropic', 'claude-sonnet-4-6', 200_000);
+    expect(getContextUsage().cacheWriteInputTokens).toBeUndefined();
+    expect(getContextUsage().estimatedCostUsd).toBeUndefined();
+    expect(getContextUsage().cacheSavingsUsd).toBeUndefined();
   });
 
   it('clears CLI-only usage immediately when the same session switches to an API provider', () => {
@@ -207,6 +258,43 @@ describe('manager context preview provider transitions', () => {
     expect(manager().contextBreakdown).toBeUndefined();
   });
 
+  it('clamps an impossible cumulative total to the window and marks it estimated', () => {
+    const sessionId = sessionState.activeSessionId;
+    beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 285_000);
+
+    updateUsage(
+      'kory-manager',
+      {
+        agentId: 'kory-manager',
+        model: 'gpt-5.6-codex',
+        provider: 'codex',
+        tokensIn: 860_300,
+        tokensOut: 700,
+        tokensUsed: 861_000,
+        usageKnown: true,
+        estimated: true,
+        contextWindow: 285_000,
+        contextKnown: true,
+        breakdown: CLI_BREAKDOWN,
+      },
+      sessionId,
+    );
+
+    // The meter must never render 860.3k / 285.0k.
+    expect(manager()).toMatchObject({
+      tokensUsed: 285_000,
+      contextMax: 285_000,
+      usageEstimated: true,
+    });
+    expect(getContextUsage()).toMatchObject({
+      used: 285_000,
+      max: 285_000,
+      percent: 100,
+      isReliable: true,
+      estimated: true,
+    });
+  });
+
   it('rejects delayed previews and remains provenance-safe across CLI to API to CLI', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 1_000_000);
@@ -322,15 +410,19 @@ describe('manager context preview provider transitions', () => {
     });
     expect(getContextUsage().cachedInputTokens).toBe(0);
 
+    // A non-authoritative event — the manager emits one at every turn start
+    // and before every tool-loop dispatch — must neither be adopted as a total
+    // nor destroy the last verified one. The 400k figure mirrors the real
+    // chars/4 planning estimate, which runs ~10x above the actual total.
     updateUsage(
       'kory-manager',
       {
         agentId: 'kory-manager',
         model: 'minimax-m3',
         provider: 'openai',
-        tokensIn: 20_000,
+        tokensIn: 400_000,
         tokensOut: 0,
-        tokensUsed: 20_000,
+        tokensUsed: 400_000,
         usageKnown: false,
         contextWindow: 262_144,
         contextKnown: true,
@@ -340,13 +432,13 @@ describe('manager context preview provider transitions', () => {
       sessionId,
     );
     expect(manager()).toMatchObject({
-      tokensUsed: 0,
+      tokensUsed: 20_000,
       contextMax: 262_144,
       contextKnown: true,
-      hasUsageData: false,
+      hasUsageData: true,
     });
-    expect(manager().contextBreakdown).toBeUndefined();
-    expect(manager().cachedInputTokens).toBeUndefined();
+    expect(getContextUsage()).toMatchObject({ used: 20_000, isReliable: true });
+    expect(manager().cachedInputTokens).toBe(0);
 
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 1_000_000);
     expect(manager().contextBreakdown).toBeUndefined();

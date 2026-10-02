@@ -8,7 +8,7 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { Server } from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 
 import { KoryphaiosMCPServer } from './server/mcp-server.js';
@@ -60,8 +60,11 @@ export function isKoryphaiosActive(): boolean {
  * this responds immediately to protocol discovery without starting heavy background watchers,
  * file analyzers, or Playwright, preventing timeouts and zombie node processes.
  */
-export async function runPassiveServer(): Promise<void> {
-  const server = new Server(
+export function createPassiveServer(): McpServer {
+  // An empty high-level server is the correct passive response: the SDK owns
+  // protocol dispatch and advertises no tools, prompts, or resources without
+  // requiring low-level request handlers.
+  return new McpServer(
     {
       name: 'koryphaios',
       version: '0.2.0',
@@ -72,16 +75,13 @@ export async function runPassiveServer(): Promise<void> {
         prompts: {},
         resources: {},
       },
-    }
+    },
   );
+}
 
-  // Return empty capabilities instantly with zero delay
-  server.setRequestHandler('tools/list', async () => ({ tools: [] }));
-  server.setRequestHandler('prompts/list', async () => ({ prompts: [] }));
-  server.setRequestHandler('resources/list', async () => ({ resources: [] }));
-
+export async function runPassiveServer(): Promise<void> {
   // Serve over stdio
-  const stdioHandle = serveStdio(() => server);
+  const stdioHandle = serveStdio(() => createPassiveServer());
 
   // Ensure clean exit when parent process disconnects
   process.on('SIGINT', async () => {

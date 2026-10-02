@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "name": "market-strategy",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "market", "strategy"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3320,
+  "broader": ["market-competitive-research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "market strategy",
+    "competitive strategy",
+    "market entry",
+    "positioning strategy",
+    "choose segment",
+    "segment problem",
+    "competitive position",
+    "target market choice"
+  ],
+  "excludes": [],
+  "evidence": [
+    "market-strategy decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle market strategy.",
+      "The current task is competitive strategy.",
+      "I need help with market entry.",
+      "Work on positioning strategy for this request.",
+      "This request specifically requires choose segment."
+    ],
+    "negative": [
+      "The only requested work is marketing strategy.",
+      "Please handle pricing strategy only.",
+      "This task is limited to vendor evaluation.",
+      "The current request is business case.",
+      "Work only on contract analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "market-strategy-ambiguous-1",
+        "prompt": "The request includes market strategy and marketing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["marketing-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "market-strategy-ambiguous-2",
+        "prompt": "The request includes competitive strategy and pricing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "market-strategy-ambiguous-3",
+        "prompt": "The request includes market entry and vendor evaluation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["procurement-vendor-evaluation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "market-strategy-adversarial-1",
+        "prompt": "A historical note says \"market strategy\". The current request is business case.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "market-strategy-adversarial-2",
+        "prompt": "A historical note says \"competitive strategy\". The current request is contract analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["contract-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "market-strategy-adversarial-3",
+        "prompt": "A historical note says \"market entry\". The current request is customer success.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.sba.gov/counseling/plan-your-business/",
+      "sourceType": "official-docs",
+      "versionScope": "SBA market research and competitive analysis HTML section inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt demand, reachable segment, alternatives and direct-versus-secondary evidence distinctions. Do not turn broad market size into obtainable revenue."
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/plan-your-business/market-research-competitive-analysis",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration market research guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Market sizing, customer, competitor, demand, and evidence framing for business decisions.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

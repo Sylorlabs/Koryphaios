@@ -1517,8 +1517,8 @@
       );
       toastStore.info(
         draft.state === 'conflict'
-          ? 'Opened the older draft for review; explicit Save is required'
-          : 'Opened the backed-up draft; explicit Save is required',
+          ? 'Opened the older draft for review. Explicit Save is required'
+          : 'Opened the backed up draft. Explicit Save is required',
       );
     } catch (error) {
       durableDraftError = error instanceof Error ? error.message : 'Failed to recover draft';
@@ -1643,7 +1643,10 @@
           title="Preview and restore a vault archive"
           aria-label="Restore Notes vault"
         >
-          {#if vaultRestoreComponentLoading}<LoaderCircle class="animate-spin" size={13} />{:else}<ArchiveRestore size={13} />{/if}
+          {#if vaultRestoreComponentLoading}<LoaderCircle
+              class="animate-spin"
+              size={13}
+            />{:else}<ArchiveRestore size={13} />{/if}
         </button>
         <button
           type="button"
@@ -2282,8 +2285,7 @@
           <p class="min-w-56 flex-1 text-xs leading-5 text-[var(--color-text-primary)]">
             A crash-safe draft for “{durableDraft.title}” is available ({durableDraft.state}).
             {#if durableDrafts.length > 1}
-              {durableDrafts.length - 1} more draft{durableDrafts.length === 2 ? '' : 's'} await
-              review.
+              {durableDrafts.length - 1} more draft{durableDrafts.length === 2 ? '' : 's'} await review.
             {/if}
           </p>
           <button
@@ -2314,10 +2316,8 @@
         role="alert"
       >
         Draft recovery could not load: {durableDraftError}
-        <button
-          type="button"
-          class="ml-2 underline"
-          onclick={() => void refreshDurableDrafts()}>Retry</button
+        <button type="button" class="ml-2 underline" onclick={() => void refreshDurableDrafts()}
+          >Retry</button
         >
       </div>
     {/if}
@@ -2332,7 +2332,7 @@
           <AlertTriangle size={15} class="shrink-0 text-[var(--color-warning)]" />
           <p class="min-w-56 flex-1 text-xs leading-5 text-[var(--color-text-primary)]">
             {notesStore.conflict.sourceDeleted
-              ? 'The project source file was deleted outside Koryphaios. Your draft is safe; recreate the file or accept its deletion.'
+              ? 'The project source file was deleted outside Koryphaios. Your draft is safe. Recreate the file or accept its deletion.'
               : 'A newer revision was saved elsewhere. Your draft has not been overwritten.'}
           </p>
           {#if notesStore.conflict.sourceDeleted}
@@ -2482,8 +2482,7 @@
               role="status"
             >
               <AlertTriangle size={12} />
-              Large graph — showing {notesStore.graphData.shown ??
-                notesStore.graphData.nodes.length}
+              Large graph. Showing {notesStore.graphData.shown ?? notesStore.graphData.nodes.length}
               of {notesStore.graphData.total ?? 'many'} notes. Use search to narrow the set.
             </div>
           {/if}
@@ -2518,7 +2517,7 @@
             style="border-color: var(--color-border); color: var(--color-text-muted);"
           >
             <Code2 size={12} />
-            Sandboxed preview — CSS and embedded media work; scripts, forms, navigation, and network requests
+            Sandboxed preview. CSS and embedded media work. Scripts, forms, navigation, and network requests
             are blocked.
           </div>
           <iframe
@@ -3004,7 +3003,7 @@
         <SettingsSwitch
           checked={notesStore.settings.autosaveEnabled}
           label="Autosave drafts"
-          description="On saves while editing; off only Save or Ctrl/⌘ S writes to disk"
+          description="On saves while editing. When off, only Save or Ctrl/⌘ S writes to disk"
           onchange={() => {
             void notesStore.updateSettings({
               autosaveEnabled: !notesStore.settings.autosaveEnabled,

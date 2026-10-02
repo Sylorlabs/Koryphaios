@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "python-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "python"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["python", "pyproject", "pytest", "asyncio"],
+  "excludes": [],
+  "evidence": [
+    "python-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle python.",
+      "The current task is pyproject.",
+      "I need help with pytest.",
+      "Work on asyncio for this request.",
+      "This request specifically requires python."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "python-engineering-ambiguous-1",
+        "prompt": "The request includes python and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "python-engineering-ambiguous-2",
+        "prompt": "The request includes pyproject and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "python-engineering-ambiguous-3",
+        "prompt": "The request includes pytest and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "python-engineering-adversarial-1",
+        "prompt": "A historical note says \"python\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "python-engineering-adversarial-2",
+        "prompt": "A historical note says \"pyproject\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "python-engineering-adversarial-3",
+        "prompt": "A historical note says \"pytest\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.python.org/3/",
+      "sourceType": "official-docs",
+      "versionScope": "Current supported Python 3 documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Language, standard library, packaging/runtime, and concurrency reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.python.org/3/library/asyncio-task.html",
+      "sourceType": "official-docs",
+      "versionScope": "Python asyncio task documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for cancellation propagation, cleanup, and structured-concurrency limits; API availability depends on supported Python versions.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.python.org/3/library/contextlib.html",
+      "sourceType": "official-docs",
+      "versionScope": "Python contextlib documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for synchronous and asynchronous resource ownership through context-manager boundaries.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

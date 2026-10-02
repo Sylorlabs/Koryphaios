@@ -1,0 +1,94 @@
+{
+  "id": "financial-modeling-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply financial model expertise to this task\". The evidence packet contains conflicting stakeholder pressure, incomplete evidence, capacity or cost constraints, and an attractive option whose reversibility and opportunity cost differ from alternatives. The acceptance boundary is financial-modeling: Define decision, historical sources, accounting/operating drivers, units, timing, taxes, financing, working capital, capex, and scenario assumptions. The adjacent exploratory-data-analysis discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://financial-modeling/subscription-three-statement",
+    "requirements": [
+      "three years of filed historical statements plus operating-driver detail",
+      "fiscal-year versus calendar-year source-period mismatch",
+      "one copied revenue formula missing churn and one hard-coded forecast depreciation value",
+      "debt-interest circularity and an unexplained balance-sheet plug",
+      "base/downside/upside assumptions with debt, working-capital, capex and tax schedules",
+      "paired same-model skill/no-skill execution",
+      "financial-modeling parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual financial-modeling boundary and relevant environment before acting, preserve the hierarchy relationship (broader=data-analysis; near-neighbor=exploratory-data-analysis), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define decision, historical sources, accounting/operating drivers, units, timing, taxes, financing, working capital, capex, and scenario assumptions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Reconcile historical periods to source data, run balance/cash checks, inspect formula consistency, stress key drivers and downside cases, and trace every headline output to auditable assumptions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not hard-code outputs into formulas, mix nominal/real or monthly/annual units, hide unsupported precision, or present scenario results as predictions."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Model contract covering purpose, periods, horizon, currency/units, nominal-real basis, source hierarchy, scenarios, and outputs; Historical reconciliation and source provenance with driver assumptions separated from formulas; Linked statement/cash-flow/debt/capex/working-capital mechanics with explicit circularity or balancing treatment; Scenario and sensitivity structure focused on coherent key drivers and uncertainty), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "financial-modeling-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Model contract covering purpose, periods, horizon, currency/units, nominal-real basis, source hierarchy, scenarios, and outputs",
+        "Historical reconciliation and source provenance with driver assumptions separated from formulas",
+        "Linked statement/cash-flow/debt/capex/working-capital mechanics with explicit circularity or balancing treatment",
+        "Scenario and sensitivity structure focused on coherent key drivers and uncertainty",
+        "Integrity checks for balances, cash, rollforwards, dates, units, signs, formula consistency, hard-codes, references, and output traceability",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "financial-modeling-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Model contract covering purpose, periods, horizon, currency/units, nominal-real basis, source hierarchy, scenarios, and outputs",
+    "Historical reconciliation and source provenance with driver assumptions separated from formulas",
+    "Linked statement/cash-flow/debt/capex/working-capital mechanics with explicit circularity or balancing treatment",
+    "Scenario and sensitivity structure focused on coherent key drivers and uncertainty",
+    "Integrity checks for balances, cash, rollforwards, dates, units, signs, formula consistency, hard-codes, references, and output traceability",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "financial-modeling-individual-scenario-1-result",
+    "financial-modeling-individual-scenario-1-verification",
+    "financial-modeling-individual-scenario-1-paired-evaluation"
+  ]
+}

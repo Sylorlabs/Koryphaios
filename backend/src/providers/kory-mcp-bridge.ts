@@ -2,7 +2,7 @@
 // Koryphaios control-plane MCP bridge server.
 //
 // A stdio MCP server that exposes ALL Koryphaios tools as `kory__<tool>` MCP
-// tools. When a native CLI (devin, claude, codex, cline, cursor, antigravity,
+// tools. When a native CLI (devin, claude, codex, cursor, antigravity,
 // grok) is configured to use this server, the CLI calls `kory__read_file`,
 // `kory__edit_file`, `kory__bash`, `kory__create_note`, `kory__delegate_to_worker`,
 // etc. instead of its own native tools. Every call is proxied to the Koryphaios
@@ -238,25 +238,31 @@ export const KORY_TOOLS: KoryToolDef[] = [
           enum: ['completed', 'partial', 'blocked', 'decision'],
         },
         objective: { type: 'string' },
-        decisions: { type: 'array', items: { type: 'string' } },
-        changedFiles: { type: 'array', items: { type: 'string' } },
-        commands: { type: 'array', items: { type: 'string' } },
+        decisions: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+        changedFiles: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+        commands: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
         tests: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              outcome: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
-              evidence: { type: 'string' },
+          anyOf: [
+            {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  outcome: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
+                  evidence: { type: 'string' },
+                },
+                required: ['name', 'outcome'],
+              },
             },
-            required: ['name', 'outcome'],
-          },
+            { type: 'array', items: { type: 'string' } },
+            { type: 'string' },
+          ],
         },
-        evidence: { type: 'array', items: { type: 'string' } },
-        risks: { type: 'array', items: { type: 'string' } },
-        followUps: { type: 'array', items: { type: 'string' } },
-        relatedNotes: { type: 'array', items: { type: 'string' } },
+        evidence: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+        risks: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+        followUps: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
+        relatedNotes: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }] },
         includeInContext: { type: 'boolean' },
       },
       required: ['title', 'summary', 'status'],
@@ -518,6 +524,47 @@ export const KORY_TOOLS: KoryToolDef[] = [
     },
     role: 'manager',
   },
+  {
+    name: 'kory__send_agent_message',
+    description:
+      'Send an asynchronous message to another agent. Managers may message another project manager or agents in their own project. Sub-agents may message only within their own project; use request_manager_relay to ask your manager to contact another project.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        toProject: { type: 'string' },
+        toAgent: { type: 'string' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        replyToMessageId: { type: 'string' },
+      },
+      required: ['body'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__request_manager_relay',
+    description:
+      'Ask your own manager to forward a request to another project manager. Sub-agents cannot contact other projects directly.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        toProject: { type: 'string' },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['toProject', 'body'],
+    },
+    role: 'worker',
+  },
+  {
+    name: 'kory__list_agent_messages',
+    description: 'Read inter-agent messages and replies for the current session and agent.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    role: 'any',
+  },
 
   // ── Goals ──
   {
@@ -549,6 +596,99 @@ export const KORY_TOOLS: KoryToolDef[] = [
       required: ['goalId'],
     },
     role: 'manager',
+  },
+
+  // ── Checklists ──
+  {
+    name: 'kory__create_checklist',
+    description: 'Create a checklist to track multi-step work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        items: { type: 'array', items: { type: 'string' } },
+        scope: { type: 'string', enum: ['workspace', 'project', 'session'] },
+      },
+      required: ['title'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__list_checklists',
+    description: 'List checklists visible in this chat with their progress.',
+    inputSchema: {
+      type: 'object',
+      properties: { includeArchived: { type: 'boolean' } },
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__read_checklist',
+    description: 'Read one checklist and its items.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    role: 'any',
+  },
+  {
+    name: 'kory__add_checklist_item',
+    description: 'Append one or more items to a checklist.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        items: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['id', 'items'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__check_checklist_item',
+    description: 'Mark a checklist item done, skipped, or pending again.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        itemId: { type: 'string' },
+        status: { type: 'string', enum: ['pending', 'done', 'skipped'] },
+      },
+      required: ['id', 'itemId'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__update_checklist',
+    description: "Replace a checklist's title or its whole item plan.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        items: { type: 'array', items: { type: 'object' } },
+        archive: { type: 'boolean' },
+      },
+      required: ['id'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__delete_checklist',
+    description: 'Permanently delete a checklist and its items.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    role: 'any',
+  },
+  {
+    name: 'kory__edit_goal_checklist',
+    description:
+      'Reshape a Goal Mode plan: add, rename, reorder, or delete checks. Cannot complete a check.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goalId: { type: 'string' },
+        items: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['goalId', 'items'],
+    },
+    role: 'any',
   },
 
   // ── Workflows ──
@@ -762,7 +902,7 @@ async function fetchAuthoritativeToolCatalog(
     }
     const payload = (await response.json()) as { tools?: unknown };
     if (!Array.isArray(payload.tools)) return [];
-    return payload.tools.filter(
+    const tools = payload.tools.filter(
       (tool): tool is RuntimeKoryToolDef =>
         !!tool &&
         typeof tool === 'object' &&
@@ -771,6 +911,11 @@ async function fetchAuthoritativeToolCatalog(
         typeof (tool as RuntimeKoryToolDef).description === 'string' &&
         !!(tool as RuntimeKoryToolDef).inputSchema &&
         typeof (tool as RuntimeKoryToolDef).inputSchema === 'object',
+    );
+    // A malformed or duplicated catalog must not prevent the bridge from
+    // serving the rest of the authenticated tool set.
+    return tools.filter(
+      (tool, index) => tools.findIndex((candidate) => candidate.name === tool.name) === index,
     );
   } catch {
     process.stderr.write('[kory-mcp-bridge] authoritative catalog unreachable\n');
@@ -817,8 +962,14 @@ async function proxyToolCall(
         isError: true,
       };
     }
-    const data = (await resp.json()) as { output?: string; isError?: boolean };
-    return { content: data.output ?? '', isError: data.isError ?? false };
+    const data = (await resp.json()) as { output?: unknown; isError?: unknown };
+    if (typeof data.output !== 'string' || (data.isError !== undefined && typeof data.isError !== 'boolean')) {
+      return {
+        content: 'Kory backend returned an invalid tool result.',
+        isError: true,
+      };
+    }
+    return { content: data.output, isError: data.isError ?? false };
   } catch {
     return {
       content: 'Kory backend or private authorization is unavailable.',
@@ -851,24 +1002,37 @@ export function buildServer(
     { capabilities: { tools: {} } },
   );
 
+  const registeredNames = new Set<string>();
   for (const tool of allowedTools) {
-    server.registerTool(
-      tool.name,
-      {
-        description: tool.description,
-        inputSchema: fromJsonSchema(tool.inputSchema),
-      },
-      // fromJsonSchema wraps a raw JSON Schema; the SDK validates args against
-      // it before the handler runs, but the TypeScript type is `unknown` since
-      // JSON Schema carries no TS types. Cast to Record at the call site.
-      async (args: unknown) => {
-        const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
-        return {
-          content: [{ type: 'text' as const, text: result.content }],
-          isError: result.isError,
-        };
-      },
-    );
+    if (registeredNames.has(tool.name)) continue;
+    try {
+      server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: fromJsonSchema(tool.inputSchema),
+        },
+        // fromJsonSchema wraps a raw JSON Schema; the SDK validates args against
+        // it before the handler runs, but the TypeScript type is `unknown` since
+        // JSON Schema carries no TS types. Cast to Record at the call site.
+        async (args: unknown) => {
+          const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
+          return {
+            content: [{ type: 'text' as const, text: result.content }],
+            isError: result.isError,
+          };
+        },
+      );
+      registeredNames.add(tool.name);
+    } catch (error) {
+      // Catalog data is backend-authenticated but still runtime input. Skip a
+      // single invalid schema rather than taking down the whole stdio server.
+      process.stderr.write(
+        `[kory-mcp-bridge] skipped invalid tool schema ${tool.name}: ${
+          error instanceof Error ? error.message : String(error)
+        }\n`,
+      );
+    }
   }
 
   return server;

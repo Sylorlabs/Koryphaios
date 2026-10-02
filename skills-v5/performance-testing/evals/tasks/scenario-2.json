@@ -1,0 +1,76 @@
+{
+  "id": "performance-testing-full-task-2",
+  "maturity": "individual",
+  "prompt": "Create and run a component performance benchmark for a JSON event parser used by the ingest pipeline. The fixture supplies a 64KB representative event corpus with fixed schema/cardinality plus an exact optimized release build and machine. Measure both cold first-use latency and warm steady-state throughput. For warm results, use an explicit benchmark warmup period that is discarded, a minimum measured duration, five independent repetitions, and machine-readable raw output. Report operation latency/throughput, allocations or peak memory where supported, and correctness against the same parsed-event oracle used in functional tests. If a baseline build is included, randomize/interleave baseline and candidate repetitions when the harness supports it so slow machine drift does not automatically favor one version. Keep this as benchmark construction/evidence; do not explain a slowdown or enforce the release budget here.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-testing/scenario-2",
+    "requirements": [
+      "fixed 64KB representative event corpus and parsed-event correctness oracle",
+      "exact optimized release build and runtime/toolchain identity",
+      "dedicated machine identity with stable power/performance settings",
+      "benchmark harness supporting discarded warmup, repetitions, and machine-readable output",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-testing-cold-warm-2",
+      "assertion": "Cold first-use latency is measured separately from warm steady-state results; warmup execution is explicitly discarded and not mixed into reported steady-state timing."
+    },
+    {
+      "id": "performance-testing-repetitions-2",
+      "assertion": "The warm benchmark uses five independent repetitions with a stated minimum measured duration and preserves per-repetition machine-readable raw output plus cross-run variation."
+    },
+    {
+      "id": "performance-testing-env-identity-2",
+      "assertion": "Build optimization, commit/image, compiler/runtime, machine/CPU, OS, power/performance mode, benchmark-tool version, and corpus identity are recorded and held fixed for comparable runs."
+    },
+    {
+      "id": "performance-testing-correctness-2",
+      "assertion": "Every benchmarked parser path is validated against the fixed parsed-event oracle so an incorrect fast implementation cannot be reported as an improvement."
+    },
+    {
+      "id": "performance-testing-baseline-drift-2",
+      "assertion": "When baseline and candidate are both measured, their repetitions are randomized/interleaved where supported or the report explicitly documents the sequential-order drift risk."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-testing-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "cold versus warm protocol",
+        "five per-repetition raw benchmark outputs",
+        "environment identity",
+        "correctness and baseline-order evidence"
+      ]
+    },
+    {
+      "id": "performance-testing-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "benchmark build/runtime/machine/corpus identity",
+    "cold first-use result",
+    "warmup/min-duration/five-repetition protocol",
+    "per-repetition raw output and variation",
+    "correctness oracle results",
+    "baseline/candidate order-control evidence when applicable",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "performance-testing-scenario-2-result",
+    "performance-testing-scenario-2-verification",
+    "performance-testing-scenario-2-paired-evaluation"
+  ]
+}

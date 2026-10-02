@@ -17,18 +17,17 @@
         "label": "main",
         "title": "Koryphaios",
         "width": 1280,
-        "height": 800,
+        "height": 1072,
         "minWidth": 1024,
         "minHeight": 640,
-        "maxWidth": 3840,
-        "maxHeight": 2160,
         "resizable": true,
         "fullscreen": false,
         "center": true,
         "decorations": false,
         "visible": true,
         "focus": true,
-        "useHttpsScheme": false
+        "useHttpsScheme": false,
+        "skipTaskbar": false
       }
     ],
     "security": {

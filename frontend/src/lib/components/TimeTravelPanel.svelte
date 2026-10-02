@@ -16,6 +16,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { formatUsd } from '$lib/utils/usd';
 
   type TimelineEntry = {
     hash: string;
@@ -247,7 +248,7 @@
               Recorded cost
             </p>
             <p class="mt-1 font-mono text-sm text-[var(--color-text-primary)]">
-              ${timelineState.stats.totalCost.toFixed(4)}
+              {formatUsd(timelineState.stats.totalCost)}
             </p>
           </div>
           <div class="bg-[var(--color-surface-1)] px-4 py-3">
@@ -367,7 +368,7 @@
                       ><span>{checkpointLabel(entry.checkpointType)}</span>
                       {#if entry.model}<span class="font-mono">{entry.model}</span>{/if}
                       {#if entry.cost !== undefined}<span class="font-mono"
-                          >${entry.cost.toFixed(4)}</span
+                          >{formatUsd(entry.cost)}</span
                         >{/if}
                     </span>
                     {#if badges.length > 0}

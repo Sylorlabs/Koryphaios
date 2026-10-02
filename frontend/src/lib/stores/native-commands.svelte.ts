@@ -1,7 +1,7 @@
 // Native CLI slash command store.
 //
 // When the active manager is a CLI-backed provider (Claude Code, Codex, Devin,
-// Grok Build, Cursor, Cline, Antigravity, Kimi Code), the composer surfaces
+// Grok Build, Cursor, Antigravity, Kimi Code), the composer surfaces
 // that harness's own /commands in the slash picker and dispatches them to the
 // backend, which runs a real headless equivalent (or surfaces an attributed
 // note) and streams the reply back as `native.command` WebSocket events.
@@ -35,7 +35,6 @@ export const NATIVE_CLI_PROVIDERS = new Set([
   'devin',
   'grok',
   'cursor',
-  'cline',
   'antigravity',
   'kimicode',
 ]);

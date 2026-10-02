@@ -1,0 +1,82 @@
+{
+  "id": "http-rest-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Add optimistic concurrency to a REST resource updated by multiple admin clients. Define strong/weak ETag semantics for the representation, require If-Match on destructive updates, map missing versus stale preconditions correctly, and keep GET caching behavior compatible. Provide contract tests for concurrent writers, conditional GET, stale retry, wildcard semantics, and an old read-only client.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://http-rest-engineering/conditional-update-etag",
+    "requirements": [
+      "GET/PUT/DELETE resource contract with two concurrent client fixtures",
+      "representation version source suitable for ETag generation",
+      "existing cache headers and read-only client behavior to preserve",
+      "tests for 304, 412/428 policy, stale If-Match, and successful retry",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "http-rest-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "http-rest-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "http-rest-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "conditional-update-etag scenario evidence",
+    "http-rest-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "http-rest-engineering-individual-scenario-1-result",
+    "http-rest-engineering-individual-scenario-1-verification",
+    "http-rest-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual http-rest-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=graphql-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Use HTTP semantics deliberately: safe/idempotent methods, status classes, Location, validators, conditional requests, Cache-Control, content types, redirects, range/streaming, and proxy behavior."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "HTTP precondition semantics make lost updates observable and retryable without changing the meaning of successful reads or conflating cache validation with write authorization."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise retries, conditional requests, cache hit/revalidation, malformed bodies, unsupported media, auth denial, proxy headers, timeouts, streaming disconnects, and client compatibility."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not tunnel every action through POST without reason, cache personalized data incorrectly, trust forwarded headers from untrusted peers, or retry non-idempotent requests blindly."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (http-rest-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

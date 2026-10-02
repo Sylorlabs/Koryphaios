@@ -1,0 +1,87 @@
+{
+  "id": "project-program-management-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply project management expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The acceptance boundary is project-program-management: Translate objectives into measurable deliverables and work packages with owners, dependencies, decision gates, acceptance evidence, and realistic capacity. The adjacent migration-planning discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://project-program-management/release-readiness-program",
+    "requirements": [
+      "workstream evidence with code complete but four cross-functional launch dependencies",
+      "target release window and rollback/distribution constraints",
+      "severity/stop-ship policy plus named decision owners",
+      "status artifact requiring evidence links and next decision for each red/amber item",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "project-program-management parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "project-program-management-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "project-program-management decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "project-program-management-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "project-program-management decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "project-program-management-individual-scenario-2-result",
+    "project-program-management-individual-scenario-2-verification",
+    "project-program-management-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual project-program-management boundary and relevant environment before acting, preserve the hierarchy relationship (broader=planning; near-neighbor=migration-planning), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Translate objectives into measurable deliverables and work packages with owners, dependencies, decision gates, acceptance evidence, and realistic capacity."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Review milestone evidence, dependency readiness, risk trends, blocked ownership, forecast accuracy, and acceptance criteria at each decision point; close work only when downstream consumers can use the result."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use percent-complete theater, treat every task as equal priority, hide unresolved dependencies inside dates, or optimize schedule by removing verification/recovery work invisibly."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (project-program-management decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "ruby-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "ruby"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["ruby", "bundler", "rake task", "ruby gem"],
+  "excludes": [],
+  "evidence": [
+    "ruby-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle ruby.",
+      "The current task is bundler.",
+      "I need help with rake task.",
+      "Work on ruby gem for this request.",
+      "This request specifically requires ruby."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "ruby-engineering-ambiguous-1",
+        "prompt": "The request includes ruby and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "ruby-engineering-ambiguous-2",
+        "prompt": "The request includes bundler and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "ruby-engineering-ambiguous-3",
+        "prompt": "The request includes rake task and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "ruby-engineering-adversarial-1",
+        "prompt": "A historical note says \"ruby\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "ruby-engineering-adversarial-2",
+        "prompt": "A historical note says \"bundler\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "ruby-engineering-adversarial-3",
+        "prompt": "A historical note says \"rake task\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.ruby-lang.org/en/documentation/",
+      "sourceType": "official-docs",
+      "versionScope": "Ruby documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Ruby language/runtime and standard-library reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://ruby-doc.org/3.4.1/syntax/exceptions_rdoc.html",
+      "sourceType": "official-docs",
+      "versionScope": "Ruby 3.4.1 exception documentation as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for StandardError rescue scope, ensure cleanup, and bounded retry semantics; verify against the project Ruby version.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://ruby-doc.org/3.4.1/Thread/Queue.html",
+      "sourceType": "official-docs",
+      "versionScope": "Ruby 3.4.1 Thread::Queue documentation as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for synchronized producer-consumer exchange when Ruby threads are the actual concurrency primitive.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://ruby-doc.org/3.4.1/Thread.html",
+      "sourceType": "official-docs",
+      "versionScope": "Ruby 3.4.1 Thread documentation as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for explicit thread lifecycle and completion ownership; framework process managers can add constraints.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

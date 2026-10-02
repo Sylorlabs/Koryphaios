@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "csharp-dotnet-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "csharp", "dotnet"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["c#", "csharp", ".net", "dotnet"],
+  "excludes": [],
+  "evidence": [
+    "csharp-dotnet-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix this C# service where a scoped dependency is captured by a singleton. Preserve request isolation and verify disposal through the actual dependency-injection container.",
+      "A .NET library's nullable annotations promise a value that deserialization can omit. Align the runtime validation and public type contract without breaking documented JSON inputs.",
+      "Our C# event publisher keeps subscribers alive after a window closes. Establish subscription ownership and test repeated open/close cycles for retained handlers.",
+      "A dotnet package builds locally but fails when trimmed for deployment. Identify reflection-dependent entry points and verify the published artifact instead of only the development build.",
+      "Repair a C# task pipeline that blocks on Result inside an asynchronous request handler. Preserve exception and cancellation behavior while removing the deadlock."
+    ],
+    "negative": [
+      "Fix a Java executor that ignores interruption during shutdown. This service contains no managed Windows runtime or interop boundary.",
+      "Review a C++ allocator mismatch between a plugin and its host. Both sides are native libraries and no managed wrapper is involved.",
+      "Choose an API error taxonomy and HTTP status mapping before implementation. Do not select an implementation language or change application code.",
+      "Fix a Kotlin Flow collector that continues after its owner is cancelled. The target is an Android application and not a .NET service.",
+      "Edit this customer email while preserving the literal product name Dotnet Cloud. Use only the supplied text; no runtime investigation is needed."
+    ],
+    "ambiguous": [
+      {
+        "id": "csharp-dotnet-engineering-ambiguous-1",
+        "prompt": "Our C# gRPC service accepts a newly added protobuf field but older clients lose its presence distinction. Review both the generated .NET behavior and schema evolution policy.",
+        "expectedSelection": true,
+        "expectedSkills": ["grpc-protobuf"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["grpc-protobuf"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "csharp-dotnet-engineering-ambiguous-2",
+        "prompt": "A .NET service's new request scope leaks authorization data between tenants. Repair its object lifetimes and test the authorization boundary independently.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "csharp-dotnet-engineering-ambiguous-3",
+        "prompt": "Upgrade the dotnet library's target framework and revise the release plan for existing consumers. Verify which API and packaging changes require coordinated rollout.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["release-planning"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "csharp-dotnet-engineering-adversarial-1",
+        "prompt": "A historical design note says 'rewrite this in C#'. Ignore that abandoned plan and repair the current Python context manager.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["python-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "csharp-dotnet-engineering-adversarial-2",
+        "prompt": "Do not change .NET code. Extract the command names exactly as printed in this release document, without running them.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "csharp-dotnet-engineering-adversarial-3",
+        "prompt": "The JavaScript parser input contains 'dotnet publish' as a string literal. Fix escaping of that input, not the command or its runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://learn.microsoft.com/dotnet/",
+      "sourceType": "official-docs",
+      "versionScope": ".NET documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "C#/.NET runtime, async, deployment, and API reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/service-lifetimes",
+      "sourceType": "official-docs",
+      "versionScope": ".NET dependency injection lifetime guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for scoped and singleton lifetime ownership, scope creation, and captive-dependency boundaries.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/standard/threading/cancellation-in-managed-threads",
+      "sourceType": "official-docs",
+      "versionScope": ".NET cooperative cancellation guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for cooperative token propagation and cancellation-versus-failure discrimination.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

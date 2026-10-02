@@ -37,7 +37,19 @@ describe('voice settings', () => {
   });
 
   test('accepts speech output from every TTS-capable provider', () => {
-    expect(validateVoiceSettings(DEFAULT_VOICE_SETTINGS).input.provider).toBe('system');
+    expect(validateVoiceSettings(DEFAULT_VOICE_SETTINGS).input).toEqual({
+      provider: 'kory-local',
+      modelId: 'kory-local-voice',
+      language: 'en',
+    });
+    // A settings file written before the runtime became format-agnostic still
+    // loads, and reports the runtime rather than one model file.
+    expect(
+      validateVoiceSettings({
+        ...DEFAULT_VOICE_SETTINGS,
+        input: { provider: 'kory-local', modelId: 'kory-whisper-local', language: 'en' },
+      }).input.provider,
+    ).toBe('kory-local');
     const local = validateVoiceSettings({
       ...DEFAULT_VOICE_SETTINGS,
       input: { provider: 'local', modelId: 'downloaded-whisper', language: 'en' },
@@ -190,9 +202,45 @@ describe('voice settings', () => {
     }
   });
 
-  test('catalog exposes system, API, and local speech paths', async () => {
+  test('migrates the legacy system input default to Kory Voice once', async () => {
+    const previousDataDir = process.env.KORYPHAIOS_DATA_DIR;
+    const tempDir = mkdtempSync(join(tmpdir(), 'kory-voice-migration-'));
+    process.env.KORYPHAIOS_DATA_DIR = tempDir;
+    try {
+      const settingsPath = join(tempDir, 'voice-settings.json');
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({
+          input: { provider: 'system', modelId: 'web-speech-recognition', language: 'fr' },
+          output: DEFAULT_VOICE_SETTINGS.output,
+          autoReadFinalReplies: false,
+          voiceModeEnabled: true,
+        }),
+      );
+      const loaded = await loadVoiceSettings();
+      expect(loaded.input).toEqual({
+        provider: 'kory-local',
+        modelId: 'kory-local-voice',
+        language: 'fr',
+      });
+      expect(loaded.localVoiceSetupVersion).toBe(1);
+
+      const explicitlySelectedSystem = {
+        ...loaded,
+        input: { provider: 'system', modelId: 'web-speech-recognition', language: 'fr' },
+      };
+      writeFileSync(settingsPath, JSON.stringify(explicitlySelectedSystem));
+      expect((await loadVoiceSettings()).input.provider).toBe('system');
+    } finally {
+      if (previousDataDir === undefined) delete process.env.KORYPHAIOS_DATA_DIR;
+      else process.env.KORYPHAIOS_DATA_DIR = previousDataDir;
+    }
+  });
+
+  test('catalog exposes built-in, system, API, and local speech paths', async () => {
     const providers = await listVoiceProviders();
     expect(providers.map((provider) => provider.id)).toEqual([
+      'kory-local',
       'system',
       'openai',
       'groq',
@@ -203,10 +251,11 @@ describe('voice settings', () => {
       'llamacpp',
     ]);
     expect(providers[0]).toMatchObject({
-      capabilities: ['stt', 'tts'],
+      capabilities: ['stt'],
       configured: true,
       local: true,
     });
+    expect(providers[0].models?.[0]?.id).toBe('kory-local-voice');
     expect(providers.find((provider) => provider.id === 'local')).toMatchObject({
       capabilities: ['stt', 'tts'],
       local: true,

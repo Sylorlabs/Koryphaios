@@ -1,0 +1,68 @@
+{
+  "id": "accessibility-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A web delete-confirmation dialog has been completed. Run an accessibility audit in the supported browser with keyboard-only input and the supplied representative screen reader. Starting from the Delete button, verify focus enters the dialog predictably, remains within the modal interaction, reaches Cancel and Confirm in logical order, shows a visible focus indicator, supports Escape according to the product contract, and returns focus to the invoking Delete button after cancel or successful confirm. The dialog title, irreversible-action description, buttons, busy state, and injected server error must expose accurate names/roles/state; the error must be perceivable without moving focus manually. Repeat the flow at 200% browser zoom and with a long localized item name to verify reflow without losing controls. Run the project's automated scanner as supporting evidence, but do not use a clean scan as the manual verdict.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://accessibility-verification/web-delete-dialog",
+    "requirements": [
+      "the fixture records browser and screen-reader version and supports keyboard-only operation",
+      "a deterministic server-rejection branch is available without changing production code",
+      "the fixture can force 200% zoom and a long localized item name",
+      "the repository's automated accessibility scanner can run against the same dialog state",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "a11y-dialog-keyboard-focus",
+      "assertion": "Keyboard-only traversal reaches all dialog actions with visible focus, does not escape unexpectedly, honors documented Escape behavior, and restores focus to the invoking control after dismissal."
+    },
+    {
+      "id": "a11y-dialog-semantics-error",
+      "assertion": "The representative screen reader exposes the dialog title, purpose, controls, busy state, and injected error accurately, and the error becomes perceivable without requiring a pointer or manual focus hunt."
+    },
+    {
+      "id": "a11y-dialog-reflow-evidence",
+      "assertion": "At 200% zoom with the long localized name, the dialog remains operable without clipped or unreachable required controls; automated findings are reported separately from manual evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "accessibility-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Manual alternate-input task results",
+        "Assistive-technology semantic observations",
+        "zoom/reflow observations",
+        "automated findings and residual limitations"
+      ]
+    },
+    {
+      "id": "accessibility-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "manual task evidence is not replaced by scanner output",
+        "focus and announcement claims use the real supported interaction path",
+        "untested assistive-technology coverage is stated explicitly"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Manual alternate-input task results",
+    "assistive-technology transcript or observation log",
+    "zoom/reflow evidence",
+    "automated findings and residual limitations",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "accessibility-verification-scenario-1-task-matrix",
+    "accessibility-verification-scenario-1-at-evidence",
+    "accessibility-verification-scenario-1-verdict",
+    "accessibility-verification-scenario-1-paired-evaluation"
+  ]
+}

@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -253,6 +254,8 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
     git(repo, 'add', '.');
     git(repo, 'commit', '-m', 'baseline');
     const baseline = git(repo, 'rev-parse', 'HEAD');
+    const alias = join(makeDirectory('kory-response-alias'), 'project');
+    symlinkSync(repo, alias, process.platform === 'win32' ? 'junction' : 'dir');
     writeFileSync(join(repo, 'tracked.txt'), 'pending review edit\n');
     writeFileSync(join(repo, 'new.txt'), 'must be removed\n');
 
@@ -264,7 +267,7 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
     );
     await ensurePendingSessionReview({
       sessionId: durable.id,
-      projectRoot: repo,
+      projectRoot: alias,
       rollback: { kind: 'git', baselineHash: baseline },
       changes: [
         {
@@ -292,6 +295,56 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
       restarted.shutdown();
     }
   });
+
+  test('accepts a durable review through an alias of the same physical project', async () => {
+    const repo = makeDirectory('kory-response-accept-alias');
+    const alias = join(makeDirectory('kory-response-accept-link'), 'project');
+    symlinkSync(repo, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    const durable = await new SessionStore().create('local-user', 'alias review', undefined, repo);
+    await ensurePendingSessionReview({
+      sessionId: durable.id,
+      projectRoot: alias,
+      changes: [],
+      rollback: { kind: 'unavailable', reason: 'acceptance does not roll back' },
+    });
+    const manager = createManager(repo, sessionStore([session(durable.id, realpathSync(repo))]));
+    try {
+      await manager.handleSessionResponse(durable.id, true);
+      expect(await getSessionReview(durable.id)).toMatchObject({ status: 'accepted' });
+    } finally {
+      manager.shutdown();
+    }
+  });
+
+  for (const binding of ['different', 'missing'] as const) {
+    test(`refuses a review bound to a ${binding} physical project`, async () => {
+      const repo = makeDirectory('kory-response-bound-project');
+      const other = makeDirectory('kory-response-other-project');
+      const durable = await new SessionStore().create(
+        'local-user',
+        'bound review',
+        undefined,
+        repo,
+      );
+      await ensurePendingSessionReview({
+        sessionId: durable.id,
+        projectRoot: binding === 'different' ? other : join(other, 'missing'),
+        changes: [],
+        rollback: { kind: 'git', baselineHash: 'must-not-be-used' },
+      });
+      writeFileSync(join(repo, 'unchanged.txt'), 'preserve');
+      const manager = createManager(repo, sessionStore([session(durable.id, repo)]));
+      try {
+        await expect(manager.handleSessionResponse(durable.id, false)).rejects.toThrow(
+          'different project directory',
+        );
+        expect(readFileSync(join(repo, 'unchanged.txt'), 'utf8')).toBe('preserve');
+        expect(await getSessionReview(durable.id)).toMatchObject({ status: 'terminalized' });
+      } finally {
+        manager.shutdown();
+      }
+    });
+  }
 
   test('a restarted manager terminalizes an interrupted rejection without retrying Git', async () => {
     const repo = makeDirectory('kory-response-restart-terminal');

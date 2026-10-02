@@ -38,6 +38,7 @@
   "scripts": {
     "dev": "bun run dev:desktop",
     "dev:desktop": "bun run scripts/launch-desktop.ts",
+    "user": "bun run scripts/launch-user.ts",
     "write-compat-hash": "bun run scripts/write-compat-hash.ts",
     "build:frontend:static": "bun run desktop/scripts/build-frontend.ts",
     "build": "bun run write-compat-hash && bun run --filter '*' build",
@@ -49,12 +50,24 @@
     "test:core": "bun run test:backend:isolated && bun run --filter frontend test",
     "test:coverage": "bun run --filter backend test:coverage:check && bun run --filter frontend test:coverage:check",
     "test:e2e": "playwright test",
+    "eval:core": "bun run scripts/evaluate-core.ts",
     "audit:files": "bun run scripts/audit-file-ledger.ts",
+    "audit:skills-v5": "bun run scripts/sync-skill-v5-audit.ts",
+    "audit:skills-v5:quality": "bun run scripts/audit-skill-v5-quality.ts --summary",
+    "audit:skills-v5:execution": "bun run scripts/audit-skill-v5-execution-readiness.ts",
+    "audit:skills-v5:qualification": "bun run scripts/audit-skill-v5-qualification.ts --summary",
+    "eval:skills-v5:routing": "bun run scripts/evaluate-skill-v5-independent-routing.ts",
+    "eval:skills-v5:pilot": "bun run scripts/run-skill-v5-pilot.ts",
+    "sync:skill-stewards": "bun run scripts/sync-skill-stewards.ts",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:changed": "bun run scripts/check-changed-format.ts",
     "build:ci": "bun run write-compat-hash && bun run --filter backend build && bun run build:frontend:static",
-    "dev:workspace": "bun run --filter \"*\" dev"
+    "dev:workspace": "bun run --filter \"*\" dev",
+    "eval:skills-v5:blind": "bun run scripts/run-skill-v5-blind-review-campaign.ts",
+    "benchmark:cache": "bun run scripts/benchmark-cache-fabric.ts",
+    "benchmark:cache:live": "bun run scripts/benchmark-cache-live.ts",
+    "benchmark:cache:switches": "bun run scripts/benchmark-cache-switch-matrix.ts"
   },
   "workspaces": [
     "backend",

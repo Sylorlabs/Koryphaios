@@ -1,0 +1,82 @@
+{
+  "id": "web-interface-full-task-content-led-product-page",
+  "prompt": "Build a production browser page for a technical product using supplied real copy, screenshots, logo assets, and brand references. The page must communicate the product clearly, support a primary evaluation action and a secondary documentation action, adapt to content and available space, remain usable with zoom and long text, respect reduced motion, use semantic structure, and avoid generic generated-design patterns unless they are justified by the brand or content. Use the existing web stack and component library found in the repository, then verify the real page rather than judging a single screenshot.",
+  "environment": {
+    "kind": "browser",
+    "startingState": "fixture://web-interface/content-led-product-page",
+    "requirements": [
+      "real content and brand-reference fixture",
+      "existing web stack and component library",
+      "representative viewport and long-content fixtures",
+      "reduced-motion environment",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "web-page-real-content-brand",
+      "assertion": "The page uses the supplied copy, screenshots, logos, and brand references and does not replace them with invented claims, placeholder product content, or generic generated-design motifs without evidence."
+    },
+    {
+      "id": "web-page-purpose-actions",
+      "assertion": "Hierarchy communicates the product to the stated audience and keeps the primary evaluation action and secondary documentation action distinct and reachable across representative states/viewports."
+    },
+    {
+      "id": "web-page-semantic-structure",
+      "assertion": "The implementation uses the existing web stack/component library and semantic document/navigation/action structure rather than rebuilding the page in an unrelated framework or screenshot-only surface."
+    },
+    {
+      "id": "web-page-content-responsive-access",
+      "assertion": "Layout adapts to content/available space and remains usable under long text, zoom/large text, narrow/wide supported viewports, overflow, keyboard navigation, and reduced-motion preference."
+    },
+    {
+      "id": "web-page-real-browser-proof",
+      "assertion": "Verification exercises the real page across representative viewports/preferences/interactions and checks runtime/console failures; a single visual snapshot cannot establish responsive, semantic, or interaction correctness."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "content-and-web-structure",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "real supplied content and assets used",
+        "purpose and audience drive hierarchy",
+        "semantic web structure and navigation",
+        "repository stack and components reused",
+        "primary and secondary actions remain clear"
+      ]
+    },
+    {
+      "id": "responsive-visual-and-preference-integrity",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "responsive behavior follows content rather than fixed screenshot breakpoints",
+        "zoom, long content, and overflow verified",
+        "reduced motion respected",
+        "visual direction is contextual rather than generic by default",
+        "real-browser verification covers runtime errors and interaction"
+      ]
+    },
+    {
+      "id": "blind-content-led-web-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "audience, purpose, content, and brand direction",
+    "semantic and responsive implementation contract",
+    "reduced-motion and accessibility behavior",
+    "real-browser viewport and interaction checks",
+    "anti-generic decisions tied to evidence"
+  ],
+  "requiredArtifacts": [
+    "content-led-web-interface-plan",
+    "responsive-browser-verification-contract",
+    "paired-experiment-report"
+  ]
+}

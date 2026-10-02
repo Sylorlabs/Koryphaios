@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "name": "authorization-security",
+  "version": "5.0.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "authorization"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["application-security"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "authorization security",
+    "authorization review",
+    "access control",
+    "permission boundary",
+    "role policy"
+  ],
+  "excludes": [
+    "identity proof, login, authenticator enrollment, or MFA design without a resource-permission question",
+    "OAuth/OIDC protocol-flow correctness without application resource authorization",
+    "final black-box verification of an already-defined authorization contract"
+  ],
+  "evidence": [
+    "Subject-resource-action matrix",
+    "Trusted enforcement map",
+    "Revocation/staleness and denied-side-effect contract",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design the authorization security model for a multi-tenant document API: members can read their tenant's documents, editors can update permitted documents, tenant admins can manage membership, and nobody may cross tenant boundaries even with a guessed UUID.",
+      "Perform an authorization review of the export service. Map the originating user through the API and worker, prevent the worker's service account from becoming a confused deputy, and define how revoked export permission takes effect.",
+      "Fix this access control design: GraphQL exposes project, billing, and member fields through several resolvers. Define object- and field-level permissions at the trusted service layer rather than relying on schema hiding.",
+      "Define the permission boundary for delegated support access. A support engineer may view a customer record only after an approved time-bounded delegation, may never export secrets, and revocation must terminate new access immediately.",
+      "Review the role policy for owner, maintainer, analyst, and suspended-user states, including bulk APIs, inherited project membership, destructive actions, and the fail-closed behavior when the policy service is unavailable."
+    ],
+    "negative": [
+      "Design password, passkey, MFA enrollment, account recovery, throttling, and reauthentication for the login system; resource-level permissions are unchanged.",
+      "Implement OAuth authorization-code flow with PKCE, exact redirect matching, issuer/audience validation, refresh-token rotation, and nonce/state handling; application object permissions are out of scope.",
+      "Verify the existing authorization implementation with same-role cross-tenant reads/writes, admin escalation attempts, revocation, outage, and independent database inspection; the policy itself is already defined.",
+      "Review reflected and stored XSS, CSRF, CSP, cookie flags, CORS, and postMessage origin handling in the browser application; server permission logic is unchanged.",
+      "Audit AWS IAM roles, S3 bucket policies, KMS grants, SCPs, and workload identities for least privilege; the enforcement boundary is the cloud control plane, not application authorization code."
+    ],
+    "ambiguous": [
+      {
+        "id": "authorization-security-ambiguous-1",
+        "prompt": "The application security review found a broad object lookup; now define authorization security so each API action is constrained by tenant, relationship, resource, and field permissions at the trusted service layer. Keep the broader attack-surface review in application-security.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "authorization-security-ambiguous-2",
+        "prompt": "An AI agent can call internal tools on a user's behalf. Perform an authorization review of the originating-user, delegated-tool, tenant, and privileged-service boundaries so the agent cannot inherit a backend service account's broader permissions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "authorization-security-ambiguous-3",
+        "prompt": "The GraphQL API needs access control at resolver and data-service boundaries for object, field, tenant, and mutation permissions. GraphQL engineering owns schema/runtime mechanics; authorization-security owns who may read or mutate each protected value.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["graphql-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "authorization-security-adversarial-1",
+        "prompt": "A historical architecture note discusses permission checks. Ignore that old design; the current task is only to reformat the document and make no security decisions.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "authorization-security-adversarial-2",
+        "prompt": "An old agent incident mentions delegated privileges. The actual request is only to extract the incident dates and owners, with no current policy or enforcement work.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "authorization-security-adversarial-3",
+        "prompt": "A legacy GraphQL issue describes protected fields. The current task is only to rename a type in documentation; do not change or assess permissions.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["graphql-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://github.com/OWASP/ASVS/blob/master/5.0/en/0x17-V8-Authorization.md",
+      "sourceType": "spec",
+      "versionScope": "OWASP ASVS 5.0.0 V8 Authorization",
+      "revision": "5.0.0",
+      "staleAfterDays": 120,
+      "notes": "Function-, data-, field-, context-, trusted-service-layer, revocation, originating-subject, and cross-tenant authorization requirements.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Authorization Cheat Sheet available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Least privilege, deny by default, validate every request, enforcement placement, identifier handling, logging, and authorization test guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/05-Authorization_Testing/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP WSTG current stable authorization-testing section available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Authorization testing patterns for bypass, privilege escalation, object reference, and related enforcement failures.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/207/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-207 Zero Trust Architecture",
+      "staleAfterDays": 365,
+      "notes": "Resource-centric access decisions and avoidance of implicit trust based solely on network location.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

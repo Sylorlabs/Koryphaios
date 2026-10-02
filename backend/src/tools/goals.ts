@@ -188,3 +188,100 @@ export class UpdateGoalTool implements Tool {
     };
   }
 }
+
+/**
+ * Reshape a Goal Mode plan: add, rename, reorder, or delete checks.
+ *
+ * Graded 'any' so any role can correct a plan it is executing against, but
+ * routed through `GoalStore.editChecklistPlan`, which only accepts shape. An
+ * agent therefore cannot mark a check complete or attach evidence to it here --
+ * `update_goal` and the critic remain the only paths that can do that.
+ */
+export class EditGoalChecklistTool implements Tool {
+  readonly name = 'edit_goal_checklist';
+  readonly role = 'any' as const;
+  readonly description =
+    'Reshape a Goal Mode plan: add, rename, reorder, or delete its checks. This changes the plan only -- it cannot mark a check complete or record evidence. Use update_goal inside an active Goal Mode turn to report progress on the current check, and the Critic to verify it.';
+  readonly inputSchema = {
+    type: 'object',
+    properties: {
+      goalId: { type: 'string', description: 'The goal whose plan should change' },
+      items: {
+        type: 'array',
+        description: 'The full replacement plan. Checks omitted from this list are deleted.',
+        items: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description:
+                'Existing check id, to keep that check and its state. Omit for a new check.',
+            },
+            title: { type: 'string', maxLength: 1000, description: 'Check title' },
+            order: { type: 'number', description: 'Position, zero-based' },
+          },
+          required: ['title'],
+        },
+      },
+    },
+    required: ['goalId', 'items'],
+  };
+
+  async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
+    const start = Date.now();
+    const goalId = typeof call.input.goalId === 'string' ? call.input.goalId.trim() : '';
+    const rawItems = call.input.items;
+    if (!goalId) return this.fail(call, 'goalId is required.', start);
+    if (!Array.isArray(rawItems) || rawItems.length === 0)
+      return this.fail(call, 'items must be a non-empty replacement plan.', start);
+    const items = rawItems
+      .map((entry, index) => {
+        const raw = (entry ?? {}) as Record<string, unknown>;
+        const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+        const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+        return {
+          ...(id ? { id } : {}),
+          title,
+          order: Number.isFinite(raw.order) ? Number(raw.order) : index,
+        };
+      })
+      .filter((item) => item.title);
+    if (!items.length) return this.fail(call, 'Every check requires a title.', start);
+    try {
+      const { goals, wsManager } = getContext();
+      const actor = ctx.callerRole ? `${ctx.callerRole} agent` : 'an agent';
+      const goal = await goals.editChecklistPlan(goalId, items, actor);
+      if (!goal) return this.fail(call, `No goal ${goalId}.`, start);
+      const plan = goal.checklist
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((item) => `  [${item.status === 'completed' ? 'x' : ' '}] ${item.id}  ${item.title}`)
+        .join('\n');
+      wsManager.broadcast({
+        type: 'goals.updated',
+        payload: { goal },
+        timestamp: Date.now(),
+        sessionId: goal.sessionId,
+      });
+      return {
+        callId: call.id,
+        name: this.name,
+        output: `Plan updated for goal ${goalId}. Status and evidence were preserved; completing a check still requires evidence and verification.\n${plan}`,
+        isError: false,
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      return this.fail(call, err instanceof Error ? err.message : String(err), start);
+    }
+  }
+
+  private fail(call: ToolCallInput, message: string, start: number): ToolCallOutput {
+    return {
+      callId: call.id,
+      name: this.name,
+      output: `Error: ${message}`,
+      isError: true,
+      durationMs: Date.now() - start,
+    };
+  }
+}

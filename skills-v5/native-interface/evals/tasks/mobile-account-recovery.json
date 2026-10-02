@@ -1,0 +1,82 @@
+{
+  "id": "native-interface-full-task-mobile-recovery",
+  "prompt": "Improve a native mobile account-recovery flow that may involve biometric or credential input, virtual keyboard entry, a waiting period, permission-dependent fallback, support handoff, background interruption, deep-link return, and a policy denial. The app must preserve user progress safely without persisting sensitive state improperly, adapt to changing available window space where supported, and remain operable with platform accessibility services. Produce a platform-native implementation and verification contract without importing browser form assumptions.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://native-interface/mobile-account-recovery",
+    "requirements": [
+      "native mobile application fixture",
+      "platform and toolkit identity",
+      "permission, deep-link, and lifecycle fixtures",
+      "assistive-technology and keyboard scenarios",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "mobile-recovery-lifecycle",
+      "assertion": "Backgrounding, process/lifecycle interruption where applicable, waiting, support handoff, deep-link return, and navigation restoration preserve a coherent recovery state instead of restarting or skipping required steps silently."
+    },
+    {
+      "id": "mobile-recovery-sensitive-state",
+      "assertion": "Credential/biometric and other sensitive state is separated from safely resumable progress so restoration does not persist secrets or bypass reauthentication/policy boundaries."
+    },
+    {
+      "id": "mobile-recovery-permission-fallback",
+      "assertion": "Permission denial/unavailability, supported fallback, waiting, support escalation, and final policy denial are distinguishable states with no invented bypass around platform or product policy."
+    },
+    {
+      "id": "mobile-recovery-input-access",
+      "assertion": "Virtual keyboard, touch, safe-area/window-space changes where supported, text scaling, accessibility services, and alternative input retain access to critical controls and state."
+    },
+    {
+      "id": "mobile-recovery-native-proof",
+      "assertion": "Verification uses the identified native platform/toolkit on a real device or faithful emulator for representative lifecycle/accessibility states; browser form assumptions are insufficient evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "mobile-platform-and-lifecycle",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "touch, safe-area, and virtual-keyboard behavior",
+        "permission and fallback flows",
+        "background interruption and return",
+        "deep-link and navigation restoration",
+        "sensitive versus resumable state separated"
+      ]
+    },
+    {
+      "id": "mobile-access-and-adaptation",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "platform accessibility semantics",
+        "alternate input and text scaling",
+        "changing window-space behavior where supported",
+        "failure, denial, and support-handoff states",
+        "real device or faithful emulator verification"
+      ]
+    },
+    {
+      "id": "blind-mobile-native-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "mobile platform and toolkit contract",
+    "permission and lifecycle state model",
+    "interruption and restoration matrix",
+    "accessibility and input checks",
+    "device or emulator verification plan"
+  ],
+  "requiredArtifacts": [
+    "mobile-native-interface-plan",
+    "mobile-lifecycle-and-access-matrix",
+    "paired-experiment-report"
+  ]
+}

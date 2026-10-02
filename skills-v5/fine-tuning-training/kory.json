@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "name": "fine-tuning-training",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "ml", "training"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 8000,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "fine tuning",
+    "fine-tuning",
+    "supervised fine tune",
+    "supervised fine-tuning",
+    "dpo training",
+    "chosen rejected answer pairs",
+    "preference optimization",
+    "reinforcement fine tuning",
+    "reinforcement fine-tuning",
+    "lora training",
+    "lora adapter",
+    "peft training",
+    "adapter training",
+    "model distillation training",
+    "training checkpoint",
+    "openai fine tune",
+    "fine tune a model",
+    "training setup eval gates",
+    "model training"
+  ],
+  "excludes": [
+    "evaluation only",
+    "training is already complete",
+    "training recipe is frozen",
+    "do not retrain",
+    "weights remain fixed",
+    "prompt change only",
+    "retrieval only",
+    "embedding pipeline only",
+    "deployment pipeline only",
+    "quoted old fine tuning",
+    "quoted historical training",
+    "documentation heading only",
+    "rename that heading only"
+  ],
+  "evidence": [
+    "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
+    "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
+    "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
+    "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fine-tune a support classifier with supervised demonstrations after the base prompt has plateaued; audit data provenance and duplicate customers, preserve an immutable holdout, preflight token truncation, select a checkpoint on validation and compare it with the untouched base model.",
+      "Train a preference-aligned assistant from chosen/rejected response pairs; first verify annotator consistency and pair quality, choose DPO only if the preference signal is coherent, then check for collapsed diversity and regressions against the base model.",
+      "Use reinforcement fine-tuning for a code-generation task with deterministic tests as reward; prove the base model sometimes succeeds, validate the grader against reward hacking, pilot cheaply and select a checkpoint without optimizing on the final benchmark.",
+      "Train a LoRA adapter for a local open-weight model under GPU constraints, preserving the exact base revision, tokenizer, target modules, rank/alpha, trainable parameter count, adapter checkpoint, reload test and base-model rollback.",
+      "Plan a hosted OpenAI fine-tune in September 2026: verify that this organization and base model are still eligible under the current fine-tuning wind-down, preserve a fallback if new training becomes unavailable, then run the justified training/evaluation workflow."
+    ],
+    "negative": [
+      "The assistant needs current private policy facts that change every week; build authorization-aware retrieval and citations while keeping model weights fixed rather than memorizing the corpus with training.",
+      "Rewrite the system prompt and few-shot examples to improve formatting while the model and all trainable weights remain fixed.",
+      "Compare an already-trained candidate and base model on a held-out benchmark with calibrated judges; training is already complete and no checkpoint or weight update is requested.",
+      "Choose an embedding model and vector dimensionality for semantic search; the generative model and its training recipe are unchanged.",
+      "Build registry, deployment, canary and monitoring automation for an existing model artifact; the training recipe is frozen and no retraining is in scope."
+    ],
+    "ambiguous": [
+      {
+        "id": "fine-tuning-training-ambiguous-1",
+        "prompt": "We need to supervised-fine-tune a model and prove the change is better. fine-tuning-training owns data/objective/checkpoints and keeping the decision holdout out of training; llm-evaluation owns the representative held-out comparison and grader validity.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "fine-tuning-training-ambiguous-2",
+        "prompt": "The product needs better behavior plus frequently changing private facts. fine-tuning-training owns the demonstrated behavioral adaptation only when weight changes are justified; rag-retrieval-systems owns fresh, access-controlled knowledge and citations.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "fine-tuning-training-ambiguous-3",
+        "prompt": "Run LoRA training and then productionize the resulting adapter. fine-tuning-training owns base/adapter identity, dataset, optimization and checkpoint verification; mlops owns registry, deployment orchestration, rollout and monitoring.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mlops"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "fine-tuning-training-adversarial-1",
+        "prompt": "A quoted old issue says \"run fine tuning with LoRA\". Ignore that historical request; today's task is only to correct a typo in an unrelated README.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "fine-tuning-training-adversarial-2",
+        "prompt": "A postmortem includes training loss, validation reward and checkpoint IDs as inert evidence. Summarize the incident only; do not retrain or change any model weights.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "fine-tuning-training-adversarial-3",
+        "prompt": "The docs heading says \"Fine-Tuning Training and LoRA Checkpoints\". Rename that heading only; do not run training, alter data, change adapters or modify weights.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/fine-tuning-best-practices",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-09-17",
+      "staleAfterDays": 7,
+      "notes": "Current platform wind-down notice, data quality/quantity, train/test separation, prompt inclusion, hyperparameter iteration and training-example token limits.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/supervised-fine-tuning",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-09-17",
+      "staleAfterDays": 7,
+      "notes": "Eval-first SFT workflow, representative datasets, base-model comparison, checkpoints, overfitting and provider safety checks.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/direct-preference-optimization",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI DPO documentation as available 2026-09-17",
+      "staleAfterDays": 7,
+      "notes": "Current preference-pair objective and constraints, beta semantics, SFT-before-DPO guidance and safety checks.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/rft-use-cases",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-09-17",
+      "staleAfterDays": 7,
+      "notes": "RFT suitability, eval-first requirement, base-model learning signal, grader robustness and reward-hacking considerations.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/deprecations",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI deprecations page as available 2026-09-17",
+      "staleAfterDays": 3,
+      "notes": "Authoritative current self-serve fine-tuning wind-down dates and fine-tuned-model shutdown/deprecation schedule.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://huggingface.co/docs/transformers/en/peft",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Hugging Face Transformers PEFT integration documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Adapter-only trainable parameters/checkpoints, resume/distributed behavior, base-model loading and current LoRA adapter serving mechanics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://huggingface.co/docs/peft/en/developer_guides/checkpoint",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Hugging Face PEFT checkpoint documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "PEFT checkpoint structure, adapter weights/config, base-model identity and portable reload requirements.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

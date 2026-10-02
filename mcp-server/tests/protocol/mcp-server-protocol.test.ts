@@ -15,6 +15,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createPassiveServer } from '@/index.js';
 import { ErrorDebuggingMCPServer } from '@/server/mcp-server.js';
 import type { ServerConfig } from '@/types/index.js';
 
@@ -125,6 +126,32 @@ async function makeServer(): Promise<ErrorDebuggingMCPServer> {
   await server.registerCoreComponents();
   return server;
 }
+
+// ─── Passive server ────────────────────────────────────────────────────────
+
+describe('MCP passive server', () => {
+  it('answers discovery with no tools, resources, or prompts', async () => {
+    const handler = createMcpHandler(() => createPassiveServer());
+    const transport = new StreamableHTTPClientTransport(new URL('http://test.local/mcp'), {
+      fetch: (url, init) => handler.fetch(new Request(url, init)),
+    });
+    const client = new Client(
+      { name: 'passive-test-client', version: '1.0.0' },
+      { versionNegotiation: { mode: 'auto' } },
+    );
+
+    try {
+      await client.connect(transport);
+      expect(client.getNegotiatedProtocolVersion()).toBe('2026-07-28');
+      expect((await client.listTools()).tools).toEqual([]);
+      expect((await client.listResources()).resources).toEqual([]);
+      expect((await client.listPrompts()).prompts).toEqual([]);
+    } finally {
+      await client.close();
+      await handler.close();
+    }
+  });
+});
 
 // ─── 2026-07-28 era (createMcpHandler + StreamableHTTP) ───────────────────
 

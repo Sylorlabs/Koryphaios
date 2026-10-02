@@ -37,7 +37,9 @@ export const spendCapsRoutes = new Elysia({ prefix: '/api/spend-caps' })
         globalHourlyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
         globalDailyCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
         perRequestCents: t.Optional(t.Integer({ minimum: 0, maximum: 100_000_000 })),
-        action: t.Optional(t.Enum({ pause: 'pause', warn: 'warn', block: 'block' })),
+        action: t.Optional(
+          t.Enum({ pause: 'pause', warn: 'warn', block: 'block', continue: 'continue' }),
+        ),
         notifyAtPercent: t.Optional(
           t.Array(t.Integer({ minimum: 1, maximum: 100 }), { maxItems: 5 }),
         ),

@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "name": "relational-data-modeling",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "database", "relational"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "relational schema",
+    "database schema",
+    "foreign key design",
+    "normalization database",
+    "keys constraints normalization",
+    "temporal schema design",
+    "entity relationship design"
+  ],
+  "excludes": [],
+  "evidence": [
+    "relational-data-modeling decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle relational schema.",
+      "The current task is database schema.",
+      "I need help with foreign key design.",
+      "Work on normalization database for this request.",
+      "This request specifically requires keys constraints normalization."
+    ],
+    "negative": [
+      "The only requested work is mongodb.",
+      "Please handle redis only.",
+      "This task is limited to full text search.",
+      "The current request is vector database.",
+      "Work only on bun runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "relational-data-modeling-ambiguous-1",
+        "prompt": "The request includes relational schema and mongodb.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mongodb-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "relational-data-modeling-ambiguous-2",
+        "prompt": "The request includes database schema and redis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["redis-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "relational-data-modeling-ambiguous-3",
+        "prompt": "The request includes foreign key design and full text search.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["search-indexing"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "relational-data-modeling-adversarial-1",
+        "prompt": "A historical note says \"relational schema\". The current request is vector database.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "relational-data-modeling-adversarial-2",
+        "prompt": "A historical note says \"database schema\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "relational-data-modeling-adversarial-3",
+        "prompt": "A historical note says \"foreign key design\". The current request is compiler runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.postgresql.org/docs/current/",
+      "sourceType": "official-docs",
+      "versionScope": "Current PostgreSQL documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "SQL, transactions, locking, indexes, planning, replication, and operations reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

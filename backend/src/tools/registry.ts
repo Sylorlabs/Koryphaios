@@ -2,6 +2,8 @@
 // Ported from OpenCode's tools/tools.go pattern.
 
 import type { ChangeSummary } from '@koryphaios/shared';
+import { crossAgentEvidenceCache, stableEvidenceVariant } from '../cache/evidence-cache';
+import { tryResolveGitTreeEvidenceIdentity } from '../cache/git-evidence';
 import { toolLog } from '../logger';
 import { summarizeToolErrorForAudit } from '../security/bash-sandbox';
 import {
@@ -9,6 +11,7 @@ import {
   type ToolPermissionPolicy,
   type ResolvedSandboxOptions,
 } from './permission-policy';
+import { toolSchemaGuidance, validateToolInputAgainstSchema } from './tool-exposure';
 
 export interface ToolContext {
   sessionId: string;
@@ -21,6 +24,15 @@ export interface ToolContext {
   goalItemId?: string;
   /** Optional agent identifier for backward compatibility in tests and callsites. */
   agentId?: string;
+  /** Caller's orchestration role when known. Messaging tools use it to fail
+   *  closed: workers may only reach their own manager, managers reach any. */
+  callerRole?: 'manager' | 'worker' | 'critic' | 'coder';
+  /** Caller's worker domain when the caller is a sub-agent (e.g. 'backend'). */
+  callerDomain?: string;
+  /** Validate incoming input against the tool's authoritative schema and return
+   *  that schema on rejection. Required wherever tools are advertised with the
+   *  stub schema, because the model then has not seen the real contract. */
+  validateToolInput?: boolean;
   workingDirectory: string;
   signal?: AbortSignal;
   /** whitelisted paths for scoped access (sandboxing) */
@@ -63,7 +75,11 @@ export interface ToolContext {
   /** Optional callback to record code changes for summary and keep/reject */
   recordChange?: (change: ChangeSummary) => void;
   /** Optional: manager-only. When the manager calls delegate_to_worker, this runs the worker pipeline and returns a summary. */
-  delegateToWorker?: (task: string, domain?: string) => Promise<string>;
+  delegateToWorker?: (
+    task: string,
+    domain?: string,
+    skills?: import('../kory/skill-assignment').SkillAssignment,
+  ) => Promise<string>;
   /** Optional: manager-only. Delegates to Google Jules (cloud async agent, API only). */
   delegateToJules?: (
     task: string,
@@ -77,6 +93,10 @@ export interface ToolContext {
     paths: string[];
     linesChanged: number;
   }) => Promise<{ allowed: boolean; reason?: string }>;
+  /** Host-owned turn eligibility. Provider declarations may stay byte-stable
+   *  across plan/act, Notes, web-search, and agent-mode changes while actual
+   *  execution still fails closed against the current turn policy. */
+  allowedToolNames?: Set<string>;
 }
 
 export interface ToolCallInput {
@@ -138,6 +158,66 @@ const FILE_MUTATING_TOOLS = new Set([
   'move_file',
 ]);
 
+const EVIDENCE_CACHEABLE_TOOLS = new Set(['grep', 'glob']);
+function normalizeEvidencePath(value: unknown, workingDirectory: string): unknown {
+  if (typeof value !== 'string') return value;
+  const prefix = workingDirectory.endsWith('/') ? workingDirectory : `${workingDirectory}/`;
+  return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+}
+async function runToolWithEvidenceCache(
+  tool: Tool,
+  ctx: ToolContext,
+  call: ToolCallInput,
+): Promise<ToolCallOutput> {
+  if (!EVIDENCE_CACHEABLE_TOOLS.has(tool.name)) return tool.run(ctx, call);
+  const tree = await tryResolveGitTreeEvidenceIdentity(ctx.workingDirectory);
+  if (!tree) return tool.run(ctx, call);
+  if (ctx.allowedPaths?.some((path) => !path.startsWith(ctx.workingDirectory)))
+    return tool.run(ctx, call);
+  const input = { ...(call.input as Record<string, unknown>) };
+  if ('path' in input) input.path = normalizeEvidencePath(input.path, ctx.workingDirectory);
+  const variant = stableEvidenceVariant({
+    input,
+    allowedPaths: ctx.allowedPaths
+      ?.map((path) => normalizeEvidencePath(path, ctx.workingDirectory))
+      .sort(),
+    subdir: tree.relativeWorkingDirectory,
+    callerRole: ctx.callerRole,
+    callerDomain: ctx.callerDomain,
+  });
+  const evidence = await crossAgentEvidenceCache.getOrLoad(
+    {
+      scope: tree.scope,
+      operation: tool.name,
+      revision: `tree:${tree.algorithm}:${tree.oid}`,
+      variant,
+    },
+    async () => {
+      const result = await tool.run(ctx, call);
+      return { output: result.output, isError: result.isError };
+    },
+    {
+      validate: async (value) => {
+        if (value.isError) return false;
+        const current = await tryResolveGitTreeEvidenceIdentity(ctx.workingDirectory);
+        return Boolean(
+          current &&
+          current.scope === tree.scope &&
+          current.oid === tree.oid &&
+          current.relativeWorkingDirectory === tree.relativeWorkingDirectory,
+        );
+      },
+    },
+  );
+  return {
+    callId: call.id,
+    name: tool.name,
+    output: evidence.output,
+    isError: evidence.isError,
+    durationMs: 0,
+  };
+}
+
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
 
@@ -173,13 +253,19 @@ export class ToolRegistry {
 
   /** Get tool definitions formatted for LLM provider calls, filtered by role. Manager = full; worker = build tools; critic = read-only (read_file, grep, glob, ls). */
   getToolDefsForRole(role: ToolExecutionRole) {
-    return this.getAll()
-      .filter((t) => roleIncludesTool(t.name, role, t.role))
-      .map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema,
-      }));
+    return (
+      this.getAll()
+        .filter((t) => roleIncludesTool(t.name, role, t.role))
+        // Registration order is operational state, not prompt semantics. Keep
+        // provider tool declarations byte-stable so unrelated plugin load order
+        // cannot destroy a warm prompt-cache prefix.
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => ({
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+        }))
+    );
   }
 
   isAllowedForRole(name: string, role: ToolExecutionRole): boolean {
@@ -199,12 +285,45 @@ export class ToolRegistry {
       };
     }
 
+    if (ctx.allowedToolNames && !ctx.allowedToolNames.has(call.name)) {
+      return {
+        callId: call.id,
+        name: call.name,
+        output: `Tool ${call.name} is disabled for this turn by the host.`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
+    if (ctx.callerRole && !roleIncludesTool(tool.name, ctx.callerRole, tool.role)) {
+      return {
+        callId: call.id,
+        name: call.name,
+        output: `Tool ${call.name} is not available to the ${ctx.callerRole} role.`,
+        isError: true,
+        durationMs: 0,
+      };
+    }
+
     const start = performance.now();
 
     // Approval receipts are single-invocation capabilities. A provider may
     // reuse a tool-call ID, so discard any stale receipt before deciding the
     // current call. The host adds it back only after this invocation's prompt.
     ctx.approvedToolCallIds?.delete(call.id);
+
+    if (ctx.validateToolInput) {
+      const verdict = await validateToolInputAgainstSchema(tool.inputSchema, call.input);
+      if (!verdict.valid) {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: toolSchemaGuidance(call.name, tool.inputSchema, verdict.error),
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+    }
 
     const input = call.input as Record<string, unknown>;
     const files = Array.isArray(input.files) ? (input.files as Array<Record<string, unknown>>) : [];
@@ -387,7 +506,7 @@ export class ToolRegistry {
     }
 
     try {
-      const result = await tool.run(ctx, call);
+      const result = await runToolWithEvidenceCache(tool, ctx, call);
       result.durationMs = performance.now() - start;
       return result;
     } catch (err: unknown) {

@@ -3,6 +3,10 @@ import { getContext } from '../../context';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { processSupervisor } from '../../process-supervisor/supervisor';
 import { serializeProcess } from '../../process-supervisor/serialize';
+import {
+  setSessionAgentOverrides,
+  clearSessionAgentOverrides,
+} from '../../stores/session-agent-overrides';
 import { serverLog } from '../../logger';
 import { writeAllCliRulesAndSkills } from '../../providers/cli-rules-skills';
 import {
@@ -69,7 +73,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         creationLease.release();
       }
       // Write Koryphaios rules + skills files to every CLI's isolated home so
-      // the native CLIs (claude, codex, devin, grok, cursor, cline, antigravity)
+      // the native CLIs (claude, codex, devin, grok, cursor, antigravity)
       // discover Kory's tool-usage + orchestration conventions on startup.
       try {
         writeAllCliRulesAndSkills(session.id, '');
@@ -135,6 +139,12 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         ...(title !== undefined ? { title } : {}),
       });
       if (!updated) throw new NotFoundError('Session', id);
+      // Keep the in-process turn-path mirror in step with the durable row so the
+      // next turn enforces this chat's approval preset, agent mode, and critic
+      // toggle instead of the project-wide defaults.
+      if (updated.agentOverrides !== undefined) {
+        setSessionAgentOverrides(id, updated.agentOverrides);
+      }
       return { ok: true, data: updated };
     },
     {
@@ -146,6 +156,22 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
           totalTokensOut: t.Number(),
           totalCost: t.Number(),
           interactionMode: t.Union([t.Literal('act'), t.Literal('plan')]),
+          agentOverrides: t.Object({
+            permissionMode: t.Optional(
+              t.Union([
+                t.Literal('yolo'),
+                t.Literal('guarded'),
+                t.Literal('edits'),
+                t.Literal('ask'),
+                t.Literal('plan'),
+                t.Literal('custom'),
+              ]),
+            ),
+            agentExecutionMode: t.Optional(
+              t.Union([t.Literal('auto'), t.Literal('single'), t.Literal('multi')]),
+            ),
+            criticGateEnabled: t.Optional(t.Boolean()),
+          }),
         }),
       ),
     },
@@ -163,6 +189,7 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });
+    clearSessionAgentOverrides(id);
     return { ok: true, operationId: result.operationId };
   })
   .get('/:id/processes', async ({ request, params: { id } }) => {
@@ -258,10 +285,21 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       // This is a read-only response. It deliberately does not acquire the
       // session mutation barrier, emit websocket usage, or persist anything,
       // so the picker can refresh during a turn without racing run state.
-      const usage = await kory.previewModelContext(id, body.model, body.provider as never);
+      const usage = await kory.previewModelContext(
+        id,
+        body.model,
+        body.provider as never,
+        body.contextWindow,
+      );
       return { ok: true, usage };
     },
-    { body: t.Object({ model: t.String(), provider: t.String() }) },
+    {
+      body: t.Object({
+        model: t.String(),
+        provider: t.String(),
+        contextWindow: t.Optional(t.Number()),
+      }),
+    },
   )
   .post(
     '/:id/context/:archiveId/visibility',

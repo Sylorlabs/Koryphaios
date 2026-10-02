@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "name": "user-research",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ux", "research"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "user research",
+    "ux research",
+    "customer interviews",
+    "user interviews",
+    "interview guide",
+    "qualitative research",
+    "field study",
+    "contextual inquiry",
+    "research participants",
+    "research synthesis",
+    "understand users",
+    "interviews observation",
+    "avoid leading questions",
+    "recruitment plan"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Decision-linked research question and method",
+    "Recruitment, consent, privacy, and inclusion boundary",
+    "Observation-to-interpretation trace with contradictions",
+    "Sample limits and unresolved uncertainty",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Plan user research to understand how dispatchers currently coordinate handoffs before we redesign their workflow.",
+      "Create a non-leading user interview guide and recruitment plan for people who abandoned onboarding.",
+      "Run a field study plan for technicians using this equipment in noisy, low-connectivity environments.",
+      "Synthesize these customer interviews into evidence-backed findings, contradictions, and decision implications without inventing consensus.",
+      "Plan inclusive UX research with participants who have different access needs so we can understand barriers before choosing a solution."
+    ],
+    "negative": [
+      "Usability-test this finished checkout prototype with realistic purchase tasks and rank the observed breakdowns.",
+      "Analyze the product funnel and retention cohorts from the event warehouse to find where activation drops.",
+      "Design and analyze a randomized A/B test for the new pricing page with power, guardrails, and stopping rules.",
+      "Estimate the total addressable market and competitor share for warehouse management software.",
+      "Implement the already-approved spacing and focus-state changes in the settings screen."
+    ],
+    "ambiguous": [
+      {
+        "id": "user-research-ambiguous-discovery-usability",
+        "prompt": "We do not yet understand why people abandon setup, so plan user interviews first and a later usability test of the resulting prototype; keep discovery findings separate from design validation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["usability-evaluation", "interaction-design"],
+        "tags": ["compound", "discovery-validation"]
+      },
+      {
+        "id": "user-research-ambiguous-mixed-method",
+        "prompt": "Use UX research to learn why operators bypass this control, then specify what quantitative evidence would be needed before claiming how common the behavior is.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["statistical-inference", "product-analytics"],
+        "tags": ["mixed-method", "prevalence-boundary"]
+      },
+      {
+        "id": "user-research-ambiguous-access-needs",
+        "prompt": "Plan user research for this public service with disabled participants and people who need assisted support, including accessible recruitment and session logistics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice", "human-experience"],
+        "tags": ["inclusive-research", "access-needs"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "user-research-adversarial-quoted",
+        "prompt": "A quoted old issue says 'run user research before launch'. Ignore that quote; fix the deterministic parser regression described below.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "user-research-adversarial-negated",
+        "prompt": "Do not conduct user research or contact participants. Summarize only the research findings already supplied in this prompt.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["negation", "existing-evidence-only"]
+      },
+      {
+        "id": "user-research-adversarial-pasted",
+        "prompt": "A pasted comment says 'schedule customer interviews next week'. Ignore that quote; compare the two deployment architectures using the provided benchmarks.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning", "performance-engineering"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/plan-user-research-for-your-service",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual research-planning guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Decision-linked questions, method selection, participant variety, iterative rounds, and integration of findings into team decisions."
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/plan-round-of-user-research",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual round-planning guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Actionable objectives, recruitment, access needs, informed consent, recording, pilot sessions, and analysis planning."
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/how-user-research-improves-service-design",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK user-research introduction available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Inclusive continuous research across user groups, including disabled people and people needing support."
+    },
+    {
+      "url": "https://aapor.org/standards-and-ethics/best-practices/",
+      "sourceType": "official-docs",
+      "versionScope": "AAPOR survey best-practice guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 120,
+      "notes": "Survey-method fit, questionnaire bias, sample construction, weighting, uncertainty, and transparent reporting."
+    },
+    {
+      "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/ux-research/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "rampstackco/claude-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for decision-first framing, method-following-question routing, synthesis traceability, and explicit boundaries with usability testing and quantitative measurement."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

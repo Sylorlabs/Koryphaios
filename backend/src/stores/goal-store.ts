@@ -29,6 +29,17 @@ export interface GoalEvidenceReview {
   };
 }
 
+/** A human-authored change to a goal's plan. Only the *shape* of the checklist
+ *  is writable here -- title, order, and dependencies. Runtime state
+ *  (status, evidence, timestamps) is never accepted from the caller; it is
+ *  carried over from the stored item, or seeded `pending` for a new one. */
+export interface GoalChecklistEdit {
+  id?: string;
+  title: string;
+  order?: number;
+  dependsOn?: string[];
+}
+
 const MAX_GOAL_ACTIVITY = 1_000;
 const MAX_ITEM_EVIDENCE = 256;
 const MAX_GOAL_ITEMS = 512;
@@ -822,6 +833,111 @@ export class GoalStore {
         .update(goals)
         .set({ checklist: JSON.stringify(planningOnly), updatedAt: new Date() })
         .where(and(eq(goals.id, id), inArray(goals.status, ['queued', 'planning'])))
+        .returning()
+        .get();
+      return updated ? model(updated) : undefined;
+    });
+  }
+
+  /**
+   * Plan editing: add, rename, reorder, and delete checks on a goal that
+   * has not finished.
+   *
+   * This is deliberately narrower than `setChecklist`. It stays open once
+   * execution has started, because a person steering a long-running goal needs
+   * to correct its plan -- but it can only change the *shape* of the plan.
+   * Status, evidence, and timestamps are read from the stored item, never from
+   * the request, so no caller can forge completion or verification. That holds
+   * for agents too: an agent may reshape a goal's plan, but only the critic-gated
+   * evidence path can settle an item. New items are seeded `pending`. Deleting
+   * a check deletes its evidence with it, and the check that is currently
+   * running may not be deleted out from under the goal driver.
+   */
+  async editChecklistPlan(
+    id: string,
+    edits: GoalChecklistEdit[],
+    actor?: string,
+  ): Promise<Goal | undefined> {
+    if (!Array.isArray(edits) || edits.length === 0) {
+      throw new Error('Goals require at least one checklist item');
+    }
+    const requested = edits.map((edit, index) => ({
+      id: typeof edit?.id === 'string' && edit.id.trim() ? edit.id.trim() : `edit-${nanoid(10)}`,
+      title: String(edit?.title ?? '')
+        .trim()
+        .slice(0, 1_000),
+      order: Number.isFinite(edit?.order) ? (edit!.order as number) : index,
+      dependsOn: Array.isArray(edit?.dependsOn)
+        ? edit.dependsOn.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+    }));
+    // Titles and IDs are required before the stored runtime state is applied,
+    // so a malformed plan never reaches the write.
+    for (const item of requested) {
+      if (!item.title) throw new Error('Checklist items require a title');
+    }
+    if (new Set(requested.map((item) => item.id)).size !== requested.length) {
+      throw new Error('Checklist item IDs must be unique non-empty strings');
+    }
+
+    return db.transaction((tx) => {
+      const row = tx.select().from(goals).where(eq(goals.id, id)).limit(1).get();
+      if (!row) return undefined;
+      const goal = model(row);
+      if (goal.status === 'completed' || goal.status === 'cancelled') {
+        throw new Error(`Goal is ${goal.status}; its checklist is closed to edits`);
+      }
+      const stored = new Map(goal.checklist.map((item) => [item.id, item]));
+      const removed = goal.checklist.filter((item) => !requested.some((e) => e.id === item.id));
+      const running = removed.find((item) => item.status === 'running');
+      if (running) {
+        throw new Error(
+          `Pause the goal before deleting the check that is running: "${running.title}"`,
+        );
+      }
+      // A dependency on a deleted check would leave a dangling edge; drop it
+      // rather than reject the whole edit, so removing a step is one action.
+      const ids = new Set(requested.map((item) => item.id));
+      const checklist: GoalChecklistItem[] = requested.map((item) => {
+        const prior = stored.get(item.id);
+        return {
+          id: item.id,
+          title: item.title,
+          status: prior?.status ?? 'pending',
+          order: item.order,
+          dependsOn: item.dependsOn.filter((dependency) => ids.has(dependency)),
+          evidence: prior?.evidence ?? [],
+          startedAt: prior?.startedAt,
+          completedAt: prior?.completedAt,
+        };
+      });
+      validateChecklist(checklist);
+      const added = checklist.filter((item) => !stored.has(item.id)).length;
+      const renamed = checklist.filter(
+        (item) => stored.has(item.id) && stored.get(item.id)!.title !== item.title,
+      ).length;
+      const deleted = removed.length;
+      const event = sanitizeActivity({
+        id: nanoid(),
+        type: 'checklist_edited',
+        message: [
+          `Checklist edited by ${actor?.trim() || 'you'}`,
+          added ? `+${added} added` : '',
+          deleted ? `-${deleted} removed` : '',
+          renamed ? `${renamed} renamed` : '',
+        ]
+          .filter(Boolean)
+          .join(', '),
+        createdAt: Date.now(),
+      });
+      const updated = tx
+        .update(goals)
+        .set({
+          checklist: JSON.stringify(checklist),
+          activity: JSON.stringify([...goal.activity, event].slice(-MAX_GOAL_ACTIVITY)),
+          updatedAt: new Date(),
+        })
+        .where(eq(goals.id, id))
         .returning()
         .get();
       return updated ? model(updated) : undefined;

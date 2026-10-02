@@ -26,6 +26,7 @@ const policy = (mode: PermissionMode, confirmRiskyActions: boolean): ToolPermiss
   approvalThresholdLines: 999_999,
   toolAllowlist: [],
   toolBlocklist: [],
+  toolAsklist: [],
 });
 
 const context = (

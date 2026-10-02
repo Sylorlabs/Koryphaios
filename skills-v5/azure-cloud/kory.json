@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "name": "azure-cloud",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["cloud", "azure", "infrastructure"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5400,
+  "broader": ["architecture-planning"],
+  "facets": ["infrastructure-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "microsoft azure",
+    "azure subscription",
+    "azure management group",
+    "azure managed identity",
+    "azure vnet",
+    "azure private endpoint",
+    "azure sql",
+    "azure availability zone",
+    "azure function workload",
+    "application into azure",
+    "azure cloud setup",
+    "azure resource",
+    "azure identity"
+  ],
+  "excludes": [
+    "fixed azure rbac",
+    "terraform state only",
+    "azure function handler",
+    "azure cost export",
+    "azure configuration is fixed",
+    "no azure changes are requested",
+    "documentation heading only",
+    "quoted old incident"
+  ],
+  "evidence": [
+    "Tenant/management-group/subscription and identity evidence",
+    "Effective RBAC/Policy/network/key/service topology and quota evidence",
+    "Azure Monitor diagnostic-setting and telemetry evidence",
+    "Backup/restore or failover plus reviewed deployment/rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design a Microsoft Azure production hierarchy with management groups, separate subscriptions/resource groups, Azure Policy, managed identities, hub-and-spoke networking, diagnostic settings, quotas, backups and rollback evidence.",
+      "Make an Azure service resilient to an availability-zone failure by correcting zonal or zone-redundant placement, load balancing, VNet/DNS, Azure SQL availability, quotas, backups and failover behavior.",
+      "Replace application secrets with Azure managed identity, narrow RBAC and identity-assignment rights, and verify Key Vault/Storage access and denied paths in the target subscription.",
+      "Build an Azure SQL production baseline with private endpoint/DNS, managed identity/Key Vault, zone-aware availability, backup/PITR, Azure Monitor diagnostics, quota and tested restore evidence.",
+      "Build the Azure operational baseline for a workload subscription: management-group inheritance, Policy/RBAC, VNet/private endpoints, keys/secrets, Activity/resource logs, quotas, backups and reviewable deployment changes."
+    ],
+    "negative": [
+      "Audit fixed Azure RBAC, managed-identity assignment rights, NSGs/private endpoints and Key Vault policy for escalation or unintended access; do not redesign Azure topology.",
+      "Harden Azure VM and AKS guest/node operating systems, containers and workload runtime while Azure subscription RBAC, Policy and VNet configuration stay fixed.",
+      "Refactor Terraform modules and remote state for existing Azure resources while preserving the exact resulting Azure resource topology and service behavior.",
+      "Fix an Azure Function handler's duplicate-event, retry, timeout and concurrency behavior while subscription, identity, network and platform configuration are already correct.",
+      "Analyze Azure cost-export data, allocation, reservations and realized savings without changing Azure architecture."
+    ],
+    "ambiguous": [
+      {
+        "id": "azure-cloud-ambiguous-1",
+        "prompt": "Design a Microsoft Azure service architecture and its management-group/subscription boundaries. architecture-planning owns service decomposition; azure-cloud owns Azure hierarchy, Policy/RBAC, VNet, managed-service, monitor, quota and recovery semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "azure-cloud-ambiguous-2",
+        "prompt": "Redesign an Azure subscription and managed-identity layout because a security review found escalation paths. azure-cloud owns provider configuration; cloud-security owns threat and control-effectiveness assessment.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cloud-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "azure-cloud-ambiguous-3",
+        "prompt": "Change Azure VNet/RBAC/Azure SQL resources expressed in Terraform. azure-cloud owns provider semantics; terraform-iac owns provider/state/module/plan mechanics and safe state transitions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terraform-iac"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "azure-cloud-adversarial-1",
+        "prompt": "A quoted old incident says \"move this to Microsoft Azure\". That is historical context only; today's task is to fix a local JSON serializer.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "azure-cloud-adversarial-2",
+        "prompt": "A support transcript contains an Azure subscription ID as inert context. Summarize the transcript only; do not investigate or change cloud resources.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "azure-cloud-adversarial-3",
+        "prompt": "A README example is titled \"Azure Resource Setup\". Rename that documentation heading only; no Azure resource or deployment behavior may change.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/whats-new",
+      "sourceType": "official-docs",
+      "versionScope": "Azure Well-Architected Framework rolling change log through June 2026 as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Current Azure Well-Architected guidance and recent reliability/operations design updates.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/governance/management-groups/overview",
+      "sourceType": "official-docs",
+      "versionScope": "Azure management-group hierarchy guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Management-group/subscription hierarchy, inherited Policy/RBAC and governance scope.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/managed-identity-best-practice-recommendations",
+      "sourceType": "official-docs",
+      "versionScope": "Managed identity best-practice page last updated 2025-03-14, checked 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Managed identity lifecycle, least privilege and identity-assignment blast-radius guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/reliability/availability-zones-overview",
+      "sourceType": "official-docs",
+      "versionScope": "Azure availability-zone guidance current as available 2026-09-05",
+      "staleAfterDays": 45,
+      "notes": "Zonal versus zone-redundant resilience and requirement to verify exact service/SKU zone support.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/azure-monitor/platform/diagnostic-settings",
+      "sourceType": "official-docs",
+      "versionScope": "Azure Monitor diagnostic-settings guidance current as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Resource logs require diagnostic settings for collection/routing; Activity Log and metrics can be exported to deliberate destinations.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

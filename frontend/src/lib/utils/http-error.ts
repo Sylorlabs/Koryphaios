@@ -13,11 +13,11 @@ export function friendlyHttpError(status: number, action: string): string {
     case 404:
       return `Could not find the requested resource`;
     case 429:
-      return `Too many requests — please wait a moment`;
+      return `Too many requests. Please wait a moment`;
     case 500:
     case 502:
     case 503:
-      return `Could not ${action} — the local Koryphaios backend needs attention`;
+      return `Could not ${action}. The local Koryphaios backend needs attention`;
     default:
       return `Something went wrong (${status})`;
   }

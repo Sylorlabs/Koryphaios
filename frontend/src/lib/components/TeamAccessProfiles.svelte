@@ -90,7 +90,9 @@
     while (policy.accessTiers.some((t) => t.id === id)) id = `${idBase}-${n++}`;
     const viewer = policy.accessTiers.find((t) => t.id === 'viewer') ?? policy.accessTiers[0];
     const tier: CollaborationAccessTier = {
-      ...structuredClone(viewer),
+      // `$state.snapshot` unwraps the store's reactive proxy; `structuredClone`
+      // throws DataCloneError on one.
+      ...$state.snapshot(viewer),
       id,
       name: newTierName.trim(),
       description: 'Custom host-defined access profile.',
@@ -118,7 +120,7 @@
     let n = 2;
     while (policy.accessTiers.some((t) => t.id === id)) id = `${base}-${n++}`.slice(0, 31);
     const copy: CollaborationAccessTier = {
-      ...structuredClone(selectedTier),
+      ...$state.snapshot(selectedTier),
       id,
       name: `${selectedTier.name} Copy`,
       builtin: null,

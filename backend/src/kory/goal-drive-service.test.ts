@@ -244,14 +244,14 @@ function harness(options: HarnessOptions = {}) {
       const running = goal.checklist.find((item) => item.status === 'running')!;
       if (options.workflow && running.id === 'one') {
         let workflow = startWorkflow(root, {
-          workflowId: 'design-quality',
+          workflowId: 'task-workflow',
           sessionId: 'session',
           goalId: goal.id,
           goalItemId: running.id,
           task: running.title,
           requestedBy: 'agent',
         });
-        for (const stage of getWorkflowDefinition('design-quality')!.stages) {
+        for (const stage of getWorkflowDefinition('task-workflow')!.stages) {
           workflow = advanceWorkflow(root, workflow.id, { evidence: `${stage.id} proof` });
         }
         return {
@@ -799,6 +799,67 @@ describe('durable Goal Mode driver', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('session erasure', () => {
+  /** A turn that only finishes when the manager cancels its workers. */
+  function blockedHarness() {
+    let release = () => {};
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = harness({ processTask: () => blocked, onCancel: release });
+    return state;
+  }
+
+  function timers(driver: GoalDriveService): Map<string, unknown> {
+    return (driver as unknown as { checkpointTimers: Map<string, unknown> }).checkpointTimers;
+  }
+
+  test('pauses the goal running in the deleted chat instead of timing out', async () => {
+    const state = blockedHarness();
+    await state.driver.start('goal', {
+      sessionId: 'session',
+      provider: 'openai',
+      model: 'openai:test',
+    });
+    await waitFor(() => state.turns === 1);
+
+    const lease = state.driver.tryBeginSessionErasure('session');
+    expect(lease).not.toBeNull();
+    await lease!.waitForIdle(2_000);
+    lease!.complete();
+
+    expect(state.goal.status).toBe('paused');
+    expect(state.goal.blocker).toBe('Paused because its chat was deleted');
+    expect(state.cancelCount).toBe(1);
+  });
+
+  test('leaves no checkpoint timer running against the erased chat', async () => {
+    const state = blockedHarness();
+    await state.driver.start('goal', {
+      sessionId: 'session',
+      provider: 'openai',
+      model: 'openai:test',
+    });
+    await waitFor(() => timers(state.driver).has('goal'));
+
+    const lease = state.driver.tryBeginSessionErasure('session')!;
+    await lease.waitForIdle(2_000);
+    lease.complete();
+
+    expect(timers(state.driver).has('goal')).toBe(false);
+    // The tombstone outlives the commit, so a late resume cannot resurrect work.
+    await expect(state.driver.resume('goal')).rejects.toThrow(
+      'Goal execution refused because this session is being deleted',
+    );
+  });
+
+  test('refuses a second erasure for the same chat', async () => {
+    const state = blockedHarness();
+    expect(state.driver.tryBeginSessionErasure('session')).not.toBeNull();
+    expect(state.driver.tryBeginSessionErasure('session')).toBeNull();
   });
 });
 

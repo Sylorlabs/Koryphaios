@@ -384,6 +384,24 @@ export interface WrapResult {
   mechanism: SandboxMechanism;
 }
 
+/**
+ * Inference-transport rule for spawned CLI children.
+ *
+ * A CLI child IS the model transport: its own HTTPS calls (direct provider
+ * APIs or a local bridge) carry the turn's inference. Cutting its network
+ * (allowNetwork: false) cannot work — every request fails at connect (EPERM
+ * under Seatbelt, ENETUNREACH under bwrap --unshare-net) and the turn dies
+ * before any tool runs. Network restriction for AGENT tools stays enforced
+ * one layer up: Koryphaios owns tool execution (kory__ MCP tools +
+ * permission policy), each CLI's native web tools are hard-disabled
+ * (--disallowedTools / harness rules / the CLI's own tool sandbox), so the
+ * OS jail keeps filesystem confinement while inference keeps its socket.
+ */
+export function inferenceSandboxPolicy(policy: SandboxPolicy): SandboxPolicy {
+  if (policy.allowNetwork) return policy;
+  return { ...policy, allowNetwork: true };
+}
+
 /** Build the spawn command. Wraps in the host's native OS sandbox when isolation
  *  is requested AND available; otherwise returns the command unchanged. */
 export function wrapCommand(bin: string, args: string[], opts: WrapOptions): WrapResult {

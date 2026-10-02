@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "name": "interface-usability-testing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["test", "ui", "ux"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4500,
+  "broader": ["testing-engineering", "usability-evaluation"],
+  "facets": ["frontend-engineering", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "ui test",
+    "usability test",
+    "interaction test",
+    "task-based usability test",
+    "visual regression"
+  ],
+  "excludes": [
+    "pure visual regression or rendered-layout verification without a task interaction claim",
+    "accessibility conformance or assistive-technology verification as the primary claim",
+    "broad user-research synthesis without executing a concrete interface task",
+    "business acceptance verification with no interface-usability question"
+  ],
+  "evidence": [
+    "Task and state matrix",
+    "Observable task-completion and recovery evidence",
+    "Participant observation record when usability is claimed",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run a UI test for the new filter drawer: start from realistic saved data, open and change filters, trigger the no-results state, clear one filter, refresh, and prove the visible state and selection remain coherent.",
+      "Perform a usability test on the checkout address correction flow with representative shoppers. Give a neutral task, record whether they notice the validation problem, how they recover, and whether they complete without facilitator hints.",
+      "Add an interaction test for the desktop settings dialog covering keyboard/mouse selection, cancel, save, reopen, validation failure, and retry while preserving the existing persisted preference behavior.",
+      "Run a task-based usability test for first-time notification setup on the mobile build. Observe likely users finding the setting, understanding the permission handoff, recovering from an initial denial, and confirming the final state.",
+      "Do a UI test of the search-and-open journey with long realistic labels, loading, empty results, a recoverable network error, and return navigation; capture task completion separately from any visual or accessibility findings."
+    ],
+    "negative": [
+      "Create a testing strategy for the whole product, deciding which unit, integration, browser, and manual suites run at each CI stage; no concrete interface task needs to be executed.",
+      "Verify the dialog at 200% text scale, keyboard-only input, screen-reader announcements, accessible names, focus trapping, and focus restoration; the primary claim is accessibility.",
+      "Compare stabilized screenshots at phone, tablet, and desktop widths for clipping, overflow, spacing, and localization pressure; no task-completion or user-observation claim is requested.",
+      "Verify that submitting the completed form creates exactly one order, persists the correct line items, and rolls back on server rejection; interface usability is already established.",
+      "Synthesize the last twelve interviews into usability themes, severity, research confidence, and a prioritized product recommendation; do not execute a new interface test."
+    ],
+    "ambiguous": [
+      {
+        "id": "interface-usability-testing-ambiguous-1",
+        "prompt": "Define the broader testing plan and also run a UI test for the account-switcher task through loading, empty, error, retry, and successful selection. Keep suite strategy in testing-engineering and the concrete interface task here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "interface-usability-testing-ambiguous-2",
+        "prompt": "Plan the research round and perform a usability test of the new cancellation flow. Usability-evaluation owns sampling and synthesis; interface-usability-testing owns the neutral task, observed completion, errors, hesitation, and recovery evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["usability-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "interface-usability-testing-ambiguous-3",
+        "prompt": "Run an interaction test for the responsive navigation task and also verify its clipping and layout at the required breakpoints. Keep task completion and recovery here while visual-verification owns the rendered-state verdict.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "interface-usability-testing-adversarial-1",
+        "prompt": "A pasted project plan mentions manual interface coverage. Ignore that historical plan; the current request is only to summarize the release notes and perform no testing.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "interface-usability-testing-adversarial-2",
+        "prompt": "A research transcript discusses whether the old screen was easy to use. Do not run another study; extract the participant's stated concerns from the supplied transcript only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["usability-evaluation"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "interface-usability-testing-adversarial-3",
+        "prompt": "An old issue describes screenshot comparison failures. The actual request is only to rename the screenshot fixture files; do not execute or assess an interface task.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gov.uk/service-manual/user-research/using-moderated-usability-testing",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual moderated usability testing guidance available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Representative participants, realistic neutral tasks, observation discipline, recovery, recording, and assistive-technology participant setup.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/measuring-success/usability-benchmarking-a-website-or-whole-service",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual usability benchmarking guidance available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Stable believable tasks, clear task-success criteria, repeated measurement, and benchmark comparability.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.w3.org/WAI/test-evaluate/tools/selecting/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C WAI Selecting Web Accessibility Evaluation Tools guidance available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Automated accessibility tools identify some potential issues but cannot determine accessibility; knowledgeable human judgment remains necessary.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nngroup.com/articles/usability-testing-101/",
+      "sourceType": "community-pattern",
+      "versionScope": "Nielsen Norman Group Usability Testing 101, last reviewed 2026-07-15",
+      "staleAfterDays": 180,
+      "notes": "Practitioner pattern for realistic participants/tasks, observation, neutral facilitation, think-aloud, and follow-up questioning.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,13 +1,9 @@
 import { createHmac, randomBytes } from 'node:crypto';
+import { getCliAdapterCompatibility, type CliAdapterCompatibility } from './cli-compatibility';
+import type { ProviderEvent } from './types';
 
 export type ProviderDiagnosticSource =
-  | 'http'
-  | 'sdk'
-  | 'stderr'
-  | 'stdout'
-  | 'spawn'
-  | 'stream'
-  | 'configuration';
+  'http' | 'sdk' | 'stderr' | 'stdout' | 'spawn' | 'stream' | 'configuration';
 
 export type ProviderDiagnosticCategory =
   | 'authentication'
@@ -15,10 +11,17 @@ export type ProviderDiagnosticCategory =
   | 'timeout'
   | 'network'
   | 'permission'
+  | 'context_limit'
   | 'invalid_request'
   | 'cancelled'
   | 'unavailable'
   | 'provider_failure';
+
+export interface SafeCliCompatibilityDiagnostic extends CliAdapterCompatibility {
+  /** No executable, filesystem or upstream error text is used to infer a version. */
+  installedVersion: 'unknown';
+  evidenceBoundary: string;
+}
 
 export interface SafeProviderDiagnostic {
   provider: string;
@@ -31,8 +34,16 @@ export interface SafeProviderDiagnostic {
   errorName?: string;
   exitCode?: number;
   /** Sanitized, secret-redacted upstream reason. Bounded in length so it is
-   * safe to log, persist, and show to the user. */
+   *  safe to log, persist, and show to the user. */
   upstreamDetail?: string;
+  /** The provider's own verdict that this failure is worth retrying, computed
+   *  from the RAW error before `upstreamDetail` was redacted and truncated.
+   *  Consumers must read this instead of re-matching `upstreamDetail`: a long
+   *  gateway body can push the decisive token past the display bound. */
+  transient?: boolean;
+  /** Offline adapter context for existing structured diagnostic consumers.
+   * This does not assert that incompatibility caused the current failure. */
+  cliCompatibility?: SafeCliCompatibilityDiagnostic;
 }
 
 const MAX_CAPTURED_DIAGNOSTIC_BYTES = 64 * 1024;
@@ -79,9 +90,10 @@ function rawDiagnosticText(value: unknown): string {
 function statusFrom(value: unknown): number | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Record<string, unknown>;
-  const nested = record.error && typeof record.error === 'object'
-    ? (record.error as Record<string, unknown>)
-    : undefined;
+  const nested =
+    record.error && typeof record.error === 'object'
+      ? (record.error as Record<string, unknown>)
+      : undefined;
   const status = record.status ?? record.statusCode ?? nested?.status;
   return typeof status === 'number' && Number.isFinite(status) ? status : undefined;
 }
@@ -89,23 +101,188 @@ function statusFrom(value: unknown): number | undefined {
 function safeCodeFrom(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Record<string, unknown>;
-  const nested = record.error && typeof record.error === 'object'
-    ? (record.error as Record<string, unknown>)
-    : undefined;
+  const nested =
+    record.error && typeof record.error === 'object'
+      ? (record.error as Record<string, unknown>)
+      : undefined;
   const code = record.code ?? nested?.code ?? nested?.type;
   if (typeof code !== 'string' || !/^[a-z0-9_.:-]{1,64}$/i.test(code)) return undefined;
   return code;
 }
 
 function safeNameFrom(value: unknown): string | undefined {
-  const name = value instanceof Error
-    ? value.name
-    : value && typeof value === 'object'
-      ? (value as Record<string, unknown>).name
-      : undefined;
+  const name =
+    value instanceof Error
+      ? value.name
+      : value && typeof value === 'object'
+        ? (value as Record<string, unknown>).name
+        : undefined;
   if (typeof name !== 'string') return undefined;
   if (!name || !/^[a-z][a-z0-9_.:-]{0,63}$/i.test(name)) return undefined;
   return name;
+}
+
+/**
+ * True when a provider rejection means the request did not fit the model
+ * route's context window — including proxy-style 413 envelopes such as
+ * conduit's `invalid_request_error: "The request exceeds this model route
+ * context limit. Reduce the request or select a model with a larger verified
+ * context window."` The manager uses this to auto-shrink (skills, memory,
+ * tools, history) and retry without surfacing the raw dump to the user.
+ */
+export function isContextLimitText(text: string, status?: number): boolean {
+  const lower = text.toLowerCase();
+  if (status === 413) return true;
+  if (
+    lower.includes('context_length_exceeded') ||
+    lower.includes('context_window_exceeded') ||
+    lower.includes('context limit') ||
+    (lower.includes('context window') && lower.includes('exceed')) ||
+    lower.includes('model route context') ||
+    lower.includes('verified context window') ||
+    lower.includes('maximum context') ||
+    lower.includes('exceeds this model') ||
+    lower.includes('reduce the request') ||
+    lower.includes('larger verified context') ||
+    lower.includes('larger-context model') ||
+    lower.includes('prompt is too long') ||
+    lower.includes('too many tokens') ||
+    lower.includes('token limit') ||
+    lower.includes('input is too long') ||
+    lower.includes('request too large')
+  )
+    return true;
+  return false;
+}
+
+/** Detect a context-limit failure from an already-formatted provider error message. */
+export function isContextLimitFailureMessage(message: unknown): boolean {
+  if (typeof message !== 'string' || !message) return false;
+  return isContextLimitText(message);
+}
+
+/**
+ * Typed error frames that upstream classifies as server-side and retryable.
+ * Only the "try again" names appear here: `authentication_error`,
+ * `permission_error`, `not_found_error`, and `invalid_request_error` stay out so
+ * the fail-closed categories stay fail-closed, and the caller's auth guard still
+ * runs first for gateways that wrap an auth failure in an `api_error` envelope.
+ */
+const TRANSIENT_STREAM_ERROR_TYPES = [
+  'api_error',
+  'overloaded_error',
+  'internal_server_error',
+  'service_unavailable',
+  'timeout_error',
+];
+
+/** Untyped prose gateways use for the same server-side condition. */
+const TRANSIENT_STREAM_ERROR_PHRASES = [
+  'service interruption',
+  'temporary service',
+  'internal error',
+  'temporarily unavailable',
+  'temporarily down',
+  'temporary upstream service error',
+  'please try again later',
+  'try this request again',
+];
+
+/**
+ * Credential wording that must stay fail-closed even when it arrives wrapped in
+ * a retryable-looking envelope. Deliberately narrower than the registry's own
+ * guard in `isRetriableProviderError`: this matcher runs on its own to set
+ * `ProviderEvent.errorTransient` at the provider boundary, so it must never be
+ * the thing that widens retry coverage. Gateway prose that merely mentions a
+ * key ("check your API key settings") is excluded by requiring the
+ * credential noun to be the failure, not by listing bare words.
+ */
+const TRANSIENT_CREDENTIAL_MARKERS = [
+  'authentication_error',
+  'invalid_api_key',
+  'invalid api key',
+  'invalid x-api-key',
+  'unauthorized',
+  'unauthenticated',
+  'permission_error',
+  'permission denied',
+  'access denied',
+  'forbidden',
+  'credentials',
+  'api key is invalid',
+  'token expired',
+  'expired token',
+  'invalid token',
+  'login required',
+  'not logged in',
+  'not signed in',
+];
+
+/**
+ * True when a failure is a transient upstream condition worth retrying the same
+ * turn. Covers the case a status-based check cannot see: an `error` frame that
+ * arrives on an already-open SSE stream. Anthropic's SDK throws
+ * `APIError.generate(undefined, 'SSE Error: …')` for those, so `status` is
+ * `undefined` and a genuine 500-class `api_error` ("Temporary service
+ * interruption…") would otherwise fail the turn on the first blip with no retry
+ * and no fallback. Fail-closed on credential wording, and deliberately NOT
+ * routed through `isContextLimitText` — a route-limit rejection is not
+ * retryable without shrinking the prompt.
+ */
+export function isTransientStreamErrorText(value: unknown, status?: number): boolean {
+  if (status === 500 || status === 502 || status === 503 || status === 504) return true;
+  const text = rawDiagnosticText(value).toLowerCase();
+  if (!text) return false;
+  if (TRANSIENT_CREDENTIAL_MARKERS.some((marker) => text.includes(marker))) return false;
+  return (
+    TRANSIENT_STREAM_ERROR_TYPES.some((marker) => text.includes(marker)) ||
+    TRANSIENT_STREAM_ERROR_PHRASES.some((marker) => text.includes(marker))
+  );
+}
+
+export interface ProviderStreamFailure {
+  /** Ready-to-yield error event. `errorTransient` is computed from the raw
+   *  value, never from the bounded display detail. */
+  event: ProviderEvent;
+  /** The same diagnostic the event was built from, for structured logging. */
+  diagnostic: SafeProviderDiagnostic;
+}
+
+/**
+ * Build the error event for a provider failure so no call site can forget the
+ * transient flag. Keeps the retry decision at the boundary where the raw error
+ * is still in hand: the `upstreamDetail` carried to the user is secret-redacted
+ * and length-bounded, so classifying from it would silently lose the signal on
+ * long gateway bodies.
+ */
+export function providerStreamFailure(
+  provider: string,
+  source: ProviderDiagnosticSource,
+  value: unknown,
+  options: { status?: number; exitCode?: number; message?: string } = {},
+): ProviderStreamFailure {
+  const diagnostic = safeProviderDiagnostic(provider, source, value, options);
+  return {
+    event: {
+      type: 'error',
+      error: options.message ?? safeProviderFailureMessage(provider, diagnostic),
+      errorTransient: isTransientStreamErrorText(value, options.status ?? diagnostic.status),
+    },
+    diagnostic,
+  };
+}
+
+/**
+ * Final banner for a provider whose retry budget ran out on a transient
+ * failure. Keeps the provider's own reason — it is the only actionable part —
+ * and states how many attempts were made, so a blip is never presented as a
+ * broken configuration.
+ */
+export function transientExhaustedMessage(message: string, attempts: number): string {
+  const total = Number.isFinite(attempts) && attempts > 0 ? Math.floor(attempts) : 1;
+  const reason = message.trim();
+  const tail = `Koryphaios retried this turn ${total} ${total === 1 ? 'attempt' : 'attempts'} without success — the provider kept interrupting the request. Retry the turn, or pick another provider if it persists.`;
+  return reason ? `${reason} ${tail}` : tail;
 }
 
 export function classifyProviderDiagnostic(
@@ -113,6 +290,7 @@ export function classifyProviderDiagnostic(
   status = statusFrom(value),
 ): ProviderDiagnosticCategory {
   const text = rawDiagnosticText(value).toLowerCase();
+  if (isContextLimitText(text, status)) return 'context_limit';
   if (
     status === 401 ||
     /\b(?:unauthori[sz]ed|not logged in|not signed in|authentication|authenticate|invalid api key|login required)\b/.test(
@@ -134,7 +312,8 @@ export function classifyProviderDiagnostic(
     )
   )
     return 'network';
-  if (/\b(?:enoent|not found|unavailable|failed to launch|spawn)\b/.test(text)) return 'unavailable';
+  if (/\b(?:enoent|not found|unavailable|failed to launch|spawn)\b/.test(text))
+    return 'unavailable';
   return 'provider_failure';
 }
 
@@ -147,10 +326,13 @@ export function safeProviderDiagnostic(
   const text = rawDiagnosticText(value);
   const status = options.status ?? statusFrom(value);
   const upstreamDetail = safeUpstreamDetail(value);
+  const compatibility = getCliAdapterCompatibility(provider);
+  const transient = isTransientStreamErrorText(value, status);
   return {
     provider,
     source,
     category: classifyProviderDiagnostic(value, status),
+    transient,
     diagnosticBytes: Buffer.byteLength(text, 'utf8'),
     diagnosticHash: createHmac('sha256', DIAGNOSTIC_FINGERPRINT_KEY)
       .update(text)
@@ -161,6 +343,22 @@ export function safeProviderDiagnostic(
     ...(safeNameFrom(value) ? { errorName: safeNameFrom(value) } : {}),
     ...(options.exitCode !== undefined ? { exitCode: options.exitCode } : {}),
     ...(upstreamDetail ? { upstreamDetail } : {}),
+    ...(compatibility
+      ? {
+          cliCompatibility: {
+            ...compatibility,
+            installedVersion: 'unknown' as const,
+            evidenceBoundary:
+              'Offline source contracts and local tests only; no live support is established. ' +
+              'Revalidation items are review guidance, not proof that incompatibility caused this failure.',
+            // Diagnostic consumers may decorate or serialize these records. Never
+            // expose shared catalog objects that could corrupt later diagnostics.
+            versionBoundary: { ...compatibility.versionBoundary },
+            evidence: compatibility.evidence.map((item) => ({ ...item })),
+            revalidate: [...compatibility.revalidate],
+          },
+        }
+      : {}),
   };
 }
 
@@ -183,8 +381,25 @@ function providerLabel(provider: string): string {
     groq: 'Groq',
     togetherai: 'Together AI',
     zai: 'Z.ai',
+    workbuddy: 'Work Buddy',
+    autoclaw: 'AutoClaw',
   };
   return labels[provider] ?? provider;
+}
+
+/**
+ * Append the provider's own redacted reason. The detail is already
+ * secret-scrubbed and length-bounded by `safeUpstreamDetail`, and it is
+ * frequently the only actionable part of the failure: an account with no API
+ * entitlement, a key scoped to the wrong project, and a plan that excludes a
+ * model all arrive as the same bare 403, and "check your permission settings"
+ * is unactionable without it. Deliberately NOT used for `context_limit`, where
+ * the manager shrinks and retries silently and must not surface the raw dump.
+ */
+function withUpstreamDetail(message: string, diagnostic: SafeProviderDiagnostic): string {
+  return diagnostic.upstreamDetail
+    ? `${message} — provider said: "${diagnostic.upstreamDetail}"`
+    : message;
 }
 
 export function safeProviderFailureMessage(
@@ -194,24 +409,57 @@ export function safeProviderFailureMessage(
 ): string {
   const label = providerLabel(provider);
   switch (diagnostic.category) {
+    case 'context_limit':
+      return `${label} reported the request exceeds its context limit. Koryphaios shrinks skills, memory, tools, and history automatically and retries; if this persists, choose a larger-context model or shorten the latest input.`;
     case 'authentication':
-      return `${label} authentication failed.${options.authenticationAction ? ` ${options.authenticationAction}` : ' Reconnect the provider and retry.'}`;
+      return withUpstreamDetail(
+        `${label} authentication failed.${options.authenticationAction ? ` ${options.authenticationAction}` : ' Reconnect the provider and retry.'}`,
+        diagnostic,
+      );
     case 'rate_limit':
-      return `${label} rate limit or quota was reached. Retry later or choose another provider.`;
+      return withUpstreamDetail(
+        `${label} rate limit or quota was reached. Retry later or choose another provider.`,
+        diagnostic,
+      );
     case 'timeout':
-      return `${label} did not respond before the request timed out.`;
+      return withUpstreamDetail(
+        `${label} did not respond before the request timed out.`,
+        diagnostic,
+      );
     case 'network':
-      return `${label} could not be reached. Check the connection and retry.`;
+      return withUpstreamDetail(
+        `${label} could not be reached. Check the connection and retry.`,
+        diagnostic,
+      );
     case 'permission':
-      return `${label} denied this request. Check the provider account and permission settings.`;
+      return withUpstreamDetail(
+        `${label} denied this request. Check the provider account and permission settings.`,
+        diagnostic,
+      );
     case 'invalid_request':
-      return `${label} rejected the request. Check the selected model and provider settings.${diagnostic.upstreamDetail ? ` — provider said: "${diagnostic.upstreamDetail}"` : ''}`;
+      return withUpstreamDetail(
+        `${label} rejected the request. Check the selected model and provider settings.`,
+        diagnostic,
+      );
     case 'cancelled':
-      return `${label} request was cancelled.`;
+      return withUpstreamDetail(`${label} request was cancelled.`, diagnostic);
     case 'unavailable':
-      return `${label} is unavailable or failed to start.`;
+      return withUpstreamDetail(`${label} is unavailable or failed to start.`, diagnostic);
     default:
-      return `${label} request failed. Retry or inspect provider status in Settings.${diagnostic.upstreamDetail ? ` — provider said: "${diagnostic.upstreamDetail}"` : ''}`;
+      if (diagnostic.transient) {
+        // A server-side blip the registry already retried: send the user back to
+        // the turn, not to Settings, and never imply their configuration is
+        // wrong. The verdict comes from the raw failure, so a redacted or
+        // truncated detail clause cannot hide it.
+        return withUpstreamDetail(
+          `${label} hit a temporary upstream service error. Retry the turn, or pick another provider if it persists.`,
+          diagnostic,
+        );
+      }
+      return withUpstreamDetail(
+        `${label} request failed. Retry or inspect provider status in Settings.`,
+        diagnostic,
+      );
   }
 }
 

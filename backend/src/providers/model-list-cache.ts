@@ -55,16 +55,40 @@ function firstPositive(...values: unknown[]): number | undefined {
   return undefined;
 }
 
+function firstBoolean(...values: unknown[]): boolean | undefined {
+  for (const v of values) {
+    if (typeof v === 'boolean') return v;
+  }
+  return undefined;
+}
+
 /**
  * Pull real capability metadata out of a raw /models list entry. Many
  * OpenAI-compatible endpoints return far more than the bare id — OpenRouter
  * sends `context_length`, GitHub Copilot sends
  * `capabilities.limits.max_context_window_tokens` / `max_output_tokens` and
  * `capabilities.supports.vision`, other gateways send `context_window` or
- * `display_name`. The OpenAI SDK preserves unknown fields on the raw objects,
+ * `display_name`. Reasoning capability flags are read from `reasoning`,
+ * `capabilities.supports.reasoning`, or `capabilities.reasoning`, and discrete
+ * effort tiers from `reasoning_levels` / `supported_reasoning_efforts` /
+ * `reasoning_options` when the provider reports them. The OpenAI
+ * SDK preserves unknown fields on the raw objects,
  * so this turns the provider's OWN numbers into the ModelDef instead of
  * trusting a hand-maintained catalog.
  */
+function firstStringArray(...values: unknown[]): string[] | undefined {
+  for (const v of values) {
+    if (
+      Array.isArray(v) &&
+      v.length > 0 &&
+      v.every((item) => typeof item === 'string' && item.trim().length > 0)
+    ) {
+      return [...new Set(v.map((item) => (item as string).trim().toLowerCase()))];
+    }
+  }
+  return undefined;
+}
+
 export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef {
   if (!raw || typeof raw !== 'object') return def;
   const r = raw as Record<string, unknown>;
@@ -91,8 +115,29 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
         ? (r.name as string).trim()
         : undefined;
   const vision = typeof supports.vision === 'boolean' ? (supports.vision as boolean) : undefined;
+  const reasoning = firstBoolean(r.reasoning, supports.reasoning, caps.reasoning);
+  // Discrete reasoning effort tiers, when the provider's own catalog reports
+  // them (e.g. gateways mirroring the models.dev `reasoning_options` shape or
+  // a plain `reasoning_levels` array). Never invented — absent means unknown.
+  const reasoningOptions = Array.isArray(r.reasoning_options)
+    ? (r.reasoning_options as Array<{ type?: unknown; values?: unknown }>)
+    : undefined;
+  const effortValues = reasoningOptions?.find((o) => o?.type === 'effort')?.values;
+  const reasoningLevels = firstStringArray(
+    r.reasoning_levels,
+    r.supported_reasoning_efforts,
+    r.reasoning_efforts,
+    Array.isArray(effortValues) ? effortValues : undefined,
+  );
 
-  if (ctx === undefined && maxOut === undefined && !displayName && vision === undefined) {
+  if (
+    ctx === undefined &&
+    maxOut === undefined &&
+    !displayName &&
+    vision === undefined &&
+    reasoning === undefined &&
+    reasoningLevels === undefined
+  ) {
     return def;
   }
   return {
@@ -100,6 +145,8 @@ export function enrichFromRemoteMetadata(raw: unknown, def: ModelDef): ModelDef 
     ...(displayName ? { name: displayName } : {}),
     ...(ctx !== undefined ? { contextWindow: ctx, contextVerified: true } : {}),
     ...(maxOut !== undefined ? { maxOutputTokens: maxOut } : {}),
+    ...(reasoning !== undefined ? { canReason: reasoning } : {}),
+    ...(reasoningLevels !== undefined ? { reasoningLevels } : {}),
     ...(vision !== undefined
       ? { vision, supportsAttachments: def.supportsAttachments || vision }
       : {}),

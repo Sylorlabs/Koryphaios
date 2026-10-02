@@ -369,6 +369,24 @@ export const goals = sqliteTable('goals', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
 });
 
+/**
+ * App-wide checklists. Unlike `goals`, these carry no evidence or verification
+ * state: any actor (human or agent, in any role) may create and edit them.
+ */
+export const checklists = sqliteTable('checklists', {
+  id: text('id').primaryKey(),
+  userId: text('user_id'),
+  title: text('title').notNull(),
+  scope: text('scope').notNull().default('workspace'),
+  projectPath: text('project_path'),
+  sessionId: text('session_id'),
+  items: text('items').notNull().default('[]'), // JSON ChecklistItem[]
+  activity: text('activity').notNull().default('[]'), // JSON ChecklistActivity[]
+  archivedAt: integer('archived_at', { mode: 'timestamp' }),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+});
+
 // ============================================================================
 // Auth & Security Tables
 // ============================================================================
@@ -537,6 +555,36 @@ export const sessionTags = sqliteTable(
     pk: primaryKey({ columns: [t.sessionId, t.tag] }),
   }),
 );
+
+// ============================================================================
+// Inter-Agent Messaging (AgentMail)
+// ============================================================================
+
+export const agentMessages = sqliteTable('agent_messages', {
+  id: text('id').primaryKey(),
+  threadId: text('thread_id').notNull(),
+  fromSessionId: text('from_session_id').notNull(),
+  fromAgentId: text('from_agent_id').notNull(),
+  fromRole: text('from_role', { enum: ['manager', 'worker'] }).notNull(),
+  fromLabel: text('from_label').notNull(),
+  toSessionId: text('to_session_id').notNull(),
+  toAgentId: text('to_agent_id'),
+  toRole: text('to_role', { enum: ['manager', 'worker'] }).notNull(),
+  toLabel: text('to_label').notNull(),
+  crossProject: integer('cross_project', { mode: 'boolean' }).notNull().default(false),
+  isRelayRequest: integer('is_relay_request', { mode: 'boolean' }).notNull().default(false),
+  subject: text('subject').notNull(),
+  body: text('body').notNull(),
+  replyToMessageId: text('reply_to_message_id'),
+  status: text('status', {
+    enum: ['queued', 'pending_approval', 'delivered', 'answered', 'declined', 'failed'],
+  }).notNull(),
+  statusReason: text('status_reason'),
+  reply: text('reply'),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  deliveredAt: integer('delivered_at', { mode: 'timestamp' }),
+  answeredAt: integer('answered_at', { mode: 'timestamp' }),
+});
 
 // ============================================================================
 // Collaboration Tables

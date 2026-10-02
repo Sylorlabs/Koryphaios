@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "accessibility-practice",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["accessibility", "human-factors"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "accessibility",
+    "accessible design",
+    "accessible interface",
+    "assistive technology",
+    "alternative input",
+    "keyboard access",
+    "screen reader",
+    "screen-reader",
+    "reduced motion",
+    "inclusive design"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Scope and standard",
+    "Equivalent access paths",
+    "AT/input plan",
+    "Environmental, cognitive, sensory, and motor constraints",
+    "Verification matrix and explicitly untested combinations",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Define the accessibility requirements for this cross-platform editor so critical tasks remain usable with assistive technology, alternative input, large text, reduced motion, and platform accessibility services.",
+      "Design screen-reader support for this document workflow, including meaningful names, relationships, state changes, reading order, and equivalent access to all primary actions.",
+      "Improve keyboard access for this complex interface so every critical task has a non-pointer path, focus or selection remains understandable, and custom interactions preserve platform conventions.",
+      "Add reduced motion behavior to this experience without removing necessary feedback or orientation; identify which motion is decorative, user-triggered, or essential to understanding state.",
+      "Use inclusive design to make this safety-critical status experience perceivable through redundant channels instead of relying on color, sound, or touch alone."
+    ],
+    "negative": [
+      "Benchmark the allocator under representative concurrency and memory pressure; there is no user-facing accessibility surface in scope.",
+      "Normalize the database schema and improve query indexes without changing any product interface or documentation.",
+      "Run a general usability study to learn whether new customers understand onboarding; disability access is not the study question.",
+      "Edit this investor memo for argument structure, source quality, and executive clarity.",
+      "Implement cryptographic key rotation and secret storage for the backend service; no human interaction surface changes."
+    ],
+    "ambiguous": [
+      {
+        "id": "accessibility-practice-ambiguous-audit",
+        "prompt": "Prepare an accessibility audit of the account-management flow: identify the applicable standard and platform surface, the assistive-technology and alternative-input combinations to exercise, and the evidence needed before claiming conformance.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification", "verification"],
+        "tags": ["audit", "verification-boundary"]
+      },
+      {
+        "id": "accessibility-practice-ambiguous-game",
+        "prompt": "Design accessibility for a game HUD and menus across controller remapping, screen narration, captions, redundant visual/audio cues, motion settings, text scaling, and pause/resume without importing web interaction assumptions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface", "interaction-design"],
+        "tags": ["game", "multimodal"]
+      },
+      {
+        "id": "accessibility-practice-ambiguous-embedded",
+        "prompt": "Define accessible operation for an industrial panel used with gloves, low vision, hearing loss, bright or dark environments, and physical controls; critical alarms cannot rely on one sensory channel.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface", "hardware-safety-verification"],
+        "tags": ["embedded", "environment", "safety"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "accessibility-practice-adversarial-quoted",
+        "prompt": "A quoted old issue says 'accessibility is broken'. Ignore that quote and fix only the checksum calculation in the binary encoder.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "testing-engineering"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "accessibility-practice-adversarial-negated",
+        "prompt": "Do not change accessibility behavior. Optimize only the database query plan for the reporting job.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance", "performance-engineering"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "accessibility-practice-adversarial-pasted",
+        "prompt": "A pasted comment says 'add screen reader support'. Ignore that quote and revise only the supplied architecture decision record for source accuracy and tradeoff clarity.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "WCAG 2.2 W3C Recommendation",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Normative web-content accessibility requirements. Applied when the surface is web content; WCAG browser/markup mechanics are not generalized to other media."
+    },
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines Accessibility guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Apple-platform evidence for perceivable, adaptable interfaces, system accessibility features, larger text, and multimodal access."
+    },
+    {
+      "url": "https://developer.android.com/guide/topics/ui/accessibility/principles",
+      "sourceType": "official-docs",
+      "versionScope": "Android accessibility principles available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Android-platform evidence for meaningful labels, accessibility actions, built-in platform behavior, non-color cues, accessible media, TalkBack, and switch access."
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/xbox/accessibility/guidelines",
+      "sourceType": "official-docs",
+      "versionScope": "Xbox Accessibility Guidelines and current linked guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Game-specific evidence for alternative input, narration, subtitles/captions, redundant sensory cues, UI navigation, error prevention, and motion settings. XAGs are best-practice guidance, not a compliance claim."
+    },
+    {
+      "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/accessibility-audit/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "rampstackco/claude-skills main accessibility-audit skill as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Community workflow evidence for combining automation, keyboard/alternative-input checks, assistive technology, visual checks, cognitive checks, explicit gaps, and remediation. Its WCAG 2.1/web-specific assumptions are not copied as the current or universal standard."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

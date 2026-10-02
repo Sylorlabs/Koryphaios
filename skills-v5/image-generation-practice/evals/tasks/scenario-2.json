@@ -1,0 +1,87 @@
+{
+  "id": "image-generation-practice-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply image generation expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is image-generation-practice: Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity. The adjacent embedded-interface discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://image-generation-practice/editorial-character-consistency",
+    "requirements": [
+      "character/bicycle reference board with fixed identity attributes",
+      "four shot briefs with deliberately different camera and lighting conditions",
+      "continuity rubric covering face, jacket, helmet, bicycle geometry, and prohibited logos/text",
+      "explicit capability/uncertainty note for the selected generation runtime",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "image-generation-practice parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "image-generation-practice-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "image-generation-practice decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "image-generation-practice-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "image-generation-practice decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "image-generation-practice-individual-scenario-2-result",
+    "image-generation-practice-individual-scenario-2-verification",
+    "image-generation-practice-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual image-generation-practice boundary and relevant environment before acting, preserve the hierarchy relationship (broader=visual-interface-design; near-neighbor=embedded-interface), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Translate the intended use into subject, composition, camera/view, lighting, palette, material, typography constraints, aspect ratio, negative constraints, and required fidelity."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Inspect output at delivery resolution for anatomy/geometry, text accuracy, edge artifacts, repeated patterns, perspective, brand/style consistency, and task-specific fidelity; compare variants against the intended use rather than prompt literalism."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not claim exact likeness or trademark/style fidelity without evidence, hide obvious generation artifacts under effects, or keep expanding prompts when the composition itself is wrong."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (image-generation-practice decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

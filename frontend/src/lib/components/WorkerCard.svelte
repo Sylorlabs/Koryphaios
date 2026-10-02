@@ -1,13 +1,9 @@
 <script lang="ts">
   import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
-  import { wsStore } from '$lib/stores/websocket.svelte';
-  import Square from 'lucide-svelte/icons/square';
-  import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
-  import { fade } from 'svelte/transition';
-  import { apiFetch } from '$lib/api.svelte';
+  import X from 'lucide-svelte/icons/x';
 
-  interface AgentState {
+  interface WorkerCardAgent {
     identity: AgentIdentity;
     status: AgentStatus;
     content: string;
@@ -22,12 +18,29 @@
 
   let {
     agent,
+    status,
     selected = false,
     onSelect,
+    onClose,
+    closing = false,
   }: {
-    agent: AgentState;
+    agent: WorkerCardAgent;
+    /**
+     * The agent's status, passed separately from `agent` on purpose.
+     *
+     * AgentState objects held in the agent store's Map are not reactive
+     * proxies, so `agentStore.updateAgentStatus()` mutates `.status` in place
+     * and republishes the Map. A keyed #each then hands this component the
+     * *same* object reference, which Svelte treats as an unchanged prop — so
+     * any $derived reading `agent.status` never re-evaluates and the tile keeps
+     * rendering a stale status icon and a stale "Stop and close" label.
+     * A primitive prop compares by value, so this does invalidate.
+     */
+    status: AgentStatus;
     selected?: boolean;
     onSelect?: () => void;
+    onClose?: () => void;
+    closing?: boolean;
   } = $props();
 
   function providerLabel(provider: string): string {
@@ -39,6 +52,7 @@
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'unorouter') return 'UnoRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
@@ -53,44 +67,36 @@
     'glow-claude'
   );
 
-  let statusText = $derived(
-    agent.status === 'thinking' ? 'Thinking…' :
-    agent.status === 'analyzing' ? 'Analyzing…' :
-    agent.status === 'streaming' ? 'Responding…' :
-    agent.status === 'tool_calling' ? `Running ${agent.toolCalls.at(-1)?.name ?? 'tool'}…` :
-    agent.status === 'reading' ? 'Reading files…' :
-    agent.status === 'writing' ? 'Editing files…' :
-    agent.status === 'searching' ? 'Searching…' :
-    agent.status === 'verifying' ? 'Verifying…' :
-    agent.status === 'criticizing' ? 'Reviewing…' :
-    agent.status === 'compacting' ? 'Compacting context…' :
-    agent.status === 'waiting_user' ? 'Waiting for your input' :
-    agent.status === 'waiting' ? 'Waiting on a process' :
-    agent.status === 'done' ? 'Complete' :
-    agent.status === 'error' ? 'Failed' :
-    'Idle'
-  );
-
-  let isActive = $derived(!['idle', 'done', 'error'].includes(agent.status));
+  let isActive = $derived(!['idle', 'done', 'error'].includes(status));
 
   let contextPercent = $derived(
     agent.contextMax > 0 ? Math.min((agent.tokensUsed / agent.contextMax) * 100, 100) : 0
   );
 
-  let contextColor = $derived(
-    contextPercent > 80 ? 'bg-red-500' :
-    contextPercent > 50 ? 'bg-amber-500' :
-    'bg-emerald-500'
-  );
-
   let isManager = $derived(agent.identity.role === 'manager');
+
+  // The tile is name + status glyph only. The hover card is deliberately
+  // short: which provider/model the agent is burning and how much of its
+  // context window is left. Status, task text and the "click to steer" hint
+  // all restate what the chip and the header already show, and they turned the
+  // tooltip into a paragraph the reader had to parse on every pass of the rail.
+  let details = $derived(
+    [
+      `${providerLabel(agent.identity.provider)} ${agent.identity.model}`,
+      agent.contextKnown && agent.contextMax > 0 ? `Context ${Math.round(contextPercent)}%` : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  );
 </script>
 
 <div
-  class="agent-card rounded-lg border text-left transition-all duration-300
-            {selected ? `ring-1 ring-[var(--color-accent)] bg-[var(--color-surface-2)] shadow-[0_0_0_1px_rgba(var(--color-accent-rgb), 0.2)]` : ''}
-            {isActive ? `active ${glowClass} glow-active min-w-[188px] max-w-[252px]` : 'min-w-[188px] max-w-[252px] opacity-85'}"
-  style="background: var(--color-surface-2); border-color: {selected ? 'rgba(var(--color-accent-rgb), 0.42)' : 'var(--color-border)'}; padding: {isActive || selected ? '10px 12px' : '8px 10px'};"
+  class="agent-card inline-flex shrink-0 items-center gap-1.5 rounded-lg border text-left transition-all duration-300
+            {selected ? `ring-1 ring-[var(--color-accent)] shadow-[0_0_0_1px_rgba(var(--color-accent-rgb), 0.2)]` : ''}
+            {isActive ? `active ${glowClass} glow-active` : 'opacity-70'}"
+  style="max-width: 220px; height: 24px; padding: 0 5px 0 7px; background: var(--color-surface-2); border-color: {selected
+    ? 'rgba(var(--color-accent-rgb), 0.42)'
+    : 'var(--color-border)'}; color: var(--color-text-primary);"
   onclick={() => onSelect?.()}
   onkeydown={(event) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -100,83 +106,28 @@
   }}
   role="button"
   tabindex="0"
+  title={details}
+  aria-label={details}
 >
-  <!-- Header -->
-  <div class="flex items-start justify-between {isActive ? 'mb-[var(--space-sm)]' : 'mb-0'}">
-    <div class="flex items-center gap-1.5">
-      <div class="flex items-center pt-0.5">
-        <AnimatedStatusIcon status={agent.status} size={isActive ? 16 : 14} {isManager} isStatic={!isActive} />
-      </div>
-      <span class="text-xs font-medium {isActive ? 'opacity-100' : 'opacity-70'}" style="color: var(--color-text-primary);">{agent.identity.name}</span>
-    </div>
-    <div class="flex items-center gap-1">
-      {#if isActive}
-        <span class="text-[10px] capitalize px-1.5 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-text-muted); transition: all 0.3s;">{agent.identity.domain}</span>
-        <button
-          class="p-0.5 rounded transition-colors hover:bg-red-500/20"
-          style="color: var(--color-text-muted);"
-          title={isManager ? 'Stop manager and workers' : 'Cancel this worker'}
-          onclick={(event) => {
-            event.stopPropagation();
-            if (isManager && agent.sessionId) {
-              wsStore.markSessionAgentsStopped(agent.sessionId);
-              apiFetch(`/api/sessions/${agent.sessionId}/cancel`, { method: 'POST' }).catch((err: unknown) => {
-                console.warn('Session cancel failed:', err instanceof Error ? err.message : String(err));
-              });
-            } else {
-              wsStore.markAgentStopped(agent.identity.id);
-              apiFetch(`/api/agent/${agent.identity.id}/cancel`, { method: 'POST' }).catch((err: unknown) => {
-                console.warn('Agent cancel failed:', err instanceof Error ? err.message : String(err));
-              });
-            }
-          }}
-        >
-          <Square size={10} />
-        </button>
-      {:else}
-        <span class="text-[9px] opacity-40 uppercase tracking-tighter">{agent.status}</span>
-      {/if}
-    </div>
-  </div>
-
-  {#if isActive}
-    <!-- Status -->
-    <div class="flex items-center justify-between mb-[var(--space-md)]" transition:fade={{duration: 200}}>
-      <span class="text-[11px]" style="color: {agent.status === 'done' ? 'var(--color-success)' : agent.status === 'error' ? 'var(--color-error)' : 'var(--color-text-secondary)'};">
-        {statusText}
-      </span>
-      <span class="text-[10px]" style="color: var(--color-text-muted);">({providerLabel(agent.identity.provider)}) {agent.identity.model}</span>
-    </div>
-
-    <!-- Context window bar -->
-    {#if agent.tokensUsed > 0 && agent.contextKnown && agent.contextMax > 0}
-      <div class="mb-[var(--space-sm)]">
-        <div class="flex items-center justify-between mb-[var(--space-xs)]">
-          <span class="text-[9px]" style="color: var(--color-text-muted);">Context</span>
-          <span class="text-[9px]" style="color: var(--color-text-muted);">{Math.round(agent.tokensUsed / 1000)}k / {Math.round(agent.contextMax / 1000)}k</span>
-        </div>
-        <div class="h-1 rounded-full overflow-hidden" style="background: var(--color-surface-4);">
-          <div class="h-full rounded-full transition-all {contextColor}" style="width: {contextPercent}%;"></div>
-        </div>
-      </div>
-    {/if}
-
-    <!-- Recent tools -->
-    {#if agent.toolCalls.length > 0}
-      <div class="flex flex-wrap gap-1 mt-1">
-        {#each agent.toolCalls.slice(-2) as tc}
-          <span class="text-[10px] px-1 py-0.5 rounded" style="background: var(--color-surface-3); color: var(--color-accent);">{tc.name}</span>
-        {/each}
-      </div>
-    {/if}
-  {/if}
-
-  {#if agent.task}
-    <div class="mt-2 line-clamp-2 text-[10px] leading-relaxed" style="color: var(--color-text-muted);" title={agent.task}>
-      {agent.task}
-    </div>
-  {/if}
-  <div class="mt-2 border-t pt-1.5 text-[9px] font-bold uppercase tracking-wider" style="border-color: var(--color-border); color: {selected ? 'var(--color-accent)' : 'var(--color-text-muted)'};">
-    {selected ? 'Transcript open · type below to steer' : 'Open transcript & steer'}
-  </div>
+  <span
+    class="shrink-0"
+    style="color: {status === 'error' ? 'var(--color-error)' : status === 'done' ? 'var(--color-success)' : 'var(--color-accent)'}"
+  >
+    <AnimatedStatusIcon {status} size={13} {isManager} isStatic={!isActive} />
+  </span>
+  <span class="text-[11px] font-medium truncate">{agent.identity.name}</span>
+  <button
+    type="button"
+    class="shrink-0 rounded p-0.5 transition-colors hover:bg-[var(--color-surface-3)] disabled:cursor-default disabled:opacity-40"
+    style="color: var(--color-text-muted);"
+    title={isActive ? `Stop and close ${agent.identity.name}` : `Close ${agent.identity.name}`}
+    aria-label={isActive ? `Stop and close ${agent.identity.name}` : `Close ${agent.identity.name}`}
+    disabled={closing}
+    onclick={(event) => {
+      event.stopPropagation();
+      onClose?.();
+    }}
+  >
+    <X size={11} />
+  </button>
 </div>

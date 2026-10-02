@@ -12,26 +12,60 @@
     { direction: 'SouthWest', className: 'south-west' },
   ];
 
+  // Handles only make sense inside the Tauri frameless window. In a plain
+  // browser (dev server, demo build) they would be invisible dead zones that
+  // swallow clicks along the viewport edges, so don't render them there.
+  // `__TAURI_INTERNALS__` is injected before page scripts run, so this is
+  // safe to check synchronously at component init.
+  const inTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+  // Resolve the Tauri window handle once, up front. Importing lazily inside
+  // the pointerdown handler delayed `startResizeDragging` by a round trip,
+  // which made every first grab feel dead.
+  const tauriWindow: Promise<import('@tauri-apps/api/window').Window> | null = inTauri
+    ? import('@tauri-apps/api/window').then((m) => m.getCurrentWindow())
+    : null;
+
+  let resizeActive = false;
+
   async function resize(direction: ResizeDirection, event: PointerEvent) {
-    if (event.button !== 0 || !('__TAURI_INTERNALS__' in window)) return;
+    if (event.button !== 0 || !tauriWindow || resizeActive) return;
+    // Must happen before any await, or the browser starts a text selection /
+    // scroll alongside the native resize.
     event.preventDefault();
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    await getCurrentWindow().startResizeDragging(direction);
+    resizeActive = true;
+    try {
+      const win = await tauriWindow;
+      // If the pointer was released during the IPC round trip, a native
+      // resize would start with no button held and never stop until the next
+      // click — the classic "stuck resize". Bail instead.
+      if (event.buttons & 1) {
+        await win.startResizeDragging(direction);
+      }
+    } catch (err) {
+      console.warn('Window resize drag failed:', err);
+    } finally {
+      resizeActive = false;
+    }
   }
 </script>
 
-{#each directions as handle (handle.direction)}
-  <div
-    class={`window-resize-handle ${handle.className}`}
-    aria-hidden="true"
-    onpointerdown={(event) => void resize(handle.direction, event)}
-  ></div>
-{/each}
+{#if tauriWindow}
+  {#each directions as handle (handle.direction)}
+    <div
+      class={`window-resize-handle ${handle.className}`}
+      aria-hidden="true"
+      onpointerdown={(event) => void resize(handle.direction, event)}
+    ></div>
+  {/each}
+{/if}
 
 <style>
   .window-resize-handle {
     position: fixed;
     z-index: 2147483647;
+    touch-action: none;
+    user-select: none;
   }
   .north,
   .south {

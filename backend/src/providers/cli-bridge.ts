@@ -1,6 +1,6 @@
 // Generalized CLI-provider deep-integration bridge.
 //
-// Every native CLI harness (devin, claude-code, codex, cline, cursor,
+// Every native CLI harness (devin, claude-code, codex, cursor,
 // antigravity, grok, kimicode) can implement this surface so Koryphaios
 // replaces the CLI's internal tool calls, context editing, reasoning, and
 // notes/context handling with Koryphaios-owned equivalents as far as the CLI

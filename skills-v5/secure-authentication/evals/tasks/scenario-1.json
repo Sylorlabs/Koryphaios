@@ -1,0 +1,74 @@
+{
+  "id": "secure-authentication-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design login security for a consumer account service that currently supports email/password and recovery email. Add optional passkeys without making recovery the weakest path. Define password-verifier requirements, compromised/common-password screening policy, anti-enumeration and credential-stuffing throttling, WebAuthn RP/origin/challenge/user-verification checks, passkey enrollment and duplicate handling, recovery codes, lost-device recovery, authenticator replacement/removal, and fresh-authentication requirements before changing the primary email, resetting all authenticators, or exporting recovery material. Explicitly state what is and is not phishing-resistant and what happens to existing sessions after account recovery or suspected compromise. Leave OAuth/OIDC federation out of this scenario.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://secure-authentication/scenario-1",
+    "requirements": [
+      "consumer account with email/password, recovery email, and active sessions",
+      "WebAuthn-capable RP fixture with valid/invalid origin, RP ID, challenge, credential, and user-verification cases",
+      "credential-stuffing and enumeration attempt corpus",
+      "lost-device, recovery-code, and authenticator-replacement lifecycle fixtures",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "secure-authentication-password-abuse-1",
+      "assertion": "The design specifies password-verifier storage, compromised/common-password handling, and throttling/anti-automation dimensions without depending on revealing account existence or a single attacker-controlled global lockout key."
+    },
+    {
+      "id": "secure-authentication-webauthn-1",
+      "assertion": "Passkey/WebAuthn verification explicitly validates challenge freshness, RP ID/origin, credential identity, signature, and required user-verification state before establishing authenticated state."
+    },
+    {
+      "id": "secure-authentication-recovery-1",
+      "assertion": "Recovery, backup-code, lost-device, and authenticator-replacement flows have explicit assurance requirements and cannot silently bypass the stronger authenticator policy."
+    },
+    {
+      "id": "secure-authentication-reauth-1",
+      "assertion": "Primary-email change, authenticator reset/removal, and recovery-material export require appropriately fresh authentication or the deliberate recovery path, not merely possession of an old ambient session."
+    },
+    {
+      "id": "secure-authentication-session-response-1",
+      "assertion": "The account-recovery/compromise path defines which existing sessions or refresh credentials are revoked, rotated, or retained and records the relevant security event."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "secure-authentication-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "authenticator lifecycle matrix",
+        "WebAuthn validation contract",
+        "throttling/recovery state model",
+        "fresh-auth and session-response rules"
+      ]
+    },
+    {
+      "id": "secure-authentication-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "password/abuse policy",
+    "WebAuthn RP/challenge/credential validation contract",
+    "enrollment/recovery/replacement state model",
+    "fresh-auth and session invalidation rules",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "secure-authentication-scenario-1-result",
+    "secure-authentication-scenario-1-verification",
+    "secure-authentication-scenario-1-paired-evaluation"
+  ]
+}

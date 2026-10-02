@@ -8,6 +8,7 @@ export type WSEventType =
   | 'agent.completed'
   | 'agent.error'
   | 'agent.thread_message'
+  | 'agent.message'
   | 'agent.heartbeat'
   // Streaming content
   | 'stream.delta'
@@ -68,6 +69,8 @@ export type WSEventType =
   | 'workspace.updated'
   // Goal mode
   | 'goals.updated'
+  // App-wide checklists
+  | 'checklists.updated'
   // Native CLI slash command output (attributed to a CLI provider harness)
   | 'native.command';
 
@@ -110,6 +113,7 @@ export type WSMessagePayload =
   | AgentStatusPayload
   | AgentHeartbeatPayload
   | AgentThreadMessagePayload
+  | AgentMessageEventPayload
   | ThinkingPayload
   | ToolCallPayload
   | StreamToolResultPayload
@@ -138,6 +142,7 @@ import type {
   AgentStatusPayload,
   AgentHeartbeatPayload,
   AgentThreadMessagePayload,
+  AgentMessageEventPayload,
   ThinkingPayload,
   ToolCallPayload,
   StreamToolResultPayload,

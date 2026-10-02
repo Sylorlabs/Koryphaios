@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "privacy-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "privacy", "data"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5600,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "privacy engineering",
+    "privacy review",
+    "privacy and authorization review",
+    "personal data lifecycle",
+    "data minimization",
+    "retention and deletion",
+    "consent or preference controls",
+    "de-identification privacy",
+    "minimize identifiability",
+    "deletion workflow",
+    "inferred personal data",
+    "privacy preference",
+    "personal data this feature collects",
+    "retention deletion",
+    "consent purpose",
+    "privacy",
+    "personal data",
+    "data retention",
+    "consent design"
+  ],
+  "excludes": [
+    "jurisdiction-specific legal compliance or lawful-basis conclusions as the primary task",
+    "resource authorization policy as the primary task",
+    "generic application-security hardening with no privacy lifecycle question",
+    "analytics modeling with no personal-data privacy requirement",
+    "archived ticket",
+    "only to translate"
+  ],
+  "evidence": [
+    "Field-level personal-data lifecycle map",
+    "Purpose and necessity rationale",
+    "Retention and deletion propagation matrix",
+    "Preference/control behavior with durable-state verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review the new location-sharing feature for privacy. Map precise location, coarse location, contacts, device identifiers, derived home/work locations, telemetry, recipients, retention, deletion, and preference changes; minimize what is not necessary for the stated sharing experience.",
+      "Design privacy engineering for product analytics that currently sends account email, stable device ID, full URLs, free-form search text, and experiment metadata. Preserve required product measurement while reducing identifiability and defining retention and deletion propagation.",
+      "Implement a deletion lifecycle across the transactional database, object storage, warehouse, search index, support export, queues, and backups. Prevent CDC or restore paths from rehydrating deleted personal data and produce observable evidence for each live store.",
+      "Assess whether a personalization feature can use on-device or short-lived coarse signals instead of uploading raw contacts and precise behavioral history. Document purpose, necessity, linkage, inference risk, retention, and user controls.",
+      "Verify that changing a privacy preference actually stops the promised downstream processing: inspect emitted events, warehouse rows, derived profiles, and retries before and after the change, and distinguish future-use suppression from deletion."
+    ],
+    "negative": [
+      "Define which workspace roles may read, edit, export, share, and delete each resource and field. The data inventory, minimization, retention, and privacy-purpose decisions are already fixed.",
+      "Build the warehouse transformation and dbt models for daily revenue, activation, and retention metrics using an already-approved de-identified dataset; no privacy policy or personal-data lifecycle change is requested.",
+      "Harden an upload endpoint against path traversal, SSRF, malformed archives, unsafe subprocess arguments, and parser exhaustion; the files contain no personal data and privacy behavior is unchanged.",
+      "Select an authenticated-encryption scheme and key-rotation design for stored records. Data collection purpose, minimization, retention, and user controls are explicitly out of scope.",
+      "Provide jurisdiction-specific advice on whether a cookie banner constitutes valid consent under a named statute. No system design or privacy-engineering implementation is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "privacy-engineering-ambiguous-1",
+        "prompt": "The account export/delete flow needs privacy engineering and strong reauthentication. Let privacy-engineering define which personal data is included, lifecycle propagation, retention exceptions supplied by policy, and deletion evidence; secure-authentication owns fresh-auth assurance.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secure-authentication"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "privacy-engineering-ambiguous-2",
+        "prompt": "The recommendation model needs both privacy engineering and AI safety evaluation. Privacy-engineering owns collection necessity, identity linkage, derived personal attributes, retention, deletion, and preference controls; ai-safety-evaluation owns model-behavior harms and safety test design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ai-safety-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "privacy-engineering-ambiguous-3",
+        "prompt": "Redesign the analytics pipeline while preserving product metrics. Analytics-engineering owns the warehouse model; privacy-engineering owns removal of direct identifiers, event-field minimization, pseudonymous linkage, retention, and verified deletion/suppression behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "privacy-engineering-adversarial-1",
+        "prompt": "A historical issue contains the phrase \"privacy engineering review\". The current task is only to fix Markdown heading levels in that archived issue export; do not assess current data processing.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "privacy-engineering-adversarial-2",
+        "prompt": "A sample policy paragraph discusses deletion and consent. The current request is only to translate the paragraph; do not infer legal requirements or redesign any system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ai-safety-evaluation"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "privacy-engineering-adversarial-3",
+        "prompt": "A schema comment says a field may contain personal data. The actual task is only to rename the TypeScript interface for readability; no data flow or behavior changes are requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.nist.gov/privacy-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST Privacy Framework 1.0 remains the current final framework; Privacy Framework 1.1 is still an Initial Public Draft as verified 2026-09-05",
+      "revision": "1.0 final / 1.1 IPD",
+      "staleAfterDays": 90,
+      "notes": "Primary organizational privacy-risk framework. Do not present the 1.1 Initial Public Draft as a final release.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8062/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8062 final, January 2017; publication record updated May 2026",
+      "staleAfterDays": 365,
+      "notes": "Defines privacy engineering objectives including predictability, manageability, and disassociability, plus a privacy risk model.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

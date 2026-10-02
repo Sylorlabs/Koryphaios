@@ -54,11 +54,6 @@ export function normalizeReasoningLevel(
 
   const normalizedLevel = reasoningLevel.toLowerCase().trim();
 
-  // Antigravity exposes Low/Medium/High as separate model entries. It has no
-  // independent reasoning parameter, so stale UI/session values must not be
-  // forwarded or interpreted as a request to switch models.
-  if (provider === 'antigravity') return undefined;
-
   if (normalizedLevel === 'adaptive') {
     return undefined;
   }
@@ -72,6 +67,8 @@ export function normalizeReasoningLevel(
   // the model itself reported via reasoningLevels, so the value is already in
   // the provider's native format. Each provider's backend code handles any
   // API-specific mapping (e.g. OpenAI maps budget tokens to effort strings).
+  // Providers that publish effort as separate models rather than a parameter
+  // (Antigravity) map the level onto their own per-tier model id instead.
   return normalizedLevel;
 }
 
@@ -144,6 +141,7 @@ export function determineAutoReasoningLevel(taskDescription: string): string {
 export { DEFAULT_REASONING_RULES } from './ReasoningConfig';
 export { STANDARD_REASONING_OPTIONS } from './ReasoningConfig';
 export { buildReasoningConfigFromLevels } from './ReasoningConfig';
+export { resolveReasoningLevel } from './ReasoningConfig';
 export type {
   ReasoningConfig,
   ReasoningOption,

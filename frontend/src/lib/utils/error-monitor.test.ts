@@ -4,13 +4,17 @@ vi.mock('$lib/demo-flags', () => ({ isDemoMode: false }));
 
 import {
   disposeErrorMonitoring,
+  getStallSnapshot,
   initErrorMonitoring,
   MONITOR_MAX_BATCH_BYTES,
+  recordRendererStall,
+  resetStallMonitoring,
   summarizeMonitorValue,
 } from './error-monitor';
 
 afterEach(() => {
   disposeErrorMonitoring();
+  resetStallMonitoring();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -69,5 +73,28 @@ describe('frontend error monitor confidentiality boundary', () => {
     const consoleOutput = JSON.stringify([...originalError.mock.calls, ...originalWarn.mock.calls]);
     expect(consoleOutput).not.toContain(sentinel);
     expect(new TextEncoder().encode(consoleOutput).byteLength).toBeLessThan(8_192);
+  });
+});
+
+describe('renderer stall monitor', () => {
+  test('tracks worst gap, counts longtasks, and caps the ring', () => {
+    expect(getStallSnapshot()).toEqual({ worstFrameGapMs: 0, longTaskCount: 0, recentStalls: [] });
+    recordRendererStall({ at: 1, durationMs: 3_500, source: 'heartbeat' });
+    recordRendererStall({ at: 2, durationMs: 1_200, source: 'longtask' });
+    for (let i = 0; i < 12; i++) {
+      recordRendererStall({ at: 10 + i, durationMs: 100 + i, source: 'heartbeat' });
+    }
+    const snapshot = getStallSnapshot();
+    expect(snapshot.worstFrameGapMs).toBe(3_500);
+    expect(snapshot.longTaskCount).toBe(1);
+    expect(snapshot.recentStalls).toHaveLength(10);
+    // Oldest entries evicted first.
+    expect(snapshot.recentStalls[0]).toMatchObject({ at: 12, durationMs: 102 });
+  });
+
+  test('reset clears stall state', () => {
+    recordRendererStall({ at: 1, durationMs: 9_000, source: 'heartbeat' });
+    resetStallMonitoring();
+    expect(getStallSnapshot()).toEqual({ worstFrameGapMs: 0, longTaskCount: 0, recentStalls: [] });
   });
 });

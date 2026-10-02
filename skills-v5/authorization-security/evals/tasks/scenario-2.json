@@ -1,0 +1,75 @@
+{
+  "id": "authorization-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Perform an authorization review of a GraphQL project-management service. The fixture exposes Project, Member, BillingAccount, ApiToken, and AuditEvent types through queries, nested fields, aliases, batch loaders, and mutations. Roles are viewer, contributor, maintainer, owner, and organization support with a time-bounded delegated support grant. Review and redesign access control so object and field reads, nested resolver paths, bulk/batch loaders, mutations, token creation, billing fields, and audit-event visibility all enforce the same trusted policy. Define how project/organization relationship changes and support-grant revocation propagate, prevent a resolver from authorizing with a backend service identity instead of the caller, and give concrete negative cases for horizontal/vertical escalation and field overposting. Keep GraphQL schema/resolver mechanics in graphql-engineering and authorization policy/enforcement here.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://authorization-security/scenario-2",
+    "requirements": [
+      "GraphQL schema with nested fields, aliases, batch loaders, and mutations",
+      "organization/project relationship and role fixtures",
+      "time-bounded delegated support grant with revocation control",
+      "backend service identity distinct from originating caller identity",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "authorization-security-graphql-policy-2",
+      "assertion": "The review defines object-, operation-, and field-level permissions for Project, BillingAccount, ApiToken, AuditEvent, and membership mutations rather than relying on type/schema visibility."
+    },
+    {
+      "id": "authorization-security-indirect-paths-2",
+      "assertion": "Nested resolver, alias, bulk/batch-loader, and mutation paths are mapped to the same trusted authorization policy so alternate query shapes cannot bypass enforcement."
+    },
+    {
+      "id": "authorization-security-support-delegation-2",
+      "assertion": "Support access requires the documented active time-bounded delegation, excludes prohibited fields/actions, and has an explicit revocation-effective-time rule."
+    },
+    {
+      "id": "authorization-security-confused-deputy-2",
+      "assertion": "Backend service credentials are not used as the effective subject for user-originated protected operations; the originating subject or constrained delegation drives the resource decision."
+    },
+    {
+      "id": "authorization-security-negative-cases-2",
+      "assertion": "The output contains concrete horizontal, vertical, cross-organization, nested-field, token-creation, bulk-loader, and overposting denial cases with expected non-effects."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "authorization-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "GraphQL authorization matrix",
+        "resolver/data-layer enforcement map",
+        "delegation and revocation contract",
+        "negative escalation/field cases"
+      ]
+    },
+    {
+      "id": "authorization-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "field/object/operation matrix",
+    "nested and batch enforcement trace",
+    "support delegation lifecycle",
+    "originating-subject policy",
+    "negative and denied-non-effect cases",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "authorization-security-scenario-2-result",
+    "authorization-security-scenario-2-verification",
+    "authorization-security-scenario-2-paired-evaluation"
+  ]
+}

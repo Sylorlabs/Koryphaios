@@ -41,7 +41,12 @@ import {
   SkillRevisionConflictError,
   type SkillDocumentSpec,
   type SkillSource,
+  readPersonalSkillInstructions,
+  resetPersonalSkillInstructions,
+  writePersonalSkillInstructions,
 } from '../../kory/skills';
+import { collectProviderEvents } from '../../providers/provider-retry';
+import { RESPONSE_STYLE_SKILL_NAME } from '../../kory/response-style-skill';
 import { createTaskContract } from '../../kory/prompts';
 import {
   listHarnessQualifications,
@@ -52,6 +57,16 @@ import {
   listSkillEvaluationRuns,
   recordSkillEvaluationRun,
 } from '../../kory/skill-evaluations';
+import { buildSkillHealthSnapshot } from '../../kory/skill-health';
+import { syncSkillStewardRegistry } from '../../kory/skill-stewards';
+import {
+  analyzeSkillGaps,
+  buildSkillFactoryCandidate,
+  createSkillFactoryDraft,
+  dismissSkillFactoryGap,
+  reconcileSkillFactoryGaps,
+  reopenSkillFactoryGap,
+} from '../../kory/skill-factory';
 import {
   advanceWorkflow,
   listWorkflowDefinitions,
@@ -98,7 +113,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     },
     {
       body: t.Object({
-        workflowId: t.String(),
+        workflowId: t.Optional(t.String()),
         sessionId: t.String(),
         task: t.String({ minLength: 1 }),
         goalId: t.Optional(t.String()),
@@ -190,6 +205,174 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     },
     { query: t.Object({ skill: t.Optional(t.String()) }) },
   )
+  .get('/skills/health', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const root = getRequestProjectRoot(request);
+    syncSkillStewardRegistry(root);
+    return { ok: true, data: buildSkillHealthSnapshot(root) };
+  })
+  .get('/skills/stewards', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: syncSkillStewardRegistry(getRequestProjectRoot(request)) };
+  })
+  .get('/skills/factory/gaps', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    return { ok: true, data: reconcileSkillFactoryGaps(getRequestProjectRoot(request)) };
+  })
+  .post(
+    '/skills/factory/analyze',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        return {
+          ok: true,
+          data: analyzeSkillGaps(getRequestProjectRoot(request), body.signals, {
+            coverageThreshold: body.coverageThreshold,
+          }),
+        };
+      } catch (error: unknown) {
+        throw new ValidationError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    {
+      body: t.Object({
+        coverageThreshold: t.Optional(t.Number({ minimum: 0.5, maximum: 1 })),
+        signals: t.Array(
+          t.Object({
+            id: t.String({ minLength: 1, maxLength: 200 }),
+            capability: t.String({ minLength: 1, maxLength: 240 }),
+            proposedSkillName: t.Optional(t.String({ minLength: 1, maxLength: 64 })),
+            requestExamples: t.Optional(
+              t.Array(t.String({ minLength: 1, maxLength: 500 }), { maxItems: 12 }),
+            ),
+            domains: t.Optional(
+              t.Array(t.String({ minLength: 1, maxLength: 80 }), { maxItems: 12 }),
+            ),
+            targetMedia: t.Optional(
+              t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 8 }),
+            ),
+            source: t.Union([
+              t.Literal('session'),
+              t.Literal('benchmark'),
+              t.Literal('failure'),
+              t.Literal('manual'),
+              t.Literal('import'),
+            ]),
+            observedAt: t.String(),
+            weight: t.Optional(t.Number({ exclusiveMinimum: 0, maximum: 100 })),
+            evidence: t.Optional(
+              t.Array(t.String({ minLength: 1, maxLength: 1_000 }), { maxItems: 20 }),
+            ),
+          }),
+          { minItems: 1, maxItems: 100 },
+        ),
+      }),
+    },
+  )
+  .get('/skills/factory/:id/candidate', ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return {
+        ok: true,
+        data: buildSkillFactoryCandidate(getRequestProjectRoot(request), params.id),
+      };
+    } catch (error: unknown) {
+      throw new NotFoundError('Skill Factory candidate', params.id);
+    }
+  })
+  .post(
+    '/skills/factory/:id/draft',
+    ({ request, params, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const root = getRequestProjectRoot(request);
+      try {
+        return {
+          ok: true,
+          data: createSkillFactoryDraft(root, {
+            gapId: params.id,
+            learningMode: loadAgentSettings(root).skillLearningMode,
+            source: body.source,
+            stewardModel: body.stewardModel,
+            draft: body.draft,
+          }),
+        };
+      } catch (error: unknown) {
+        throw new ValidationError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    {
+      body: t.Object({
+        source: t.Optional(t.Union([t.Literal('personal'), t.Literal('project')])),
+        stewardModel: t.Optional(t.String({ minLength: 1, maxLength: 100 })),
+        draft: t.Object({
+          description: t.String({ minLength: 40, maxLength: 360 }),
+          instructions: t.String({ minLength: 40, maxLength: 50_000 }),
+          domains: t.Array(t.String({ minLength: 1, maxLength: 80 }), {
+            minItems: 1,
+            maxItems: 12,
+          }),
+          activation: t.Array(t.String({ minLength: 1, maxLength: 120 }), {
+            minItems: 1,
+            maxItems: 16,
+          }),
+          shouldTrigger: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+            minItems: 2,
+            maxItems: 12,
+          }),
+          shouldNotTrigger: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+            minItems: 2,
+            maxItems: 12,
+          }),
+          evidence: t.Array(t.String({ minLength: 1, maxLength: 240 }), {
+            minItems: 1,
+            maxItems: 12,
+          }),
+          broader: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 8 })),
+          facets: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 })),
+          requires: t.Optional(
+            t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 }),
+          ),
+          conflicts: t.Optional(
+            t.Array(t.String({ minLength: 1, maxLength: 64 }), { maxItems: 12 }),
+          ),
+          excludes: t.Optional(
+            t.Array(t.String({ minLength: 1, maxLength: 120 }), { maxItems: 16 }),
+          ),
+          targetMedia: t.Optional(
+            t.Array(t.String({ minLength: 1, maxLength: 64 }), { minItems: 1, maxItems: 8 }),
+          ),
+          depth: t.Optional(t.Integer({ minimum: 0, maximum: 32 })),
+          contextBudget: t.Optional(t.Integer({ minimum: 100, maximum: 20_000 })),
+        }),
+      }),
+    },
+  )
+  .post(
+    '/skills/factory/:id/dismiss',
+    ({ request, params, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        return {
+          ok: true,
+          data: dismissSkillFactoryGap(getRequestProjectRoot(request), params.id, body.reason),
+        };
+      } catch (error: unknown) {
+        throw new ValidationError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    { body: t.Object({ reason: t.String({ minLength: 1, maxLength: 1_000 }) }) },
+  )
+  .post('/skills/factory/:id/reopen', ({ request, params, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      return {
+        ok: true,
+        data: reopenSkillFactoryGap(getRequestProjectRoot(request), params.id),
+      };
+    } catch (error: unknown) {
+      throw new ValidationError(error instanceof Error ? error.message : String(error));
+    }
+  })
   .post(
     '/skills/evaluations',
     ({ request, body, set }) => {
@@ -198,26 +381,29 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       const run = recordSkillEvaluationRun(root, body);
       const related = listSkillEvaluationRuns(root, run.skill).filter(
         (item) =>
+          item.variant !== 'without-skill' &&
           item.provider === run.provider &&
           item.model === run.model &&
           item.harnessVersion === run.harnessVersion &&
           item.role === run.role &&
           item.medium === run.medium,
       );
-      saveHarnessQualification(root, {
-        provider: run.provider,
-        model: run.model,
-        harnessVersion: run.harnessVersion,
-        skill: run.skill,
-        role: run.role,
-        medium: run.medium,
-        sampleSize: related.length,
-        successes: related.filter((item) => item.passed && !item.integrityFailure).length,
-        quality: related.reduce((sum, item) => sum + item.quality, 0) / related.length,
-        verification: related.reduce((sum, item) => sum + item.verification, 0) / related.length,
-        updatedAt: run.recordedAt,
-        evidence: related.flatMap((item) => item.evidence).slice(-10),
-      });
+      if (related.length) {
+        saveHarnessQualification(root, {
+          provider: run.provider,
+          model: run.model,
+          harnessVersion: run.harnessVersion,
+          skill: run.skill,
+          role: run.role,
+          medium: run.medium,
+          sampleSize: related.length,
+          successes: related.filter((item) => item.passed && !item.integrityFailure).length,
+          quality: related.reduce((sum, item) => sum + item.quality, 0) / related.length,
+          verification: related.reduce((sum, item) => sum + item.verification, 0) / related.length,
+          updatedAt: run.recordedAt,
+          evidence: related.flatMap((item) => item.evidence).slice(-10),
+        });
+      }
       return { ok: true, data: run };
     },
     {
@@ -233,6 +419,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         medium: t.Optional(t.String()),
         evaluator: t.Union([
           t.Literal('deterministic'),
+          t.Literal('blind-review'),
           t.Literal('human-blind-review'),
           t.Literal('human-review'),
         ]),
@@ -243,6 +430,82 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         evidence: t.Array(t.String()),
         notes: t.Optional(t.String()),
         recordedAt: t.String(),
+        protocolVersion: t.Optional(t.Union([t.Literal(2), t.Literal(3)])),
+        variant: t.Optional(t.Union([t.Literal('with-skill'), t.Literal('without-skill')])),
+        caseCategory: t.Optional(
+          t.Union([
+            t.Literal('positive'),
+            t.Literal('negative'),
+            t.Literal('ambiguous'),
+            t.Literal('adversarial'),
+            t.Literal('full-task'),
+            t.Literal('regression'),
+          ]),
+        ),
+        comparisonId: t.Optional(t.String()),
+        routing: t.Optional(
+          t.Object({
+            expectedSelection: t.Boolean(),
+            selected: t.Boolean(),
+            selectionScope: t.Optional(t.Union([t.Literal('direct'), t.Literal('bundle')])),
+            selectedSkills: t.Optional(t.Array(t.String())),
+            expectedSkills: t.Optional(t.Array(t.String())),
+            forbiddenSkills: t.Optional(t.Array(t.String())),
+          }),
+        ),
+        evaluatorProvenance: t.Optional(
+          t.Object({
+            evaluatorId: t.String(),
+            kind: t.Union([t.Literal('human'), t.Literal('model')]),
+            provider: t.Optional(t.String()),
+            model: t.Optional(t.String()),
+            assignmentId: t.Optional(t.String()),
+            blindTo: t.Array(
+              t.Union([
+                t.Literal('skill-variant'),
+                t.Literal('revision'),
+                t.Literal('expected-selection'),
+                t.Literal('expected-outcome'),
+              ]),
+            ),
+            evidence: t.Array(t.String()),
+          }),
+        ),
+        regressionId: t.Optional(t.String()),
+        suiteId: t.Optional(t.String()),
+        scenarioId: t.Optional(t.String()),
+        experimentId: t.Optional(t.String()),
+        infrastructureFailure: t.Optional(
+          t.Object({
+            kind: t.Union([
+              t.Literal('setup'),
+              t.Literal('provider'),
+              t.Literal('tool'),
+              t.Literal('timeout'),
+              t.Literal('environment-drift'),
+              t.Literal('artifact-capture'),
+            ]),
+            retryable: t.Boolean(),
+            evidence: t.Array(t.String()),
+            detail: t.String(),
+          }),
+        ),
+        artifacts: t.Optional(
+          t.Array(
+            t.Object({
+              kind: t.Union([
+                t.Literal('log'),
+                t.Literal('state'),
+                t.Literal('screenshot'),
+                t.Literal('trace'),
+                t.Literal('report'),
+                t.Literal('other'),
+              ]),
+              location: t.String(),
+              sha256: t.Optional(t.String()),
+            }),
+          ),
+        ),
       }),
     },
   )
@@ -659,7 +922,10 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           bundled,
           localRevision.storageVersion === 2 ? localRevision.document : undefined,
         );
-        const stream = provider.streamResponse({
+        // Retried on a transient provider failure: without it a single upstream
+        // blip is reported as "merge produced empty native content", which reads
+        // like the user's own skill file broke.
+        const merged = await collectProviderEvents(provider, {
           model: routing.model,
           systemPrompt:
             localRevision.storageVersion === 2
@@ -667,9 +933,16 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
               : "You are an expert at merging skill instruction files. Preserve the user's customizations while incorporating bundled improvements. Output only merged SKILL.md content: no explanation or markdown fences.",
           messages: [{ role: 'user', content: mergePrompt }],
         });
+        if (merged.failed) {
+          set.status = 502;
+          return {
+            ok: false,
+            error: `The provider could not complete the merge: ${merged.error ?? 'unknown error'}`,
+          };
+        }
 
         let mergedContent = '';
-        for await (const event of stream) {
+        for (const event of merged.events) {
           if (event.type === 'content_delta' && event.content) {
             mergedContent += event.content;
           }
@@ -799,6 +1072,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
               ]),
             ),
             contextBudget: t.Optional(t.Number({ minimum: 1 })),
+            activePaths: t.Optional(t.Array(t.String())),
           }),
         ),
       }),
@@ -944,6 +1218,41 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       data: prefs,
       message: 'Preferences initialized with comprehensive template.',
     };
+  })
+  // Response style is a *user* skill: it lives in the personal skill library,
+  // not the project, and is pinned on every manager turn. These routes edit
+  // its markdown body without going through the draft/activate skill flow.
+  .get('/response-style', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const style = readPersonalSkillInstructions(RESPONSE_STYLE_SKILL_NAME);
+    if (!style) {
+      set.status = 404;
+      return { ok: false, error: 'Response style skill is not available' };
+    }
+    return { ok: true, data: style };
+  })
+  .put(
+    '/response-style',
+    ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const style = writePersonalSkillInstructions(RESPONSE_STYLE_SKILL_NAME, body.instructions);
+        return { ok: true, data: style, message: 'Response style saved to your personal skills.' };
+      } catch (error) {
+        set.status = 400;
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        instructions: t.String({ maxLength: 20_000 }),
+      }),
+    },
+  )
+  .post('/response-style/reset', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const style = resetPersonalSkillInstructions(RESPONSE_STYLE_SKILL_NAME);
+    return { ok: true, data: style, message: 'Response style reset to the Koryphaios default.' };
   })
   .get('/context', async ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

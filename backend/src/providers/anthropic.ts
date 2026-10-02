@@ -16,8 +16,16 @@ import { createUsageInterceptingFetch } from '../credit-accountant';
 import { providerLog } from '../logger';
 import { applyModelsDevMetadata, refreshModelsDevCache, modelsDevKeysFor } from './models-dev';
 import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
-import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
-import { resolvePromptCacheSegments } from './prompt-cache';
+import { providerStreamFailure } from './provider-diagnostics';
+import {
+  canonicalizeProviderTools,
+  derivePromptCacheLane,
+  observePromptCacheDispatch,
+  resolvePromptCacheSegments,
+} from './prompt-cache';
+import { promptCacheDiagnostics, selectAdaptiveCacheTtl } from './cache-fabric';
+import { promptCacheMaintenance } from './cache-maintenance';
+import { resolvePricing } from '../pricing';
 
 export class AnthropicProvider implements Provider {
   readonly name: ProviderName;
@@ -149,14 +157,13 @@ export class AnthropicProvider implements Provider {
     if (requestDef?.vision === false && requestDef.supportsAttachments !== true) {
       messages = messages.map((m) => {
         if (!Array.isArray(m.content)) return m;
-        if (!m.content.some((b) => b.type === 'image')) return m;
         return {
           ...m,
           content: m.content.map((b) =>
             b.type === 'image'
               ? {
                   type: 'text' as const,
-                  text: '[image attachment omitted — the selected model does not support image input]',
+                  text: '[image attachment omitted — this model may not support image input]',
                 }
               : b,
           ),
@@ -167,13 +174,42 @@ export class AnthropicProvider implements Provider {
     const nativePromptCaching =
       !this.config.custom && (this.name === 'anthropic' || this.name === 'bedrock');
     const cacheSegments = resolvePromptCacheSegments(request);
-    const tools = request.tools?.map((t, index, all) => ({
+    const canonicalTools = canonicalizeProviderTools(request.tools);
+    const cacheRoutingContext = {
+      provider: String(this.name),
+      custom: this.config.custom === true,
+      reasoningScopeOverride: request.cacheReasoningScopeOverride,
+    };
+    const cacheLane = nativePromptCaching
+      ? derivePromptCacheLane(request, canonicalTools, cacheRoutingContext)
+      : undefined;
+    const cacheDiagnostic = nativePromptCaching
+      ? observePromptCacheDispatch(request, canonicalTools, cacheRoutingContext)
+      : undefined;
+    if (cacheDiagnostic) {
+      providerLog.debug(
+        {
+          provider: this.name,
+          model: request.model,
+          cacheState: cacheDiagnostic.state,
+          cacheLane: cacheDiagnostic.laneKey,
+          cacheLaneKind: cacheDiagnostic.laneKind,
+          cacheBreakReasons: cacheDiagnostic.reasons,
+        },
+        'Prompt cache lane dispatch',
+      );
+    }
+    const adaptiveCacheTtl =
+      this.name === 'anthropic' ? selectAdaptiveCacheTtl(cacheDiagnostic) : '5m';
+    const cacheControl =
+      adaptiveCacheTtl === '1h'
+        ? ({ type: 'ephemeral' as const, ttl: '1h' as const } as const)
+        : ({ type: 'ephemeral' as const } as const);
+    const tools = canonicalTools.map((t, index, all) => ({
       name: t.name,
       description: t.description,
       input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
-      ...(nativePromptCaching && index === all.length - 1
-        ? { cache_control: { type: 'ephemeral' as const } }
-        : {}),
+      ...(nativePromptCaching && index === all.length - 1 ? { cache_control: cacheControl } : {}),
     }));
 
     const system =
@@ -182,7 +218,7 @@ export class AnthropicProvider implements Provider {
             {
               type: 'text' as const,
               text: cacheSegments.stable,
-              cache_control: { type: 'ephemeral' as const },
+              cache_control: cacheControl,
             },
             ...(cacheSegments.dynamic
               ? [{ type: 'text' as const, text: cacheSegments.dynamic }]
@@ -199,11 +235,18 @@ export class AnthropicProvider implements Provider {
       stream: true,
       ...(tools?.length && { tools }),
     };
-    if (nativePromptCaching) {
+    if (this.name === 'anthropic' && tools.length > 0 && request.allowedToolNames?.length === 0) {
+      // Cache prewarm must carry the exact same declared tool prefix as a real
+      // turn, but it must never invite a tool call. Anthropic supports an
+      // explicit none choice, which preserves declarations while preventing
+      // tool selection on the wire.
+      params.tool_choice = { type: 'none' };
+    }
+    if (nativePromptCaching && this.name === 'anthropic') {
       // Automatic caching advances a rolling conversation breakpoint while
       // the explicit system marker preserves the cross-task workspace layer.
       // The older installed SDK does not type the current top-level control.
-      (params as unknown as Record<string, unknown>).cache_control = { type: 'ephemeral' };
+      (params as unknown as Record<string, unknown>).cache_control = cacheControl;
     }
 
     // Extended thinking: Opus 4.6 & Sonnet 4.6 use adaptive + output_config.effort (Anthropic API);
@@ -218,11 +261,9 @@ export class AnthropicProvider implements Provider {
 
       if (isOpus46 || isSonnet46) {
         // API: output_config.effort (low|medium|high|max), thinking.type "adaptive". Max is Opus 4.6 only.
-        const effort = (['low', 'medium', 'high', 'max'] as const).includes(
-          level as 'low' | 'medium' | 'high' | 'max',
-        )
-          ? level
-          : 'medium';
+        // Pass provider-reported tiers through verbatim instead of coercing
+        // unknown values to medium, so new provider tiers keep working.
+        const effort = level || 'medium';
         if (effort === 'max' && isSonnet46) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK types lag behind API; output_config not yet typed
           (params as unknown as Record<string, unknown>).output_config = { effort: 'high' };
@@ -285,6 +326,9 @@ export class AnthropicProvider implements Provider {
       let currentToolCallId = '';
       let currentToolName = '';
       let toolInputBuffer = '';
+      let observedInputTokens: number | undefined;
+      let observedCacheReadTokens = 0;
+      let observedCacheWriteTokens = 0;
 
       for await (const event of stream) {
         switch (event.type) {
@@ -361,6 +405,16 @@ export class AnthropicProvider implements Provider {
             const cacheWrite =
               ((usage as unknown as Record<string, unknown>).cache_creation_input_tokens as
                 number | undefined) ?? 0;
+            observedInputTokens = usage.input_tokens;
+            observedCacheReadTokens = cacheRead;
+            observedCacheWriteTokens = cacheWrite;
+            const cacheOutcome = cacheDiagnostic
+              ? promptCacheDiagnostics.recordProviderOutcome(cacheDiagnostic, {
+                  inputTokens: usage.input_tokens + cacheRead + cacheWrite,
+                  cacheReadTokens: cacheRead,
+                  cacheWriteTokens: cacheWrite,
+                })
+              : undefined;
             yield {
               type: 'usage_update',
               tokensIn: usage.input_tokens,
@@ -370,29 +424,101 @@ export class AnthropicProvider implements Provider {
               tokensCache: cacheRead + cacheWrite,
               tokensCacheRead: cacheRead,
               tokensCacheWrite: cacheWrite,
+              cacheExpectedWarm: cacheOutcome?.expectedWarm,
+              cacheUnexpectedMiss: cacheOutcome?.unexpectedMiss,
+              cacheLaneKind: cacheDiagnostic?.laneKind,
             };
             break;
           }
         }
       }
+
+      if (
+        this.name === 'anthropic' &&
+        cacheSegments.valid &&
+        request.promptCache &&
+        cacheLane &&
+        cacheDiagnostic
+      ) {
+        const pricing = resolvePricing(this.name, request.model);
+        const stableTokens =
+          request.promptCache.estimatedStableTokens +
+          Math.ceil(Buffer.byteLength(JSON.stringify(canonicalTools), 'utf8') / 4);
+        const refreshInputTokens =
+          observedInputTokens === undefined
+            ? stableTokens
+            : observedInputTokens + observedCacheReadTokens + observedCacheWriteTokens;
+        const refreshCachedTokens = Math.min(
+          refreshInputTokens,
+          Math.max(stableTokens, observedCacheReadTokens + observedCacheWriteTokens),
+        );
+        const maintenanceParams: Anthropic.MessageCreateParamsNonStreaming = {
+          model: params.model,
+          max_tokens: 1,
+          system: params.system,
+          // Replay the exact successful lane request so the rolling
+          // conversation breakpoint stays warm too, not only the immutable
+          // system/tool prefix. The generated answer is capped and discarded.
+          messages: params.messages,
+          ...(tools.length > 0 ? { tools } : {}),
+          ...(params.tool_choice ? { tool_choice: params.tool_choice } : {}),
+        };
+        const requestCacheControl = (params as unknown as Record<string, unknown>).cache_control;
+        if (requestCacheControl !== undefined) {
+          (maintenanceParams as unknown as Record<string, unknown>).cache_control =
+            requestCacheControl;
+        }
+        promptCacheMaintenance.observe({
+          provider: this.name,
+          sessionId: request.sessionId,
+          routingKey: cacheLane.routingKey,
+          slotKey: cacheLane.slotKey,
+          stableTokens,
+          refreshInputTokens,
+          refreshCachedTokens,
+          ttlMs: adaptiveCacheTtl === '1h' ? 60 * 60_000 : 5 * 60_000,
+          diagnostic: cacheDiagnostic,
+          mode: request.promptCacheKeepaliveMode,
+          pricing: pricing
+            ? {
+                freshInputPerMillion: pricing.inPerM,
+                cacheReadPerMillion: pricing.cacheReadPerM,
+                cacheWritePerMillion: pricing.cacheWritePerM,
+              }
+            : null,
+          refresh: async () => {
+            await withRetry(
+              () =>
+                this.client.messages.create(maintenanceParams, {
+                  signal: withTimeoutSignal(undefined, 20_000),
+                }),
+              { providerName: this.name, modelName: request.model },
+            );
+          },
+        });
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'TimeoutError') {
-        const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
+        const failure = providerStreamFailure(this.name, 'sdk', err, {
+          message: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
+        });
         providerLog.error(
-          { ...diagnostic, model: request.model },
+          { ...failure.diagnostic, model: request.model },
           'Anthropic provider stream timed out',
         );
-        yield {
-          type: 'error',
-          error: `Request timed out after 60s — provider ${this.name} did not respond. Try again or switch model/provider.`,
-        };
+        // A timed-out attempt is worth repeating: the same turn usually succeeds
+        // once the provider's own queue drains.
+        yield { ...failure.event, errorTransient: true };
         return;
       }
       if (err instanceof Error && err.name === 'AbortError') return;
 
-      const diagnostic = safeProviderDiagnostic(this.name, 'sdk', err);
-      providerLog.error({ ...diagnostic, model: request.model }, 'Anthropic provider stream error');
-      yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
+      const failure = providerStreamFailure(this.name, 'sdk', err);
+      providerLog.error(
+        { ...failure.diagnostic, model: request.model },
+        'Anthropic provider stream error',
+      );
+      yield failure.event;
     }
   }
 

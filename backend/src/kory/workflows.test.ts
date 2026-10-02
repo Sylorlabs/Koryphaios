@@ -37,28 +37,29 @@ afterEach(() => {
 });
 
 describe('host-owned workflows', () => {
-  test('starts a design-quality run and persists each evidence-gated stage', () => {
+  test('starts the general workflow and persists each evidence-gated stage', () => {
     const project = root();
     const run = startWorkflow(project, {
-      workflowId: 'design-quality',
       sessionId: 'session-1',
       task: 'Improve the settings screen',
       requestedBy: 'human',
     });
-    expect(workflowNextInstruction(run)).toContain('Inspect');
+    expect(run.workflowId).toBe('task-workflow');
+    expect(workflowNextInstruction(run)).toContain('Understand');
     let current = run;
-    for (const stage of getWorkflowDefinition('design-quality')!.stages) {
+    const definition = getWorkflowDefinition('task-workflow')!;
+    for (const stage of definition.stages) {
       current = advanceWorkflow(project, current.id, { evidence: `${stage.id} evidence` });
     }
     expect(current.status).toBe('completed');
-    expect(current.evidence).toHaveLength(6);
+    expect(current.evidence).toHaveLength(definition.stages.length);
     expect(listWorkflowRuns(project, 'session-1')[0]?.status).toBe('completed');
   });
 
   test('cannot skip evidence or confuse a stopped workflow with a Goal', () => {
     const project = root();
     const run = startWorkflow(project, {
-      workflowId: 'design-quality',
+      workflowId: 'task-workflow',
       sessionId: 'session-1',
       task: 'Improve the settings screen',
       requestedBy: 'agent',
@@ -84,7 +85,7 @@ describe('host-owned workflows', () => {
     const result = await start.run(ctx, {
       id: 'start-1',
       name: start.name,
-      input: { workflowId: 'design-quality', task: 'Polish Goal Mode' },
+      input: { workflowId: 'task-workflow', task: 'Polish Goal Mode' },
     });
     expect(result.isError).toBe(false);
     const run = listWorkflowRuns(project, 'session-1')[0]!;
@@ -113,20 +114,20 @@ describe('host-owned workflows', () => {
       input: {},
     });
     expect(list.isError).toBe(false);
-    expect(list.output).toContain('Design Quality Loop (design-quality)');
+    expect(list.output).toContain('Workflow (task-workflow)');
 
     const start = await new StartWorkflowTool().run(ctx, {
       id: 'start-by-name',
       name: 'start_workflow',
-      input: { name: 'Design Quality Loop', task: 'Polish workflow feedback' },
+      input: { name: 'Workflow', task: 'Polish workflow feedback' },
     });
     expect(start.isError).toBe(false);
-    expect(listWorkflowRuns(project, 'session-1')[0]?.workflowId).toBe('design-quality');
+    expect(listWorkflowRuns(project, 'session-1')[0]?.workflowId).toBe('task-workflow');
 
     const aliased = await new StartWorkflowTool().run(ctx, {
       id: 'start-by-common-alias',
       name: 'start_workflow',
-      input: { workflow: 'design-quality', task: 'Verify the compatibility alias' },
+      input: { workflow: 'task-workflow', task: 'Verify the compatibility alias' },
     });
     expect(aliased.isError).toBe(false);
   });
@@ -144,7 +145,7 @@ describe('host-owned workflows', () => {
     );
     expect(unknown.isError).toBe(true);
     expect(unknown.output).toContain('no registered workflow matches "test"');
-    expect(unknown.output).toContain('Design Quality Loop (design-quality)');
+    expect(unknown.output).toContain('Workflow (task-workflow)');
     expect(unknown.output).toContain('list_workflows');
   });
 
@@ -231,7 +232,7 @@ describe('host-owned workflows', () => {
     const project = root();
     const secret = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456';
     const run = startWorkflow(project, {
-      workflowId: 'design-quality',
+      workflowId: 'task-workflow',
       sessionId: 'session-1',
       task: `Inspect token=${secret}`,
       requestedBy: 'human',

@@ -1,0 +1,82 @@
+{
+  "id": "csharp-dotnet-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Evolve a C# record used in a persisted JSON job queue by adding a new optional retry policy while old serialized jobs and old workers remain in circulation during a rolling deployment. Preserve source/binary behavior where required, define serializer defaults, reject malformed retry data safely, and test old->new/new->old compatibility plus restart recovery. Do not solve by deleting the queue.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://csharp-dotnet-engineering/record-json-compatibility",
+    "requirements": [
+      "persisted JSON corpus from the previous record shape plus a rolling-deployment compatibility window",
+      "new optional retry policy with bounded attempts/backoff values",
+      "old-worker reader behavior and new-worker reader/writer tests",
+      "malformed and unknown-field queue entries plus restart fixture",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "csharp-dotnet-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "csharp-dotnet-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "csharp-dotnet-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "record-json-compatibility scenario evidence",
+    "csharp-dotnet-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "csharp-dotnet-engineering-individual-scenario-2-result",
+    "csharp-dotnet-engineering-individual-scenario-2-verification",
+    "csharp-dotnet-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual csharp-dotnet-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=feature-implementation), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm target frameworks, nullable context, hosting model, dependency lifetimes, async flow, and serializer configuration."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Schema evolution has an explicit compatibility envelope; persisted jobs deserialize deterministically and invalid new state fails closed without corrupting the queue."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run dotnet build/test for supported target frameworks, exercise cancellation and disposal, and validate serialization, trimming, or AOT paths when affected."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not block async tasks with .Result or .Wait in request paths, capture scoped services in singletons, suppress nullable warnings without proof, or depend on reflection that deployment modes remove."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (csharp-dotnet-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

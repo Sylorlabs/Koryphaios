@@ -1,0 +1,64 @@
+{
+  "id": "implementation-full-task-1",
+  "maturity": "individual",
+  "prompt": "In the supplied TypeScript repository, `loadSkillPackage()` already computes `sourceCount`, but the existing `SkillSummary` response drops it before the settings UI receives the summary. Implement this change: expose that already-computed value through the current summary type and mapper, update the existing response-contract tests, and make no new endpoint, storage path, or parallel metadata model. Preserve unrelated work. Return the actual diff and the focused test evidence that proves `sourceCount` reaches the existing response without changing other summary fields.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://implementation/thread-existing-field",
+    "requirements": [
+      "repository contains an existing loadSkillPackage sourceCount calculation",
+      "SkillSummary type and mapper currently omit sourceCount",
+      "response-contract tests exist and initially pass for the old shape",
+      "unrelated dirty-worktree change must be preserved",
+      "no new API endpoint or persistence layer is needed"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "implementation-source-count-shape",
+      "assertion": "The final SkillSummary contract exposes sourceCount by reusing the existing computed value rather than recomputing or storing it elsewhere."
+    },
+    {
+      "id": "implementation-source-count-tests",
+      "assertion": "Focused response-contract tests exercise sourceCount and pass after the change."
+    },
+    {
+      "id": "implementation-source-count-scope",
+      "assertion": "No unrelated endpoint, persistence, or metadata architecture is introduced."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "implementation-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "actual focused diff",
+        "sourceCount follows the existing calculation-to-response path",
+        "focused response-contract test output",
+        "unrelated dirty-worktree change remains untouched"
+      ]
+    },
+    {
+      "id": "implementation-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "minimal coherent patch",
+        "repository conventions reused",
+        "completion claim matches observed verification"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "actual diff for the SkillSummary path",
+    "focused passing response-contract test output",
+    "evidence that unrelated user-owned changes were preserved"
+  ],
+  "requiredArtifacts": [
+    "implementation-scenario-1-diff",
+    "implementation-scenario-1-test-output",
+    "implementation-scenario-1-paired-evaluation"
+  ]
+}

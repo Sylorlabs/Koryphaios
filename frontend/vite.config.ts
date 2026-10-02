@@ -122,6 +122,16 @@ export default defineConfig({
   // every native entry in the initial dependency optimization set so the
   // launcher can hand Tauri a stable graph on a cold start.
   optimizeDeps: {
+    // SvelteKit loads routes as client-side dynamic imports, so the default
+    // entry scan only reaches the initially-rendered route. The 152
+    // `lucide-svelte/icons/*` subpaths and the native modules below live in
+    // components that mount later, so Vite used to discover them *after* the
+    // WebView had already resolved the shared `icons` chunk name. That
+    // mid-session re-optimization rewrites the chunk under the mounted app and
+    // WebKit reports "Importing a module script failed" with no Svelte error
+    // boundary able to recover. Scanning every source file up front makes the
+    // optimized dep set complete and stable before the first WebView request.
+    entries: ['src/**/*.{svelte,ts,js}'],
     include: [
       '@tauri-apps/api/app',
       '@tauri-apps/api/core',

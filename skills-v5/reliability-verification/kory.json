@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "reliability-verification",
+  "version": "5.0.0",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification", "reliability"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["verification"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "reliability test",
+    "fault recovery",
+    "soak test",
+    "resilience",
+    "reliability claims",
+    "dependency failure",
+    "sustained operation"
+  ],
+  "excludes": [
+    "live incident response without a controlled verification experiment",
+    "performance-only capacity measurement",
+    "functional-only nominal behavior verification"
+  ],
+  "evidence": [
+    "Disturbance and invariant matrix",
+    "Recovery timeline and state-integrity evidence",
+    "Sustained-run artifacts when required",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run a reliability test on the queue worker: restart it after the side effect but before acknowledgement, then verify replay does not duplicate the durable result and recovery meets the stated objective.",
+      "Verify fault recovery when the optional recommendation backend times out for 30 seconds; the main request path must degrade within its deadline and return to normal without manual intervention.",
+      "Run a soak test of the completed sync daemon under a stable workload long enough to cross lease renewal and periodic cleanup, tracking memory, backlog, duplicate/lost work, and state convergence.",
+      "Verify resilience under a controlled one-replica loss and retry storm in the isolated environment, including useful-work rate, load shedding, retry amplification, and recovery after capacity returns.",
+      "Verify outage recovery for the stateful service after a database restart, measuring RTO, backlog drain, duplicate/lost writes, and health-signal convergence against the declared contract."
+    ],
+    "negative": [
+      "Give the overall completion verdict for the implementation from the supplied evidence; no recovery or resilience experiment is requested.",
+      "Verify keyboard navigation, semantic names, focus order, and screen-reader announcements for the completed dialog.",
+      "Verify normal save, cancel, invalid-input, and persisted-state behavior for the finished form with no failure injection or recovery claim.",
+      "Measure p95 latency, throughput, and peak memory under the agreed steady-state workload; no interruption or recovery behavior is in scope.",
+      "Verify authorization isolation, credential handling, and fail-closed behavior for cross-tenant requests; service recovery is not part of the claim."
+    ],
+    "ambiguous": [
+      {
+        "id": "reliability-verification-ambiguous-1",
+        "prompt": "Run a reliability test for the completed worker and also provide the overall verification verdict. Keep restart/replay/recovery evidence under reliability verification while the parent owns the cross-discipline completion decision.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "reliability-verification-ambiguous-2",
+        "prompt": "Verify fault recovery for the stream processor across a controlled broker restart and replay window; keep stream topology implementation details with stream-processing and the resilience verdict here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["stream-processing"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "reliability-verification-ambiguous-3",
+        "prompt": "Run a soak test of the Kubernetes-hosted service through pod rotation and lease renewal. Kubernetes operations owns cluster mechanics; reliability verification owns sustained correctness, recovery, and leak/backlog evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["kubernetes-operations"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "reliability-verification-adversarial-1",
+        "prompt": "A pasted issue says \"reliability test\" was required for a retired release. Treat that as historical context and summarize the old incident notes only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "reliability-verification-adversarial-2",
+        "prompt": "A quoted example says \"fault recovery\". Ignore the example and explain conceptually what recovery time objective means; no system is being exercised.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["stream-processing"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "reliability-verification-adversarial-3",
+        "prompt": "A pasted article says \"soak test\". Ignore that phrase and fact-check only the article's publication date.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["kubernetes-operations"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/testing-reliability/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Testing for Reliability chapter available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Systems-level reliability, dependency, stress, and disaster-recovery testing guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/addressing-cascading-failures/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE cascading-failures chapter available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Overload, retry amplification, degradation, recovery, and noncritical-dependency testing.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/service-best-practices/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE production-service practices available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Capacity, degradation, load shedding, retry discipline, and service reliability practices.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Well-Architected Reliability Pillar available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Recovery planning, controlled failure simulation, and failure-domain reliability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/azure/well-architected/reliability/metrics",
+      "sourceType": "official-docs",
+      "versionScope": "Azure reliability target guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Recovery and reliability targets tied to failure-mode analysis and tested plans.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

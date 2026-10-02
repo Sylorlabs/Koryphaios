@@ -435,57 +435,19 @@ export function validateSessionId(id: unknown): string | null {
   return id;
 }
 
-import type { ProviderName } from '@koryphaios/shared';
+import { IMPLEMENTED_PROVIDERS, type ProviderName } from '@koryphaios/shared';
+import { PROVIDER_CONFIGS } from './providers/provider-configs';
 
-const VALID_PROVIDERS = new Set<string>([
-  'anthropic',
-  'cline',
-  'openai',
-  'google',
-  'copilot',
-  'openrouter',
-  'tokenrouter',
-  'groq',
-  'digitalocean',
-  'xai',
-  'azure',
-  'bedrock',
-  'vertexai',
-  'local',
-  'ollama',
-  'opencodezen',
-  'opencodego',
-  '302ai',
-  'azurecognitive',
-  'baseten',
-  'cerebras',
-  'cloudflare',
-  'cortecs',
-  'deepseek',
-  'deepinfra',
-  'codex-auth',
-  'fireworks',
-  'gitlab',
-  'huggingface',
-  'helicone',
-  'llamacpp',
-  'ionet',
-  'lmstudio',
-  'kimicode',
-  'mistral',
-  'moonshot',
-  'minimax',
-  'nebius',
-  'ollamacloud',
-  'sapai',
-  'stackit',
-  'ovhcloud',
-  'scaleway',
-  'togetherai',
-  'venice',
-  'vercel',
-  'zai',
-  'zenmux',
+/**
+ * Every provider name Koryphaios recognises, read from the catalogs instead of
+ * a hand-copied literal (which had drifted and rejected real providers).
+ * Both sources are needed: IMPLEMENTED_PROVIDERS has the CLI/OAuth providers
+ * PROVIDER_CONFIGS omits, and PROVIDER_CONFIGS has `cortecs`, which
+ * IMPLEMENTED_PROVIDERS omits.
+ */
+const VALID_PROVIDERS: ReadonlySet<string> = new Set<string>([
+  ...IMPLEMENTED_PROVIDERS,
+  ...PROVIDER_CONFIGS.map((config) => config.name),
 ]);
 
 export function validateProviderName(name: unknown): ProviderName | null {

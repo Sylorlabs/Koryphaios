@@ -1,0 +1,76 @@
+{
+  "id": "oauth-oidc-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design OAuth for a native public client that calls a document API. Use the system browser and authorization code flow with PKCE S256. The fixture includes legitimate and malicious redirect variants, missing/downgraded PKCE, intercepted/replayed codes, mismatched state, access tokens for the wrong API audience, refresh-token replay, and a custom-scheme competitor app. Define exact redirect registration/validation appropriate to the native-client redirect choice, state/session correlation, code-verifier lifecycle, one-time redemption, token audience/scope validation at the resource server, secure token persistence, and refresh-token rotation or sender constraint. If a custom scheme is retained, explicitly address app-claim/interception risk rather than treating PKCE as optional. Keep document-level permissions in authorization-security.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://oauth-oidc/scenario-1",
+    "requirements": [
+      "native public OAuth client and authorization server fixtures",
+      "valid/invalid exact redirect URI variants plus code interception/replay corpus",
+      "PKCE S256 and downgrade/missing-verifier cases",
+      "resource server with correct/wrong audience and scope token cases",
+      "refresh-token replay and rotation/sender-constraint state",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "oauth-oidc-pkce-1",
+      "assertion": "Every authorization request uses a fresh high-entropy verifier with S256 challenge, the token endpoint enforces the verifier/challenge binding, and missing/downgraded PKCE cannot redeem the code."
+    },
+    {
+      "id": "oauth-oidc-redirect-state-1",
+      "assertion": "Redirect validation uses the registered native-client rules without wildcard/prefix broadening, and the authorization response is bound to the initiating client session through a one-time state correlation."
+    },
+    {
+      "id": "oauth-oidc-code-token-1",
+      "assertion": "Authorization codes are single-use and client/redirect-bound as applicable, while the resource server independently rejects access tokens with incorrect audience, expired validity, or insufficient scope."
+    },
+    {
+      "id": "oauth-oidc-refresh-1",
+      "assertion": "Public-client refresh credentials are rotated or sender-constrained per the design, replay is detectable, and compromise response revokes or invalidates the affected token family/authorization."
+    },
+    {
+      "id": "oauth-oidc-token-storage-1",
+      "assertion": "Codes/access/refresh tokens are kept out of ordinary logs, analytics, crash artifacts, and unintended URL/referrer surfaces, with persistence matched to the native platform's protected-storage boundary."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "oauth-oidc-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "native OAuth flow/actor map",
+        "redirect/state/PKCE validation contract",
+        "resource-server audience/scope rules",
+        "refresh replay and token-storage policy"
+      ]
+    },
+    {
+      "id": "oauth-oidc-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "actor/client/redirect registration map",
+    "PKCE/state/code lifecycle",
+    "resource-server token validation rules",
+    "refresh replay and compromise response",
+    "token storage/logging boundaries",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "oauth-oidc-scenario-1-result",
+    "oauth-oidc-scenario-1-verification",
+    "oauth-oidc-scenario-1-paired-evaluation"
+  ]
+}

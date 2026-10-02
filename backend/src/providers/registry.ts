@@ -22,6 +22,8 @@ import {
   OpenAIProvider,
   GroqProvider,
   OpenRouterProvider,
+  UnoRouterProvider,
+  ExperientialLabsProvider,
   XAIProvider,
   AzureProvider,
 } from './openai';
@@ -29,7 +31,12 @@ import { OpenCodeGoProvider } from './opencodego';
 
 import { GoogleProvider } from './google';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
-import { CodexCliProvider } from './codex-cli';
+import {
+  CodexCliProvider,
+  codexTransientExhaustedMessage,
+  isCodexTurnTokenFailure,
+  isTransientCodexFailure,
+} from './codex-cli';
 import { CodexAuthProvider } from './codex-auth';
 import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
@@ -41,11 +48,13 @@ import { CursorProvider } from './cursor';
 import { DevinProvider } from './devin';
 import { ClineProvider } from './cline';
 import { KiloCodeProvider } from './kilo-cli';
+import { CommandCodeProvider } from './command-code';
 import { JulesProvider } from './jules';
 import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
+import { HopliteProvider } from './hoplite';
 import { BedrockProvider } from './bedrock';
 import { hasAwsCredentialSource } from './aws-credential-scan';
-import { GITLAB_DUO_UNAVAILABLE_ERROR, GitLabProvider } from './gitlab';
+import { GitLabProvider, normalizeGitLabBaseUrl, verifyGitLabDuoAccess } from './gitlab';
 import { SapAiProvider, verifySapAiConnection } from './sapai';
 import {
   GITHUB_MODELS_CATALOG_URL,
@@ -54,7 +63,9 @@ import {
   parseGitHubModelsCatalog,
 } from './github-models';
 import { ChatbaseProvider } from './chatbase';
+import { NOTION_API_VERSION, NOTION_BASE_URL, NotionProvider } from './notion';
 import { CustomProvider, normalizeCustomProviderBaseUrl, probeCustomProvider } from './custom';
+import { getWireAdapter } from './wire-adapters/registry';
 import {
   detectCodexCLILogin,
   detectClaudeCodeLogin,
@@ -62,7 +73,6 @@ import {
   detectAntigravityCLILogin,
   detectCursorCLILogin,
   detectDevinCLILogin,
-  detectClineCLILogin,
   detectFreebuffCLILogin,
   readFreebuffAuthToken,
 } from './auth-utils';
@@ -78,6 +88,7 @@ import {
   registerLiveModelResolver,
   type StreamRequest,
   type ProviderEvent,
+  type ProviderMessage,
   type Provider,
 } from './types';
 import { CapabilityRegistry } from './CapabilityRegistry';
@@ -93,7 +104,19 @@ import {
   PROVIDER_AUTH_MODE,
   providerDefaultBaseUrl,
 } from './constants';
-import { safeProviderDiagnostic, safeProviderFailureMessage } from './provider-diagnostics';
+import {
+  providerStreamFailure,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+  transientExhaustedMessage,
+} from './provider-diagnostics';
+import {
+  isRetriableProviderFailure,
+  SAME_MODEL_MAX_RETRIES,
+  waitForProviderRetry,
+} from './provider-retry';
+import { verifyRuntimeCompletion } from './runtime-verification';
+import { getCatalogRefreshScheduler } from './catalog-refresh';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { syncProviderConfigsToConfig } from '../runtime/config';
 
@@ -116,7 +139,6 @@ const CLI_HARNESS_PROVIDERS = new Set<ProviderName>([
   'antigravity',
   'cursor',
   'devin',
-  'cline',
   'freebuff',
 ]);
 
@@ -147,9 +169,22 @@ export const UNSUPPORTED_CHAT_PROVIDER_NAMES = new Set<ProviderName>([
   'prodia',
 ]);
 
+/**
+ * Providers that are genuinely configurable and verifiable but deliberately
+ * expose no generic chat adapter. Membership means:
+ *   - `unavailableProviderReason()` does not block them (only matters for names
+ *     that are also in UNSUPPORTED_CHAT_PROVIDER_NAMES), and
+ *   - a verified credential still resolves to connectionState 'verified', which
+ *     is what unlocks the model selector for a provider whose `isAvailable()`
+ *     is false.
+ * `hoplite` qualifies: its org API key verifies against /api/projects and it
+ * publishes a per-thread model catalog, but a Hoplite thread is a delegated
+ * remote/local agent run rather than a chat completion.
+ */
 export const DEDICATED_CAPABILITY_PROVIDER_NAMES = new Set<ProviderName>([
   'deepgram',
   'assemblyai',
+  'hoplite',
 ]);
 
 function unsupportedChatReason(name: ProviderName): string | undefined {
@@ -160,7 +195,6 @@ function unsupportedChatReason(name: ProviderName): string | undefined {
 function unavailableProviderReason(name: ProviderName): string | undefined {
   return (
     (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name) ? undefined : unsupportedChatReason(name)) ??
-    (name === 'gitlab' ? GITLAB_DUO_UNAVAILABLE_ERROR : undefined) ??
     (name === 'jules' ? JULES_APPROVAL_REQUIRED_ERROR : undefined)
   );
 }
@@ -254,6 +288,8 @@ function generateProviderLabel(name: string): string {
     fal: 'Fal',
     luma: 'Luma',
     poe: 'Poe',
+    workbuddy: 'Work Buddy',
+    autoclaw: 'AutoClaw',
     moark: 'Moark',
     wandb: 'Weights & Biases',
     submodel: 'SubModel',
@@ -301,6 +337,8 @@ function generateProviderLabel(name: string): string {
     anthropic: 'Anthropic',
     openai: 'OpenAI',
     openrouter: 'OpenRouter',
+    unorouter: 'UnoRouter',
+    experientiallabs: 'Experiential Labs',
     google: 'Google',
     copilot: 'GitHub Copilot',
     azure: 'Azure OpenAI',
@@ -313,9 +351,10 @@ function generateProviderLabel(name: string): string {
     deepseek: 'DeepSeek',
     claude: 'Claude Code',
     jules: 'Google Jules',
+    hoplite: 'Hoplite',
     azurecognitive: 'Azure Cognitive',
     sapai: 'SAP AI',
-    gitlab: 'GitLab',
+    gitlab: 'GitLab Duo',
   };
   if (SPECIAL[name]) return SPECIAL[name];
 
@@ -332,6 +371,58 @@ function generateProviderLabel(name: string): string {
 
 const CIRCUIT_THRESHOLD = 5;
 const CIRCUIT_TIMEOUT = 60_000; // 1 minute
+
+/**
+ * Same-model retries for transient failures before falling through to the
+ * next model in the fallback chain. CLI harnesses (Codex) YIELD an error
+ * event on nonzero exit instead of throwing, so the retry check must cover
+ * yielded errors too — not just thrown ones. The budget, the backoff, and the
+ * retry decision live in `provider-retry` so auxiliary calls that invoke
+ * `streamResponse` directly get the identical policy.
+ */
+
+/**
+ * Upper bound for the connect-time live model catalog fetch in
+ * setCredentials. Explicit connects await the provider's real model list so
+ * the picker shows it immediately; this cap guarantees a slow catalog can
+ * never hang the connect request (verification already proved the endpoint,
+ * and background discovery keeps going).
+ */
+const CONNECT_CATALOG_TIMEOUT_MS = 15_000;
+
+/**
+ * Resume context for same-model retries of CLI-harness providers. When a
+ * mid-turn transport failure (e.g. a stale turn-token binding) forces a fresh
+ * attempt, already-completed native tool results ride along as `tool` role
+ * messages so the model continues instead of redoing finished work. Codex
+ * renders these freeform (`Tool result: ...`); strict API providers would
+ * reject orphan tool messages, so carry-over applies to codex-family only.
+ */
+const CARRIED_TOOL_RESULTS_MAX = 20;
+const CARRIED_TOOL_OUTPUT_MAX_CHARS = 2000;
+
+/** Fingerprint a completed native tool call for resume matching. */
+function carriedToolKey(toolName: string, toolInput: string): string {
+  return `${toolName}::${toolInput}`;
+}
+
+/** Render one recorded native tool result as a prompt message. */
+function toCarriedToolMessage(
+  toolName: string,
+  toolInput: string,
+  toolOutput: string,
+  isError: boolean,
+): ProviderMessage {
+  const output =
+    toolOutput.length > CARRIED_TOOL_OUTPUT_MAX_CHARS
+      ? `${toolOutput.slice(0, CARRIED_TOOL_OUTPUT_MAX_CHARS)}…[truncated ${toolOutput.length - CARRIED_TOOL_OUTPUT_MAX_CHARS} chars]`
+      : toolOutput;
+  const input = toolInput && toolInput !== '{}' ? ` input ${toolInput}` : '';
+  return {
+    role: 'tool',
+    content: `[${toolName}]${isError ? ' (failed)' : ''}${input} → ${output}`,
+  };
+}
 
 // ─── Provider factory registry ──────────────────────────────────────────────
 // Each built-in provider registers a factory here instead of being dispatched
@@ -363,17 +454,29 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   cursor: (c) => new CursorProvider(c),
   // Devin subscription — runs Cognition's official `devin` CLI harness (no API key).
   devin: (c) => new DevinProvider(c),
-  cline: (c) => new ClineProvider(c),
+  // Cline's hosted API — OpenAI-compatible Chat Completions on one API key.
+  cline: (c) => (c.apiKey || c.authToken ? new ClineProvider(c) : null),
   // Freebuff — real TUI driven through a sandboxed tmux PTY + Kory MCP.
   freebuff: (c) => new FreebuffProvider(c),
   codebuff: (c) => (c.apiKey ? new CodebuffProvider(c) : null),
   // Kilo Code AI Gateway — OpenAI-compatible, API key auth.
   chatbase: (c) => new ChatbaseProvider(c),
+  // Notion Agent APIs — PAT auth, Custom Agents are the models.
+  notion: (c) => (c.apiKey ? new NotionProvider(c) : null),
   kilocode: (c) => new KiloCodeProvider(c),
+  // Command Code Provider API — OpenAI and Anthropic formats on one key.
+  commandcode: (c) => new CommandCodeProvider(c),
   // Visible as approval-required; this adapter cannot mutate remote state.
   jules: (c) => new JulesProvider(c),
+  // Hoplite — cloud async agent whose organization key is verifiable today;
+  // live delegation is not wired, so the adapter stays inert without a key.
+  hoplite: (c) => (c.apiKey ? new HopliteProvider(c) : null),
   kimicode: (c) => new KimiCodeProvider(c),
   openrouter: (c) => new OpenRouterProvider(c),
+  // UnoRouter — open-source OpenAI-compatible gateway (Bearer auth, /v1/models).
+  unorouter: (c) => new UnoRouterProvider(c),
+  // Experiential Labs — open-source AI gateway (Bearer auth, /v1/models).
+  experientiallabs: (c) => new ExperientialLabsProvider(c),
   // OpenCode Go is dual-protocol — OpenCodeGoProvider dispatches per-model.
   opencodego: (c) => new OpenCodeGoProvider(c),
   groq: (c) => new GroqProvider(c),
@@ -387,7 +490,8 @@ const PROVIDER_FACTORIES: Partial<Record<ProviderName, ProviderFactory>> = {
   // GitHub Models has a distinct catalog host; its dedicated adapter keeps
   // discovery separate from the OpenAI-compatible inference surface.
   'github-models': (c) => new GitHubModelsProvider(c),
-  // Retained for explicit unavailable reporting; the provider itself never contacts GitLab.
+  // GitLab Duo speaks POST /api/v4/chat/completions with a GitLab body and a
+  // bare-string answer, so it keeps its own adapter instead of the family path.
   gitlab: (c) => (c.apiKey || c.authToken ? new GitLabProvider(c) : null),
   // SAP AI Core — OAuth (service key) + /v2/inference/deployments/{id} + AI-Resource-Group.
   sapai: (c) => (c.apiKey || c.authToken ? new SapAiProvider(c) : null),
@@ -429,6 +533,12 @@ class ProviderRegistry {
   private providers = new Map<ProviderName, Provider>();
   private providerConfigs = new Map<ProviderName, ProviderConfig>();
   private circuitStates = new Map<ProviderName, CircuitState>();
+  /**
+   * Same-model retry counts by `${provider}:${cause}` (`transient` or
+   * `turn-token-stale-binding`). Process-local health signal so bridge
+   * flapping is visible instead of silent; never affects routing.
+   */
+  private retryCauseCounts = new Map<string, number>();
   /** Process-local probe verdicts. Credential/file presence is tracked separately. */
   private verificationRecords = new Map<ProviderName, ProviderVerificationRecord>();
   private cliAutoConnectInFlight: Promise<void> | null = null;
@@ -449,7 +559,13 @@ class ProviderRegistry {
       try {
         return p
           .listModels()
-          .find((m) => m.id === modelId || m.apiModelId === modelId || m.realModelId === modelId);
+          .find(
+            (m) =>
+              m.id === modelId ||
+              m.apiModelId === modelId ||
+              m.realModelId === modelId ||
+              m.aliases?.includes(modelId),
+          );
       } catch (err: unknown) {
         serverLog.debug(
           { err: err instanceof Error ? err.message : String(err) },
@@ -532,6 +648,25 @@ class ProviderRegistry {
       state.failures = 0;
       state.isOpen = false;
     }
+  }
+
+  /** Snapshot of same-model retry counts by `${provider}:${cause}`. */
+  getRetryCauseCounts(): Record<string, number> {
+    return Object.fromEntries(this.retryCauseCounts);
+  }
+
+  /** Classify a retried failure for health visibility. Counts only; the
+   *  retry decision itself stays in the call sites. Returns the cause key. */
+  private recordRetryCause(provider: ProviderName, message: unknown): string {
+    const cause =
+      provider === 'codex' || provider === 'codex-auth'
+        ? isCodexTurnTokenFailure(message)
+          ? 'turn-token-stale-binding'
+          : 'transient'
+        : 'transient';
+    const key = `${provider}:${cause}`;
+    this.retryCauseCounts.set(key, (this.retryCauseCounts.get(key) ?? 0) + 1);
+    return cause;
   }
 
   private hasDetectedConnectionMaterial(
@@ -674,6 +809,11 @@ class ProviderRegistry {
     credentialUrl?: string;
   }> {
     const names = this.getVisibleProviderNames();
+    // A status read means the user is looking at the provider surface (Settings,
+    // the model picker, the composer). That counts as activity for the adaptive
+    // catalog scheduler, so returning to the app refreshes what is stale instead
+    // of waiting out an idle-backoff interval.
+    getCatalogRefreshScheduler()?.noteActivity();
     const result: Array<{
       name: ProviderName;
       enabled: boolean;
@@ -746,7 +886,13 @@ class ProviderRegistry {
 
       const enabledModels =
         selectedModels.length > 0
-          ? allModels.filter((model) => selectedModels.includes(model.id)).map((model) => model.id)
+          ? allModels
+              .filter(
+                (model) =>
+                  selectedModels.includes(model.id) ||
+                  model.aliases?.some((alias) => selectedModels.includes(alias)),
+              )
+              .map((model) => model.id)
           : allModels.map((model) => model.id);
 
       const blocksChatConfiguration = !!providerUnavailableReason;
@@ -776,6 +922,9 @@ class ProviderRegistry {
           name === 'azure' ||
           name === 'azurecognitive' ||
           name === 'sapai' ||
+          // Self-managed GitLab is a different host, so the instance URL has to
+          // be configurable even though gitlab.com is the default.
+          name === 'gitlab' ||
           name === 'zai');
       const baseUrlPlaceholder: string | undefined = requiresBaseUrl
         ? (BASE_URL_PLACEHOLDERS[name] ??
@@ -911,6 +1060,53 @@ class ProviderRegistry {
     if (refreshes.length > 0) {
       await Promise.allSettled(refreshes);
     }
+
+    // A manual refresh already paid for the catalogs it covered. Tell the
+    // adaptive scheduler so it does not immediately repeat the same work.
+    getCatalogRefreshScheduler()?.noteManualRefresh();
+  }
+
+  /**
+   * Providers a background catalog refresh may poll: enabled, runnable, and
+   * actually exposing a discovery hook. Providers with no `refreshModels` hook
+   * serve a fixed list and must never appear here.
+   */
+  listModelCatalogRefreshTargets(): Provider[] {
+    const targets: Provider[] = [];
+    for (const provider of this.providers.values()) {
+      const config = this.providerConfigs.get(provider.name);
+      if (!config || config.disabled) continue;
+      if (typeof provider.refreshModels !== 'function') continue;
+      if (!provider.isAvailable()) continue;
+      // Same reasoning as refreshModelCatalogsInternal: a custom provider whose
+      // credential probe failed gains nothing from another /models attempt.
+      const isCustom = config.custom === true || this.customProviderIds.has(provider.name);
+      if (isCustom && this.verificationRecords.get(provider.name)?.state === 'failed') continue;
+      if (this.isCircuitOpen(provider.name)) continue;
+      targets.push(provider);
+    }
+    return targets;
+  }
+
+  /**
+   * Refresh one provider's model catalog. Single-provider counterpart to
+   * `refreshModelCatalogs`, used by the adaptive background scheduler so each
+   * provider can run on its own cadence. Failures stay non-fatal.
+   */
+  async refreshModelCatalog(name: ProviderName): Promise<void> {
+    const provider = this.providers.get(name);
+    if (!provider) return;
+    try {
+      const result = provider.refreshModels?.(true);
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        await result;
+      }
+    } catch (err: unknown) {
+      serverLog.debug(
+        { provider: name, err: err instanceof Error ? err.message : String(err) },
+        'Provider model refresh failed (non-fatal)',
+      );
+    }
   }
 
   /** All provider types that can be added (for "Add provider" UI). Not filtered by auth. */
@@ -926,6 +1122,7 @@ class ProviderRegistry {
     id: ProviderName;
     label: string;
     kind?: 'openai' | 'anthropic' | 'gemini';
+    adapter?: string;
     baseUrl: string;
     apiKey?: string;
     authToken?: string;
@@ -966,6 +1163,9 @@ class ProviderRegistry {
         lastVerificationState: 'detected' as const,
       }),
       ...(previous?.customIcon && { customIcon: previous.customIcon }),
+      // Only persist known adapter ids; an unknown one would silently break
+      // inference at provider-construction time.
+      ...(def.adapter && getWireAdapter(def.adapter) && { adapter: def.adapter }),
       disabled: false,
     };
     this.providerConfigs.set(def.id, providerConfig);
@@ -987,7 +1187,10 @@ class ProviderRegistry {
     } else {
       this.verificationRecords.delete(def.id);
     }
-    providerLog.info({ provider: def.id, kind: providerConfig.kind }, 'Custom provider registered');
+    providerLog.info(
+      { provider: def.id, kind: providerConfig.kind, adapter: providerConfig.adapter },
+      'Custom provider registered',
+    );
     return { success: true };
   }
 
@@ -1035,6 +1238,18 @@ class ProviderRegistry {
     }
   }
 
+  /**
+   * True when the provider earned explicit trust for auto-routing: a verified
+   * credential, or a user-owned custom endpoint (creating one is explicit by
+   * definition). Everything else — env-detected keys, CLI login markers,
+   * never-probed configs — ranks as fallback. Auto-detection therefore fills
+   * gaps but never outranks a provider the user verified.
+   */
+  isTrustedForRouting(name: ProviderName): boolean {
+    if (this.customProviderIds.has(name) || this.providerConfigs.get(name)?.custom) return true;
+    return this.verificationRecords.get(name)?.state === 'verified';
+  }
+
   /** Find the best available provider for a given model ID. */
   findProviderForModel(modelId: string): Provider | undefined {
     for (const provider of this.getAvailable()) {
@@ -1043,11 +1258,13 @@ class ProviderRegistry {
       const config = this.providerConfigs.get(provider.name);
       const selected = config?.selectedModels ?? [];
 
-      if (selected.length > 0 && !selected.includes(modelId)) {
+      const listed = provider.listModels();
+      const known = listed.some((m) => m.id === modelId || m.aliases?.includes(modelId));
+      if (selected.length > 0 && !selected.includes(modelId) && !known) {
         continue;
       }
 
-      if (provider.listModels().some((m) => m.id === modelId)) {
+      if (known) {
         return provider;
       }
     }
@@ -1111,6 +1328,10 @@ class ProviderRegistry {
     fallbackChain: string[] = [],
   ): AsyncGenerator<ProviderEvent> {
     const chain = [request.model, ...fallbackChain];
+    // A real completion is the strongest activity signal available: the user is
+    // actively using this provider, so its catalog should not be sitting on an
+    // idle-backoff interval while a turn runs.
+    getCatalogRefreshScheduler()?.noteActivity();
 
     for (let i = 0; i < chain.length; i++) {
       const currentModel = chain[i];
@@ -1135,119 +1356,278 @@ class ProviderRegistry {
         continue;
       }
 
+      // Consecutive same-model retries used for transient failures. Declared
+      // outside the attempt loop so the exhausted error banner can report the
+      // total attempt count honestly.
+      let attempt = 0;
+      // Native tool results completed in earlier attempts of this turn. On a
+      // mid-turn transport failure the retried attempt resumes with these in
+      // context instead of redoing finished work. Codex-family only: strict
+      // API providers reject orphan `tool` messages.
+      const carriedToolLedger = new Map<string, ProviderMessage>();
+      const isCodexFamily = provider.name === 'codex' || provider.name === 'codex-auth';
       try {
-        let hasContent = false;
-        let accTokensIn = 0;
-        let accTokensOut = 0;
-        let accTokensCacheExcluded = 0;
-        let accTokensCacheRead: number | undefined;
-        let accTokensCacheWrite: number | undefined;
-        let accBillingTokensIn: number | undefined;
-        let accBillingTokensOut: number | undefined;
-        let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
-        let usageAccountId: string | undefined;
-        const stream = provider.streamResponse({ ...request, model: currentModel });
+        for (;;) {
+          const attemptStartedAt = performance.now();
+          let firstContentAt: number | undefined;
+          let hasContent = false;
+          let accTokensIn = 0;
+          let accTokensOut = 0;
+          let accTokensCacheExcluded = 0;
+          let accTokensCacheRead: number | undefined;
+          let accTokensCacheWrite: number | undefined;
+          let accBillingTokensIn: number | undefined;
+          let accBillingTokensOut: number | undefined;
+          let accBillingUsageSamples: ProviderEvent['billingUsageSamples'];
+          let usageAccountId: string | undefined;
+          // A yielded error event the loop chose to suppress for a same-model
+          // retry (set instead of surfacing it to the caller).
+          let yieldedRetriable: string | undefined;
+          // A terminal retriable error already surfaced with an honest banner.
+          let terminalSurfaced = false;
+          // An error event already yielded to the caller this attempt. When
+          // set, the empty-response fallback below stays silent so the turn
+          // ends with the single real banner instead of two stacked errors.
+          let surfacedError = false;
+          try {
+            const stream = provider.streamResponse({
+              ...request,
+              model: currentModel,
+              ...(isCodexFamily && carriedToolLedger.size > 0
+                ? { messages: [...request.messages, ...carriedToolLedger.values()] }
+                : {}),
+            });
 
-        for await (const event of stream) {
-          if (this.isContentEvent(event)) hasContent = true;
-          if (event.type === 'usage_update') {
-            if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
-            if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
-            if (typeof event.tokensCache === 'number') {
-              accTokensCacheExcluded = event.tokensCache;
+            for await (const event of stream) {
+              if (event.type === 'error' && !request.signal?.aborted) {
+                const message = typeof event.error === 'string' ? event.error : '';
+                // `errorTransient` is the provider's own verdict, computed from
+                // the raw failure. Text matching stays as the fallback for
+                // adapters that only surface a message.
+                const retriable =
+                  event.errorTransient === true ||
+                  (message.length > 0 && this.isRetriableProviderError(message));
+                if (message && retriable) {
+                  if (attempt < SAME_MODEL_MAX_RETRIES) {
+                    // Transient yielded error (the Codex path: nonzero exit
+                    // does not throw). Suppress it — the caller must not see
+                    // an error for an attempt we are about to retry — and
+                    // re-run the same model with backoff. Breaking the
+                    // for-await closes the finished provider generator.
+                    yieldedRetriable = message;
+                    break;
+                  }
+                  if (
+                    (provider.name === 'codex' || provider.name === 'codex-auth') &&
+                    isTransientCodexFailure(message)
+                  ) {
+                    // Retries exhausted: a single honest banner with the
+                    // attempt count instead of the raw stderr plus a duplicate
+                    // empty-response error below.
+                    yield {
+                      type: 'error',
+                      error: codexTransientExhaustedMessage(attempt + 1),
+                    };
+                    terminalSurfaced = true;
+                    break;
+                  }
+                  if (attempt > 0) {
+                    // Same honesty for every other provider: the user sees the
+                    // provider's own reason plus how many retries already ran,
+                    // instead of a bare failure that looks like a config error.
+                    // Reaching here means the retry budget is spent, so `attempt`
+                    // is always the number of retries already made.
+                    yield {
+                      type: 'error',
+                      error: transientExhaustedMessage(message, attempt + 1),
+                    };
+                    terminalSurfaced = true;
+                    break;
+                  }
+                }
+              }
+              if (this.isContentEvent(event)) {
+                hasContent = true;
+                firstContentAt ??= performance.now();
+              }
+              if (event.type === 'error') surfacedError = true;
+              if (isCodexFamily && event.type === 'tool_executed' && event.toolName) {
+                // Record before yielding so an aborted consumer still leaves
+                // resume context for the retry. Latest result wins per tool.
+                const input = typeof event.toolInput === 'string' ? event.toolInput : '';
+                const output = typeof event.toolOutput === 'string' ? event.toolOutput : '';
+                carriedToolLedger.set(
+                  carriedToolKey(event.toolName, input),
+                  toCarriedToolMessage(event.toolName, input, output, event.isError === true),
+                );
+                while (carriedToolLedger.size > CARRIED_TOOL_RESULTS_MAX) {
+                  const oldest = carriedToolLedger.keys().next();
+                  if (oldest.done) break;
+                  carriedToolLedger.delete(oldest.value);
+                }
+              }
+              if (event.type === 'usage_update') {
+                if (typeof event.tokensIn === 'number') accTokensIn = event.tokensIn;
+                if (typeof event.tokensOut === 'number') accTokensOut = event.tokensOut;
+                if (typeof event.tokensCache === 'number') {
+                  accTokensCacheExcluded = event.tokensCache;
+                }
+                if (typeof event.tokensCacheRead === 'number') {
+                  accTokensCacheRead = event.tokensCacheRead;
+                }
+                if (typeof event.tokensCacheWrite === 'number') {
+                  accTokensCacheWrite = event.tokensCacheWrite;
+                }
+                if (typeof event.billingTokensIn === 'number') {
+                  accBillingTokensIn = event.billingTokensIn;
+                }
+                if (typeof event.billingTokensOut === 'number') {
+                  accBillingTokensOut = event.billingTokensOut;
+                }
+                if (event.billingUsageSamples) {
+                  accBillingUsageSamples = event.billingUsageSamples;
+                }
+                if (event.accountId) usageAccountId = event.accountId;
+              }
+              yield event;
             }
-            if (typeof event.tokensCacheRead === 'number') {
-              accTokensCacheRead = event.tokensCacheRead;
+          } catch (streamError: unknown) {
+            if (
+              attempt < SAME_MODEL_MAX_RETRIES &&
+              !request.signal?.aborted &&
+              this.isRetriableProviderError(streamError)
+            ) {
+              attempt += 1;
+              const retryCause = this.recordRetryCause(provider.name, streamError);
+              providerLog.warn(
+                { provider: provider.name, model: currentModel, attempt, cause: retryCause },
+                'Transient provider throw — retrying same model',
+              );
+              await this.waitForSameModelRetry(attempt, request.signal);
+              continue;
             }
-            if (typeof event.tokensCacheWrite === 'number') {
-              accTokensCacheWrite = event.tokensCacheWrite;
-            }
-            if (typeof event.billingTokensIn === 'number') {
-              accBillingTokensIn = event.billingTokensIn;
-            }
-            if (typeof event.billingTokensOut === 'number') {
-              accBillingTokensOut = event.billingTokensOut;
-            }
-            if (event.billingUsageSamples) {
-              accBillingUsageSamples = event.billingUsageSamples;
-            }
-            if (event.accountId) usageAccountId = event.accountId;
+            throw streamError;
           }
-          yield event;
-        }
 
-        if (hasContent) {
-          // A successful provider turn is the strongest account proof we have.
-          // Local files, env vars, and CLI presence remain "detected" until the
-          // provider actually accepts a request; after that, Billing and
-          // Settings may truthfully show the connection as active.
-          const checkedAt = Date.now();
-          const providerConfig = this.providerConfigs.get(provider.name);
-          const scope: ProviderVerificationScope = providerConfig?.custom
-            ? 'runtime'
-            : this.verificationScopeFor(provider.name);
-          this.verificationRecords.set(provider.name, {
-            state: 'verified',
-            checkedAt,
-            scope,
-          });
-          if (providerConfig) {
-            providerConfig.lastVerifiedAt = checkedAt;
-            providerConfig.lastVerificationScope = scope;
+          if (yieldedRetriable !== undefined) {
+            attempt += 1;
+            const retryCause = this.recordRetryCause(provider.name, yieldedRetriable);
+            providerLog.warn(
+              {
+                provider: provider.name,
+                model: currentModel,
+                attempt,
+                cause: retryCause,
+                resumedTools: carriedToolLedger.size,
+              },
+              'Transient provider error — retrying same model',
+            );
+            await this.waitForSameModelRetry(attempt, request.signal);
+            continue;
           }
-          if (accBillingUsageSamples?.length) {
-            for (const sample of accBillingUsageSamples) {
-              creditRecordUsage(
-                currentModel,
-                provider.name,
-                sample.tokensIn,
-                sample.tokensOut,
-                {
-                  accountId: usageAccountId,
-                  sessionId: request.sessionId,
-                },
-                {
-                  cacheReadTokens: sample.tokensCacheRead,
-                  cacheWriteTokens: sample.tokensCacheWrite,
-                },
-              );
-            }
-          } else {
-            const recordedTokensIn = accBillingTokensIn ?? accTokensIn + accTokensCacheExcluded;
-            const recordedTokensOut = accBillingTokensOut ?? accTokensOut;
-            if (recordedTokensIn > 0 || recordedTokensOut > 0) {
-              creditRecordUsage(
-                currentModel,
-                provider.name,
-                recordedTokensIn,
-                recordedTokensOut,
-                {
-                  accountId: usageAccountId,
-                  sessionId: request.sessionId,
-                },
-                {
-                  cacheReadTokens: accTokensCacheRead,
-                  cacheWriteTokens: accTokensCacheWrite,
-                },
-              );
-            }
+
+          if (terminalSurfaced) {
+            this.recordFailure(provider.name);
+            return;
           }
-          this.recordSuccess(provider.name);
+
+          if (hasContent) {
+            const completedAt = performance.now();
+            const latencyMs = Math.max(0, completedAt - attemptStartedAt);
+            const ttftMs =
+              firstContentAt === undefined
+                ? undefined
+                : Math.max(0, firstContentAt - attemptStartedAt);
+            // A successful provider turn is the strongest account proof we have.
+            // Local files, env vars, and CLI presence remain "detected" until the
+            // provider actually accepts a request; after that, Billing and
+            // Settings may truthfully show the connection as active.
+            const checkedAt = Date.now();
+            const providerConfig = this.providerConfigs.get(provider.name);
+            const scope: ProviderVerificationScope = providerConfig?.custom
+              ? 'runtime'
+              : this.verificationScopeFor(provider.name);
+            this.verificationRecords.set(provider.name, {
+              state: 'verified',
+              checkedAt,
+              scope,
+            });
+            if (providerConfig) {
+              providerConfig.lastVerifiedAt = checkedAt;
+              providerConfig.lastVerificationScope = scope;
+            }
+            if (accBillingUsageSamples?.length) {
+              for (const sample of accBillingUsageSamples) {
+                creditRecordUsage(
+                  currentModel,
+                  provider.name,
+                  sample.tokensIn,
+                  sample.tokensOut,
+                  {
+                    accountId: usageAccountId,
+                    sessionId: request.sessionId,
+                  },
+                  {
+                    cacheReadTokens: sample.tokensCacheRead,
+                    cacheWriteTokens: sample.tokensCacheWrite,
+                    ttftMs,
+                    latencyMs,
+                  },
+                );
+              }
+            } else {
+              const recordedTokensIn = accBillingTokensIn ?? accTokensIn + accTokensCacheExcluded;
+              const recordedTokensOut = accBillingTokensOut ?? accTokensOut;
+              if (recordedTokensIn > 0 || recordedTokensOut > 0) {
+                creditRecordUsage(
+                  currentModel,
+                  provider.name,
+                  recordedTokensIn,
+                  recordedTokensOut,
+                  {
+                    accountId: usageAccountId,
+                    sessionId: request.sessionId,
+                  },
+                  {
+                    cacheReadTokens: accTokensCacheRead,
+                    cacheWriteTokens: accTokensCacheWrite,
+                    ttftMs,
+                    latencyMs,
+                  },
+                );
+              }
+            }
+            this.recordSuccess(provider.name);
+            return;
+          }
+
+          if (!surfacedError) {
+            yield {
+              type: 'error',
+              error: `The model returned an empty response. The provider ${provider.name} did not stream any content before timing out or closing. Try again, switch model/provider, or split a large prompt.`,
+            };
+          }
+          this.recordFailure(provider.name);
           return;
         }
-
-        yield {
-          type: 'error',
-          error: `The model returned an empty response. The provider ${provider.name} did not stream any content before timing out or closing. Try again, switch model/provider, or split a large prompt.`,
-        };
-        this.recordFailure(provider.name);
-        return;
       } catch (err: unknown) {
         const diagnostic = safeProviderDiagnostic(provider.name, 'stream', err);
         providerLog.error({ ...diagnostic, model: currentModel }, 'Provider error');
         this.recordFailure(provider.name);
 
         if (i === chain.length - 1) {
+          if (
+            (provider.name === 'codex' || provider.name === 'codex-auth') &&
+            isTransientCodexFailure(err)
+          ) {
+            // Same-model retries exhausted on a thrown transient: same honest
+            // banner as the yielded-error path. attempt counts retries used.
+            yield {
+              type: 'error',
+              error: codexTransientExhaustedMessage(attempt + 1),
+            };
+            return;
+          }
           yield {
             type: 'error',
             error: safeProviderFailureMessage(provider.name, diagnostic),
@@ -1267,6 +1647,12 @@ class ProviderRegistry {
     );
   }
 
+  /** Abort-aware backoff between same-model retries. Shared with the auxiliary
+   *  provider calls so every retry site uses one budget and one delay curve. */
+  private waitForSameModelRetry(retryIndex: number, signal?: AbortSignal): Promise<void> {
+    return waitForProviderRetry(retryIndex, signal);
+  }
+
   /**
    * Validate provider credentials and retain a process-local verdict. The
    * record is updated only when probing the active config (or immediately
@@ -1276,6 +1662,7 @@ class ProviderRegistry {
   async verifyConnection(
     name: ProviderName,
     credentials?: { apiKey?: string; authToken?: string; baseUrl?: string; deployment?: string },
+    options: { runtimeCheck?: boolean } = {},
   ): Promise<ProviderVerificationResult> {
     const existing = this.providerConfigs.get(name);
     const probesActiveConfig =
@@ -1284,8 +1671,16 @@ class ProviderRegistry {
         (credentials.authToken ?? undefined) === (existing?.authToken ?? undefined) &&
         (credentials.baseUrl ?? undefined) === (existing?.baseUrl ?? undefined) &&
         (credentials.deployment ?? undefined) === (existing?.deployment ?? undefined));
-    const result = await this.verifyConnectionInternal(name, credentials);
+    let result = await this.verifyConnectionInternal(name, credentials);
     if (!probesActiveConfig) return result;
+
+    // A catalog probe cannot see plan entitlement, key scoping, or per-model
+    // access. When the caller explicitly asked for a full check, close that gap
+    // with one real generation. Never on the polled auto-connect path: that
+    // would spend tokens on every status poll.
+    if (options.runtimeCheck && result.success) {
+      result = await this.applyRuntimeVerification(name, existing, result);
+    }
 
     const previous = this.verificationRecords.get(name);
     const nextState = result.state ?? (result.success ? 'verified' : 'failed');
@@ -1320,6 +1715,69 @@ class ProviderRegistry {
     return result;
   }
 
+  /**
+   * Families that are verified by their own authority or have no completion
+   * contract. Kept next to the CLI/unsupported sets it mirrors so the two lists
+   * can be compared by eye.
+   */
+  private runtimeCheckIneligible(name: ProviderName, config: ProviderConfig): string | null {
+    if (CLI_HARNESS_PROVIDERS.has(name) || MANAGED_CLI_PROVIDERS.has(name)) return 'CLI';
+    if (LOCAL_PROVIDER_KEYS.has(name)) return 'local';
+    if (UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) return 'unsupported';
+    if (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name)) return 'capability-only';
+    if (String(name).startsWith('remote-')) return 'remote';
+    // Deployment-, project-, or OAuth-bound hosts verify their binding through
+    // the catalog; a synthetic generation adds cost without adding evidence.
+    if (name === 'azure' || name === 'azurecognitive' || name === 'bedrock') return 'deployment';
+    if (name === 'vertexai' || name === 'sapai' || name === 'copilot') return 'hosted-resource';
+    if (name === 'codex-auth' || name === 'codebuff') return 'own-authority';
+    return null;
+  }
+
+  /**
+   * Upgrade a catalog-level pass to a runtime-level one, or surface a
+   * definitive refusal.
+   *
+   * A transient generation failure deliberately keeps the catalog verdict: a
+   * rate-limited provider is not a misconfigured one, and reporting it as
+   * broken would be a lie the user cannot act on.
+   */
+  private async applyRuntimeVerification(
+    name: ProviderName,
+    existing: ProviderConfig | undefined,
+    catalogResult: ProviderVerificationResult,
+  ): Promise<ProviderVerificationResult> {
+    const config = existing;
+    if (!config) return catalogResult;
+
+    const ineligible = this.runtimeCheckIneligible(name, config);
+    if (ineligible) return catalogResult;
+
+    const adapter = this.createProvider(name, config);
+    if (!adapter || !adapter.isAvailable()) return catalogResult;
+
+    const outcome = await verifyRuntimeCompletion(name, adapter);
+    if (outcome.kind === 'skipped') return catalogResult;
+
+    if (outcome.kind === 'generated') {
+      // 'runtime' is the strongest scope: the account produced a completion.
+      return { success: true, state: 'verified', scope: 'runtime' };
+    }
+
+    if (outcome.kind === 'refused') {
+      return { success: false, state: 'failed', error: outcome.error };
+    }
+
+    // Transient: preserve the catalog verdict, but carry the reason so the
+    // settings note can say the generation check was inconclusive.
+    return {
+      success: true,
+      state: catalogResult.state,
+      scope: catalogResult.scope,
+      error: outcome.error,
+    };
+  }
+
   private async verifyConnectionInternal(
     name: ProviderName,
     credentials?: { apiKey?: string; authToken?: string; baseUrl?: string; deployment?: string },
@@ -1343,6 +1801,7 @@ class ProviderRegistry {
       if (existing?.custom || this.customProviderIds.has(name)) {
         const probe = await probeCustomProvider({
           kind: existing?.kind,
+          adapter: existing?.adapter,
           baseUrl: baseUrl ?? '',
           apiKey,
           authToken,
@@ -1483,31 +1942,6 @@ class ProviderRegistry {
           }
           return { success: true, state: 'verified' };
         }
-        case 'cline': {
-          const clineBin = whichBinary('cline');
-          if (!clineBin) {
-            return {
-              success: false,
-              error: 'Cline CLI was not found on PATH. Install the Cline CLI, then reconnect.',
-            };
-          }
-          if (!detectClineCLILogin()) {
-            return {
-              success: false,
-              error:
-                'No Cline credential material was detected. Install cline, configure it with "cline auth --provider <p> --apikey <k>", then check again.',
-            };
-          }
-          if (!probeCliConnection(clineBin, 'cline')) {
-            return {
-              success: true,
-              state: 'detected',
-              error:
-                'Cline CLI was found on PATH with login material but did not pass its connection probe. The local login may be expired, unavailable, or the CLI installation may be broken.',
-            };
-          }
-          return { success: true, state: 'verified' };
-        }
         case 'freebuff': {
           if (detectFreebuffCLILogin() || readFreebuffAuthToken()) {
             const runtime = new FreebuffProvider({
@@ -1546,6 +1980,33 @@ class ProviderRegistry {
           return {
             success: false,
             error: safeVerificationHttpError(response.status, 'Codebuff account verification'),
+          };
+        }
+        case 'hoplite': {
+          // Hoplite is a cloud async-agent control plane, not a chat API. Its
+          // organization-scoped key is proven against the live project catalog
+          // (/api/projects); delegation itself is a later release. Unlike Jules,
+          // a valid key really does verify here.
+          if (!apiKey) return { success: false, error: 'Missing Hoplite API key' };
+          const response = await fetch('https://api.hoplite.sh/api/projects', {
+            headers: {
+              'X-Api-Key': apiKey,
+              'Content-Type': 'application/json',
+              'User-Agent': 'Koryphaios/1.0',
+            },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (response.ok) return { success: true, state: 'verified', scope: 'catalog' };
+          const body = (await response.text().catch(() => '')).slice(0, 200);
+          if (response.status === 401 || response.status === 403) {
+            return {
+              success: false,
+              error: `Hoplite rejected this API key (HTTP ${response.status}). Create an organization API key (hop_…) in app.hoplite.sh organization settings, then reconnect.${body ? ` Hoplite said: ${body}` : ''}`,
+            };
+          }
+          return {
+            success: false,
+            error: `${safeVerificationHttpError(response.status, 'Hoplite connection verification')}${body ? ` Body: ${body}` : ''}`,
           };
         }
         case 'anthropic': {
@@ -1671,6 +2132,30 @@ class ProviderRegistry {
             Authorization: `Bearer ${apiKey}`,
           });
         }
+        case 'notion': {
+          if (!apiKey)
+            return { success: false, error: 'Notion requires a Personal Access Token (PAT)' };
+          // POST /agents/query is the documented discovery surface: 200 proves
+          // the PAT authenticates; the body is kept minimal for a cheap probe.
+          try {
+            const response = await fetch(`${NOTION_BASE_URL}/agents/query`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Notion-Version': NOTION_API_VERSION,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Koryphaios/1.0',
+              },
+              body: JSON.stringify({ page_size: 1 }),
+              signal: AbortSignal.timeout(5_000),
+            });
+            if (!response.ok)
+              return { success: false, error: safeVerificationHttpError(response.status) };
+            return { success: true };
+          } catch {
+            return { success: false, error: 'Provider verification failed safely.' };
+          }
+        }
         case 'openrouter':
           return this.verifyModelCatalog(
             'https://openrouter.ai/api/v1/models',
@@ -1686,6 +2171,19 @@ class ProviderRegistry {
           const token = apiKey || authToken;
           if (!token) return { success: false, error: 'Missing GitHub token' };
           return this.verifyGitHubModelsCatalog(token);
+        }
+        case 'gitlab': {
+          // No catalog or identity endpoint also proves Duo entitlement, so the
+          // chat endpoint is the only honest probe.
+          const probe = await verifyGitLabDuoAccess({
+            ...(existing ?? { name: 'gitlab' }),
+            name: 'gitlab',
+            apiKey,
+            authToken,
+            baseUrl,
+            disabled: false,
+          } as ProviderConfig);
+          return probe.success ? { success: true, state: 'verified', scope: 'endpoint' } : probe;
         }
         case 'kimicode': {
           const resolvedToken = await resolveKimiCodeAccessToken(authToken ?? apiKey ?? null);
@@ -1705,6 +2203,20 @@ class ProviderRegistry {
         }
         case 'mistral':
           return this.verifyBearerGet('https://api.mistral.ai/v1/models', apiKey);
+        case 'workbuddy':
+          // TokenHub gateway: GET /v1/models is the documented low-cost probe
+          // (an invalid key returns 401 gateway_error on every endpoint).
+          return this.verifyBearerGet(
+            'https://tokenhub-intl.tencentcloudmaas.com/v1/models',
+            apiKey,
+          );
+        case 'autoclaw':
+          // Local AutoClaw gateway: GET /v1/models is the cheap loopback probe
+          // for the bearer token from ~/.openclaw-autoclaw/.gateway-token.
+          return this.verifyBearerGet(
+            `${(baseUrl || 'http://127.0.0.1:18789/v1').replace(/\/+$/, '')}/models`,
+            apiKey,
+          );
         case 'groq':
           return this.verifyBearerGet('https://api.groq.com/openai/v1/models', apiKey);
         case 'deepgram':
@@ -1907,7 +2419,12 @@ class ProviderRegistry {
         }
         default: {
           const defaultBase = providerDefaultBaseUrl(name);
-          const effectiveBase = baseUrl ?? defaultBase;
+          // A configured base URL that is present but blank (the Settings UI and
+          // the shipped koryphaios.json both write `""`) must fall back to the
+          // provider's own default. `??` treats "" as a real value, which
+          // silently produced "Unsupported provider" for every built-in
+          // OpenAI-compatible provider whose default URL is known.
+          const effectiveBase = baseUrl?.trim() || defaultBase;
           const effectiveApiKey = apiKey || authToken;
 
           // Universal OpenAI-compatible verification
@@ -1940,6 +2457,7 @@ class ProviderRegistry {
       selectedModels?: string[];
       hideModelSelector?: boolean;
     },
+    options: { fullCheck?: boolean } = {},
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const unavailableReason = unavailableProviderReason(name);
@@ -1966,6 +2484,18 @@ class ProviderRegistry {
       const rawResolvedBaseUrl =
         credentials.baseUrl?.trim() || existing?.baseUrl || this.detectEnvUrl(name) || undefined;
       let resolvedBaseUrl = rawResolvedBaseUrl;
+      if (rawResolvedBaseUrl && name === 'gitlab') {
+        // Store the canonical API root so the settings field round-trips the
+        // same value it shows, whatever shape was pasted in.
+        try {
+          resolvedBaseUrl = normalizeGitLabBaseUrl(rawResolvedBaseUrl);
+        } catch (error: unknown) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'GitLab instance URL is invalid',
+          };
+        }
+      }
       if (existing?.custom && rawResolvedBaseUrl) {
         try {
           resolvedBaseUrl = normalizeCustomProviderBaseUrl(rawResolvedBaseUrl);
@@ -2022,8 +2552,16 @@ class ProviderRegistry {
       // `state !== 'verified'` clause re-probed on EVERY save, so a
       // preference-only save (e.g. Manage Models) was rejected whenever the
       // endpoint hiccuped and the failure poisoned the stored record.
-      if (connectionChanged || CLI_HARNESS_PROVIDERS.has(name)) {
-        const verification = await this.verifyConnection(name, nextConnection);
+      //
+      // `fullCheck` is the one exception: it is how "Run safe check" and an
+      // explicit connect ask for a re-probe of *unchanged* stored credentials.
+      // Without it that button was a no-op for API-key providers — it re-saved
+      // the previous verdict, so a provider stuck on 'failed' stayed failed
+      // forever no matter how many times the user clicked it.
+      if (connectionChanged || CLI_HARNESS_PROVIDERS.has(name) || options.fullCheck) {
+        const verification = await this.verifyConnection(name, nextConnection, {
+          runtimeCheck: options.fullCheck === true,
+        });
         if (!verification.success) return verification;
         acceptedState = verification.state ?? 'verified';
         acceptedScope = verification.scope ?? this.verificationScopeFor(name);
@@ -2071,11 +2609,32 @@ class ProviderRegistry {
 
       const provider = this.createProvider(name, providerConfig);
       if (provider) {
-        // The Codex app-server exposes its authenticated model catalog. Wait
-        // for it on explicit connect so the picker never opens with a stale
-        // hardcoded fallback list.
-        if (provider instanceof CodexCliProvider || provider instanceof CodexAuthProvider) {
-          await provider.refreshModels();
+        // Wait for the live model catalog on explicit connect so the model
+        // picker shows the provider's real models immediately — no restart
+        // needed. Previously only Codex awaited here (and without forcing a
+        // refresh), so every other provider returned success with an empty
+        // catalog while background discovery was still in flight, and the
+        // frontend's immediate status reload rendered zero models. Guarded by
+        // a timeout so a slow catalog can never hang connect: verification
+        // already passed, and the background refresh keeps going.
+        const catalogRefresh = provider.refreshModels?.(true);
+        if (catalogRefresh && typeof (catalogRefresh as Promise<unknown>).then === 'function') {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              catalogRefresh as Promise<unknown>,
+              new Promise((resolve) => {
+                timer = setTimeout(resolve, CONNECT_CATALOG_TIMEOUT_MS);
+              }),
+            ]);
+          } catch (err: unknown) {
+            providerLog.debug(
+              { provider: name, err: err instanceof Error ? err.message : String(err) },
+              'Connect-time model catalog refresh failed; background discovery continues',
+            );
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
         }
         this.providers.set(name, provider);
         this.circuitStates.delete(name); // Reset circuit breaker
@@ -2188,6 +2747,19 @@ class ProviderRegistry {
         success: false,
         error: 'SAP AI Core requires an explicit running deployment ID',
       };
+    }
+
+    if (name === 'gitlab' && baseUrl) {
+      // Reject a malformed instance URL at save time: a typo here otherwise
+      // surfaces much later as a 404 that reads like "no Duo access".
+      try {
+        normalizeGitLabBaseUrl(baseUrl);
+      } catch (error: unknown) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'GitLab instance URL is invalid',
+        };
+      }
     }
 
     return { success: true };
@@ -2328,9 +2900,14 @@ class ProviderRegistry {
     );
     const isDisabled =
       userConfig?.disabled ?? (hasStoredCredential ? false : autoCli ? false : defaultDisabled);
+    // Retired TokenRouter hosts (the dead .me domain and the wrong .io default
+    // older versions may have persisted) count as "no explicit override" so the
+    // canonical default applies. Explicit user URLs on live hosts still win.
+    const normalizedUserBaseUrl = userConfig?.baseUrl?.replace(/\/+$/, '');
     const userBaseUrl =
       name === 'tokenrouter' &&
-      userConfig?.baseUrl?.replace(/\/+$/, '') === 'https://tokenrouter.me/v1'
+      (normalizedUserBaseUrl === 'https://tokenrouter.me/v1' ||
+        normalizedUserBaseUrl === 'https://api.tokenrouter.io/v1')
         ? undefined
         : userConfig?.baseUrl;
 
@@ -2409,8 +2986,9 @@ class ProviderRegistry {
     // OpenAIProvider. This keeps BYO OpenAI-compatible endpoints working without
     // requiring a per-name factory entry.
     const defaultBase = providerDefaultBaseUrl(name);
-    if ((defaultBase || config.baseUrl) && (config.apiKey || config.authToken)) {
-      return new OpenAIProvider(config, name, config.baseUrl ?? defaultBase);
+    const effectiveBase = config.baseUrl?.trim() || defaultBase;
+    if (effectiveBase && (config.apiKey || config.authToken)) {
+      return new OpenAIProvider(config, name, effectiveBase);
     }
     if (name === 'sapai' && config.apiKey && config.baseUrl) {
       return new OpenAIProvider(config, 'sapai', config.baseUrl);
@@ -2592,7 +3170,7 @@ class ProviderRegistry {
         return {
           success: false,
           status: response.status,
-          error: `HTTP ${response.status}: model catalog returned no valid ${shape} model entries`,
+          error: `HTTP ${response.status}: model catalog contained no valid ${shape} model entries`,
         };
       }
       return { success: true, status: response.status };
@@ -2752,6 +3330,17 @@ class ProviderRegistry {
       msg.includes('insufficient_quota') ||
       msg.includes('credit balance');
     return isQuota;
+  }
+
+  /**
+   * Identify transient provider errors (5xx / timeouts / in-stream server error
+   * frames) that should be retried on the same model, or fall through to a
+   * fallback provider, instead of failing closed. 4xx auth errors
+   * (401/403/invalid key) stay fail-closed. The policy lives in
+   * `provider-retry` so auxiliary calls share it.
+   */
+  isRetriableProviderError(error: unknown): boolean {
+    return isRetriableProviderFailure(error);
   }
 
   /**

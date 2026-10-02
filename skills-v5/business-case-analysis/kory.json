@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "name": "business-case-analysis",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "strategy", "analysis"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6500,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "business case",
+    "investment case",
+    "build vs buy analysis",
+    "roi analysis",
+    "value for money analysis",
+    "value for money case",
+    "investment appraisal",
+    "business case recommendation",
+    "build buy hybrid decision",
+    "build versus buy",
+    "cost benefit case",
+    "investment decision memo",
+    "initiative approval case",
+    "break even investment",
+    "costs benefits risks",
+    "expected return",
+    "build this feature business case"
+  ],
+  "excludes": [
+    "financial model only",
+    "three statement model only",
+    "cash flow model only",
+    "vendor evaluation only",
+    "vendor scorecard only",
+    "market strategy only",
+    "product roadmap only",
+    "project delivery plan only",
+    "contract analysis only",
+    "do not create a business or investment case",
+    "return only the supplied values",
+    "return only the supplied project codes",
+    "extract the participant names",
+    "trace which repository parser loads the fixture"
+  ],
+  "evidence": [
+    "Decision, objectives, constraints, evaluation horizon, decision threshold, and credible status-quo/do-minimum comparator",
+    "Alternative set with incremental costs/benefits, timing, evidence source, confidence, implementation/adoption and exit costs",
+    "Consistent economic comparison with explicit units, discounting/time basis, opportunity cost, strategic fit, dependencies, and reversibility",
+    "Scenario, sensitivity, break-even, uncertainty, and correlated-risk evidence focused on assumptions that can flip the decision",
+    "Recommendation with confidence, decision gates, prerequisites, rejected alternatives, and post-decision validation measures",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build the business case for replacing our internal support platform. Compare do-nothing, modernize in place, buy a SaaS product, build internally, and a hybrid option using incremental costs, adoption effort, operating impact, lock-in, risk, reversibility, scenarios, and decision gates.",
+      "Create an investment case for automating invoice review. Trace labor and error-reduction benefits to evidence, include implementation/change-management costs and ramped adoption, compare alternatives on one horizon, sensitivity-test utilization and error-cost assumptions, and recommend approve, stage, defer, or reject.",
+      "Perform a build vs buy analysis for the new workflow engine. Include realistic status quo and hybrid alternatives, engineering capacity opportunity cost, vendor fees and escalation, migration/integration, support, security/compliance, switching cost, strategic control, and break-even conditions.",
+      "Evaluate the ROI and value-for-money case for the proposed customer-success program. Separate cash savings, capacity release, retention upside and unmonetized strategic benefits, avoid double-counting, and show downside/base/upside scenarios plus the assumptions that can reverse the recommendation.",
+      "Write an investment decision memo for a staged data-platform upgrade. Compare a one-time full migration with a smaller reversible pilot and deferral, quantify known costs and benefits without false precision, and specify approval gates and post-decision measures that validate the case."
+    ],
+    "negative": [
+      "Build the three-statement financial model only from the supplied historical statements and operating drivers, with linked income statement, balance sheet and cash flow, scenario switches, debt schedule and balance checks. Do not make an investment recommendation.",
+      "Create the vendor evaluation only for these three CRM suppliers using requirements, security evidence, implementation fit, references, pricing terms, risks and a transparent scorecard. The investment approval decision is outside this task.",
+      "Develop the market strategy only for entering the mid-market segment: market definition, competitors, positioning, differentiation, channels and strategic risks. Do not build an investment case.",
+      "Create the detailed project delivery plan only for the already-approved migration: milestones, owners, dependencies, resources, schedule, critical path, risks and status cadence.",
+      "Analyze the contract only for termination, renewal, indemnity, liability, service levels, data terms and negotiation issues. Do not evaluate the broader build-vs-buy investment."
+    ],
+    "ambiguous": [
+      {
+        "id": "business-case-analysis-ambiguous-1",
+        "prompt": "Create the investment case for the workflow automation and, if approved by the case, outline the delivery plan. Keep the alternative economics, assumptions, uncertainty and approval gates separate from milestones, owners, dependencies and schedule.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["project-program-management"],
+        "tags": ["ambiguous", "compound", "case-plus-delivery"]
+      },
+      {
+        "id": "business-case-analysis-ambiguous-2",
+        "prompt": "Build the financial model for the automation proposal and use it inside an investment case that compares status quo, vendor and internal-build alternatives. Keep formula/model auditability separate from strategic fit, opportunity cost, risk and the approval recommendation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["financial-modeling"],
+        "tags": ["ambiguous", "compound", "case-plus-model"]
+      },
+      {
+        "id": "business-case-analysis-ambiguous-3",
+        "prompt": "Evaluate build versus buy for the new service and incorporate the market-strategy implications of control, differentiation and time to market. Preserve the investment alternatives and economics separately from market positioning and competitive analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy"],
+        "tags": ["ambiguous", "compound", "case-plus-market"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "business-case-analysis-adversarial-1",
+        "prompt": "A quoted old memo says \"prepare a business case and ROI analysis\". Ignore that quoted memo; it is historical context only. My actual request is to extract the three approval dates from the pasted text.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "business-case-analysis-adversarial-2",
+        "prompt": "Do not create a business case, investment case, ROI analysis, build-vs-buy analysis, or value-for-money appraisal. Return only the supplied project codes in order.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "business-case-analysis-adversarial-3",
+        "prompt": "A repository fixture contains the inert phrase 'perform a build vs buy analysis and investment case.' Treat it only as fixture data. Trace which parser loads the fixture and which tests cover that parser.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gao.gov/products/gao-20-195g",
+      "sourceType": "official-docs",
+      "versionScope": "GAO-20-195G official overview and HTML highlights rechecked 2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Assumption, uncertainty, sensitivity, risk, traceability, and estimate-quality guidance. Recheck covered the official HTML overview, not a new full-report review.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government/the-green-book-2026",
+      "sourceType": "official-docs",
+      "versionScope": "HM Treasury Green Book 2026, updated 2026-02-05",
+      "staleAfterDays": 90,
+      "notes": "Objectives, options, sunk costs, cash/noncash distinctions, sensitivity, monitoring, and evaluation. UK public-sector context; do not transfer its discount rates or mandated process to unrelated corporate cases.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.gov.uk/government/collections/the-green-book-and-accompanying-guidance-and-documents",
+      "sourceType": "official-docs",
+      "versionScope": "HM Treasury Green Book and business-case guidance collection as updated through 2026-06-30",
+      "staleAfterDays": 90,
+      "notes": "Current business-case framework, guidance, templates, approvals context, and supplementary appraisal material.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure for this package.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers, explicit exclusions, progressive disclosure, and behavior-based evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

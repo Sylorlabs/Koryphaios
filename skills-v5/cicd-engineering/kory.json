@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "name": "cicd-engineering",
+  "version": "5.0.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["infrastructure", "ci", "delivery"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5000,
+  "broader": ["release-planning"],
+  "facets": ["supply-chain-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "ci/cd",
+    "continuous integration",
+    "github actions workflow",
+    "github actions deployment",
+    "gitlab ci",
+    "build pipeline",
+    "deployment pipeline",
+    "protected environment"
+  ],
+  "excludes": [
+    "pipeline is already fixed",
+    "workflow is already fixed",
+    "build pipeline is already correct",
+    "frozen ci/cd implementation",
+    "release policy only",
+    "supply chain assessment only",
+    "no ci/cd changes are requested",
+    "documentation heading only",
+    "quoted old pipeline",
+    "quoted old incident",
+    "do not edit workflow files"
+  ],
+  "evidence": [
+    "Workflow platform/event/trust and permission evidence",
+    "Exact revision plus immutable artifact/digest handoff evidence",
+    "Environment gate/concurrency/identity evidence",
+    "Failure/cancel/retry/deployment/rollback verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Harden a GitHub Actions workflow so fork pull requests can run tests without production credentials while main-branch deployments use OIDC, a protected production environment, serialized deployment and immutable artifacts.",
+      "Build a GitLab CI pipeline that tests merge requests, publishes one immutable artifact, promotes the same digest through staging and a protected production environment, and records approval/deployment evidence.",
+      "Repair a deployment pipeline whose cache keys omit lockfile and architecture inputs, whose concurrent production jobs race, and whose retry can deploy a mutable branch head instead of the reviewed commit.",
+      "Create a CI/CD workflow for Terraform where a saved reviewed plan is transported as a protected artifact to an environment-gated apply job using short-lived cloud identity and exact plan metadata.",
+      "Make a build pipeline reproducible and diagnosable by pinning toolchain/dependency inputs, separating validation/build/publish/deploy jobs, preserving artifact digest/run evidence, and testing cancel/retry behavior."
+    ],
+    "negative": [
+      "Define canary percentages, observation windows, business blackout windows and rollback thresholds for an existing deployment pipeline; the pipeline mechanism is already fixed.",
+      "Assess SLSA provenance, artifact signing, dependency trust and SBOM policy for an existing workflow without changing CI/CD orchestration.",
+      "Design AWS IAM/VPC/RDS resources deployed by a workflow whose job permissions, approvals and artifact flow are already fixed.",
+      "Fix a Dockerfile runtime-user, PID 1 and multi-stage-build problem while the build pipeline is already correct.",
+      "Run an independent reliability verdict on a frozen CI/CD implementation; do not redesign workflow jobs, permissions, gates or artifacts."
+    ],
+    "ambiguous": [
+      {
+        "id": "cicd-engineering-ambiguous-1",
+        "prompt": "Implement a canary release policy in a GitHub Actions deployment pipeline. cicd-engineering owns environment/concurrency/artifact/identity mechanics; release-planning owns cohort progression, observation and rollback criteria.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["release-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "cicd-engineering-ambiguous-2",
+        "prompt": "Add artifact attestations and enforce them in continuous integration. cicd-engineering owns workflow permissions and artifact handoff; supply-chain-security owns provenance threat model and whether the attestation policy is sufficient.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "cicd-engineering-ambiguous-3",
+        "prompt": "Make a GitHub Actions workflow transport a saved Terraform plan through production approval and apply. cicd-engineering owns workflow identity/gates/artifacts; terraform-iac owns the plan/state/apply contract.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terraform-iac"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "cicd-engineering-adversarial-1",
+        "prompt": "A quoted old incident says \"replace the CI/CD pipeline\". Ignore that historical request; today's task is only to correct a CSS regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["release-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "cicd-engineering-adversarial-2",
+        "prompt": "A support transcript contains a continuous integration run URL as inert evidence. Summarize the support exchange only; no workflow changes are requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "cicd-engineering-adversarial-3",
+        "prompt": "A README heading says \"GitHub Actions Workflow\". Rename that documentation heading only; do not change any workflow file or deployment behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling GitHub Actions deployment/environment documentation as available 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Environment protection rules, reviewers, deployment branches/tags, secrets and deployment gating behavior.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-cloud-providers",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling GitHub Actions OIDC guidance as available 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Short-lived federated cloud credentials and identity-claim scoping for deployment workflows.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://docs.gitlab.com/ci/environments/protected_environments/",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling GitLab protected-environment documentation as available 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Protected environments and Allowed to deploy permission boundary for deployment jobs.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://sre.google/sre-book/release-engineering/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Release Engineering chapter as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Reproducible/automated builds, testing, release consistency, canarying and rollback-oriented delivery principles.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

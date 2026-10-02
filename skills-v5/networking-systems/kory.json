@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "name": "networking-systems",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["systems", "networking"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7200,
+  "broader": ["network-service-backend"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "network routing",
+    "network path",
+    "network connectivity",
+    "aaaa record",
+    "ipv6 route",
+    "dns resolution",
+    "dns issue",
+    "dns intermittently",
+    "tcp connection",
+    "tcp timeout",
+    "udp connectivity",
+    "packet loss",
+    "packet capture",
+    "path mtu",
+    "mtu black hole",
+    "pmtud",
+    "nat issue",
+    "nat and load balancer",
+    "firewall path",
+    "load balancer network",
+    "load balancer migration",
+    "vpn path",
+    "network namespace and vpn",
+    "edge to origin",
+    "cdn edge intermittently",
+    "dual stack connectivity",
+    "ipv4 ipv6 connectivity",
+    "tls handshake",
+    "tls handshakes"
+  ],
+  "excludes": [
+    "application protocol only",
+    "http handler only",
+    "linux process only",
+    "systemd service only",
+    "cdn cache only",
+    "tls certificate issuance only",
+    "network behavior is unchanged",
+    "network path is unchanged",
+    "network routing dns and transport behavior are unchanged",
+    "archived incident says network routing",
+    "quoted old network routing",
+    "quoted old dns issue",
+    "quoted old tcp connection",
+    "historical networking request",
+    "rename the networking document only"
+  ],
+  "evidence": [
+    "Exact failing source/destination/address-family/DNS and selected route/source-address identity",
+    "Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior",
+    "Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification",
+    "Source-specific before/after connectivity plus staged network change, propagation and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Diagnose a dual-stack API where some clients resolve AAAA first and time out while IPv4 works; compare source-specific DNS, IPv6 routes/return path, firewall and TCP/TLS captures before changing records.",
+      "Find why small HTTPS requests work through a VPN but large uploads stall: inspect tunnel MTU, PMTUD ICMP, TCP retransmissions and firewall behavior instead of adding application retries.",
+      "Trace a TCP timeout through NAT and a load balancer by verifying the actual source tuple, route, stateful firewall rules, translated tuple, listener/backend health and return path from the failing network.",
+      "Investigate intermittent DNS resolution that occurs only in one region by comparing resolver path, A/AAAA/CNAME answers, TTL/cache state and the resulting route/transport from failing and healthy sources.",
+      "Diagnose a TLS handshake failure after a load-balancer migration by proving TCP reaches the intended listener, then checking SNI, certificate name/chain/trust and ALPN without disabling verification."
+    ],
+    "negative": [
+      "Fix an HTTP handler returning the wrong JSON after a successful connection and TLS request; network routing and transport behavior are unchanged.",
+      "Debug a Linux daemon that is not listening because its systemd unit fails to start; no network path or DNS change is needed.",
+      "Tune CDN cache-control and purge behavior while the DNS, origin route and transport path remain unchanged.",
+      "Issue and rotate a TLS certificate through the PKI workflow; there is no connectivity or handshake-path failure to diagnose.",
+      "Change application retry/backoff logic for a known 429 response while the network path has already been proven healthy."
+    ],
+    "ambiguous": [
+      {
+        "id": "networking-systems-ambiguous-1",
+        "prompt": "A Linux service can open a socket but cannot reach its peer through a namespace/VPN path. linux-systems owns process/socket/netns host state; networking-systems owns source-address selection, routes, tunnel, transport and return-path diagnosis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["linux-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "networking-systems-ambiguous-2",
+        "prompt": "A gRPC service times out after a load-balancer change. networking-systems owns DNS, route, TCP/TLS, LB/backend path and timeout localization; network-service-backend owns gRPC listener/protocol/application behavior after the path is proven.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "networking-systems-ambiguous-3",
+        "prompt": "A CDN origin is intermittently unreachable. networking-systems owns generic DNS/IP/route/TCP/TLS evidence from edge to origin; edge-cdn owns edge selection, cache/origin policy and CDN-specific configuration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["edge-cdn"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "networking-systems-adversarial-1",
+        "prompt": "A quoted old network routing incident says to change the default route. Ignore that historical request; today's task is only to revise a README paragraph.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "networking-systems-adversarial-2",
+        "prompt": "A postmortem contains DNS issue and TCP timeout packet captures as inert evidence. Summarize it only; network behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "networking-systems-adversarial-3",
+        "prompt": "The archived file is named network-routing-dns-tcp.md. Rename the networking document only; do not change DNS, routes, firewalls, load balancers or transport behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9001.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 9001, sections 3 and 4, May 2021",
+      "staleAfterDays": 365,
+      "notes": "Adopt TLS/QUIC cooperative handshakes; diagnose QUIC over UDP without imposing a TCP prerequisite. No transport architecture is mandated.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9293",
+      "sourceType": "spec",
+      "versionScope": "RFC 9293 Transmission Control Protocol, Internet Standard",
+      "staleAfterDays": 365,
+      "notes": "Current TCP specification for connection state, segments, retransmission and transport semantics; obsoletes RFC 793.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc8200",
+      "sourceType": "spec",
+      "versionScope": "RFC 8200 Internet Protocol Version 6, Internet Standard",
+      "staleAfterDays": 365,
+      "notes": "IPv6 packet and network-layer behavior used for address-family and path diagnosis.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc8201",
+      "sourceType": "spec",
+      "versionScope": "RFC 8201 Path MTU Discovery for IPv6, Internet Standard",
+      "staleAfterDays": 365,
+      "notes": "IPv6 PMTUD behavior and failure implications when Packet Too Big messages are lost or filtered.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc1034",
+      "sourceType": "spec",
+      "versionScope": "RFC 1034 DNS Concepts and Facilities, with later updates",
+      "staleAfterDays": 365,
+      "notes": "Foundational DNS resolver/name-server/cache concepts; consult later RFCs for behavior that updates the original specification.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc1035",
+      "sourceType": "spec",
+      "versionScope": "RFC 1035 DNS Implementation and Specification, with later updates",
+      "staleAfterDays": 365,
+      "notes": "Foundational DNS protocol/message/resource-record behavior; use current operational implementation docs when resolver-specific details matter.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc8305",
+      "sourceType": "spec",
+      "versionScope": "RFC 8305 Happy Eyeballs Version 2",
+      "staleAfterDays": 365,
+      "notes": "Dual-stack connection-attempt behavior useful when IPv4/IPv6 path quality differs and client fallback affects symptoms.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc8446",
+      "sourceType": "spec",
+      "versionScope": "RFC 8446 TLS 1.3",
+      "staleAfterDays": 365,
+      "notes": "TLS 1.3 handshake/protocol semantics; certificate validation and TLS behavior remain distinct from raw TCP reachability.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

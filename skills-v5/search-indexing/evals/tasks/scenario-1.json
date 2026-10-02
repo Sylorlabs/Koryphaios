@@ -1,0 +1,82 @@
+{
+  "id": "search-indexing-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Change a product-search analyzer so hyphenated SKU-like tokens and accented terms match correctly without corrupting the live index. Define a versioned index/mapping, reindex strategy, dual-read/alias cutover, relevance regression corpus, rollback, and handling for writes during reindex. Verify exact SKU queries, natural-language queries, accent normalization, no-result controls, and document-count parity.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://search-indexing/zero-downtime-analyzer-change",
+    "requirements": [
+      "current and target analyzer/index mappings plus representative document corpus",
+      "golden relevance queries covering SKUs, accents, phrases, and no-result cases",
+      "continuous write stream during reindex and alias/cutover capability",
+      "rollback path preserving old index until acceptance checks pass",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "search-indexing-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "search-indexing decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "search-indexing-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "zero-downtime-analyzer-change scenario evidence",
+    "search-indexing decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "search-indexing-individual-scenario-1-result",
+    "search-indexing-individual-scenario-1-verification",
+    "search-indexing-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual search-indexing boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; near-neighbor=vector-search-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define search intents, corpus fields, language, analyzers, synonyms, filters, facets, ranking signals, freshness, and update/delete semantics before tuning queries."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Analyzer changes are deployed as a versioned index transition with measurable relevance/parity; live writes are not lost and cutover remains reversible until evidence passes."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Maintain judged query sets spanning head/tail, exact/fuzzy, multilingual, empty/noisy, authorization-filtered, and freshness-sensitive cases."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not tune from a handful of favorite queries, expose unauthorized documents through search, use wildcard scans as a default, or change analyzers without a reindex strategy."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (search-indexing decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

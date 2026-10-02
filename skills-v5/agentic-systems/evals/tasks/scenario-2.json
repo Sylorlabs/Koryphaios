@@ -1,0 +1,91 @@
+{
+  "id": "agentic-systems-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply ai agent expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is agentic-systems: Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment. The adjacent rag-retrieval-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://agentic-systems/scenario-2",
+    "requirements": [
+      "manager plus dependency-analysis and test-evidence specialist fixtures with read-only repository/test tools",
+      "per-specialist scope/tool/budget/artifact contracts and bounded delegation depth/parallelism",
+      "partial timeout, contradictory conclusions, unauthorized scope-expansion and stale-memory conflict fixtures",
+      "durable manager/specialist run state with resume harness and explicit final evidence contract",
+      "paired same-model skill/no-skill execution",
+      "agentic-systems parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual agentic-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=llm-application-engineering; near-neighbor=rag-retrieval-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Separate goal interpretation, planning, tool discovery, authorization, execution, observation, memory, delegation, and completion judgment."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use scenario suites covering tool success/failure, stale observations, partial side effects, denied permissions, duplicate retries, delegation errors, long-horizon drift, and independent verification of final state."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not let prompts grant authority, let agents self-certify irreversible work, retry non-idempotent actions blindly, or add subagents when decomposition does not improve evidence or throughput."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Goal/terminal-condition plus run/delegation budget evidence; Tool/agent authority, approval and side-effect classification evidence; Idempotency/reconciliation/state-memory and retry evidence; Trace plus independent final-state/completion evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "agentic-systems-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Goal/terminal-condition plus run/delegation budget evidence",
+        "Tool/agent authority, approval and side-effect classification evidence",
+        "Idempotency/reconciliation/state-memory and retry evidence",
+        "Trace plus independent final-state/completion evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "agentic-systems-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Goal/terminal-condition plus run/delegation budget evidence",
+    "Tool/agent authority, approval and side-effect classification evidence",
+    "Idempotency/reconciliation/state-memory and retry evidence",
+    "Trace plus independent final-state/completion evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "agentic-systems-individual-scenario-2-result",
+    "agentic-systems-individual-scenario-2-verification",
+    "agentic-systems-individual-scenario-2-paired-evaluation"
+  ]
+}

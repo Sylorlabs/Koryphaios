@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "gpu-compute",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "gpu", "performance"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["performance-debugging"],
+  "facets": [],
+  "requires": ["verification", "performance-verification"],
+  "conflicts": [],
+  "activation": ["gpu compute", "cuda kernel", "metal compute", "compute shader"],
+  "excludes": [],
+  "evidence": [
+    "gpu-compute decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle gpu compute.",
+      "The current task is cuda kernel.",
+      "I need help with metal compute.",
+      "Work on compute shader for this request.",
+      "This request specifically requires gpu compute."
+    ],
+    "negative": [
+      "The only requested work is slow query.",
+      "Please handle ai agent only.",
+      "This task is limited to jetpack compose.",
+      "The current request is angular component.",
+      "Work only on bun runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "gpu-compute-ambiguous-1",
+        "prompt": "The request includes gpu compute and slow query.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "gpu-compute-ambiguous-2",
+        "prompt": "The request includes cuda kernel and ai agent.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "gpu-compute-ambiguous-3",
+        "prompt": "The request includes metal compute and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "gpu-compute-adversarial-1",
+        "prompt": "A historical note says \"gpu compute\". The current request is angular component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "gpu-compute-adversarial-2",
+        "prompt": "A historical note says \"cuda kernel\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "gpu-compute-adversarial-3",
+        "prompt": "A historical note says \"metal compute\". The current request is c++.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.nvidia.com/cuda/cuda-c-programming-guide/",
+      "sourceType": "official-docs",
+      "versionScope": "NVIDIA CUDA C++ Programming Guide as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "GPU execution, memory, synchronization, precision, occupancy, and performance reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html",
+      "sourceType": "official-docs",
+      "versionScope": "CUDA kernel programming guidance as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for CUDA memory-access and coalescing decisions; performance still requires profiler evidence.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html",
+      "sourceType": "official-docs",
+      "versionScope": "CUDA memory guidance as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for host-device and memory-hierarchy reasoning on CUDA targets only.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,70 @@
+{
+  "id": "hardware-runtime-debugging-full-task-1",
+  "maturity": "individual",
+  "prompt": "A Cortex-M4 telemetry board running a fixed firmware image resets only after a specific packet sequence. A captured HardFault record contains the stacked register frame plus CFSR, HFSR, BFAR, and MMFAR. Diagnose the hardware bug without reflashing first: decode the fault class and fault address validity, map the stacked PC/LR to the exact ELF, determine whether the captured instruction is the cause or only the point of an imprecise fault, then use the narrowest debugger watchpoint/trace needed to catch the first corrupting access. Reproduce on the same board revision and prove the corrected build no longer produces the original fault signature while the packet path still works. Preserve the distinction between debugger-assisted evidence and autonomous target behavior.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://hardware-runtime-debugging/scenario-1",
+    "requirements": [
+      "Cortex-M4 board revision and MCU identity",
+      "exact firmware image and matching ELF with symbols",
+      "captured exception frame plus CFSR/HFSR/BFAR/MMFAR and reset reason",
+      "SWD debugger capable of hardware watchpoints with probe/debugger version recorded",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "hardware-runtime-debugging-fault-decode-1",
+      "assertion": "The diagnosis decodes the captured Cortex-M fault-status bits and address-valid fields and maps the stacked PC/LR against the exact matching ELF rather than assuming the current source line is the cause."
+    },
+    {
+      "id": "hardware-runtime-debugging-layer-localization-1",
+      "assertion": "The evidence identifies a specific first invalid/corrupting access or explicitly leaves the cause inconclusive; it does not label the MCU or board defective solely because a HardFault occurred."
+    },
+    {
+      "id": "hardware-runtime-debugging-watchpoint-1",
+      "assertion": "Any breakpoint/watchpoint/trace is scoped to a stated address or invariant, and the result records whether hardware or software observation was used and how debugger attachment may perturb reset/timing behavior."
+    },
+    {
+      "id": "hardware-runtime-debugging-real-target-proof-1",
+      "assertion": "The original packet sequence is rerun on the same physical board revision with the corrected build, the original fault signature is absent, and the expected telemetry behavior still completes."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "hardware-runtime-debugging-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "fault-register decode",
+        "ELF/symbol mapping",
+        "first-corrupting-access evidence",
+        "same-target reproduction and proof"
+      ]
+    },
+    {
+      "id": "hardware-runtime-debugging-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "board/MCU, firmware, ELF, probe, and debugger identity",
+    "raw and decoded fault record",
+    "layer-localizing watchpoint/trace or explicit inconclusive result",
+    "real-target before/after reproduction",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "hardware-runtime-debugging-scenario-1-result",
+    "hardware-runtime-debugging-scenario-1-verification",
+    "hardware-runtime-debugging-scenario-1-paired-evaluation"
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "id": "frontend-engineering-full-task-unknown-medium",
+  "prompt": "A repository has multiple delivery surfaces and the request says only: 'improve the frontend for job monitoring and cancellation.' Determine which surface actually owns the operator task from repository and runtime evidence before choosing browser, native, terminal, or another implementation model. Then produce the implementation and verification contract for job discovery, running and partial state, cancellation, failed cancellation, stale data, completion, errors, recovery, interruption, and supported input methods. Do not assume React, DOM, CSS, REST, or a database architecture without evidence.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://frontend-engineering/unknown-medium-job-monitor",
+    "requirements": [
+      "multi-surface repository fixture",
+      "runtime and launch metadata",
+      "existing component and state inventory",
+      "representative job-state fixtures",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "unknown-medium-evidence-selection",
+      "assertion": "The result identifies the task-owning delivery surface from repository launch/runtime/component evidence before choosing an implementation model; historical or adjacent surfaces alone are insufficient."
+    },
+    {
+      "id": "unknown-medium-no-tech-invention",
+      "assertion": "React, DOM, CSS, HTTP/REST, database, or other medium/topology assumptions appear only when supported by repository/runtime evidence."
+    },
+    {
+      "id": "unknown-medium-state-contract",
+      "assertion": "The chosen interface contract distinguishes discovery, running, partial, stale, cancellation requested, cancellation failed, completion, failure, recovery, and interruption/return states with domain versus presentation ownership."
+    },
+    {
+      "id": "unknown-medium-input-and-recovery",
+      "assertion": "Supported input/focus or selection behavior and recovery after stale data, failed cancellation, error, interruption, and applicable display changes are explicit for the selected medium."
+    },
+    {
+      "id": "unknown-medium-runtime-verification",
+      "assertion": "Verification targets the actual selected runtime and representative state transitions; a static screenshot or an implementation on the wrong surface cannot satisfy the task."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "medium-and-interface-contract",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "consumer, task, medium, runtime, and toolkit established from evidence",
+        "technology assumptions withheld until supported",
+        "flow and information hierarchy explicit",
+        "domain and presentation state ownership distinguished",
+        "appropriate medium-specific specialist identified"
+      ]
+    },
+    {
+      "id": "state-and-runtime-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "running, partial, stale, success, failure, and cancellation states",
+        "failed cancellation and recovery path",
+        "supported input and focus or selection behavior",
+        "interruption and display-change checks where applicable",
+        "real-runtime verification rather than screenshot-only evidence"
+      ]
+    },
+    {
+      "id": "blind-unknown-medium-frontend-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "medium and runtime evidence",
+    "interface and state contract",
+    "failure and recovery coverage",
+    "input and accessibility behavior",
+    "runtime verification plan"
+  ],
+  "requiredArtifacts": [
+    "frontend-interface-contract",
+    "state-and-interaction-matrix",
+    "paired-experiment-report"
+  ]
+}

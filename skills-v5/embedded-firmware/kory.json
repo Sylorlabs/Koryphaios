@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "embedded-firmware",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "embedded", "firmware"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": ["compiler-runtime-backend"],
+  "facets": ["embedded-device-security"],
+  "requires": ["verification", "simulation-device-testing"],
+  "conflicts": [],
+  "activation": [
+    "embedded firmware",
+    "microcontroller",
+    "rtos firmware",
+    "device firmware",
+    "stm32 firmware",
+    "isr timing",
+    "dma race"
+  ],
+  "excludes": [],
+  "evidence": [
+    "embedded-firmware decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle embedded firmware.",
+      "The current task is microcontroller.",
+      "I need help with rtos firmware.",
+      "Work on device firmware for this request.",
+      "This request specifically requires stm32 firmware."
+    ],
+    "negative": [
+      "The only requested work is ai agent.",
+      "Please handle jetpack compose only.",
+      "This task is limited to angular component.",
+      "The current request is bun runtime.",
+      "Work only on c++."
+    ],
+    "ambiguous": [
+      {
+        "id": "embedded-firmware-ambiguous-1",
+        "prompt": "The request includes embedded firmware and ai agent.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-firmware-ambiguous-2",
+        "prompt": "The request includes microcontroller and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-firmware-ambiguous-3",
+        "prompt": "The request includes rtos firmware and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "embedded-firmware-adversarial-1",
+        "prompt": "A historical note says \"embedded firmware\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-firmware-adversarial-2",
+        "prompt": "A historical note says \"microcontroller\". The current request is c++.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-firmware-adversarial-3",
+        "prompt": "A historical note says \"rtos firmware\". The current request is c#.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.freertos.org/Documentation/00-Overview",
+      "sourceType": "official-docs",
+      "versionScope": "FreeRTOS documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Embedded task, scheduling, synchronization, timing, memory, and platform behavior.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://freertos.org/RTOS_Task_Notification_As_Event_Group.html",
+      "sourceType": "official-docs",
+      "versionScope": "FreeRTOS task notification guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted only for FreeRTOS ISR-safe notification handoff; MCU timing, DMA, and electrical behavior remain vendor-specific.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

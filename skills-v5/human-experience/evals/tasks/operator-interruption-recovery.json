@@ -1,0 +1,80 @@
+{
+  "id": "human-experience-full-task-operator-interruption-recovery",
+  "prompt": "Improve a high-consequence operations console used across long shifts. Operators must orient quickly, monitor changing state, acknowledge alarms, avoid destructive mistakes, hand work to another operator, recover after connectivity loss, and resume after interruption. Use the provided incident records and current product behavior; distinguish evidence from assumptions and route specialist questions to the appropriate UX disciplines.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://human-experience/operator-console-interruptions",
+    "requirements": [
+      "representative console states",
+      "incident evidence",
+      "operational constraints",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "operator-whole-shift-state",
+      "assertion": "The plan covers rapid orientation, monitoring, alarm acknowledgement, destructive-action avoidance, handoff, interruption, connectivity loss, recovery, and resumption as one operator journey."
+    },
+    {
+      "id": "operator-evidence-assumptions",
+      "assertion": "Incident records/current product behavior are separated from stakeholder or design assumptions; unsupported usability or safety-effect claims remain hypotheses."
+    },
+    {
+      "id": "operator-high-consequence-boundaries",
+      "assertion": "High-consequence actions and alarm acknowledgement define observable state, confirmation/commit boundaries, degraded/unknown outcomes, and recovery expectations without promising reversibility that the system cannot provide."
+    },
+    {
+      "id": "operator-specialist-map",
+      "assertion": "Specialist disciplines are selected for concrete unresolved decisions—such as interaction state, content, accessibility, usability evaluation, or research—without duplicating their implementation contracts in the orchestrator plan."
+    },
+    {
+      "id": "operator-next-evidence-step",
+      "assertion": "For each material uncertainty, the plan names the smallest credible next evidence step and leaves unavailable evidence explicit rather than converting it into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "operator-outcome-and-state-coverage",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "operator goals and context",
+        "orientation",
+        "handoff",
+        "interruption",
+        "degraded operation",
+        "recovery"
+      ]
+    },
+    {
+      "id": "discipline-routing-and-uncertainty",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "specialist discipline map",
+        "explicit assumptions",
+        "smallest next evidence step",
+        "no unsupported usability claims"
+      ]
+    },
+    {
+      "id": "blind-operator-experience-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "operator outcome map",
+    "state and recovery matrix",
+    "evidence versus assumption ledger",
+    "specialist discipline map"
+  ],
+  "requiredArtifacts": [
+    "operator-experience-plan",
+    "state-recovery-matrix",
+    "paired-experiment-report"
+  ]
+}

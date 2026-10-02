@@ -1,0 +1,78 @@
+{
+  "id": "c-cpp-systems-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Harden a C binary-frame decoder whose length field is trusted before pointer arithmetic. A malformed frame can overflow the computed end offset and read beyond the supplied buffer on 32-bit builds. Correct the bounds/overflow checks without changing accepted valid encodings, preserve zero-copy parsing, and add regression vectors for truncation, maximal lengths, integer wrap, empty payloads, and concatenated frames. Verify with sanitizers/fuzz seed replay.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://c-cpp-systems-engineering/binary-parser-bounds",
+    "requirements": [
+      "C decoder taking pointer plus byte length and returning parsed frame/error code",
+      "valid protocol corpus plus truncation and crafted overflow vectors",
+      "32-bit-width arithmetic simulation or build coverage for overflow behavior",
+      "ASan/UBSan or equivalent memory-safety evidence plus existing compatibility corpus",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "c-cpp-systems-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "c-cpp-systems-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "c-cpp-systems-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "binary-parser-bounds scenario evidence",
+    "c-cpp-systems-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": ["src/frame.c", "tests/regression.c", ".kory-eval/c-native-evidence.json"],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual c-cpp-systems-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=feature-implementation), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Establish compiler, language standard, ABI, allocation ownership, object lifetime, thread model, and error conventions before changing interfaces."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "No pointer/length arithmetic occurs before overflow-safe validation proves the referenced bytes lie inside the caller-provided buffer."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run the configured build matrix and focused tests under sanitizers or static analysis when available."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not rely on compiler extensions accidentally, mix allocators across ownership boundaries, return dangling views, suppress warnings blindly, or interpret debug-build success as proof against UB."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (c-cpp-systems-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

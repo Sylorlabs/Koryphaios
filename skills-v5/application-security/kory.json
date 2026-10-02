@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "name": "application-security",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "application"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6300,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "application security",
+    "input validation",
+    "session security",
+    "application attack surface",
+    "path containment",
+    "web application security",
+    "common attack paths",
+    "untrusted data flows",
+    "authorization review"
+  ],
+  "excludes": [
+    "resource authorization policy as the primary task",
+    "browser-specific origin, XSS, CSRF, CSP, CORS, or postMessage security as the primary task",
+    "final evidence-only verification of already-defined security controls"
+  ],
+  "evidence": [
+    "Trust and source-to-sink map",
+    "Sink-specific security invariants and resource limits",
+    "Negative/failure-path and session-lifecycle contract",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review application security for the media-import service: user archives, remote source URLs, output names, and converter options cross filesystem, outbound network, archive parser, and subprocess boundaries. Define safe invariants for each sink.",
+      "Fix input validation for a document API that accepts JSON, base64 attachments, nested filters, and import paths. Use typed parsing and explicit limits, then ensure later normalization cannot turn an accepted value into a dangerous path or query.",
+      "Design session security for a native desktop client: access and refresh state must survive normal restart, expire and revoke predictably, avoid logs/crash reports, and require fresh authentication before exporting stored credentials.",
+      "Assess the application attack surface of a background job system where database fields later become template variables, file names, webhook destinations, and command arguments. Trace each stored value to the real sink and remove unsafe reinterpretation.",
+      "Harden the upload/extract/convert pipeline against malformed archives, traversal, decompression/resource exhaustion, unsafe subprocess arguments, partial output on failure, and secret-bearing error/log leakage."
+    ],
+    "negative": [
+      "Define which tenant members, editors, owners, and admins may read, modify, share, export, or delete each resource and field; the parsing and sink APIs are already hardened.",
+      "Review reflected/stored DOM injection, CSP, CSRF, SameSite cookies, CORS, framing, and postMessage origin checks for the browser client.",
+      "Design passkey and password authentication, MFA enrollment, throttling, recovery, authenticator replacement, and phishing-resistant reauthentication.",
+      "Review an untrusted WebAssembly/plugin runtime for host capability confinement, memory/type boundaries, fuel/resource limits, and sandbox escape surfaces.",
+      "Prove the finished security controls with black-box malicious-input cases, independent durable-state inspection, denied-side-effect checks, and a remediation regression suite; the design is already complete."
+    ],
+    "ambiguous": [
+      {
+        "id": "application-security-ambiguous-1",
+        "prompt": "The broad security review found several risky data flows. Apply application security to trace file, URL, parser, database, template, and subprocess sources to sinks with concrete invariants; keep finding severity and cross-domain review synthesis in security-review.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "application-security-ambiguous-2",
+        "prompt": "The service needs an authorization review and application security hardening. Let authorization-security define who may act on each resource, while application-security owns untrusted parsing, file paths, outbound URLs, serialization, and process sinks.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "application-security-ambiguous-3",
+        "prompt": "Harden input validation and privileged IPC in the Electron app. Desktop engineering owns window/process/runtime mechanics; application-security owns trust boundaries, schema limits, canonical paths, external URLs, and privileged sink invariants.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "application-security-adversarial-1",
+        "prompt": "A historical review document describes unsafe data flows. The current task is only to correct its Markdown headings; do not assess or change the application.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "application-security-adversarial-2",
+        "prompt": "An old authorization issue contains examples of malformed IDs. Extract the issue owner and date only; no current security policy or parser work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "application-security-adversarial-3",
+        "prompt": "A desktop README discusses validation of IPC messages. Rename a documentation section only and leave the runtime behavior untouched.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP OS Command Injection Defense Cheat Sheet opened 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 120,
+      "notes": "Argument injection remains possible without shell interpolation; adapt parameter separation and effect restrictions to the actual tool contract."
+    },
+    {
+      "url": "https://owasp.org/www-project-application-security-verification-standard/",
+      "sourceType": "spec",
+      "versionScope": "OWASP ASVS 5.0.0, latest stable as verified 2026-09-05",
+      "revision": "5.0.0",
+      "staleAfterDays": 120,
+      "notes": "Primary application-security requirements across validation, encoding, APIs, files/resources, authentication/session, data protection, and secure communication.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-web-security-testing-guide/stable/4-Web_Application_Security_Testing/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP WSTG current stable site available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Current stable testing taxonomy for input validation, session management, error handling, business logic, API, and related application security cases; browser-specific cases remain with web-security.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-218 SSDF 1.1",
+      "staleAfterDays": 365,
+      "notes": "Secure software-development practices, design requirements, implementation protection, vulnerability prevention, and remediation discipline.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Input Validation Cheat Sheet available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Syntactic/semantic allowlist validation, canonicalization concerns, file-upload considerations, and the rule that validation is not the primary defense against every sink-specific injection class.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,90 @@
+{
+  "id": "research-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"research the current standard\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is research: Answer a decision-relevant question with traceable and appropriately fresh evidence. The adjacent accessibility-practice discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://research/conflicting-version-guidance-2026-09-04",
+    "requirements": [
+      "dated official protocol specification snapshot with an explicit current revision",
+      "dated official migration notes that supersede one legacy behavior",
+      "older vendor tutorial written for a prior protocol revision",
+      "current vendor compatibility page scoped to the fixture runtime",
+      "forum answer that conflicts with the official migration note",
+      "paired same-model skill/no-skill execution with clean context",
+      "research parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual research boundary and relevant environment before acting, preserve the hierarchy relationship (children=factual-research,literature-research,market-competitive-research,repository-research; near-neighbor=accessibility-practice), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Answer a decision-relevant question with traceable and appropriately fresh evidence."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Define the decision, questions, freshness, scope, and stopping rule."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Question-to-source traceability."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Search-result summaries replace primary evidence."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Claim-source provenance; Version and applicability scope; Inference boundaries; Hierarchy boundary and selected specialist rationale), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "research-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Claim-source provenance",
+        "Version and applicability scope",
+        "Inference boundaries",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "research-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Claim-source provenance",
+    "Version and applicability scope",
+    "Inference boundaries",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "research-individual-scenario-2-result",
+    "research-individual-scenario-2-verification",
+    "research-individual-scenario-2-paired-evaluation"
+  ]
+}

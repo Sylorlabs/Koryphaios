@@ -1,0 +1,91 @@
+{
+  "id": "reference-communication-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"write an API reference\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is reference-communication: Organize around stable concepts and lookup paths. The adjacent executive-communication discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://reference-communication/agent-settings-reference",
+    "requirements": [
+      "repository fixture with JSON Schema dialect, runtime parser/validation, defaults, env mapping, CLI flags, aliases, and tests",
+      "computed default, omission-sensitive environment override, deprecated alias, schema/parser enum conflict, and differently named CLI flag",
+      "documented version/tag or commit boundary",
+      "parser and CLI validation harness for examples",
+      "paired same-model skill/no-skill execution",
+      "reference-communication parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual reference-communication boundary and relevant environment before acting, preserve the hierarchy relationship (broader=documents-communication; children=contract-analysis; near-neighbor=executive-communication), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Organize around stable concepts and lookup paths."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Source comparison; Example validation; Coverage review"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of reference-communication correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Version and source-of-truth boundary; Enumerated coverage against authoritative definitions; Exact names, types, defaults, constraints, lifecycle, and errors; Validated examples and coverage/fidelity review), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "reference-communication-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Version and source-of-truth boundary",
+        "Enumerated coverage against authoritative definitions",
+        "Exact names, types, defaults, constraints, lifecycle, and errors",
+        "Validated examples and coverage/fidelity review",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "reference-communication-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Version and source-of-truth boundary",
+    "Enumerated coverage against authoritative definitions",
+    "Exact names, types, defaults, constraints, lifecycle, and errors",
+    "Validated examples and coverage/fidelity review",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "reference-communication-individual-scenario-2-result",
+    "reference-communication-individual-scenario-2-verification",
+    "reference-communication-individual-scenario-2-paired-evaluation"
+  ]
+}

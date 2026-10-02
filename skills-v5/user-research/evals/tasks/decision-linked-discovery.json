@@ -1,0 +1,81 @@
+{
+  "id": "user-research-full-task-decision-linked-discovery",
+  "prompt": "A team wants to redesign a dispatcher handoff workflow but has support tickets, a few analytics summaries, and strong stakeholder opinions rather than current user evidence. Build a research plan that identifies the decisions and uncertainties, uses existing evidence first, chooses justified methods, recruits across meaningful operating differences and access needs, and defines how observations will become findings without fabricating consensus.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://user-research/dispatcher-discovery",
+    "requirements": [
+      "existing support and analytics artifacts",
+      "stakeholder assumptions",
+      "participant constraints",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "research-decision-uncertainty-map",
+      "assertion": "Each proposed research question maps to a concrete dispatcher-handoff decision or material uncertainty instead of collecting broad opinions without a decision use."
+    },
+    {
+      "id": "research-existing-evidence-first",
+      "assertion": "Support tickets, analytics summaries, and stakeholder assumptions are inventoried before new recruitment, with what each source can and cannot establish made explicit."
+    },
+    {
+      "id": "research-method-recruitment-fit",
+      "assertion": "Method and participant sampling are justified by the decision/uncertainty and include meaningful operating differences/access needs rather than convenience or stakeholder availability alone."
+    },
+    {
+      "id": "research-evidence-chain",
+      "assertion": "The synthesis protocol keeps raw observation, interpretation, finding, implication, contradiction, and confidence/sample limits traceable rather than collapsing notes into consensus statements."
+    },
+    {
+      "id": "research-no-fabricated-consensus",
+      "assertion": "The plan contains no invented user finding, prevalence claim, or consensus and defines consent/data boundaries appropriate to the proposed evidence collection."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "decision-method-recruitment-fit",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "decision-linked questions",
+        "existing-evidence review",
+        "method rationale",
+        "recruitment dimensions",
+        "consent and access needs"
+      ]
+    },
+    {
+      "id": "evidence-synthesis-integrity",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "observation interpretation implication separation",
+        "contradiction handling",
+        "sample limits",
+        "no fabricated findings"
+      ]
+    },
+    {
+      "id": "blind-research-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "research questions",
+    "method and recruitment rationale",
+    "consent and data boundary",
+    "synthesis protocol",
+    "sample limitations"
+  ],
+  "requiredArtifacts": [
+    "research-plan",
+    "discussion-guide",
+    "evidence-synthesis-template",
+    "paired-experiment-report"
+  ]
+}

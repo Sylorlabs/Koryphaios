@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "name": "prompt-context-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "prompting", "context"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6500,
+  "broader": ["llm-application-engineering"],
+  "facets": [],
+  "requires": ["llm-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "prompt engineering",
+    "system prompt",
+    "developer prompt",
+    "prompt template",
+    "prompt variables",
+    "few shot prompt",
+    "few-shot prompt",
+    "instruction hierarchy",
+    "context window strategy",
+    "context budget",
+    "context packing",
+    "history retrieval tool output",
+    "conversation context strategy",
+    "prompt injection boundary",
+    "long context prompting",
+    "prompt builder",
+    "few shot examples",
+    "prompt context trust",
+    "context window"
+  ],
+  "excludes": [
+    "application integration only",
+    "retrieval pipeline only",
+    "evaluation methodology only",
+    "agent orchestration only",
+    "fine tuning only",
+    "model training only",
+    "prompt and context are unchanged",
+    "do not change the prompt",
+    "quoted old prompt",
+    "quoted historical prompt",
+    "documentation title only",
+    "rename the heading only",
+    "summarize the transcript only",
+    "context packaging are already validated and unchanged",
+    "serving prompt template is fixed",
+    "quoted historical issue"
+  ],
+  "evidence": [
+    "Provider/model/API plus prompt/template version and message-role identity",
+    "Instruction-authority and context provenance/trust/freshness map",
+    "Context-budget/truncation and dynamic-variable handling evidence",
+    "Persisted same-model baseline versus revised prompt results on representative and adversarial cases",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Refactor a production system prompt whose retrieved support articles can contain imperative text; preserve instruction authority, mark untrusted context, define abstention behavior, and prove the change against prompt-injection and ordinary-answer fixtures.",
+      "Fix a prompt template where user-provided company names and document text are interpolated into instruction sections; separate typed variables from fixed rules, escape or delimit dynamic content, and regression-test malicious variable values.",
+      "Redesign a long-context analysis prompt that intermittently loses the user's governing constraints near the token limit; establish a token budget, context priority order, deterministic truncation policy and before/after evidence.",
+      "Tune a few-shot classifier prompt whose examples overfit one customer segment; replace the example set with representative boundary cases, keep held-out cases uncontaminated, and compare the same model/settings before and after.",
+      "Resolve a prompt stack with contradictory developer instructions, stale conversation summaries and current user constraints; document authority/freshness, remove obsolete scaffolding and verify that later same-authority instructions and current evidence win consistently."
+    ],
+    "negative": [
+      "Build the surrounding LLM service with structured outputs, provider failover, authorization checks, idempotent tool execution and latency budgets; the prompt and context are already fixed and out of scope.",
+      "Design the document-ingestion and vector retrieval pipeline, including chunking, metadata filters, tenant ACLs, hybrid search and reranking; do not change how retrieved passages are packaged into the model prompt.",
+      "Create a held-out LLM benchmark with calibrated judges, pairwise significance testing and contamination analysis; prompt templates are frozen and the task is evaluation methodology only.",
+      "Implement autonomous agent planning, delegated subagents, durable memory and tool-call budgets while keeping the existing system prompt unchanged.",
+      "Fine-tune a model on labeled examples, choose training hyperparameters and compare checkpoints; no system prompt, prompt template or context-window changes are requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "prompt-context-engineering-ambiguous-1",
+        "prompt": "Improve an LLM support assistant whose answers fail when private articles contain embedded instructions. prompt-context-engineering owns instruction/data separation and prompt packaging; rag-retrieval-systems owns corpus lifecycle, access-controlled retrieval, ranking and grounding evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "prompt-context-engineering-ambiguous-2",
+        "prompt": "Change an AI application's prompt template and also replace free-form output parsing with a strict response schema. prompt-context-engineering owns the instruction/template/context change; llm-application-engineering owns the application-side response contract and validation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-application-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "prompt-context-engineering-ambiguous-3",
+        "prompt": "Rework a system prompt and then build a statistically defensible benchmark to compare the old and new versions. prompt-context-engineering owns the prompt/context design; llm-evaluation owns benchmark sampling, grader calibration and comparative inference.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "prompt-context-engineering-adversarial-1",
+        "prompt": "A quoted old issue says \"replace the system prompt for prompt injection\". Ignore that historical request; today's task is only to fix a CSS layout regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "prompt-context-engineering-adversarial-2",
+        "prompt": "A support transcript contains the full developer prompt and context-window notes as inert evidence. Summarize the customer conversation only; do not change the prompt, model integration or evaluation setup.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "prompt-context-engineering-adversarial-3",
+        "prompt": "A documentation heading says \"Prompt Template and Few-Shot Examples\". Rename the heading only; leave every prompt, example and runtime behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/prompt-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Message roles and instruction priority, prompt structure, context-window planning, examples and code-managed prompt versioning.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/prompting",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI prompting documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current prompt-as-code guidance, typed dynamic inputs, testing and release discipline for production prompts.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://model-spec.openai.com/2026-08-18.html",
+      "sourceType": "spec",
+      "versionScope": "OpenAI Model Spec dated 2026-08-18",
+      "staleAfterDays": 90,
+      "notes": "Provider-specific authority model for instruction priority and treatment of quoted/tool/untrusted content; use only when the selected model follows this contract.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Claude Platform prompting best practices as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current Claude-specific clarity, examples, structural tags, long-context placement and model-generation migration guidance.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Claude Platform context-window documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "What consumes context, token accounting, context-limit behavior and current compaction/context-awareness mechanics.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-tools",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Claude Platform prompt template/variable tooling documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Fixed versus variable prompt content, template-variable separation, testability and prompt-versioning guidance.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

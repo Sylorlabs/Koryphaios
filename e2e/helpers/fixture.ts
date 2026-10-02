@@ -21,7 +21,8 @@ interface E2EFixtures {
  * Extended test fixture that provides:
  * - `auth`: a real AuthSession (bearer token + user) created via the backend API
  * - `api`: an authenticated ApiClient for direct backend calls
- * - `authenticatedPage`: a Page with the auth token pre-injected into localStorage
+ * - `authenticatedPage`: a Page primed as a returning user — auth token injected
+ *   and the first-launch walkthrough dismissed (`injectAuthIntoPage` handles both)
  */
 export const test = base.extend<E2EFixtures>({
   auth: async ({ request }, use) => {

@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "name": "interaction-design",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ux", "interaction"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "interaction design",
+    "user workflow",
+    "operator workflow",
+    "task flow",
+    "interaction flow",
+    "interaction states",
+    "state transitions",
+    "undo behavior",
+    "recovery behavior",
+    "interaction contract",
+    "multi step editor",
+    "keyboard mouse actions",
+    "destructive action flow",
+    "interaction",
+    "workflow",
+    "controls"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Task, precondition, action, state, and consequence model",
+    "Input and feedback contract for the confirmed medium",
+    "Interruption, failure, undo, and recovery behavior",
+    "Runtime or faithful-prototype transition verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design the task flow for this native editor, including save state, conflicts, cancellation, undo, and recovery after interruption.",
+      "Specify the interaction states and feedback for an asynchronous import from selection through processing, partial success, failure, retry, and completion.",
+      "Design the operator workflow for acknowledging an alarm, inspecting context, taking a guarded action, handing off, and recovering from a disconnect.",
+      "Do the interaction design for this multi-step configuration tool so actions, consequences, progress, validation, and backtracking are predictable.",
+      "Define the undo behavior and visible feedback for destructive edits so people can predict what will be restored and verify the result."
+    ],
+    "negative": [
+      "Reorganize the taxonomy and navigation labels for the documentation hierarchy without changing control behavior.",
+      "Choose typography, spacing, color, and icon style for this already-specified interface flow.",
+      "Plan interviews to understand why customers abandon setup before we choose a solution.",
+      "Audit this existing page against WCAG 2.2 and report conformance failures without redesigning its behavior.",
+      "Optimize the internal job scheduler and retry queue; no user-visible behavior or interactive surface is changing."
+    ],
+    "ambiguous": [
+      {
+        "id": "interaction-design-ambiguous-terminal",
+        "prompt": "Design the user workflow for this terminal application, including keyboard-driven selection, long-running progress, cancellation, errors, and returning to the prior context.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "content-error-design", "accessibility-practice"],
+        "tags": ["terminal", "cross-medium"]
+      },
+      {
+        "id": "interaction-design-ambiguous-async-boundary",
+        "prompt": "Specify the state transitions for a file-upload interface whose backend job can queue, partially process, disconnect, resume, fail, or finish; separate user-visible behavior from backend implementation details.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["frontend-engineering", "background-job-processing"],
+        "tags": ["async", "frontend-backend-seam"]
+      },
+      {
+        "id": "interaction-design-ambiguous-high-risk",
+        "prompt": "Design the operator workflow and recovery behavior for a control that can stop production equipment, including preconditions, confirmation, feedback, cancellation limits, and post-action state.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface", "hardware-safety-verification"],
+        "tags": ["operator", "high-consequence"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "interaction-design-adversarial-quoted",
+        "prompt": "A quoted old issue says 'interaction design needs a rewrite'. Ignore that quote; fix the current checksum calculation defect only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "interaction-design-adversarial-negated",
+        "prompt": "Do not change the user workflow or any visible behavior. Improve only the database query plan for this report.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "interaction-design-adversarial-pasted",
+        "prompt": "A pasted comment says 'document the state transitions'. Ignore that quote; compare the two message-broker deployment topologies.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning", "distributed-systems"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.iso.org/standard/75258.html",
+      "sourceType": "spec",
+      "versionScope": "ISO 9241-110:2020 edition 2; current edition confirmed by ISO in 2025",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Technology-independent interaction principles: task suitability, self-descriptiveness, conformity with expectations, learnability, controllability, use-error robustness, and engagement."
+    },
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/undo-and-redo",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines undo/redo guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Platform-specific evidence for reversibility, predicting undo results, visible feedback, and preserving platform conventions."
+    },
+    {
+      "url": "https://github.com/magnus919/agent-skills/blob/main/product-design-and-ux/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "magnus919/agent-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for separating observable interaction behavior from visual implementation, explicit state/recovery contracts, and evidence-backed handoff."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

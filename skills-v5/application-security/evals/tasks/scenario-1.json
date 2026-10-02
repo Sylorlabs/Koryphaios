@@ -1,0 +1,78 @@
+{
+  "id": "application-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Review and harden a media-import service. A user can upload a ZIP archive or provide an HTTPS source URL, choose an output name, and supply converter options. The service fetches remote input, extracts the archive, writes files into a job directory, invokes a native converter, and stores generated output plus logs. Build a source-to-sink map and concrete application-security requirements for URL fetching, redirect/resolution behavior, archive paths and resource limits, output-path canonicalization, subprocess argument handling, parser limits, partial output cleanup, and safe errors/logging. Preserve authorization as a separate concern: assume the caller is already entitled to create the job. Define reproducible negative cases and fail-closed behavior, but leave final black-box proof of the finished implementation to security-verification.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://application-security/scenario-1",
+    "requirements": [
+      "media-import service with remote URL, archive, output-name, and converter-option inputs",
+      "synthetic HTTP source supporting redirects and multiple address classes",
+      "archive corpus containing traversal, nested, oversized, malformed, and valid entries",
+      "native converter invoked through a process API plus inspectable job/output directories",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "application-security-source-sink-1",
+      "assertion": "The result traces each attacker-controlled URL/archive/path/option value through decoding/normalization to outbound-request, filesystem, archive-parser, subprocess, persistence, and log/error sinks with a concrete invariant before each privileged sink."
+    },
+    {
+      "id": "application-security-path-1",
+      "assertion": "Archive entry and output paths are normalized/canonicalized at the relevant filesystem boundary and must remain within the job root; absolute, parent-traversal, symlink/reparse, or post-normalization escape cases are explicitly handled."
+    },
+    {
+      "id": "application-security-resource-1",
+      "assertion": "Archive/file/body/redirect/output size, entry count, nesting/decompression, processing time, and converter resource limits are explicit, with rejection and cleanup semantics that prevent partial privileged output from being treated as success."
+    },
+    {
+      "id": "application-security-process-1",
+      "assertion": "Converter options and file names are passed through structured process arguments or an equivalent non-shell API with a fixed executable; attacker-controlled values are not interpolated into a shell command."
+    },
+    {
+      "id": "application-security-fetch-1",
+      "assertion": "The outbound-fetch design constrains accepted URL schemes and the permitted destination policy across redirects/resolution, and does not rely on string-prefix host checks that can change meaning after parsing or DNS resolution."
+    },
+    {
+      "id": "application-security-error-1",
+      "assertion": "Failure paths return bounded user-safe errors, preserve operator diagnostics without credentials/sensitive content or unsafe attacker-controlled terminal/log data, and remove or quarantine partial outputs deterministically."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "application-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "source-to-sink trust map",
+        "path/network/process/resource invariants",
+        "negative-case matrix",
+        "fail-closed cleanup/error contract"
+      ]
+    },
+    {
+      "id": "application-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "entry-point and sensitive-sink inventory",
+    "source-to-sink security invariants",
+    "archive/path/network/process resource limits",
+    "negative and cleanup/failure cases",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "application-security-scenario-1-result",
+    "application-security-scenario-1-verification",
+    "application-security-scenario-1-paired-evaluation"
+  ]
+}

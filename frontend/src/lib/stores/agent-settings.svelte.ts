@@ -57,6 +57,7 @@ export interface AgentSettings {
   criticEnforcesPreferences: boolean;
   autoApplySafeFixes: boolean;
   confirmRuleViolations: boolean;
+  agentMessaging: 'open' | 'approval-cross-project' | 'off';
   autoRunTools: boolean;
   allowExternalPaths: boolean;
   managerModelAccess: Record<string, string[]>;
@@ -77,7 +78,7 @@ export interface AgentSettings {
   /** Tool names that are always denied. */
   toolBlocklist: string[];
   /** Per-tier tool overrides. Keys are permissionMode values. */
-  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[] }>;
+  toolPermissionsByTier?: Record<string, { allow: string[]; block: string[]; ask?: string[] }>;
   /** Bash base-command patterns that bypass the sandbox safety prompt. */
   bashCommandAllowlist: string[];
   /** Bash base-command patterns that are always blocked without prompting. */
@@ -88,6 +89,10 @@ export interface AgentSettings {
   multiSourceResearch: boolean;
   /** Context management: auto-stub stale tool outputs (recoverable via fetch_context) */
   contextPruningEnabled: boolean;
+  /** Opt into a provider request that warms a cold first-turn cache while typing. */
+  promptCacheColdPrewarmEnabled: boolean;
+  /** Provider cache keepalive policy. */
+  promptCacheKeepaliveMode: 'economic' | 'always' | 'off';
   /** Turns whose tool outputs stay full before auto-stubbing */
   contextKeepRecentTurns: number;
   /** Minimum tool-output size (chars) worth stubbing */
@@ -201,14 +206,27 @@ export interface HarnessQualificationRecord {
 export interface SkillPromotionGate {
   status: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
   candidateRuns: number;
+  baselineRuns: number;
   distinctHarnesses: number;
   distinctProviders: number;
   distinctModels: number;
   humanBlindReviews: number;
+  provenancedBlindReviews: number;
   passRate: number | null;
   quality: number | null;
   verification: number | null;
   baselineDelta: number | null;
+  pairedBaselineCases: number;
+  pairedBaselineCategories: string[];
+  skillBaselinePassRateDelta: number | null;
+  skillBaselineQualityDelta: number | null;
+  skillBaselineVerificationDelta: number | null;
+  routingObservations: number;
+  routingPrecision: number | null;
+  routingRecall: number | null;
+  regressionCases: number;
+  openRegressions: number;
+  categoryCoverage: Record<string, number>;
   reasons: string[];
 }
 
@@ -217,10 +235,15 @@ export interface SkillEvaluationCard {
   revisionHash: string;
   cases: Array<{
     id: string;
+    category: 'positive' | 'negative' | 'ambiguous' | 'adversarial' | 'full-task' | 'regression';
     prompt: string;
     expectedSelection: boolean;
     requiredEvidence: string[];
   }>;
+  suite: {
+    requiredCategories: Array<'positive' | 'negative' | 'ambiguous' | 'adversarial' | 'full-task'>;
+    categories: Record<string, SkillEvaluationCard['cases']>;
+  };
   gate: SkillPromotionGate;
   runs: Array<{
     id: string;
@@ -233,6 +256,46 @@ export interface SkillEvaluationCard {
     evidence: string[];
     recordedAt: string;
   }>;
+}
+
+export interface SkillHealthRecord {
+  name: string;
+  source: 'personal' | 'project';
+  state: 'active' | 'draft';
+  hash: string;
+  version: string;
+  steward: {
+    agentId: string;
+    displayLabel: string;
+    provider: 'chatgpt-web';
+    model: string;
+    status: 'active' | 'paused' | 'orphaned';
+    lastCompletedAt?: string;
+    lastOutcome?: 'succeeded' | 'failed' | 'cancelled' | 'expired';
+  } | null;
+  lastBenchmarkAt: string | null;
+  routingPrecision: number | null;
+  routingRecall: number | null;
+  qualityDelta: number | null;
+  openRegressions: number;
+  usageCount: number;
+  lastUsedAt: string | null;
+  conflicts: string[];
+  dependencies: string[];
+  promotionState: 'unmeasured' | 'insufficient-evidence' | 'blocked' | 'ready';
+}
+
+export interface SkillHealthSnapshot {
+  generatedAt: string;
+  records: SkillHealthRecord[];
+  summary: {
+    revisions: number;
+    active: number;
+    stewarded: number;
+    ready: number;
+    blocked: number;
+    openRegressions: number;
+  };
 }
 
 export interface SkillRevisionComparison {
@@ -318,6 +381,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   criticEnforcesPreferences: true,
   autoApplySafeFixes: false,
   confirmRuleViolations: true,
+  agentMessaging: 'open',
   autoRunTools: false,
   allowExternalPaths: false,
   managerModelAccess: {},
@@ -338,8 +402,10 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   localWebSearch: 'fallback',
   multiSourceResearch: true,
   contextPruningEnabled: true,
-  contextKeepRecentTurns: 3,
-  contextPruneMinChars: 600,
+  promptCacheColdPrewarmEnabled: false,
+  promptCacheKeepaliveMode: 'economic',
+  contextKeepRecentTurns: 8,
+  contextPruneMinChars: 2000,
   contextSelfAwareness: true,
   autoCompactEnabled: true,
   autoCompactThreshold: 80,
@@ -362,6 +428,7 @@ function createAgentSettingsStore() {
   let skills = $state<SkillRevision[]>([]);
   let skillQualifications = $state<HarnessQualificationRecord[]>([]);
   let skillEvaluationCards = $state<Record<string, SkillEvaluationCard>>({});
+  let skillHealth = $state<SkillHealthSnapshot | null>(null);
   let skillComparison = $state<SkillRevisionComparison | null>(null);
   let bundledComparison = $state<BundledSkillComparison | null>(null);
   let skillResolutionPreview = $state<SkillResolutionPreview | null>(null);
@@ -533,6 +600,7 @@ function createAgentSettingsStore() {
       const res = await apiFetch(apiUrl('/api/agent/skills'));
       const data = await res.json();
       if (res.ok && data.ok) skills = data.data;
+      await loadSkillHealth();
       // Check for bundled updates and notify the user
       await fetchBundledUpdateCount();
       if (bundledUpdateCount > 0) {
@@ -542,6 +610,16 @@ function createAgentSettingsStore() {
       }
     } catch (err) {
       console.error('Failed to load skills:', err);
+    }
+  }
+
+  async function loadSkillHealth(): Promise<void> {
+    try {
+      const res = await apiFetch(apiUrl('/api/agent/skills/health'));
+      const data = await res.json();
+      if (res.ok && data.ok) skillHealth = data.data;
+    } catch (err) {
+      console.error('Failed to load skill health:', err);
     }
   }
 
@@ -792,7 +870,7 @@ function createAgentSettingsStore() {
       bundledComparison = null;
       const messages: Record<typeof choice, string> = {
         merge: 'Bundled update saved as a draft',
-        'merge-with-agent': 'Agent-merged draft saved — review and activate it',
+        'merge-with-agent': 'Agent merged draft saved. Review and activate it',
         replace: 'Skill replaced with bundled version',
         'keep-local': 'Kept your local version',
       };
@@ -968,6 +1046,9 @@ function createAgentSettingsStore() {
     get skillEvaluationCards() {
       return skillEvaluationCards;
     },
+    get skillHealth() {
+      return skillHealth;
+    },
     get skillComparison() {
       return skillComparison;
     },
@@ -1001,6 +1082,7 @@ function createAgentSettingsStore() {
     savePreferences,
     initializePreferences,
     loadSkills,
+    loadSkillHealth,
     loadSkillQualifications,
     loadSkillEvaluationCard,
     createSkillDraft,

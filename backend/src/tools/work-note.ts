@@ -10,13 +10,69 @@ import {
 
 const VALID_STATUSES = new Set<WorkNoteStatus>(['completed', 'partial', 'blocked', 'decision']);
 
+/**
+ * The manager advertises this tool with a stub schema, so a model is guessing at
+ * the shape of the list fields. It reliably guesses "one string" or "a
+ * newline-delimited block" instead of an array. Accept both rather than burning
+ * a turn on a schema rejection and a dumped schema in the transcript.
+ */
+const LIST_SCHEMA = Object.freeze({
+  anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
+});
+
+function listSchema(description: string): Record<string, unknown> {
+  return { ...LIST_SCHEMA, description };
+}
+
+const TEST_OBJECT_SCHEMA = Object.freeze({
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    outcome: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
+    evidence: { type: 'string' },
+  },
+  required: ['name', 'outcome'],
+});
+
+const LIST_BULLET = /^[-*•]\s+/;
+
+/** Accept an array, or a bare string / newline-delimited block as one. */
 function stringArray(value: unknown): string[] | undefined {
-  return Array.isArray(value) ? value.map(String) : undefined;
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string') return undefined;
+  return value
+    .split('\n')
+    .map((line) => line.replace(LIST_BULLET, '').trim())
+    .filter(Boolean);
+}
+
+const OUTCOME_PATTERNS: ReadonlyArray<readonly [RegExp, WorkNoteTestEvidence['outcome']]> = [
+  [/\b(?:not[\s_-]?run|skipped|pending|todo)\b/i, 'not-run'],
+  [/\bpass(?:ed|es|ing)?\b/i, 'pass'],
+  [/\bfail(?:ed|s|ing|ure)?\b/i, 'fail'],
+];
+
+/** Parse "bun test (pass)" into { name: 'bun test', outcome: 'pass' }. */
+function parseTestString(value: string): WorkNoteTestEvidence {
+  const text = value.replace(LIST_BULLET, '').trim();
+  const match = OUTCOME_PATTERNS.find(([pattern]) => pattern.test(text));
+  const name = (match ? text.replace(match[0], '') : text)
+    .replace(/^[\s:(\[-]+/, '')
+    .replace(/[\s:)\]-]+$/, '')
+    .trim();
+  return { name: name || text, outcome: match?.[1] ?? 'not-run' };
 }
 
 function testEvidence(value: unknown): WorkNoteTestEvidence[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.map((entry) => {
+  if (value === undefined || value === null) return undefined;
+  const rows = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split('\n')
+      : [value];
+  return rows.map((entry) => {
+    if (typeof entry === 'string') return parseTestString(entry);
     const row = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
     const outcome =
       row.outcome === 'pass' || row.outcome === 'fail' || row.outcome === 'not-run'
@@ -50,29 +106,22 @@ export const recordWorkNoteTool: Tool = {
         enum: ['completed', 'partial', 'blocked', 'decision'],
       },
       objective: { type: 'string' },
-      decisions: { type: 'array', items: { type: 'string' } },
-      changedFiles: { type: 'array', items: { type: 'string' } },
-      commands: { type: 'array', items: { type: 'string' } },
+      decisions: listSchema('Decisions made, as a list or a newline-delimited block'),
+      changedFiles: listSchema('Files changed, as a list or a newline-delimited block'),
+      commands: listSchema('Commands run, as a list or a newline-delimited block'),
       tests: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            name: { type: 'string' },
-            outcome: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
-            evidence: { type: 'string' },
-          },
-          required: ['name', 'outcome'],
-        },
+        description:
+          'Verification evidence as {name, outcome, evidence} objects, or plain strings such as "bun test (pass)"',
+        anyOf: [
+          { type: 'array', items: TEST_OBJECT_SCHEMA },
+          { type: 'array', items: { type: 'string' } },
+          { type: 'string' },
+        ],
       },
-      evidence: { type: 'array', items: { type: 'string' } },
-      risks: { type: 'array', items: { type: 'string' } },
-      followUps: { type: 'array', items: { type: 'string' } },
-      relatedNotes: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Exact note titles to connect using wikilinks',
-      },
+      evidence: listSchema('Supporting evidence, as a list or a newline-delimited block'),
+      risks: listSchema('Known risks, as a list or a newline-delimited block'),
+      followUps: listSchema('Follow-up work, as a list or a newline-delimited block'),
+      relatedNotes: listSchema('Exact note titles to connect using wikilinks'),
       includeInContext: {
         type: 'boolean',
         description: 'Pin this work note into future agent context (default false)',

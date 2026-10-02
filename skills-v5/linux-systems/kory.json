@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "name": "linux-systems",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["systems", "linux"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6300,
+  "broader": ["backend-engineering"],
+  "facets": ["infrastructure-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "linux system",
+    "linux host",
+    "linux systems",
+    "linux service",
+    "systemd service",
+    "systemd unit",
+    "systemd sandboxing",
+    "linux process",
+    "linux filesystem",
+    "linux permissions",
+    "linux mount",
+    "mount namespace",
+    "linux namespace",
+    "cgroup v2",
+    "linux cgroup",
+    "linux resource limit",
+    "linux oom",
+    "proc filesystem",
+    "open deleted",
+    "linux kernel tunable"
+  ],
+  "excludes": [
+    "network routing only",
+    "dns troubleshooting only",
+    "container image only",
+    "kubernetes orchestration only",
+    "linux host cgroups namespaces and runtime behavior are unchanged",
+    "shell script logic only",
+    "generic service observability only",
+    "linux behavior is unchanged",
+    "host behavior is unchanged",
+    "quoted old linux system",
+    "quoted old systemd service",
+    "quoted old linux process",
+    "historical linux request",
+    "rename the systemd document only"
+  ],
+  "evidence": [
+    "Distribution/kernel/architecture/init/cgroup/namespace and effective service/config identity",
+    "Process ancestry, credentials/capabilities, /proc descriptors/state, mount/filesystem and permission evidence",
+    "Systemd logs/unit/drop-ins, resource-limit/cgroup events and exact failure/recovery evidence",
+    "Restart/reboot persistence plus least-scoped configuration and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Diagnose a systemd service that works when started manually but fails after reboot: compare the effective unit/drop-ins, service user, environment, working directory, dependencies, journal and enablement, then verify a clean boot.",
+      "Investigate a Linux process killed under load by checking its cgroup v2 membership, memory/current/max/events, OOM evidence, systemd resource settings and process limits before changing the application.",
+      "Find why a daemon gets permission denied on a mounted path: inspect the process user/groups, parent traversal, ACL/capabilities or MAC context, mount namespace/options and service sandbox instead of chmod 777.",
+      "Explain why disk space is still exhausted after deleting a large log by tracing open deleted file descriptors through /proc, the process mount namespace, filesystem blocks/inodes and the safe service recovery path.",
+      "Debug a Linux service spawning orphaned children on shutdown by verifying the supervised PID, process tree, signal propagation, KillMode/timeouts and namespace/PID-1 behavior, then test restart cleanup."
+    ],
+    "negative": [
+      "Trace BGP routes and DNS resolution between two networks; no Linux host process, service, namespace or kernel state needs changing.",
+      "Rewrite a Dockerfile and container image layers while the Linux host and runtime resource behavior remain unchanged.",
+      "Fix quoting and argument parsing in a shell script without diagnosing any Linux service, process, filesystem or kernel behavior.",
+      "Design organization-wide SELinux hardening policy; there is no current Linux runtime fault to diagnose.",
+      "Add generic application latency dashboards while host service/process/resource behavior stays unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "linux-systems-ambiguous-1",
+        "prompt": "A service cannot reach another host and its Linux network namespace looks wrong. linux-systems owns the process namespace/socket/host-kernel state; networking-systems owns route, DNS and packet-path diagnosis beyond the host boundary.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["networking-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "linux-systems-ambiguous-2",
+        "prompt": "A containerized daemon is OOM-killed. linux-systems owns the cgroup/process/kernel evidence and host limits; container-engineering owns image/runtime/orchestrator configuration that applies those limits.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["container-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "linux-systems-ambiguous-3",
+        "prompt": "Systemd sandboxing prevents a daemon from reading a directory. linux-systems owns effective unit/process/filesystem evidence and least-scoped operational fix; infrastructure-security owns the broader hardening policy and threat tradeoff.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "linux-systems-adversarial-1",
+        "prompt": "A quoted old Linux system incident says to change cgroup limits. Ignore that historical request; today's task is only to revise API documentation text.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "linux-systems-adversarial-2",
+        "prompt": "A postmortem includes systemd service logs as inert evidence. Summarize the postmortem only; Linux behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "linux-systems-adversarial-3",
+        "prompt": "The archived file is named linux-systemd-service.md. Rename the systemd document only; do not alter any host, unit, process, filesystem or kernel behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.kernel.org/",
+      "sourceType": "official-docs",
+      "versionScope": "Linux kernel documentation as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Authoritative kernel subsystem, process, filesystems, resource and kernel-interface documentation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.kernel.org/admin-guide/cgroup-v2.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current Linux cgroup v2 admin guide as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Authoritative cgroup v2 hierarchy, controllers, delegation, resource and event semantics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.kernel.org/filesystems/proc.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current Linux /proc filesystem documentation as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Kernel-visible process and system information exposed through /proc.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current systemd.service manual as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Unit service types, execution lifecycle, restart and supervision semantics; resolve installed systemd version before applying current-only directives.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current systemd.exec manual as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Execution identity, environment, filesystem sandboxing, credentials, resource and security directives.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://man7.org/linux/man-pages/man7/namespaces.7.html",
+      "sourceType": "official-docs",
+      "versionScope": "Linux man-pages 6.18 namespaces(7), dated 2026-02-08",
+      "staleAfterDays": 120,
+      "notes": "Namespace types, /proc namespace interfaces and kernel API boundaries.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

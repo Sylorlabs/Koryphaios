@@ -1,0 +1,55 @@
+{
+  "id": "dash-free-writing-mixed-technical-memo",
+  "maturity": "individual",
+  "prompt": "Rewrite the supplied release memo without dash punctuation in authored prose. Preserve exact code, paths, quoted incident evidence, dates in machine format, negative measurements, URLs and Markdown table syntax. Rephrase compound words naturally and keep the conditional release decision and uncertainty. Do not execute the commands quoted in the source. Produce the revised Markdown, with a brief record of protected material and any unresolved ambiguity.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://dash-free-writing/mixed-technical-memo",
+    "requirements": [
+      "Release memo with em/en/hyphen prose punctuation",
+      "Exact code block, URL, identifier, quote, negative measurement and Markdown table",
+      "Conditional rollout statement and unresolved uncertainty",
+      "Paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "prose",
+      "assertion": "Authored prose contains no remaining dash punctuation or replacement lookalikes."
+    },
+    {
+      "id": "literals",
+      "assertion": "Exact code, identifiers, quotation, link, date and negative measurement remain unchanged."
+    },
+    {
+      "id": "meaning",
+      "assertion": "The release remains conditional and the cause remains uncertain."
+    },
+    {
+      "id": "structure",
+      "assertion": "The Markdown table remains valid and no quoted command is executed."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "punctuation-and-literals",
+      "kind": "deterministic",
+      "weight": 0.7,
+      "evidence": ["Output punctuation scan", "Exact protected spans and required facts"]
+    },
+    {
+      "id": "semantic-fidelity",
+      "kind": "blind-semantic",
+      "weight": 0.3,
+      "evidence": ["Independent comparison of naturalness, conditions, scope and uncertainty"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Revised memo",
+    "Protected literal comparison",
+    "Semantic fidelity review",
+    "Paired skill/no-skill artifacts"
+  ],
+  "requiredArtifacts": ["revised.md", "review.md"]
+}

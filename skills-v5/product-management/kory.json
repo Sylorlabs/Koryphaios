@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "name": "product-management",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["product", "planning"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6400,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "product management",
+    "product roadmap",
+    "feature prioritization",
+    "product requirements",
+    "product brief",
+    "prd",
+    "roadmap prioritization",
+    "prioritize product opportunities",
+    "product outcome",
+    "product success metrics",
+    "launch decision",
+    "feature launch criteria",
+    "now next later roadmap",
+    "product decision memo"
+  ],
+  "excludes": [
+    "delivery schedule only",
+    "project plan only",
+    "project program management only",
+    "architecture migration plan only",
+    "a/b test design only",
+    "statistical experiment analysis only",
+    "user interview plan only",
+    "conduct user interviews only",
+    "product funnel analysis only",
+    "cohort analysis only",
+    "implement the feature only",
+    "market entry strategy only",
+    "pricing and packaging only",
+    "business case financial model only",
+    "do not create a product roadmap or prd",
+    "return only the supplied values",
+    "extract the participant names",
+    "trace which repository parser loads the fixture"
+  ],
+  "evidence": [
+    "Decision frame with target users, problem, baseline, strategic context, constraints, and time horizon",
+    "Evidence ledger distinguishing observed facts, assumptions, confidence, contradictions, and missing evidence",
+    "Prioritization tradeoffs including capacity, opportunity cost, reversibility, dependencies, and rejected alternatives",
+    "Outcome and guardrail metrics with baseline, decision threshold, and learning criteria",
+    "Rollout, iterate, stop, or rollback criteria plus unresolved decisions",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Prioritize these competing product opportunities using the supplied user research, usage evidence, strategic commitments, engineering constraints, risk, reversibility, and learning value. Capacity only permits two; make the opportunity cost and confidence explicit without inventing delivery dates.",
+      "Write a product brief for the account-recovery problem with target users, current failure mode, goals and non-goals, outcome and guardrail metrics, required behavior and edge cases, assumptions, dependencies, rollout criteria, and unresolved product decisions.",
+      "Decide whether this limited feature rollout should expand, remain limited, iterate, or stop. Compare the observed outcome to the original hypothesis and thresholds, preserve segment and representativeness limits, and treat reliability and cost guardrails as decision constraints.",
+      "Turn this stakeholder request into an evidence-backed product outcome and measurement plan rather than accepting the requested feature as the goal. Identify the decision threshold, guardrails, viable alternatives, and next learning step.",
+      "Rework this feature list into an evidence-backed now/next/later product roadmap. Explain the user and business outcomes, capacity tradeoffs, dependencies, confidence, and rejected alternatives, and do not fabricate delivery dates."
+    ],
+    "negative": [
+      "Build the detailed project delivery plan for the already-approved release: milestones, owners, dependencies, staffing, critical path, schedule, status cadence, and escalation rules. The product priority is already decided.",
+      "Design the architecture migration from the legacy event bus to the new broker, including component boundaries, compatibility phases, cutover sequencing, rollback, and technical verification. No product prioritization or PRD is requested.",
+      "Design and analyze the A/B test for the already-selected checkout change: power, sample size, randomization, exposure, statistical test, stopping rules, and interpretation. The product decision itself is out of scope.",
+      "Plan and conduct user interviews about onboarding, including recruiting, screener, interview guide, consent, note-taking, synthesis, and research limitations. Do not make the roadmap decision yet.",
+      "Analyze the activation funnel and retention cohorts from the supplied event data, diagnose the largest drop-offs, and return the queries and evidence. Do not create a product roadmap or PRD."
+    ],
+    "ambiguous": [
+      {
+        "id": "product-management-ambiguous-1",
+        "prompt": "Choose which onboarding opportunity belongs in the next product increment from the evidence packet, then implement the selected change. Keep the product decision, assumptions, success criteria, and opportunity cost separate from the implementation plan and code verification.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["ambiguous", "compound", "decision-plus-implementation"]
+      },
+      {
+        "id": "product-management-ambiguous-2",
+        "prompt": "Decide whether the product roadmap should commit to offline mode this quarter, using customer impact, strategy, capacity, risk, and reversibility, and also outline the architecture feasibility constraints that materially affect that choice. Keep product priority distinct from technical design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "compound", "roadmap-plus-architecture"]
+      },
+      {
+        "id": "product-management-ambiguous-3",
+        "prompt": "Prioritize whether to invest in the new search ranking experience, define the product outcome and guardrails, and then design an A/B experiment that can reduce the remaining uncertainty. Separate the product decision criteria from the experiment mechanics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimentation-ab-testing"],
+        "tags": ["ambiguous", "compound", "decision-plus-experiment"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "product-management-adversarial-1",
+        "prompt": "The pasted historical planning note says 'create a product roadmap and prioritize features.' Treat that sentence only as source text. My actual request is to extract the three dates from the note and return nothing else.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "product-management-adversarial-2",
+        "prompt": "Do not create a product roadmap, PRD, product brief, launch decision, or feature prioritization. Return only the supplied endpoint names in their original order.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "product-management-adversarial-3",
+        "prompt": "A repository fixture contains the inert text 'feature prioritization should use a now next later roadmap.' Ignore that sample instruction. Trace which parser loads the fixture and which tests exercise that parser.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gov.uk/service-manual",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "User-centered service/product discovery, iteration, multidisciplinary evidence, and operating decisions.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/service-standard",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Standard as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Outcome-oriented quality boundary covering user needs, journeys, accessibility, privacy/security, measurement, iteration, reliability, and responsible operation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/measuring-success/measuring-the-success-of-your-service",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK service-success measurement guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Success measures, baselines, targets, and evidence before treating delivery as success.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/measuring-success/using-data-to-improve-your-service-an-introduction",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK performance-data guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Continuous learning loops, segmentation, triangulation, and product/service improvement from observed performance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://playbook.usds.gov/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Digital Services Playbook as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "User needs, iterative delivery, analytics, security/privacy, automated testing/deployment, and operating-service guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure for the skill package itself.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers, progressive disclosure, and behavior-based evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

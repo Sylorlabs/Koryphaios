@@ -15,17 +15,25 @@ export function detectProjectRoot(): string {
       ensureSecureDir(dataDir);
       return dataDir;
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err), dataDir }, 'Failed to secure data dir, falling through to cwd detection');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), dataDir },
+        'Failed to secure data dir, falling through to cwd detection',
+      );
     }
   }
   const cwd = process.cwd();
   const candidates = [cwd, join(cwd, '..'), join(cwd, '..', '..')] as const;
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, 'koryphaios.json'))) {
-      return candidate;
-    }
+  const matches = candidates.filter((candidate) => existsSync(join(candidate, 'koryphaios.json')));
+  if (matches.length > 1) {
+    // Innermost wins (a nested checkout is a deliberate project), but a
+    // shadowed outer config is a classic source of "I edited koryphaios.json
+    // and nothing changed" confusion — name both sides once per boot.
+    serverLog.warn(
+      { chosen: matches[0], shadowed: matches.slice(1) },
+      'Multiple koryphaios.json files found in parent directories; using the innermost. The outer file(s) are ignored.',
+    );
   }
-  return cwd;
+  return matches[0] ?? cwd;
 }
 
 export const PROJECT_ROOT = detectProjectRoot();

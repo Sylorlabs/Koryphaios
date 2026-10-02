@@ -15,13 +15,12 @@
 //   antigravity  credit-accountant DB + live /usage command  (protobuf transcripts not parseable)
 //   cursor       credit-accountant DB                         (agent-transcripts have no token counts)
 //   devin        ~/.local/share/devin/cli/transcripts/*.json  ATIF final_metrics (session totals)
-//   cline        ~/.cline/data/sessions/<id>/*.messages.json  per-message metrics + modelInfo
 //   kimicode     ~/.kimi/sessions/<hash>/<uuid>/wire.jsonl    StatusUpdate token_usage events
 //   freebuff     Kory PTY usage events sourced from Freebuff's own log.jsonl
 //   jules        detected-only (approval-required; no local usage)
 //
 // Quota state: claude, codex, copilot, and antigravity expose live quota
-// endpoints or local rate_limit records. cursor, devin, cline, and kimicode
+// endpoints or local rate_limit records. cursor, devin, and kimicode
 // return empty quotas because their CLIs don't expose a local quota state —
 // usage limits are enforced server-side by the backing API and are not
 // written to disk in a parseable form.
@@ -381,7 +380,6 @@ export const CLI_API_PROVIDER_MAP: Record<string, string> = {
   antigravity: 'google',
   cursor: 'openai',
   devin: 'devin',
-  cline: 'cline',
   kimicode: 'kimicode',
   kilocode: 'kilocode',
   freebuff: 'openrouter',
@@ -1220,7 +1218,11 @@ async function readAntigravity(now: number): Promise<CliUsageReport> {
       apiProviderName: CLI_API_PROVIDER_MAP['antigravity'],
       available: hasReportedUsage(samples) || quotas.length > 0,
       attribution: 'account',
-      usageSource: 'local-session-history',
+      // Only claim a token source when there actually is one. With a freshly
+      // connected account the report is live quota and nothing else; labelling
+      // that "local-session-history" would claim Koryphaios recorded usage it
+      // never saw.
+      ...(hasReportedUsage(samples) ? { usageSource: 'local-session-history' as const } : {}),
       ...(quotas.length > 0 ? { quotaSource: 'live-cli-account' as const } : {}),
       windows: windowsFromSamples(samples, now),
       dailyUsage: dailyUsageFromSamples(samples, now),
@@ -1389,112 +1391,6 @@ async function readDevin(now: number, account?: DiscoveredCliAccount): Promise<C
       dailyUsage: dailyUsageFromSamples(samples, now),
       quotas: [],
       byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('devin')),
-      updatedAt: now,
-    },
-    samples,
-  );
-}
-
-// ── Cline CLI ─────────────────────────────────────────────────────────────────
-// Cline stores session metadata + messages at ~/.cline/data/sessions/<id>/*.json
-// The messages file has per-assistant-message metrics (inputTokens, outputTokens,
-// cacheReadTokens, cacheWriteTokens) and modelInfo.id. Each message has a `ts`
-// epoch-ms field. We parse every messages.json in the session tree.
-
-async function readCline(now: number, account?: DiscoveredCliAccount): Promise<CliUsageReport> {
-  const sessionsRoot = join(homedir(), '.cline', 'data', 'sessions');
-  const samples: UsageSample[] = [];
-  if (existsSync(sessionsRoot)) {
-    const stack = [sessionsRoot];
-    while (stack.length) {
-      const dir = stack.pop()!;
-      let entries: import('node:fs').Dirent[];
-      try {
-        entries = readdirSync(dir, { withFileTypes: true });
-      } catch (err: unknown) {
-        serverLog.debug(
-          { err: err instanceof Error ? err.message : String(err), dir },
-          'readCline: readdir sessions failed',
-        );
-        continue;
-      }
-      for (const entry of entries) {
-        const full = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          stack.push(full);
-          continue;
-        }
-        if (!entry.name.endsWith('.messages.json')) continue;
-        try {
-          const st = await stat(full);
-          if (now - st.mtimeMs > SCAN_HORIZON_MS) continue;
-          const text = await readFile(full, 'utf8');
-          const data = JSON.parse(text) as {
-            messages?: Array<{
-              role?: string;
-              ts?: number;
-              modelInfo?: { id?: string; provider?: string };
-              metrics?: {
-                inputTokens?: number;
-                outputTokens?: number;
-                cacheReadTokens?: number;
-                cacheWriteTokens?: number;
-              };
-            }>;
-          };
-          for (const msg of data.messages ?? []) {
-            if (msg.role !== 'assistant') continue;
-            const model = msg.modelInfo?.id?.trim();
-            const metrics = msg.metrics;
-            const ts = msg.ts;
-            if (!model || !metrics || typeof ts !== 'number') continue;
-            if (now - ts > SCAN_HORIZON_MS) continue;
-            // Cline routes through OpenAI-compatible providers, so inputTokens
-            // (prompt_tokens) already INCLUDES cached tokens. Do not add
-            // cacheReadTokens or cacheWriteTokens to tokensIn — that would
-            // double-count. cacheRead is recorded as a breakdown detail only.
-            const tokensIn = metrics.inputTokens ?? 0;
-            const tokensOut = metrics.outputTokens ?? 0;
-            if (tokensIn > 0 || tokensOut > 0) {
-              samples.push({
-                ts,
-                model,
-                tokensIn,
-                tokensOut,
-                cacheRead: metrics.cacheReadTokens ?? 0,
-                cacheReadIncludedInTokensIn: true,
-                cacheReadEvidence: true,
-              });
-            }
-          }
-        } catch (err: unknown) {
-          serverLog.debug(
-            { err: err instanceof Error ? err.message : String(err), file: full },
-            'readCline: messages parse failed',
-          );
-        }
-      }
-    }
-  }
-
-  return withPricingSamples(
-    {
-      provider: 'cline',
-      apiProviderName: CLI_API_PROVIDER_MAP['cline'],
-      ...(account
-        ? {
-            accountId: account.id,
-            accountLabel: account.label,
-            ...(account.email ? { accountEmail: account.email } : {}),
-          }
-        : {}),
-      available: hasReportedUsage(samples),
-      attribution: 'account',
-      usageSource: 'local-session-history',
-      windows: windowsFromSamples(samples, now),
-      dailyUsage: dailyUsageFromSamples(samples, now),
-      quotas: [],
-      byModel: byModelFromSamples(samples, now, makeApiEquivalentResolver('cline')),
       updatedAt: now,
     },
     samples,
@@ -1871,12 +1767,6 @@ async function collectCliUsageReports(opts?: {
     (account) => (at: number) => readDevin(at, account),
   );
 
-  // ── Cline: per-account readers ─────────────────────────────────────────────
-  const clineAccounts = allAccounts.filter((account) => account.provider === 'cline');
-  const clineReaders = (clineAccounts.length > 0 ? clineAccounts : [undefined]).map(
-    (account) => (at: number) => readCline(at, account),
-  );
-
   // ── Kimi Code: per-account readers ─────────────────────────────────────────
   const kimiAccounts = allAccounts.filter((account) => account.provider === 'kimicode');
   const kimiReaders = (kimiAccounts.length > 0 ? kimiAccounts : [undefined]).map(
@@ -1902,7 +1792,6 @@ async function collectCliUsageReports(opts?: {
     readAntigravity,
     ...cursorReaders,
     ...devinReaders,
-    ...clineReaders,
     ...kimiReaders,
     readFreebuff,
     ...unavailableReaders,

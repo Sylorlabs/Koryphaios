@@ -1,8 +1,11 @@
 <script lang="ts">
-  // The duration is measured from the server timestamp when the agent entered
-  // thinking until its next action. This includes providers that buffer all
-  // reasoning into one event, while avoiding an inaccurate client stopwatch.
+// The duration is measured from the server timestamp when the agent entered
+// thinking until its next action. This includes providers that buffer all
+// reasoning into one event, while avoiding an inaccurate client stopwatch.
   import { slide } from 'svelte/transition';
+  import { untrack } from 'svelte';
+  import { requestExpandAnchor } from '$lib/utils/expand-anchor';
+
 
   interface Props {
     text: string;
@@ -28,22 +31,11 @@
   $effect(() => {
     if ((durationMs ?? 0) > peakMs) peakMs = durationMs ?? 0;
   });
-  let now = $state(Date.now());
-  $effect(() => {
-    if (finalized || !thinkingStartedAt) return;
-    now = Date.now();
-    const timer = setInterval(() => (now = Date.now()), 100);
-    return () => clearInterval(timer);
-  });
-  // Keep the live counter moving even when a provider buffers its reasoning
-  // into a single event. The final server event replaces this with the exact
-  // timestamp-to-timestamp duration when the next action arrives.
-  let displayMs = $derived(
-    Math.max(peakMs, durationMs ?? 0, !finalized && thinkingStartedAt ? now - thinkingStartedAt : 0),
-  );
 
   // Live = provider hasn't finalized yet. Safety valve: if no new duration
-  // arrives for 15s the run died mid-thought — stop shimmering.
+  // arrives for 15s the run died mid-thought — stop shimmering AND stop the
+  // stopwatch. Previously only the shimmer stopped while `now` kept ticking
+  // against a never-finalized start, producing impossible values like "3000m".
   let staleAt = $state(0);
   $effect(() => {
     void durationMs;
@@ -54,12 +46,68 @@
   });
   let isLive = $derived(!finalized && staleAt === 0);
 
+  // Snapshot of the stopwatch taken the moment the block goes stale, so the
+  // display freezes at the last live value instead of collapsing to 0.0s
+  // when no server duration ever arrived.
+  //
+  // Prefer the last server-reported duration: it is the honest elapsed time
+  // as of the provider's final event, whereas extrapolating to the moment the
+  // watchdog fired would bill the reader for however long we sat waiting for a
+  // terminal event that never arrived. Only fall back to the live tick when
+  // the server never sent a duration at all (a provider that buffers its whole
+  // reasoning into one event), where the extrapolated value is the only number
+  // the reader has ever seen.
+  let frozenMs = $state(0);
+  $effect(() => {
+    if (staleAt !== 0 && !finalized && thinkingStartedAt) {
+      const serverMs = durationMs ?? 0;
+      const extrapolated = serverMs > 0 ? 0 : clampLiveTick(untrack(() => now) - thinkingStartedAt);
+      const settled = Math.max(serverMs, extrapolated);
+      if (settled > frozenMs) frozenMs = settled;
+    }
+  });
+
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!isLive || !thinkingStartedAt) return;
+    now = Date.now();
+    const timer = setInterval(() => (now = Date.now()), 100);
+    return () => clearInterval(timer);
+  });
+  // Keep the live counter moving even when a provider buffers its reasoning
+  // into a single event. The final server event replaces this with the exact
+  // timestamp-to-timestamp duration when the next action arrives.
+  // The live tick is bounded: it only runs while the block is live (server
+  // updates within the last 15s) and is clamped so a corrupt or ancient
+  // start timestamp can never render an absurd duration.
+  let displayMs = $derived(
+    Math.max(peakMs, durationMs ?? 0, frozenMs, isLive && thinkingStartedAt ? clampLiveTick(now - thinkingStartedAt) : 0),
+  );
+
+  /** Last-resort bound for the client-side live tick. Normal live ticks never
+   *  approach this (the stale freeze stops them ~15s after the last server
+   *  update); it only bites when the start timestamp is corrupt or ancient. */
+  const MAX_LIVE_TICK_MS = 15 * 60 * 1000;
+
+  function clampLiveTick(ms: number): number {
+    if (!Number.isFinite(ms) || ms < 0) return 0;
+    return Math.min(ms, MAX_LIVE_TICK_MS);
+  }
+
   function formatDuration(ms: number): string {
     const s = ms / 1000;
     if (s < 60) return `${s.toFixed(1)}s`;
     const m = Math.floor(s / 60);
     const rem = Math.round(s % 60);
     return `${m}m ${rem}s`;
+  }
+
+  function toggle(event: MouseEvent) {
+    // Opening the panel grows this row, which would push every message below
+    // it down and out of view. Ask the transcript to absorb that growth into
+    // its scroll offset so the messages below keep their place.
+    requestExpandAnchor(event.currentTarget);
+    expanded = !expanded;
   }
 
   // Auto-follow the reasoning stream when peeking live.
@@ -74,7 +122,7 @@
 <!-- Collapsed: reasoning fully hidden — just the stopwatch line -->
 <button
   class="thinking-row group"
-  onclick={() => (expanded = !expanded)}
+  onclick={toggle}
   aria-expanded={expanded}
   title={expanded ? 'Hide reasoning' : 'Show reasoning'}
 >

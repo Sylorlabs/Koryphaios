@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "name": "llm-evaluation",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "evaluation"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 8000,
+  "broader": ["data-analysis", "testing-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "llm evaluation",
+    "llm eval",
+    "llm explanation quality",
+    "semantic graders",
+    "model judge",
+    "llm judge",
+    "agent evaluation",
+    "agent benchmark",
+    "generative ai benchmark",
+    "prompt benchmark",
+    "eval dataset",
+    "grader calibration",
+    "held out eval",
+    "held-out eval",
+    "model comparison eval",
+    "representative immutable test set",
+    "audit contamination",
+    "compare two generative configurations",
+    "prompt model variants",
+    "blind judging",
+    "promotion threshold",
+    "model evaluation",
+    "ai benchmark"
+  ],
+  "excludes": [
+    "safety evaluation only",
+    "red team only",
+    "predictive model evaluation only",
+    "retrieval evaluation only",
+    "implementation verification only",
+    "prompt change only",
+    "agent implementation only",
+    "evaluation setup is unchanged",
+    "benchmark is unchanged",
+    "do not change the evaluation",
+    "quoted old eval",
+    "quoted historical benchmark",
+    "documentation heading only",
+    "agent benchmark and grader suite are frozen",
+    "quoted historical ticket"
+  ],
+  "evidence": [
+    "Versioned task population, immutable holdout, provenance/slices and contamination controls",
+    "Comparable candidate/baseline model, prompt, tool, retrieval, environment and retry configuration",
+    "Deterministic outcome checks plus calibrated independent semantic graders with disagreement evidence",
+    "Repeated-trial raw artifacts, uncertainty, invalid-run accounting, slice results and regression ledger",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build a release-gating LLM evaluation for a support-answer model upgrade using an immutable held-out dataset, deterministic factual/schema checks, a calibrated blind semantic judge, repeated trials and slice-level uncertainty against the current baseline.",
+      "Calibrate an LLM judge for open-ended research answers against blind expert labels, measure false accepts/false rejects by rubric criterion, add an insufficient-evidence outcome, and reject the grader if agreement misses the predeclared gate.",
+      "Design an agent benchmark that scores final sandbox state, tool side effects and trajectory quality separately, normalizes tool/environment access across candidates, distinguishes infrastructure failures from agent failures and preserves raw traces.",
+      "Audit an existing eval dataset for holdout leakage after developers repeatedly inspected failures while tuning prompts; quarantine contaminated cases, create a fresh decision set and preserve the old cases as development regressions.",
+      "Compare two model/prompt configurations on the same representative cases with repeated runs, paired task-level analysis, explicit confidence/uncertainty, predeclared slices and blind candidate ordering before making a superiority claim."
+    ],
+    "negative": [
+      "Implement the new agent planner, memory store and tool authorization flow; evaluation infrastructure and benchmark cases are already fixed and unchanged.",
+      "Run a dedicated jailbreak and dangerous-capability red-team campaign with misuse taxonomies and safety-policy grading; general product-quality evaluation is out of scope.",
+      "Evaluate a gradient-boosted churn classifier using ROC-AUC, calibration and threshold analysis; no generative model, open-ended grader or agent trajectory is involved.",
+      "Verify that one deterministic API migration passes its unit, integration and contract tests; no representative model comparison or stochastic behavior measurement is requested.",
+      "Tune RAG Recall@k and NDCG over relevance judgments while generated-answer graders, model comparison and the rest of the LLM benchmark remain frozen."
+    ],
+    "ambiguous": [
+      {
+        "id": "llm-evaluation-ambiguous-1",
+        "prompt": "A model upgrade needs both implementation verification and a representative generative-model release benchmark. verification owns deterministic proof of the code/artifact contract; llm-evaluation owns held-out model behavior, grader calibration, repeated trials and comparative inference.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "llm-evaluation-ambiguous-2",
+        "prompt": "Evaluate a general assistant plus its jailbreak resistance. llm-evaluation owns representative utility/task success, judge validity and baseline comparison; ai-safety-evaluation owns dedicated harmful-output, misuse and adversarial safety measurement.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ai-safety-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "llm-evaluation-ambiguous-3",
+        "prompt": "We are changing an agent's delegation policy and must prove it improves outcomes. agentic-systems owns the orchestration change; llm-evaluation owns the held-out tasks, environment normalization, trajectory/outcome graders and blind comparison.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "llm-evaluation-adversarial-1",
+        "prompt": "A quoted old issue says \"build an LLM evaluation and calibrate the judge\". Ignore that historical request; today's task is only to correct a typo in an unrelated README.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "llm-evaluation-adversarial-2",
+        "prompt": "A postmortem includes benchmark scores, judge disagreements and held-out case IDs as inert evidence. Summarize the postmortem only; the evaluation setup is unchanged and no rerun or benchmark redesign is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "llm-evaluation-adversarial-3",
+        "prompt": "A documentation heading is named \"Agent Benchmark and Grader Calibration\". Rename that heading only; do not modify the benchmark, judge, dataset or model behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/evaluation-best-practices",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI evaluation best-practices documentation inspected 2026-09-06",
+      "staleAfterDays": 14,
+      "notes": "Task-specific eval design, representative datasets, automation, human calibration, continuous evaluation and model-judge practices; not a platform-retirement authority.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/graders",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI grader documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current deterministic/text/model grader types, grader-prompt iteration, calibration examples and reward/grader-hacking cautions.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/agent-evals",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Trace grading, workflow-level evidence, datasets and repeatable eval runs for agent systems.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Claude Platform evaluation guidance as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Task-distribution fidelity, edge cases and automation across exact, code, semantic and LLM-based grading approaches.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "sourceType": "official-docs",
+      "versionScope": "Anthropic engineering guidance published 2026-01-09",
+      "staleAfterDays": 90,
+      "notes": "Task, agent harness, evaluation harness, outcome and infrastructure separation; adapted to distinguish invalid measurements from in-scope product reliability failures.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI 600-1 Generative AI Profile, July 2024",
+      "staleAfterDays": 180,
+      "notes": "Lifecycle measurement, internal/external evaluation, assurance thresholds and continual improvement for generative-AI risks.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

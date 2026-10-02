@@ -1,12 +1,25 @@
 // Keyboard shortcuts — editable, persisted to localStorage, Svelte 5 runes
 
-import { isMac } from '$lib/utils/platform';
+import { isMac, formatKey } from '$lib/utils/platform';
 
 export interface Shortcut {
   id: string;
   keys: string[];
+  /** Extra chords that trigger the same action. Voice mode uses one so the
+   *  push-to-talk key stays reachable when a platform never reports it. */
+  altKeys?: string[][];
   action: string;
   description?: string;
+}
+
+/** Modifiers a chord is built from. Everything else is a target key, including
+ *  fn, which is a target even though the platform may also report it as a
+ *  hardware modifier. */
+const MODIFIER_KEYS = ['Ctrl', 'Shift', 'Alt', 'Meta', 'Mod'];
+
+/** True when a chord has no modifier, so it would collide with plain typing. */
+export function isBareKeyChord(keys: string[]): boolean {
+  return !keys.some((key) => key === 'Mod' || key === 'Ctrl' || key === 'Meta' || key === 'Alt');
 }
 
 const STORAGE_KEY = 'koryphaios-shortcuts';
@@ -24,9 +37,19 @@ const defaultShortcuts: Shortcut[] = [
   },
   {
     id: 'toggle_zen_mode',
-    keys: ['Mod', 'Shift', 'Y'],
+    keys: ['Mod', 'Shift', 'Z'],
     action: 'Toggle Zen mode',
     description: 'Focus',
+  },
+  {
+    id: 'voice_mode',
+    // Push to talk: hold to record, release to transcribe. fn is the natural
+    // key for it, but macOS keeps fn/Globe for dictation and never reports it
+    // to a webview, so the chord that always works is kept alongside.
+    keys: ['Fn'],
+    altKeys: [['Mod', 'Shift', 'M']],
+    action: 'Voice mode',
+    description: 'Hold to record, release to transcribe',
   },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
@@ -39,6 +62,20 @@ function loadShortcuts(): Shortcut[] {
     if (stored) {
       let parsed = JSON.parse(stored) as Shortcut[];
 
+      // A stored voice_mode on the old default chord is the untouched default,
+      // so move it to the new push-to-talk binding and keep the old chord as the
+      // fallback rather than leaving the user on the retired behaviour.
+      parsed = parsed.map((s) => {
+        if (s.id !== 'voice_mode' || s.altKeys?.length) return s;
+        const untouchedDefault =
+          s.keys.length === 3 &&
+          s.keys.includes('Mod') &&
+          s.keys.includes('Shift') &&
+          s.keys.includes('M');
+        if (!untouchedDefault) return s;
+        return { ...s, keys: ['Fn'], altKeys: [['Mod', 'Shift', 'M']] };
+      });
+
       // Migrate old 'Ctrl' shortcuts to 'Mod'
       parsed = parsed
         .filter((s) => s.id !== 'toggle_yolo')
@@ -49,15 +86,15 @@ function loadShortcuts(): Shortcut[] {
             s.keys.length === 3 &&
             s.keys.includes('Mod') &&
             s.keys.includes('Shift') &&
-            s.keys.includes('Z')
-              ? ['Mod', 'Shift', 'Y']
+            s.keys.includes('Y')
+              ? ['Mod', 'Shift', 'Z']
               : s.keys.map((k) => (k === 'Ctrl' ? 'Mod' : k)),
         }));
 
       // Merge in missing default shortcuts
       for (const def of defaultShortcuts) {
         if (!parsed.some((s) => s.id === def.id)) {
-          parsed.push(structuredClone(def));
+          parsed.push($state.snapshot(def));
         }
       }
 
@@ -67,7 +104,7 @@ function loadShortcuts(): Shortcut[] {
     // Corrupt or missing shortcuts file — fall back to defaults.
     console.debug('Failed to load saved shortcuts:', err);
   }
-  return structuredClone(defaultShortcuts);
+  return $state.snapshot(defaultShortcuts);
 }
 
 function createShortcutStore() {
@@ -86,15 +123,38 @@ function createShortcutStore() {
     },
 
     reset() {
-      shortcuts = structuredClone(defaultShortcuts);
+      shortcuts = $state.snapshot(defaultShortcuts);
       localStorage.removeItem(STORAGE_KEY);
     },
 
-    /** Check if a KeyboardEvent matches a given shortcut id */
+    /** Check if a KeyboardEvent matches a given shortcut id or any of its
+     *  alternative chords. */
     matches(id: string, e: KeyboardEvent): boolean {
       const shortcut = shortcuts.find((s) => s.id === id);
       if (!shortcut) return false;
-      return keysMatch(shortcut.keys, e);
+      return [shortcut.keys, ...(shortcut.altKeys ?? [])].some((keys) => keysMatch(keys, e));
+    },
+
+    /** Every chord bound to an action, primary first. */
+    chords(id: string): string[][] {
+      const shortcut = shortcuts.find((s) => s.id === id);
+      if (!shortcut) return [];
+      return [shortcut.keys, ...(shortcut.altKeys ?? [])];
+    },
+
+    /** True when the action is bound to a chord with no modifier, which means it
+     *  would fight with ordinary typing in a text field. */
+    isBare(id: string): boolean {
+      const shortcut = shortcuts.find((s) => s.id === id);
+      if (!shortcut) return false;
+      return [shortcut.keys, ...(shortcut.altKeys ?? [])].some(isBareKeyChord);
+    },
+
+    /** Human-readable binding for a shortcut, e.g. "⌘+Shift+M" */
+    label(id: string): string {
+      const shortcut = shortcuts.find((s) => s.id === id);
+      if (!shortcut) return '';
+      return shortcut.keys.map(formatKey).join('+');
     },
   };
 }
@@ -120,7 +180,7 @@ function keysMatch(keys: string[], e: KeyboardEvent): boolean {
   if (!ctrlOk || !metaOk || !shiftOk || !altOk) return false;
 
   // Find the non-modifier key in the shortcut
-  const nonModKeys = keys.filter((k) => !['Ctrl', 'Shift', 'Alt', 'Meta', 'Mod'].includes(k));
+  const nonModKeys = keys.filter((k) => !MODIFIER_KEYS.includes(k));
   if (nonModKeys.length === 0) return false;
 
   const target = nonModKeys[0];
@@ -134,6 +194,12 @@ function keysMatch(keys: string[], e: KeyboardEvent): boolean {
   }
   if (target === 'Enter') {
     return eventKey === 'Enter';
+  }
+  // fn is reported as 'Fn' by some keyboards and as a key the app never sees at
+  // all on macOS, where the system keeps it for dictation. Both are fine: the
+  // chord simply does not fire where the platform swallows it.
+  if (target.toLowerCase() === 'fn') {
+    return eventKey === 'Fn' || eventKey === 'Globe' || eventKey === 'FnLock';
   }
 
   return eventKey === target.toUpperCase() || eventKey === target;

@@ -1,0 +1,69 @@
+{
+  "id": "concurrency-debugging-full-task-1",
+  "maturity": "individual",
+  "prompt": "The supplied async document store loses one of two field updates when `saveTitle()` and `saveTags()` start from revision 7 at the same time. Sequential calls are correct. Use the fixture's barriers to force both completion orders, reconstruct each read/modify/write timeline, identify the violated revision/ownership invariant, implement the narrow synchronization or compare-and-swap correction that preserves both updates, and add deterministic regressions for both orders plus a sequential control. Do not solve the race with sleeps or by serializing all document operations globally.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://concurrency-debugging/concurrent-document-saves",
+    "requirements": [
+      "two deterministic barriers expose both overlapping save orders",
+      "sequential title and tag saves are correct",
+      "the document revision is the existing optimistic-concurrency boundary",
+      "global serialization of unrelated documents is outside scope",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "concurrency-save-two-orders",
+      "assertion": "Both overlap schedules are exercised and at least one reproduces the lost update on the starting revision."
+    },
+    {
+      "id": "concurrency-save-invariant",
+      "assertion": "The causal explanation identifies how two actors violate the existing revision/ownership invariant."
+    },
+    {
+      "id": "concurrency-save-regression",
+      "assertion": "Both fields survive in both controlled orders after the fix, sequential behavior remains correct, and no arbitrary sleep/global lock is used."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "concurrency-debugging-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Concurrency timeline",
+        "Violated invariant",
+        "Stress regression",
+        "both controlled schedules",
+        "actual synchronization/state-transition diff"
+      ]
+    },
+    {
+      "id": "concurrency-debugging-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the timeline distinguishes actors and contested state",
+        "the repair enforces the stated invariant at the owning boundary",
+        "verification covers alternate interleavings rather than one lucky run"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Concurrency timeline",
+    "Violated invariant",
+    "Stress regression",
+    "controlled pre-fix schedule evidence",
+    "actual diff and both-order regressions",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "concurrency-debugging-scenario-1-timeline",
+    "concurrency-debugging-scenario-1-invariant",
+    "concurrency-debugging-scenario-1-regression",
+    "concurrency-debugging-scenario-1-paired-evaluation"
+  ]
+}

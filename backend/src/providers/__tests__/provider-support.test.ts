@@ -7,7 +7,6 @@ const EXPLICITLY_BLOCKED = new Set<string>([
   ...[...UNSUPPORTED_CHAT_PROVIDER_NAMES].filter(
     (name) => !DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name as never),
   ),
-  'gitlab',
   'jules',
 ]);
 
@@ -28,7 +27,6 @@ describe('provider release support truth', () => {
       'claude',
       'codex',
       'codex-auth',
-      'cline',
       'cursor',
       'devin',
       'grok',

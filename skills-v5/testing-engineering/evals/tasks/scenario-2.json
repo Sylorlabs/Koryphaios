@@ -1,0 +1,68 @@
+{
+  "id": "testing-engineering-full-task-2",
+  "maturity": "individual",
+  "prompt": "A CLI now supports `--format json`. Build the regression coverage for the feature without creating a slow end-to-end matrix. The parser already exposes a stable public argument-normalization function and the CLI has a subprocess harness. Design complementary tests for accepted and rejected format values, JSON serialization of empty and Unicode fields, stdout/stderr separation, and one real subprocess path that proves the assembled command honors the flag. Use repository conventions, avoid snapshots that obscure semantic assertions, and show which contract each layer protects.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://testing-engineering/cli-json-layering",
+    "requirements": [
+      "the CLI implementation is complete but has only legacy text-format tests",
+      "a stable public argument-normalization function and a supported subprocess harness are available",
+      "the JSON serializer can be exercised without spawning the full CLI",
+      "the subprocess harness captures stdout, stderr, and exit status independently",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "testing-cli-boundaries",
+      "assertion": "Accepted/rejected format values and serializer edge cases are covered at stable narrow boundaries, while one subprocess test proves flag-to-output wiring through the assembled CLI."
+    },
+    {
+      "id": "testing-cli-semantics",
+      "assertion": "Tests assert parsed JSON values plus stdout/stderr/exit semantics directly rather than using opaque full-output snapshots."
+    },
+    {
+      "id": "testing-cli-no-duplication",
+      "assertion": "The subprocess layer does not repeat the entire parser and serializer matrix already covered by narrower tests."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "testing-engineering-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Claim-to-test matrix",
+        "focused parser and serializer test results",
+        "real subprocess smoke result",
+        "test-suite diff showing nonduplicated coverage"
+      ]
+    },
+    {
+      "id": "testing-engineering-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "test placement matches the failure boundary",
+        "assertions protect behavior rather than implementation details",
+        "the suite balances feedback speed with one assembled-system oracle"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Claim-to-test matrix",
+    "test diff",
+    "focused test output",
+    "subprocess smoke output",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "testing-engineering-scenario-2-test-plan",
+    "testing-engineering-scenario-2-test-diff",
+    "testing-engineering-scenario-2-layered-results",
+    "testing-engineering-scenario-2-paired-evaluation"
+  ]
+}

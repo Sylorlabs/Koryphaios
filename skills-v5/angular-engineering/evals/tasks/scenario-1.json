@@ -1,0 +1,82 @@
+{
+  "id": "angular-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "An Angular customer editor built with signals and reactive forms is reused when only the route id changes. The form keeps dirty values from the previous customer and an in-flight save can apply its success state to the newly routed customer. Repair ownership and cancellation while retaining route reuse: derive the active id from router state, reset/initialize the form intentionally, prevent stale async completion, and test id changes, validation errors, navigation away, and keyboard focus on the first invalid field. Keep the solution Angular-specific rather than importing React/Vue patterns.",
+  "environment": {
+    "kind": "browser",
+    "startingState": "fixture://angular-engineering/signal-form-route-reuse",
+    "requirements": [
+      "Angular standalone component using signals, ReactiveFormsModule, and route parameter reuse",
+      "two customer ids with delayed save responses that can complete out of order",
+      "existing validation and unsaved-change behavior that must remain compatible",
+      "component/router tests for id change, cancellation, error focus, and teardown",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "angular-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "angular-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "angular-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "signal-form-route-reuse scenario evidence",
+    "angular-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "angular-engineering-individual-scenario-1-result",
+    "angular-engineering-individual-scenario-1-verification",
+    "angular-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual angular-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=frontend-engineering; near-neighbor=react-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm Angular version and standalone/module conventions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Form and async state are scoped to the active route entity; a response started for one customer can never mutate the UI state for another customer."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run Angular build/tests and exercise routing, form validation, subscription cleanup, async error states, keyboard behavior, and change-detection-sensitive interactions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not subscribe without lifecycle ownership, mutate shared service state invisibly, bypass template type checking, or mix incompatible reactive patterns without a reason."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (angular-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

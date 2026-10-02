@@ -1,0 +1,68 @@
+{
+  "id": "visual-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A macOS document inspector was rebuilt from an approved design. Perform a screenshot review and layout check in the real native runtime at the minimum 620x520 window, the default 900x700 window, and a 1400x900 wide window. Check light and dark appearances, a long German localization, the empty-selection state, a document with the maximum metadata fields, and system text size increased one supported step. Verify toolbar/content hierarchy, sidebar alignment, field-label wrapping, truncation, minimum-window clipping, separator/material consistency, and whether resize transitions leave controls stranded or overlapping. The supplied reference is a default-size English light-mode capture, so do not treat it as a pixel oracle for other contexts; use Apple platform layout guidance and the established design tokens for those states.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://visual-verification/native-inspector",
+    "requirements": [
+      "the fixture runs a fixed macOS/Xcode build identity with deterministic document data",
+      "an approved default-size English light-mode reference capture is supplied",
+      "the app supports the three specified window sizes, light/dark appearance, localization fixture, and larger text setting",
+      "the runtime capture tool records window size, appearance, locale, and text-size context with each image",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "visual-native-reference",
+      "assertion": "The default English light-mode runtime is compared to the approved reference under matching size/content conditions, with observed spacing, alignment, typography, and material differences called out explicitly."
+    },
+    {
+      "id": "visual-native-adaptation",
+      "assertion": "Minimum, wide, dark, long-localization, dense-content, empty-selection, and larger-text states have no unsupported clipping, overlap, stranded controls, or misleading truncation; failures are tied to exact captures."
+    },
+    {
+      "id": "visual-native-scope",
+      "assertion": "Reference-pixel similarity is not used as the oracle for contexts absent from the reference; platform adaptation and established design-token claims are evaluated instead."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "visual-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Stabilized native runtime captures",
+        "State and size matrix",
+        "reference comparison at matching conditions",
+        "claim-level visual verdicts"
+      ]
+    },
+    {
+      "id": "visual-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "native adaptation is judged against platform and product intent rather than browser assumptions",
+        "the reference is not overextended to unsupported contexts",
+        "localization, density, text-size, and resize risks are represented"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Stabilized native runtime captures",
+    "State and size matrix",
+    "matching-condition reference comparison",
+    "claim-level visual verdicts",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "visual-verification-scenario-2-capture-matrix",
+    "visual-verification-scenario-2-reference-audit",
+    "visual-verification-scenario-2-verdict",
+    "visual-verification-scenario-2-paired-evaluation"
+  ]
+}

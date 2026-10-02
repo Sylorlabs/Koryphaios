@@ -18,8 +18,16 @@ import { ValidationError } from '../errors/types';
 import { serverLog } from '../logger';
 import { PROJECT_ROOT } from '../runtime/paths';
 
+const KORY_LOCAL_PROVIDER = 'kory-local';
+/** Identifies the local *runtime*, not one model file: the desktop app can run a
+ *  ggml, ONNX, or PyTorch voice model, and reports which one it loaded. */
+const KORY_LOCAL_MODEL = 'kory-local-voice';
+/** Model id persisted before the runtime became format-agnostic. */
+const LEGACY_KORY_LOCAL_MODEL = 'kory-whisper-local';
+const LOCAL_VOICE_SETUP_VERSION = 1;
+
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
-  input: { provider: 'system', modelId: 'web-speech-recognition', language: 'en' },
+  input: { provider: KORY_LOCAL_PROVIDER, modelId: KORY_LOCAL_MODEL, language: 'en' },
   output: {
     provider: 'system',
     modelId: 'web-speech-synthesis',
@@ -28,6 +36,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   },
   autoReadFinalReplies: false,
   voiceModeEnabled: true,
+  localVoiceSetupVersion: LOCAL_VOICE_SETUP_VERSION,
 };
 
 /** Resolved per call so tests can redirect the data dir via env. */
@@ -85,6 +94,14 @@ const DEEPGRAM_TTS_MODELS = [
 ].map((id) => ({ id, name: id, capability: 'tts' as const }));
 
 const PROVIDERS: Array<Omit<VoiceProviderDescriptor, 'configured'>> = [
+  {
+    id: KORY_LOCAL_PROVIDER,
+    name: 'Kory Voice',
+    capabilities: ['stt'],
+    local: true,
+    supportsDiscovery: false,
+    models: [{ id: KORY_LOCAL_MODEL, name: 'Local voice model', capability: 'stt' }],
+  },
   {
     id: 'system',
     name: 'Browser / operating system',
@@ -200,6 +217,12 @@ export function validateVoiceSettings(value: unknown): VoiceSettings {
   }
   if (!INPUT_PROVIDER_IDS.has(v.input.provider) && !v.input.provider.startsWith('custom:'))
     throw new ValidationError('Select a supported speech-to-text provider.');
+  if (
+    v.input.provider === KORY_LOCAL_PROVIDER &&
+    v.input.modelId !== KORY_LOCAL_MODEL &&
+    v.input.modelId !== LEGACY_KORY_LOCAL_MODEL
+  )
+    throw new ValidationError('Select the local voice model.');
   if (v.input.provider === 'system' && v.input.modelId !== 'web-speech-recognition')
     throw new ValidationError('Select the supported system speech recognition model.');
   if (v.output.provider === 'system') {
@@ -218,7 +241,9 @@ export function validateVoiceSettings(value: unknown): VoiceSettings {
     throw new ValidationError('Auto-read must be boolean');
   if (typeof v.voiceModeEnabled !== 'boolean')
     throw new ValidationError('Voice mode settings must be boolean');
-  return structuredClone(v);
+  const cloned = structuredClone(v);
+  cloned.localVoiceSetupVersion = LOCAL_VOICE_SETUP_VERSION;
+  return cloned;
 }
 
 function clampSpeechSpeed(value: unknown): number {
@@ -277,8 +302,15 @@ export function sanitizeVoiceSettings(raw: unknown): VoiceSettings {
       typeof source.voiceModeEnabled === 'boolean'
         ? source.voiceModeEnabled
         : defaults.voiceModeEnabled,
+    localVoiceSetupVersion: LOCAL_VOICE_SETUP_VERSION,
   };
 
+  // The desktop app owns which voice model is installed, so the persisted id
+  // only records the runtime. Older settings named the bundled model; both are
+  // accepted and normalized to the runtime id.
+  if (settings.input.provider === KORY_LOCAL_PROVIDER) {
+    settings.input.modelId = KORY_LOCAL_MODEL;
+  }
   // System providers only accept their built-in model ids.
   if (settings.input.provider === 'system') settings.input.modelId = 'web-speech-recognition';
   if (settings.output.provider === 'system') {
@@ -319,7 +351,33 @@ export async function loadVoiceSettings(): Promise<VoiceSettings> {
     return structuredClone(DEFAULT_VOICE_SETTINGS);
   }
   try {
-    return validateVoiceSettings(raw);
+    const settings = validateVoiceSettings(raw);
+    const rawVersion =
+      raw && typeof raw === 'object'
+        ? (raw as Record<string, unknown>).localVoiceSetupVersion
+        : undefined;
+    if (rawVersion !== LOCAL_VOICE_SETUP_VERSION) {
+      if (
+        settings.input.provider === 'system' &&
+        settings.input.modelId === 'web-speech-recognition'
+      ) {
+        settings.input = {
+          provider: KORY_LOCAL_PROVIDER,
+          modelId: KORY_LOCAL_MODEL,
+          language: settings.input.language,
+        };
+      }
+      settings.localVoiceSetupVersion = LOCAL_VOICE_SETUP_VERSION;
+      try {
+        await saveVoiceSettings(settings);
+      } catch (saveErr: unknown) {
+        serverLog.debug(
+          { err: saveErr instanceof Error ? saveErr.message : String(saveErr) },
+          'Failed to persist the local voice settings migration',
+        );
+      }
+    }
+    return settings;
   } catch {
     const sanitized = sanitizeVoiceSettings(raw);
     serverLog.info(
@@ -364,7 +422,7 @@ function providerConfigs(): Record<string, VoiceProviderConfig> {
 }
 
 function providerIsConfigured(id: string, config: VoiceProviderConfig | undefined): boolean {
-  if (id === 'system') return true;
+  if (id === 'system' || id === KORY_LOCAL_PROVIDER) return true;
   if (!config || config.disabled) return false;
   if (id === 'local' || id === 'lmstudio' || id === 'llamacpp' || id.startsWith('custom:'))
     return Boolean(config.baseUrl?.trim());
@@ -629,6 +687,10 @@ export async function transcribeRecording(
   const audio = decodeAudio(request);
   const settings = await loadVoiceSettings();
   const { provider, modelId } = settings.input;
+  if (provider === KORY_LOCAL_PROVIDER)
+    throw new ValidationError(
+      'Local voice transcription runs in the desktop app and does not use the backend audio API.',
+    );
   if (provider === 'system')
     throw new ValidationError('System speech recognition runs on this device in the composer.');
   const startedAt = Date.now();

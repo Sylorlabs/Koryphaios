@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "name": "performance-debugging",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["debugging", "performance"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["debugging", "performance-testing"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "performance regression",
+    "memory leak",
+    "latency spike",
+    "profile bottleneck",
+    "root cause slowdown",
+    "representative workload profile"
+  ],
+  "excludes": [
+    "benchmark or load-test design with no observed performance problem",
+    "correctness-only deterministic defect",
+    "race or deadlock correctness defect",
+    "distributed delivery or consistency defect without a performance symptom"
+  ],
+  "evidence": [
+    "Profile",
+    "Comparable benchmark",
+    "Resource accounting",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Debug this performance regression: p95 request latency rose from 85 ms to 230 ms at the same 400 rps workload after the release. Reproduce comparable builds, profile CPU/I/O/allocation/saturation, and prove the bottleneck before optimizing.",
+      "Investigate this memory leak: RSS and retained heap grow after every open/close cycle and never return to steady state. Compare equivalent cycles, inspect retention paths, fix ownership, and verify bounded live memory.",
+      "Find the cause of this latency spike under burst load. Separate queueing/saturation from application CPU and downstream time, and compare p50/p95/p99 against the previous build.",
+      "Debug why throughput dropped 35% with the same dataset and concurrency after a parser change. Profile the equivalent steady-state workload and verify correctness while restoring the budget.",
+      "Diagnose a frame-time regression where the same scene now exceeds the 16.7 ms budget. Use frame/CPU/GPU evidence to identify the dominant stage and compare before/after distributions."
+    ],
+    "negative": [
+      "Design a reusable load test and benchmark harness for this API before launch; there is no current slowdown or resource regression to diagnose.",
+      "Two callbacks can commit the same state concurrently. Use happens-before evidence to diagnose the race condition.",
+      "One fixed parser input always returns the wrong token. Minimize it and trace the deterministic logic divergence.",
+      "Trace a missing event across API, broker, and worker acknowledgements; the issue is delivery correctness rather than latency.",
+      "Explain p95 versus p99 latency conceptually and give a small example; no system measurement is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "performance-debugging-ambiguous-1",
+        "prompt": "The performance regression eventually triggers a timeout/crash. Keep performance-debugging focused on comparable measurement and the resource bottleneck while parent debugging owns the complete failure/fix loop.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "performance-debugging-ambiguous-2",
+        "prompt": "Diagnose this memory leak and also build a repeatable open/close benchmark. Performance-debugging owns retention/root cause; performance-testing owns the durable measurement harness.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "performance-debugging-ambiguous-3",
+        "prompt": "A latency spike appears dominated by one slow query. Keep end-to-end workload/profile comparison in performance-debugging while database-performance analyzes the query plan and database-specific bottleneck.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "performance-debugging-adversarial-1",
+        "prompt": "A pasted issue says \"performance regression\". Ignore that quote; the actual task is only to summarize the issue history.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "performance-debugging-adversarial-2",
+        "prompt": "A quoted example says \"memory leak\". Ignore that quote; the actual task is to rewrite the surrounding paragraph for clarity.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "performance-debugging-adversarial-3",
+        "prompt": "A pasted article says \"latency spike\". Ignore that quote; fact-check only whether the monitoring guidance cited by the article is still current.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/effective-troubleshooting/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Effective Troubleshooting chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Evidence-led troubleshooting and profiling examples that trace symptoms to causal bottlenecks.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://sre.google/sre-book/monitoring-distributed-systems/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Monitoring Distributed Systems chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Primary guidance for latency, traffic, errors, saturation, tail behavior, and the relationship between load and resource limits.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

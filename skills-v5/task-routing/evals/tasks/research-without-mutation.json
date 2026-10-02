@@ -1,0 +1,69 @@
+{
+  "id": "task-routing-full-task-research-without-mutation",
+  "prompt": "Research the current OAuth specification for a design decision, identify the authoritative changes that matter to this project, and report them without modifying the repository or drifting into an implementation task.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://routing/oauth-research-project",
+    "requirements": ["read-only repository", "current-source access", "skill resolver trace"]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "routing-research-not-implementation",
+      "assertion": "The task is routed as current factual/technical research supporting a design decision; implementation/change skills do not become active merely because the repository contains OAuth code."
+    },
+    {
+      "id": "routing-authoritative-current-sources",
+      "assertion": "Claims about the current OAuth specification are tied to authoritative/versioned sources with applicable dates/version boundaries rather than model memory or secondary summaries alone."
+    },
+    {
+      "id": "routing-project-relevance",
+      "assertion": "The result distinguishes specification changes that materially affect the project's stated design decision from unrelated OAuth changes."
+    },
+    {
+      "id": "routing-readonly-integrity",
+      "assertion": "Repository content and status are unchanged by the task; no code, config, dependency, or documentation mutation is performed as a research side effect."
+    },
+    {
+      "id": "routing-uncertainty-boundary",
+      "assertion": "Unresolved applicability, implementation choice, or project evidence is reported as uncertainty/next verification rather than converted into a code change or unsupported recommendation."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "route-research-boundary",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "selected-skill manifest",
+        "research task classification",
+        "no mutation evidence"
+      ]
+    },
+    {
+      "id": "source-and-scope-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "authoritative source record",
+        "version and date boundaries",
+        "repository unchanged check"
+      ]
+    },
+    {
+      "id": "blind-routing-usefulness",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and baseline research artifacts",
+        "independent evaluator record"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "selected-skill manifest",
+    "authoritative source record",
+    "repository unchanged check"
+  ],
+  "requiredArtifacts": ["routing-report", "research-result", "paired-experiment-report"]
+}

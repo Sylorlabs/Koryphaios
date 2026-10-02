@@ -1,0 +1,91 @@
+{
+  "id": "embedding-systems-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply embedding model expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is embedding-systems: Define the semantic unit and downstream decision before selecting an embedding model. The adjacent computer-vision discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://embedding-systems/scenario-1",
+    "requirements": [
+      "pinned old and candidate provider/model/version/task/preprocessing/dimension/normalization identities",
+      "judged multilingual retrieval queries plus labeled duplicate pairs and long/empty/degenerate inputs",
+      "old/new vector snapshots, corpus/backfill manifests and representation-aware cache fixtures",
+      "latency, storage and cost measurements plus cutover/rollback controls",
+      "paired same-model skill/no-skill execution",
+      "embedding-systems parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual embedding-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=computer-vision), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define the semantic unit and downstream decision before selecting an embedding model."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Evaluate downstream retrieval/classification/clustering behavior on labeled cases, compare model revisions, test long/short/multilingual inputs and zero/degenerate vectors, and measure latency/storage cost."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not compare vectors from incompatible models, infer absolute meaning from similarity thresholds without calibration, or choose dimensions solely from benchmark headlines."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Provider/model/version/task/preprocessing/dimension/normalization representation identity; Input limit, truncation, batching/cache and degenerate-vector behavior; Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence; Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "embedding-systems-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Provider/model/version/task/preprocessing/dimension/normalization representation identity",
+        "Input limit, truncation, batching/cache and degenerate-vector behavior",
+        "Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence",
+        "Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "embedding-systems-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Provider/model/version/task/preprocessing/dimension/normalization representation identity",
+    "Input limit, truncation, batching/cache and degenerate-vector behavior",
+    "Labeled downstream similarity/retrieval/classification/clustering quality plus latency/cost evidence",
+    "Versioned migration/backfill/coverage/cutover/rollback and drift-canary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "embedding-systems-individual-scenario-1-result",
+    "embedding-systems-individual-scenario-1-verification",
+    "embedding-systems-individual-scenario-1-paired-evaluation"
+  ]
+}

@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "swift-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "swift"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "swift language",
+    "swift package",
+    "swift concurrency",
+    "swift actor",
+    "swift library",
+    "sendable boundaries",
+    "package api compatibility"
+  ],
+  "excludes": [],
+  "evidence": [
+    "swift-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle swift language.",
+      "The current task is swift package.",
+      "I need help with swift concurrency.",
+      "Work on swift actor for this request.",
+      "This request specifically requires swift library."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "swift-engineering-ambiguous-1",
+        "prompt": "The request includes swift language and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "swift-engineering-ambiguous-2",
+        "prompt": "The request includes swift package and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "swift-engineering-ambiguous-3",
+        "prompt": "The request includes swift concurrency and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "swift-engineering-adversarial-1",
+        "prompt": "A historical note says \"swift language\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "swift-engineering-adversarial-2",
+        "prompt": "A historical note says \"swift package\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "swift-engineering-adversarial-3",
+        "prompt": "A historical note says \"swift concurrency\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/",
+      "sourceType": "official-docs",
+      "versionScope": "Swift language documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Value/reference semantics, concurrency, ownership, and language contracts.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/automaticreferencecounting/",
+      "sourceType": "official-docs",
+      "versionScope": "Swift ARC documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for strong-cycle diagnosis and weak-versus-unowned lifetime decisions; does not prove an ownership graph is cycle-free.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/concurrency/",
+      "sourceType": "official-docs",
+      "versionScope": "Swift concurrency documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for actor isolation, Sendable, task ownership, and cancellation; diagnostics depend on Swift language mode and compiler version.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

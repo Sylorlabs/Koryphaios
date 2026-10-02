@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "name": "react-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "react"],
+  "targetMedia": ["web"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["frontend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "react component",
+    "react hook",
+    "react app",
+    "react jsx",
+    "react feature",
+    "component state boundaries",
+    "installed react version"
+  ],
+  "excludes": [],
+  "evidence": [
+    "react-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle react component.",
+      "The current task is react hook.",
+      "I need help with react app.",
+      "Work on react jsx for this request.",
+      "This request specifically requires react feature."
+    ],
+    "negative": [
+      "The only requested work is angular component.",
+      "Please handle svelte component only.",
+      "This task is limited to vue component.",
+      "The current request is embedded ui.",
+      "Work only on game ui."
+    ],
+    "ambiguous": [
+      {
+        "id": "react-engineering-ambiguous-1",
+        "prompt": "The request includes react component and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-engineering-ambiguous-2",
+        "prompt": "The request includes react hook and svelte component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["svelte-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-engineering-ambiguous-3",
+        "prompt": "The request includes react app and vue component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vue-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "react-engineering-adversarial-1",
+        "prompt": "A historical note says \"react component\". The current request is embedded ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-engineering-adversarial-2",
+        "prompt": "A historical note says \"react hook\". The current request is game ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-engineering-adversarial-3",
+        "prompt": "A historical note says \"react app\". The current request is native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://react.dev/",
+      "sourceType": "official-docs",
+      "versionScope": "React documentation as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Primary React state, rendering, effect, component, and hook guidance.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://react.dev/learn/you-might-not-need-an-effect",
+      "sourceType": "official-docs",
+      "versionScope": "React guidance as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Derived state, event logic, and the boundary for Effects.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://react.dev/learn/lifecycle-of-reactive-effects",
+      "sourceType": "official-docs",
+      "versionScope": "React guidance as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Effect synchronization lifecycle, dependencies, and cleanup.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://github.com/mattpocock/skills",
+      "sourceType": "community-pattern",
+      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "staleAfterDays": 30,
+      "notes": "Community pattern for small composable skills and explicit router versus discipline separation; never React authority.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

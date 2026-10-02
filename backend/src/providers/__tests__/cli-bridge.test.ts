@@ -4,7 +4,6 @@ import { sandboxToScopes, roleToPermissionMode } from '../cli-bridge';
 import {
   ClaudeCodeCliBridge,
   CodexCliBridge,
-  ClineCliBridge,
   CursorCliBridge,
   AntigravityCliBridge,
   GrokCliBridge,
@@ -298,7 +297,6 @@ describe('getCliBridge', () => {
   test('returns the correct bridge class for each provider', () => {
     expect(getCliBridge('claude')).toBeInstanceOf(ClaudeCodeCliBridge);
     expect(getCliBridge('codex')).toBeInstanceOf(CodexCliBridge);
-    expect(getCliBridge('cline')).toBeInstanceOf(ClineCliBridge);
     expect(getCliBridge('cursor')).toBeInstanceOf(CursorCliBridge);
     expect(getCliBridge('antigravity')).toBeInstanceOf(AntigravityCliBridge);
     expect(getCliBridge('grok')).toBeInstanceOf(GrokCliBridge);

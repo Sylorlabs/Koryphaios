@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "name": "angular-engineering",
+  "version": "5.0.0",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "angular"],
+  "targetMedia": ["web"],
+  "pathScopes": ["**/angular.json", "**/*.component.ts", "**/*.component.html"],
+  "contextBudget": 3247,
+  "broader": ["frontend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "angular app",
+    "angular component",
+    "angular service",
+    "angular signals",
+    "angular rxjs",
+    "angular state handling"
+  ],
+  "excludes": [],
+  "evidence": [
+    "angular-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle angular app.",
+      "The current task is angular component.",
+      "I need help with angular service.",
+      "Work on angular signals for this request.",
+      "This request specifically requires angular rxjs."
+    ],
+    "negative": [
+      "The only requested work is react component.",
+      "Please handle svelte component only.",
+      "This task is limited to vue component.",
+      "The current request is embedded ui.",
+      "Work only on game ui."
+    ],
+    "ambiguous": [
+      {
+        "id": "angular-engineering-ambiguous-1",
+        "prompt": "The request includes angular app and react component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "angular-engineering-ambiguous-2",
+        "prompt": "The request includes angular component and svelte component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["svelte-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "angular-engineering-ambiguous-3",
+        "prompt": "The request includes angular service and vue component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vue-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "angular-engineering-adversarial-1",
+        "prompt": "A historical note says \"angular app\". The current request is embedded ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "angular-engineering-adversarial-2",
+        "prompt": "A historical note says \"angular component\". The current request is game ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "angular-engineering-adversarial-3",
+        "prompt": "A historical note says \"angular service\". The current request is native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://angular.dev/guide/di/hierarchical-dependency-injection",
+      "sourceType": "official-docs",
+      "versionScope": "Angular hierarchical injector guidance opened 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Injector resolution and service-instance lifetime follow the actual owner scope."
+    },
+    {
+      "url": "https://angular.dev/guide/forms/reactive-forms",
+      "sourceType": "official-docs",
+      "versionScope": "Angular reactive forms guidance opened 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Conditional reference for explicit reactive form state; does not mandate converting other valid form architectures."
+    },
+    {
+      "url": "https://angular.dev/api/core/rxjs-interop/takeUntilDestroyed",
+      "sourceType": "official-docs",
+      "versionScope": "Angular takeUntilDestroyed API opened 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Observable teardown at owner destruction, with explicit DestroyRef outside an injection context."
+    },
+    {
+      "url": "https://angular.dev/overview",
+      "sourceType": "official-docs",
+      "versionScope": "Angular documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Angular components, dependency injection, signals, routing, and rendering reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

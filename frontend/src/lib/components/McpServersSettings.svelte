@@ -432,7 +432,7 @@
                             {#if result.connected}
                               <Check size={12} class="text-[var(--color-success)]" />
                               <span class="text-[var(--color-text-primary)]"
-                                >Connected — {result.tools.length} tool{result.tools.length === 1
+                                >Connected · {result.tools.length} tool{result.tools.length === 1
                                   ? ''
                                   : 's'}</span
                               >
@@ -808,7 +808,7 @@
               </h4>
               <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                 {editingName
-                  ? 'Re-enter configuration fields. Existing env values are masked — type a new value to replace them.'
+                  ? 'Re-enter configuration fields. Existing env values are masked. Type a new value to replace them.'
                   : 'Configure a stdio or SSE Model Context Protocol server.'}
               </p>
             </div>
@@ -944,7 +944,7 @@
               </div>
               <p class="mb-2 mt-1 text-[10px] text-[var(--color-text-muted)]">
                 Values are stored securely and never displayed. Existing keys show a masked
-                placeholder — type a new value to replace.
+                placeholder. Type a new value to replace.
               </p>
               {#if envLoading}
                 <div class="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">

@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "name": "feature-implementation",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "feature"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3300,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "new feature",
+    "add support",
+    "implement capability",
+    "bulk action",
+    "ui action backend behavior",
+    "add product behavior",
+    "vertical slice implementation"
+  ],
+  "excludes": [],
+  "evidence": [
+    "End-to-end behavior",
+    "Failure coverage",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle new feature.",
+      "The current task is add support.",
+      "I need help with implement capability.",
+      "Work on bulk action for this request.",
+      "This request specifically requires ui action backend behavior."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to game development.",
+      "The current request is golang.",
+      "Work only on integrate."
+    ],
+    "ambiguous": [
+      {
+        "id": "feature-implementation-ambiguous-1",
+        "prompt": "The request includes new feature and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "feature-implementation-ambiguous-2",
+        "prompt": "The request includes add support and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "feature-implementation-ambiguous-3",
+        "prompt": "The request includes implement capability and game development.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "feature-implementation-adversarial-1",
+        "prompt": "A historical note says \"new feature\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "feature-implementation-adversarial-2",
+        "prompt": "A historical note says \"add support\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "feature-implementation-adversarial-3",
+        "prompt": "A historical note says \"implement capability\". The current request is java.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["java-jvm-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

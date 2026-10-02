@@ -5,8 +5,11 @@ import type { ProviderName } from '@koryphaios/shared';
 export type ProviderDeployment = 'cloud' | 'api' | 'local' | 'hybrid';
 
 export interface ProviderDisplayMeta {
-  label: string;
-  iconPath: string;
+  /** Human label. Omit only when the generated label is already correct and
+   *  the entry exists solely to attach a website URL. */
+  label?: string;
+  /** Static icon path. Omit when no first-party mark is shipped. */
+  iconPath?: string;
   deployment?: ProviderDeployment;
   description?: string;
   /** Official page where the user creates the credential this adapter expects. */
@@ -21,25 +24,56 @@ export const JULES_SYNC_INSTRUCTIONS = `Jules runs in Google's cloud — it does
 3. Verify locally with \`git status\`, tests, and a quick smoke check before continuing.
 Never assume local files changed until you have pulled or checked out the remote work.`;
 
+export const HOPLITE_SYNC_INSTRUCTIONS = `Hoplite runs a thread either in Hoplite's cloud or on a local agent, so the sync rules depend on which target the thread used.
+
+Cloud target — does NOT edit your local working tree. Tasks run in Hoplite sandboxes against the project's GitHub repos and produce Hoplite threads and pull requests. After a cloud thread completes:
+1. If a PR URL was returned: review it, then run \`gh pr checkout <number>\` (or merge on GitHub and \`git pull origin <branch>\`).
+2. If Hoplite pushed to your repo branch: run \`git fetch origin && git pull\`.
+3. Verify locally with \`git status\`, tests, and a quick smoke check before continuing.
+
+Local target — runs a local agent (Codex or Claude) against your checkout in \`direct\` or \`worktree\` workspace mode, so it edits the working tree directly. Review the diff in place; there is no PR to pull.
+
+Live delegation into Hoplite is not wired in this release; the API key is verified in Settings.`;
+
 export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>> = {
+  commandcode: {
+    label: 'Command Code',
+    iconPath: '/provider-icons/commandcode-color.svg',
+    deployment: 'api',
+    credentialUrl: 'https://commandcode.ai/settings/keys',
+    description: 'OpenAI- and Anthropic-compatible model gateway.',
+  },
   tokenrouter: {
     label: 'TokenRouter',
     iconPath: '/provider-icons/tokenrouter.svg',
     deployment: 'api',
-    description:
-      'OpenAI-compatible model gateway. Uses TOKENROUTER_API_KEY and refreshes the model list from /v1/models.',
+    description: 'OpenAI-compatible model gateway.',
+  },
+  unorouter: {
+    label: 'UnoRouter',
+    iconPath: '/provider-icons/unorouter-color.svg',
+    deployment: 'api',
+    credentialUrl: 'https://unorouter.com/en/docs/platform/quickstart',
+    description: 'Open-source OpenAI-compatible gateway — one key for 200+ models.',
+  },
+  experientiallabs: {
+    label: 'Experiential Labs',
+    iconPath: '/provider-icons/experientiallabs-color.svg',
+    deployment: 'api',
+    credentialUrl: 'https://platform.experientiallabs.ai/',
+    description: 'Open-source AI gateway — one key for hosted, BYOK, and local models.',
   },
   digitalocean: {
     label: 'DigitalOcean Inference',
     iconPath: '/provider-icons/digitalocean.svg',
     deployment: 'api',
-    description:
-      'DigitalOcean serverless inference. Uses DIGITALOCEAN_API_KEY and refreshes the model list from /v1/models.',
+    description: 'DigitalOcean serverless inference.',
   },
   codex: {
     label: 'Codex CLI',
     iconPath: '/provider-icons/lobehub/codex.svg',
     deployment: 'local',
+    credentialUrl: 'https://chatgpt.com/',
     description:
       'Use an existing login from the local `codex` CLI. This is separate from Koryphaios-managed ChatGPT sign-in.',
   },
@@ -47,13 +81,18 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     label: 'OpenAI Codex',
     iconPath: '/provider-icons/lobehub/codex.svg',
     deployment: 'local',
+    credentialUrl: 'https://chatgpt.com/',
     description:
       'Sign in with ChatGPT. The official local Codex app-server owns OAuth, refreshes, and subscription access.',
+  },
+  claude: {
+    credentialUrl: 'https://claude.ai/',
   },
   google: {
     label: 'Google',
     iconPath: '/provider-icons/lobehub/google.svg',
     deployment: 'api',
+    credentialUrl: 'https://aistudio.google.com/apikey',
     description:
       'Direct Google Gemini API. Uses only GOOGLE_API_KEY; it does not use AI Studio, Vertex AI, gcloud, or Jules credentials.',
   },
@@ -103,6 +142,7 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     label: 'Google AI Studio',
     iconPath: '/provider-icons/lobehub/aistudio.svg',
     deployment: 'api',
+    credentialUrl: 'https://aistudio.google.com/apikey',
     description:
       'Google AI Studio — paste your Gemini API key (aistudio.google.com/apikey). Direct Gemini API, no gcloud sign-in.',
   },
@@ -142,11 +182,12 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
       'GitHub Models inference. Verification queries the official models.github.ai catalog; a saved token alone is only detected, not verified.',
   },
   gitlab: {
-    label: 'GitLab Duo Chat',
+    label: 'GitLab Duo',
     iconPath: '/provider-icons/gitlab-color.svg',
     deployment: 'api',
+    credentialUrl: 'https://gitlab.com/-/user_settings/personal_access_tokens',
     description:
-      'Unavailable in this build: GitLab Duo Chat does not expose a general public OpenAI-compatible provider contract that this adapter can safely claim.',
+      "GitLab Duo's chat API (POST /api/v4/chat/completions) with a personal access token carrying the `api` or `ai_features` scope. Answers arrive as one non-streamed body and GitLab picks the model. gitlab.com serves this endpoint to GitLab team members only; self-managed needs the access_rest_chat feature flag and a seat with Duo access.",
   },
   sapai: {
     label: 'SAP AI Core',
@@ -155,12 +196,15 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     description:
       'SAP AI Core requires a service-key OAuth exchange, AI resource group, and explicit running deployment ID. Service-key JSON is never sent as a bearer token.',
   },
+  // No `description`: the card shows only the name and the API key input.
+  // The integration facts (OpenAI-compatible base, the three catalog
+  // endpoints, first-party + models.dev reasoning ladders) are documented on
+  // backend/src/providers/cline.ts.
   cline: {
     label: 'Cline',
     iconPath: '/provider-icons/lobehub/cline.svg',
-    deployment: 'local',
-    description:
-      'CLI only. Runs the official cline CLI on your machine — Cline manages its own provider key (run "cline auth …"). No Koryphaios API key.',
+    deployment: 'api',
+    credentialUrl: 'https://app.cline.bot/settings/api-keys',
   },
   freebuff: {
     label: 'Freebuff (Experimental)',
@@ -193,6 +237,17 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
       'Cloud async coding agent (API only). Tasks run on remote Google VMs and land on GitHub first — pull or checkout PRs to sync locally.',
     managerHint: JULES_SYNC_INSTRUCTIONS,
   },
+  hoplite: {
+    label: 'Hoplite',
+    iconPath: '/provider-icons/hoplite.svg',
+    // Hoplite threads run in Hoplite cloud sandboxes *or* on a local agent
+    // (`executionTarget.kind: 'local'`, provider codex|claude), so the provider
+    // is genuinely hybrid rather than cloud-only.
+    deployment: 'hybrid',
+    description:
+      'Cloud + local async coding agent (hoplite.sh). A thread runs either in Hoplite cloud sandboxes against your GitHub repos — producing threads and pull requests — or on a local Codex/Claude agent in direct or worktree workspace mode. Model, reasoning effort, and fast tier are chosen per thread. The organization API key is verified in Settings; live delegation is not wired in this release.',
+    managerHint: HOPLITE_SYNC_INSTRUCTIONS,
+  },
   poe: {
     label: 'Poe',
     iconPath: '/provider-icons/lobehub/poe-color.svg',
@@ -207,6 +262,44 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     credentialUrl: 'https://www.chatbase.co/dashboard',
     description:
       'Chatbase agent API. Connect with your Chatbase API key to interact with your custom trained knowledge-base agents.',
+  },
+  notion: {
+    label: 'Notion',
+    iconPath: '/provider-icons/lobehub/notion.svg',
+    deployment: 'api',
+    credentialUrl: 'https://developers.notion.com/guides/get-started/personal-access-tokens',
+    description:
+      'Notion Agent APIs. Connect with a Personal Access Token (PAT) from the Notion Developer portal to chat with the Custom Agents your token can reach.',
+  },
+  workbuddy: {
+    label: 'Work Buddy',
+    iconPath: '/provider-icons/workbuddy.svg',
+    deployment: 'api',
+    description:
+      'Work Buddy (workbuddy.ai) API keys are issued by Tencent TokenHub. Koryphaios sends the key only to https://tokenhub-intl.tencentcloudmaas.com/v1. Create a key at https://console.cloud.tencent.com/tokenhub/apikey.',
+    credentialUrl: 'https://console.cloud.tencent.com/tokenhub/apikey',
+  },
+  autoclaw: {
+    label: 'AutoClaw',
+    iconPath: '/provider-icons/autoclaw.svg',
+    deployment: 'api',
+    description:
+      'Connects Koryphaios to the AutoClaw (Z.ai) desktop app installed on this machine: an OpenAI-compatible gateway bound to loopback at http://127.0.0.1:18789/v1. Paste the gateway bearer token from ~/.openclaw-autoclaw/.gateway-token (or copy it from the AutoClaw app).',
+  },
+  // Website key pages for API providers whose credentials are created on the
+  // provider's own site. Labels keep their generated values; these entries
+  // only attach the official key-management URL surfaced in Settings.
+  qwen: {
+    credentialUrl: 'https://bailian.console.aliyun.com/',
+  },
+  zai: {
+    credentialUrl: 'https://z.ai/manage-apikey/apikey-list',
+  },
+  perplexity: {
+    credentialUrl: 'https://www.perplexity.ai/api',
+  },
+  stepfun: {
+    credentialUrl: 'https://platform.stepfun.com/',
   },
 };
 

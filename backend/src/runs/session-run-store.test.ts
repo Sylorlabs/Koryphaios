@@ -368,6 +368,92 @@ describe('SessionRunStore', () => {
     expect(store.get(SESSION_ID)).toMatchObject({ revision: 2, phase: 'waiting_user' });
   });
 
+  test('generic resume cannot consume an unanswered question, but its answer can resume once', () => {
+    store.transition(SESSION_ID, { kind: 'start', runId: 'run-1' }, 100);
+    const wait = store.parkForQuestion(SESSION_ID, 'run-1', 1, 'question', QUESTION, 200);
+    const restarted = new SessionRunStore(sqlite);
+    expect(() =>
+      restarted.transition(
+        SESSION_ID,
+        {
+          kind: 'resume',
+          expectedRunId: 'run-1',
+          expectedRevision: 2,
+          expectedWaitingPhase: 'waiting_user',
+        },
+        300,
+      ),
+    ).toThrow('A waiting run may resume only through its owned continuation');
+    expect(restarted.get(SESSION_ID)).toEqual(wait.payload.snapshot);
+    expect(restarted.getContinuation(wait.question.questionId!)?.state).toBe('pending');
+    expect(restarted.listUnpublished()).toHaveLength(2);
+    expect(
+      restarted.answerQuestion(
+        SESSION_ID,
+        'run-1',
+        2,
+        wait.question.questionId,
+        'Desktop',
+        true,
+        400,
+      )?.payload.snapshot,
+    ).toMatchObject({ status: 'active', revision: 3 });
+    expect(() =>
+      store.answerQuestion(SESSION_ID, 'run-1', 2, wait.question.questionId, 'Browser', true, 500),
+    ).toThrow(expect.objectContaining({ code: 'STALE_REVISION' }));
+    expect(restarted.listUnpublished()).toHaveLength(3);
+  });
+
+  test('duplicate publication acknowledgement preserves retention and pending events', () => {
+    const started = store.transition(SESSION_ID, { kind: 'start', runId: 'run-1' }, 100);
+    const eventId = started.payload.transition!.eventId;
+    store.markPublished(eventId, 200);
+    const restarted = new SessionRunStore(sqlite);
+    restarted.markPublished(eventId, 900);
+    restarted.transition(
+      SESSION_ID,
+      {
+        kind: 'cancel',
+        expectedRunId: 'run-1',
+        expectedRevision: 1,
+      },
+      300,
+    );
+    expect(restarted.prunePublished(500)).toBe(1);
+    expect(restarted.listUnpublished()).toHaveLength(1);
+    expect(restarted.listUnpublished()[0]?.snapshot.phase).toBe('cancelled');
+    expect(restarted.prunePublished(1_000)).toBe(0);
+  });
+
+  test('orphan recovery does not cancel a foreign continuation or delete its process ownership', () => {
+    sqlite.exec(`INSERT INTO sessions (id, title) VALUES ('other-session', 'Other');
+      INSERT INTO supervised_processes
+        (id, session_id, status, provenance, supervision, is_background)
+      VALUES ('other-process', 'other-session', 'running', 'agent-tool', 'owned-child', 1)`);
+    store.transition('other-session', { kind: 'start', runId: 'other-run' }, 100);
+    const owned = store.parkForProcesses(
+      'other-session',
+      'other-run',
+      1,
+      ['other-process'],
+      'process',
+      200,
+    );
+    store.transition(SESSION_ID, { kind: 'start', runId: 'run-1' }, 100);
+    store.parkForQuestion(SESSION_ID, 'run-1', 1, 'question', QUESTION, 200);
+    sqlite
+      .query('UPDATE session_runs SET continuation_id = ? WHERE session_id = ?')
+      .run(owned.continuationId, SESSION_ID);
+    const orphan = store.get(SESSION_ID)!;
+    expect(store.isWaitingContinuationValid(orphan)).toBe(false);
+    store.terminalizeOrphanedWait(orphan, 'orphaned', 300);
+    const restarted = new SessionRunStore(sqlite);
+    expect(restarted.get(SESSION_ID)?.phase).toBe('error');
+    expect(restarted.getContinuation(owned.continuationId)?.state).toBe('pending');
+    expect(restarted.isWaitingContinuationValid(owned.payload.snapshot)).toBe(true);
+    expect(restarted.listProcessWaits()[0]?.processIds).toEqual(['other-process']);
+  });
+
   test('parks and answers a question with the run, continuation, input, and outbox in lockstep', () => {
     store.transition(SESSION_ID, { kind: 'start', runId: 'run-1' }, 100);
     const waiting = store.parkForQuestion(
@@ -813,6 +899,19 @@ describe('SessionRunStore', () => {
     );
 
     expect(waiting.processIds).toEqual(['proc-a', 'proc-b']);
+    expect(() =>
+      store.transition(
+        SESSION_ID,
+        {
+          kind: 'resume',
+          expectedRunId: 'run-1',
+          expectedRevision: 2,
+          expectedWaitingPhase: 'waiting_terminal',
+        },
+        250,
+      ),
+    ).toThrow('A waiting run may resume only through its owned continuation');
+    expect(store.getContinuation(waiting.continuationId)?.state).toBe('pending');
     expect(
       sqlite
         .query<{ process_id: string }, []>(
@@ -1000,6 +1099,187 @@ describe('SessionRunStore', () => {
 });
 
 describe('SessionRunCoordinator', () => {
+  test.each(['phase', 'cancel'] as const)(
+    'interrupted recovery skips concurrent %s and recovers later sessions',
+    async (kind) => {
+      const sqlite = createDatabase();
+      try {
+        const store = new SessionRunStore(sqlite);
+        sqlite.exec(
+          `INSERT INTO sessions (id, title) VALUES ('second', 'Second'), ('third', 'Third')`,
+        );
+        for (const id of [SESSION_ID, 'second', 'third']) {
+          store.transition(id, { kind: 'start', runId: id }, 100);
+        }
+        let advanced = false;
+        const coordinator = new SessionRunCoordinator(store, async (_id, message) => {
+          if (message.type !== 'run.state' || advanced) return;
+          advanced = true;
+          await Promise.resolve();
+          new SessionRunStore(sqlite).transition(
+            'second',
+            kind === 'phase'
+              ? {
+                  kind,
+                  expectedRunId: 'second',
+                  expectedRevision: 1,
+                  phase: 'streaming',
+                }
+              : { kind, expectedRunId: 'second', expectedRevision: 1 },
+            200,
+          );
+        });
+        expect(await coordinator.recoverInterruptedRuns()).toBe(2);
+        expect(store.get('second')).toMatchObject({
+          phase: kind === 'phase' ? 'streaming' : 'cancelled',
+          revision: 2,
+        });
+        expect(store.get('third')?.phase).toBe('error');
+      } finally {
+        sqlite.close();
+      }
+    },
+  );
+
+  test.each(['run.state', 'agent.status', 'failed agent.status'] as const)(
+    'recovery leaves replacement agents intact after awaiting %s publication',
+    async (boundary) => {
+      const sqlite = createDatabase();
+      try {
+        const store = new SessionRunStore(sqlite);
+        const agentIds = ['critic-one', 'kory-manager', 'worker-one'];
+        store.transition(
+          SESSION_ID,
+          {
+            kind: 'start',
+            runId: 'interrupted',
+            activeAgentIds: agentIds,
+          },
+          100,
+        );
+        sqlite.exec(`INSERT INTO sessions (id, title) VALUES ('later-session', 'Later')`);
+        store.transition('later-session', { kind: 'start', runId: 'later-run' }, 101);
+        const visibleAgents = new Map(agentIds.map((id) => [id, 'streaming']));
+        const staleStatuses: WSMessage[] = [];
+        let replaced = false;
+        const coordinator = new SessionRunCoordinator(store, async (sessionId, message) => {
+          if (sessionId !== SESSION_ID) return;
+          if (message.type === 'agent.status') {
+            if (replaced) staleStatuses.push(message);
+            const payload = message.payload as { agentId: string; status: string };
+            visibleAgents.set(payload.agentId, payload.status);
+          }
+          const trigger = boundary === 'run.state' ? 'run.state' : 'agent.status';
+          if (!replaced && message.type === trigger) {
+            // Model a replacement admitted while publication is awaiting its
+            // acknowledgement. New agent states supersede the delivered event.
+            await Promise.resolve();
+            new SessionRunStore(sqlite).transition(
+              SESSION_ID,
+              {
+                kind: 'start',
+                runId: 'replacement',
+                activeAgentIds: agentIds,
+              },
+              300,
+            );
+            for (const id of agentIds) visibleAgents.set(id, 'thinking');
+            replaced = true;
+            if (boundary === 'failed agent.status') throw new Error('publication failed');
+          }
+        });
+
+        expect(await coordinator.recoverInterruptedRuns()).toBe(2);
+        expect(replaced).toBe(true);
+        expect(staleStatuses).toEqual([]);
+        expect([...visibleAgents.values()]).toEqual(['thinking', 'thinking', 'thinking']);
+        expect(store.get(SESSION_ID)).toMatchObject({
+          runId: 'replacement',
+          revision: 3,
+          status: 'active',
+        });
+        expect(store.get('later-session')?.phase).toBe('error');
+      } finally {
+        sqlite.close();
+      }
+    },
+  );
+
+  test('recovery compares the terminal revision even if a run id is reused', async () => {
+    const sqlite = createDatabase();
+    try {
+      const store = new SessionRunStore(sqlite);
+      store.transition(SESSION_ID, { kind: 'start', runId: 'reused-id' }, 100);
+      const statuses: WSMessage[] = [];
+      const coordinator = new SessionRunCoordinator(store, async (_id, message) => {
+        if (message.type === 'agent.status') statuses.push(message);
+        if (message.type !== 'run.state') return;
+        await Promise.resolve();
+        const otherOwner = new SessionRunStore(sqlite);
+        const replacement = otherOwner.transition(
+          SESSION_ID,
+          { kind: 'start', runId: 'reused-id' },
+          300,
+        );
+        otherOwner.transition(
+          SESSION_ID,
+          {
+            kind: 'fail',
+            expectedRunId: 'reused-id',
+            expectedRevision: replacement.payload.snapshot.revision,
+            reason: 'newer failure',
+          },
+          400,
+        );
+      });
+      expect(await coordinator.recoverInterruptedRuns()).toBe(1);
+      expect(statuses).toEqual([]);
+      expect(store.get(SESSION_ID)).toMatchObject({
+        revision: 4,
+        phase: 'error',
+        terminalReason: 'newer failure',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test('orphan recovery skips a replaced run and continues with later orphaned waits', async () => {
+    const sqlite = createDatabase();
+    try {
+      const store = new SessionRunStore(sqlite);
+      sqlite.exec(
+        `INSERT INTO sessions (id, title) VALUES ('second', 'Second'), ('third', 'Third')`,
+      );
+      for (const id of [SESSION_ID, 'second', 'third']) {
+        store.transition(id, { kind: 'start', runId: id }, 100);
+        const wait = store.parkForQuestion(id, id, 1, 'question', QUESTION, 200);
+        sqlite
+          .query('DELETE FROM session_run_continuations WHERE id = ?')
+          .run(wait.question.questionId!);
+      }
+      let replaced = false;
+      const coordinator = new SessionRunCoordinator(store, async (_id, message) => {
+        if (message.type !== 'run.state' || replaced) return;
+        replaced = true;
+        await Promise.resolve();
+        const otherOwner = new SessionRunStore(sqlite);
+        otherOwner.terminalizeOrphanedWait(otherOwner.get('second')!, 'other recovery', 300);
+        otherOwner.transition('second', { kind: 'start', runId: 'new-run' }, 400);
+      });
+      expect(await coordinator.recoverOrphanedWaits()).toBe(2);
+      expect(store.get('second')).toMatchObject({
+        runId: 'new-run',
+        phase: 'analyzing',
+        revision: 4,
+      });
+      expect(store.get('third')?.phase).toBe('error');
+      expect(await coordinator.recoverOrphanedWaits()).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   test('retains a failed publication and drains it after restart', async () => {
     const sqlite = createDatabase();
     const store = new SessionRunStore(sqlite);

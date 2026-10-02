@@ -109,10 +109,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'welcome',
     label: 'Home screen',
-    description: 'Starting suggestions, pro tips, workflow guidance, and dismissed panels.',
+    description: 'Starting suggestions and the first-launch walkthrough.',
     scope: 'This device',
     group: 'Experience',
-    keywords: ['welcome', 'home', 'suggestions', 'tips', 'workflow', 'dismiss', 'empty feed'],
+    keywords: ['welcome', 'home', 'suggestions', 'walkthrough', 'onboarding', 'tour', 'empty feed'],
   },
   {
     id: 'shortcuts',
@@ -136,7 +136,18 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     description: 'Recorded metered usage and balances reported by connected providers.',
     scope: 'This app',
     group: 'Operations',
-    keywords: ['cost', 'spend', 'credits', 'quota', 'subscription', 'tokens'],
+    keywords: [
+      'cost',
+      'spend',
+      'credits',
+      'quota',
+      'subscription',
+      'tokens',
+      'billing controls',
+      'include provider',
+      'balance probe',
+      'api equivalent',
+    ],
   },
   {
     id: 'experimental',

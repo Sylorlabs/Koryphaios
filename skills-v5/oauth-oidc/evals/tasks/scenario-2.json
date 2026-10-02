@@ -1,0 +1,75 @@
+{
+  "id": "oauth-oidc-full-task-2",
+  "maturity": "individual",
+  "prompt": "Review an OpenID Connect Relying Party that supports two enterprise identity providers selected at runtime. The fixture includes valid and wrong-issuer authorization responses, swapped discovery/JWKS metadata, nonce replay, ID tokens with wrong audience/authorized-party combinations, expired tokens, an access token mistakenly accepted as an ID token, and a token for API A presented to API B. Redesign the flow so the authorization response is bound to the expected issuer and client session, discovery/JWKS is obtained from the trusted issuer configuration, ID token signature/algorithm/issuer/audience/time/nonce checks are explicit, ID and access token roles remain distinct, and each resource server enforces its own audience/scope. If refresh tokens are issued to the public frontend/native tier, define the RFC 9700 rotation/sender-constraint behavior. Do not use OIDC claims as a substitute for the application's object-level authorization policy.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://oauth-oidc/scenario-2",
+    "requirements": [
+      "two OpenID Provider fixtures with distinct issuer and JWKS metadata",
+      "OIDC RP with per-login expected-provider state",
+      "valid/invalid ID token corpus for issuer, signature, alg, audience, azp, nonce, and time claims",
+      "two resource-server audiences with correct/wrong access-token cases",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "oauth-oidc-mixup-2",
+      "assertion": "The RP binds each authorization response to the expected issuer/authorization server and does not accept metadata/JWKS or responses from the other configured provider solely because the token signature is otherwise valid."
+    },
+    {
+      "id": "oauth-oidc-id-token-validation-2",
+      "assertion": "ID token validation explicitly covers trusted issuer, signature/key and permitted algorithm, audience and authorized party where applicable, temporal validity, and the session's expected nonce before authenticated state is created."
+    },
+    {
+      "id": "oauth-oidc-token-role-2",
+      "assertion": "The client does not accept an access token as an ID token or use an ID token as an API bearer credential; token type/purpose is enforced at the consuming boundary."
+    },
+    {
+      "id": "oauth-oidc-resource-audience-2",
+      "assertion": "API A and API B independently reject access tokens not intended for their audience or lacking the required delegated scope/capability."
+    },
+    {
+      "id": "oauth-oidc-nonce-replay-2",
+      "assertion": "A reused or mismatched OIDC nonce cannot establish a fresh login session, and nonce/state lifecycle is documented separately rather than conflated."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "oauth-oidc-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "multi-issuer binding design",
+        "ID token validation matrix",
+        "token-purpose separation",
+        "resource-server audience/scope cases"
+      ]
+    },
+    {
+      "id": "oauth-oidc-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "issuer/provider/session binding map",
+    "ID token validation requirements",
+    "nonce/state lifecycle",
+    "access-token resource-server validation",
+    "token-purpose and refresh lifecycle boundaries",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "oauth-oidc-scenario-2-result",
+    "oauth-oidc-scenario-2-verification",
+    "oauth-oidc-scenario-2-paired-evaluation"
+  ]
+}

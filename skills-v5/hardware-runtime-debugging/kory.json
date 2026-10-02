@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "name": "hardware-runtime-debugging",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["debugging", "device"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4700,
+  "broader": ["debugging", "simulation-device-testing"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "hardware bug",
+    "gpu crash",
+    "device failure",
+    "driver issue",
+    "sensor dependent crash",
+    "real sensors",
+    "fault register analysis",
+    "hardware trace debugging"
+  ],
+  "excludes": [
+    "generic software crash with no hardware, driver, runtime, transport, or device-specific evidence",
+    "simulator or HIL fidelity qualification without a current defect",
+    "pure performance regression without crash, hang, corruption, or device fault"
+  ],
+  "evidence": [
+    "Exact environment identity",
+    "Layer-discriminating evidence",
+    "Real-target reproduction or bounded proof",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Debug this hardware bug on the Cortex-M4 board. Preserve the HardFault exception frame and CFSR/HFSR/BFAR/MMFAR state, identify the first bad access, and prove the fix on the same board/firmware build.",
+      "Investigate the GPU crash that returns VK_ERROR_DEVICE_LOST only on one driver branch. Record GPU and driver identity, validation output, kernel/vendor diagnostics, and a minimized submission before deciding whether the cause is app, driver, or hardware.",
+      "Debug the device failure where the I2C sensor intermittently stops responding after resume. Separate firmware state, bus transport, regulator/power, and sensor hypotheses using traces and a fixed board/revision.",
+      "Diagnose this driver issue: the accelerator works after cold boot but hangs after runtime suspend/resume. Capture host kernel/driver/device logs and compare the exact power-state transition against a non-suspending control run.",
+      "Find the source of framebuffer corruption on the physical display controller. Use a hardware watchpoint or trace on the buffer metadata, preserve the first corrupting write, and distinguish DMA/driver activity from application writes."
+    ],
+    "negative": [
+      "Debug this ordinary null-pointer crash in a pure userspace parser using the stack trace and reproducer; no device, driver, transport, accelerator, or hardware-specific behavior is involved.",
+      "Qualify whether the Renode model accurately represents the board's timers, interrupts, UART, and reset behavior before using it for release evidence; there is no active defect to localize.",
+      "Find the data race between two worker threads that reproduces identically on x86 and ARM under ThreadSanitizer; no device-specific behavior changes the failure.",
+      "Investigate why p99 inference latency regressed by 18% while outputs remain correct and there are no GPU errors, resets, hangs, or crashes.",
+      "Implement the new SPI sensor driver from the datasheet and board schematic; no current hardware failure or debugging assignment exists."
+    ],
+    "ambiguous": [
+      {
+        "id": "hardware-runtime-debugging-ambiguous-1",
+        "prompt": "Use the general debugging loop, but the active hardware bug is a Cortex-M HardFault whose exception frame and fault-status registers must localize the failing access. Keep general hypothesis management in debugging and target-specific fault evidence here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "hardware-runtime-debugging-ambiguous-2",
+        "prompt": "The GPU crash reproduces in simulation and on one physical adapter. Use the simulator to narrow the command sequence, but preserve driver/device-loss evidence and prove the localized cause on the real GPU; simulation-device-testing owns only the fidelity claim.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["simulation-device-testing"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "hardware-runtime-debugging-ambiguous-3",
+        "prompt": "The device failure appears only when an ISR and DMA completion overlap. Use concurrency-debugging for the race model, but keep the DMA engine, interrupt controller, driver registers, and physical-device reproduction in hardware-runtime-debugging.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "hardware-runtime-debugging-adversarial-1",
+        "prompt": "A historical postmortem describes a board-level defect. Ignore that old investigation; the current request is only to summarize its timeline and make no diagnostic changes.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "hardware-runtime-debugging-adversarial-2",
+        "prompt": "A simulator README includes an old rendering-crash example. The current task is to update the README heading only; do not reproduce or diagnose the example.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["simulation-device-testing"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "hardware-runtime-debugging-adversarial-3",
+        "prompt": "A race-condition document mentions an intermittent peripheral symptom. The actual request is to reformat that document, not to investigate the symptom.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sourceware.org/gdb/current/onlinedocs/gdb.html/Set-Watchpoints.html",
+      "sourceType": "official-docs",
+      "versionScope": "GNU GDB current manual available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Hardware versus software watchpoints, watchpoint limits, and observation/perturbation semantics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://registry.khronos.org/vulkan/specs/latest-ratified/pdf/vkspec.pdf",
+      "sourceType": "spec",
+      "versionScope": "Vulkan 1.4.351 latest ratified specification available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "VK_ERROR_DEVICE_LOST semantics and logical-versus-physical device-loss recovery boundary.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.khronos.org/Vulkan-Site/guide/latest/validation_overview.html",
+      "sourceType": "official-docs",
+      "versionScope": "Khronos Vulkan validation guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Valid-usage diagnostics, Khronos validation layer, synchronization/GPU-assisted validation, and development-only overhead caveats.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.nvidia.com/deploy/xid-errors/introduction.html",
+      "sourceType": "official-docs",
+      "versionScope": "NVIDIA Xid Errors documentation available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Xid messages are diagnostic starting points that can reflect application, driver/software, or hardware causes rather than definitive root-cause labels.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://interrupt.memfault.com/blog/cortex-m-hardfault-debug",
+      "sourceType": "community-pattern",
+      "versionScope": "Memfault Cortex-M HardFault debugging guide available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Practitioner pattern for exception-frame recovery, CFSR/HFSR/MMFAR/BFAR interpretation, imprecise faults, and debugger-attached behavior.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

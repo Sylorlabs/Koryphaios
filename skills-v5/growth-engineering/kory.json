@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "growth-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["product", "growth", "engineering"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3400,
+  "broader": ["product-analytics"],
+  "facets": [],
+  "requires": ["product-analytics"],
+  "conflicts": [],
+  "activation": [
+    "growth engineering",
+    "activation funnel",
+    "growth loop",
+    "referral system",
+    "activation after signup",
+    "instrument the funnel",
+    "measure lift"
+  ],
+  "excludes": [],
+  "evidence": [
+    "growth-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle growth engineering.",
+      "The current task is activation funnel.",
+      "I need help with growth loop.",
+      "Work on referral system for this request.",
+      "This request specifically requires activation after signup."
+    ],
+    "negative": [
+      "The only requested work is developer experience.",
+      "Please handle a/b test only.",
+      "This task is limited to pricing strategy.",
+      "The current request is product management.",
+      "Work only on accessibility."
+    ],
+    "ambiguous": [
+      {
+        "id": "growth-engineering-ambiguous-1",
+        "prompt": "The request includes growth engineering and developer experience.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "growth-engineering-ambiguous-2",
+        "prompt": "The request includes activation funnel and a/b test.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimentation-ab-testing"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "growth-engineering-ambiguous-3",
+        "prompt": "The request includes growth loop and pricing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "growth-engineering-adversarial-1",
+        "prompt": "A historical note says \"growth engineering\". The current request is product management.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-management"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "growth-engineering-adversarial-2",
+        "prompt": "A historical note says \"activation funnel\". The current request is accessibility.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "growth-engineering-adversarial-3",
+        "prompt": "A historical note says \"growth loop\". The current request is accessibility audit.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Microsoft Experimentation Platform article published 2020-09-14, inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Adopt diagnosis of assignment/exposure/logging bias before causal conclusions. Do not copy a platform-specific significance threshold or assume all experiments need the same analysis."
+    },
+    {
+      "url": "https://developers.google.com/analytics",
+      "sourceType": "official-docs",
+      "versionScope": "Google Analytics developer documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Event, measurement, reporting, and analytics implementation reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.itl.nist.gov/div898/handbook/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST/SEMATECH statistical methods handbook as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Statistical analysis, experimental design, exploratory analysis, and measurement reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

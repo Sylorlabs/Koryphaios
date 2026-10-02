@@ -100,7 +100,7 @@ import {
 import { getCliBridge, FREEBUFF_HARNESS_NOTE } from './cli-bridges';
 import { getContext } from '../context';
 import { resolveToolPermissionPolicy } from '../tools/permission-policy';
-import { loadAgentSettings } from '../agent-settings';
+import { loadAgentSettingsForSession } from '../agent-settings';
 import { wsBroker } from '../pubsub';
 import type { WSMessage } from '@koryphaios/shared';
 import type { ToolContext } from '../tools/registry';
@@ -245,6 +245,9 @@ function parseAccountModelId(model: string | undefined): {
 // The SDK's AgentDefinition.reasoningOptions accepts effort levels:
 // "high" | "medium" | "low" | "minimal" | "none".
 // Koryphaios uses: "high" | "medium" | "low" | "none" (default: no reasoning).
+// Tiers the map has never seen still pass through verbatim so new provider
+// levels keep working instead of being silently dropped; the backend
+// validates what it actually supports.
 
 const REASONING_EFFORT_MAP: Record<string, 'high' | 'medium' | 'low' | 'minimal' | 'none'> = {
   high: 'high',
@@ -271,7 +274,8 @@ function buildAgentDefinition(
   // the template based on costMode).
   if (!reasoningLevel && !modelId) return null;
 
-  const effort = reasoningLevel ? REASONING_EFFORT_MAP[reasoningLevel] : undefined;
+  const rawLevel = reasoningLevel ? reasoningLevel.toLowerCase().trim() : undefined;
+  const effort = rawLevel ? (REASONING_EFFORT_MAP[rawLevel] ?? rawLevel) : undefined;
   // Fall back to the freebuff settings.json default model, then to
   // gpt-5.6-luna (the freebuff default), then to claude-sonnet-4.5.
   const resolvedModel = modelId ?? readFreebuffDefaultModel() ?? 'openai/gpt-5.6-luna';
@@ -327,7 +331,10 @@ function buildAgentDefinition(
   };
 
   if (effort && effort !== 'none') {
-    def.reasoningOptions = { enabled: true, effort };
+    def.reasoningOptions = {
+      enabled: true,
+      effort: effort as 'high' | 'medium' | 'low' | 'minimal' | 'none',
+    };
   } else if (reasoningLevel === 'none' || reasoningLevel === 'off') {
     // SDK requires effort even when disabled — use 'none' to signal no reasoning.
     def.reasoningOptions = { enabled: false, exclude: true, effort: 'none' };
@@ -691,7 +698,8 @@ export async function buildKoryToolContext(
   activeProvider = 'freebuff',
 ): Promise<ToolContext> {
   const ctx = getContext();
-  const settings = loadAgentSettings(cwd);
+  // Session-scoped: this chat's own approval preset, not the workspace default.
+  const settings = loadAgentSettingsForSession(cwd, sessionId);
   const permissionPolicy = resolveToolPermissionPolicy(settings, interactionMode);
 
   // Resolve the active goal/item for this session (if any) so tool calls
@@ -967,6 +975,9 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
   const tools: CustomToolDefinition[] = [];
 
   // ── Notes: evidence-backed work result ──
+  // List fields accept a bare string / newline block as well as an array; the
+  // tool normalizes both, and rejecting here only costs the model a turn.
+  const noteList = z.union([z.array(z.string()), z.string()]).optional();
   tools.push(
     getCustomToolDefinition({
       toolName: 'kory_record_work_note',
@@ -975,22 +986,26 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
         summary: z.string().describe('Concise outcome grounded in supplied evidence'),
         status: z.enum(['completed', 'partial', 'blocked', 'decision']),
         objective: z.string().optional(),
-        decisions: z.array(z.string()).optional(),
-        changedFiles: z.array(z.string()).optional(),
-        commands: z.array(z.string()).optional(),
+        decisions: noteList,
+        changedFiles: noteList,
+        commands: noteList,
         tests: z
-          .array(
-            z.object({
-              name: z.string(),
-              outcome: z.enum(['pass', 'fail', 'not-run']),
-              evidence: z.string().optional(),
-            }),
-          )
+          .union([
+            z.array(
+              z.object({
+                name: z.string(),
+                outcome: z.enum(['pass', 'fail', 'not-run']),
+                evidence: z.string().optional(),
+              }),
+            ),
+            z.array(z.string()),
+            z.string(),
+          ])
           .optional(),
-        evidence: z.array(z.string()).optional(),
-        risks: z.array(z.string()).optional(),
-        followUps: z.array(z.string()).optional(),
-        relatedNotes: z.array(z.string()).optional(),
+        evidence: noteList,
+        risks: noteList,
+        followUps: noteList,
+        relatedNotes: noteList,
         includeInContext: z.boolean().optional(),
       }),
       description:

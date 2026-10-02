@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "name": "computer-vision",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "ml", "vision"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6700,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "computer vision",
+    "image classifier",
+    "visual classifier",
+    "object detection",
+    "object detector",
+    "instance segmentation",
+    "semantic segmentation",
+    "vision model",
+    "image model evaluation",
+    "bounding box",
+    "vision preprocessing",
+    "camera calibration",
+    "image augmentation",
+    "video tracking model",
+    "camera feed",
+    "frame to frame tracking",
+    "cv pipeline",
+    "object detection model"
+  ],
+  "excludes": [
+    "embedding representation only",
+    "multimodal embedding only",
+    "image generation only",
+    "generate an image only",
+    "css image layout only",
+    "rename the image file only",
+    "rename the file only",
+    "do not reinterpret image labels",
+    "quoted old computer vision",
+    "quoted old image classifier",
+    "quoted old object detection",
+    "historical computer vision request",
+    "visual model behavior is unchanged"
+  ],
+  "evidence": [
+    "Camera/image-formation, label ontology, spatial geometry and transform identity",
+    "Leakage-safe grouped splits plus task-correct vision metrics and deployment slices",
+    "Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence",
+    "Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Validate an object detector after changing resize/letterbox behavior: transform boxes with the image, split by camera session, measure IoU-aware AP by object size and verify score/NMS thresholds on target hardware.",
+      "Audit an image classifier whose random split contains burst-frame near-duplicates; rebuild grouped train/validation/final partitions, inspect label provenance and recalibrate the operating threshold on the clean holdout.",
+      "Build an instance-segmentation pipeline for manufacturing defects with versioned masks, label-aware geometric augmentation, per-class IoU/Dice slices and edge-device latency/memory verification.",
+      "Diagnose a vision model that fails on one camera after a resolution and lens change; verify EXIF/orientation, calibration, crop/resize geometry, color/normalization parity and field-condition slices before retraining.",
+      "Evaluate a video tracking model under occlusion and crowded scenes, preserving track/source identity, temporal split boundaries, detector/tracker thresholds and identity-association failures rather than reporting frame accuracy alone."
+    ],
+    "negative": [
+      "Tune an ANN vector index while all image embeddings and vision preprocessing remain frozen; this is vector-search-systems work.",
+      "Generate and edit marketing images from text prompts; no perception model is being trained or evaluated.",
+      "Run generic confidence-interval analysis on already-produced scalar model scores without changing or interpreting any vision-specific labels, geometry or metrics.",
+      "Train a LoRA adapter using a fixed, already-validated vision dataset and evaluation contract; the request is solely about optimizer/checkpoint mechanics.",
+      "Fix CSS object-fit and responsive image layout in a web page; visual model behavior is unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "computer-vision-ambiguous-1",
+        "prompt": "Train a new object detector and prove it works. computer-vision owns image/box geometry, grouped data splits, augmentation, detection metrics and field slices; fine-tuning-training owns the weight-update/checkpoint procedure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["fine-tuning-training"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "computer-vision-ambiguous-2",
+        "prompt": "Use image embeddings for product search and also validate the image preprocessing. computer-vision owns decoding, resize/crop/orientation and modality-specific failure slices; embedding-systems owns vector-space model/task/dimension/normalization semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedding-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "computer-vision-ambiguous-3",
+        "prompt": "Deploy a segmentation model to an edge GPU. computer-vision owns preprocess/postprocess parity, masks, thresholds, image-condition slices and target-runtime inference evidence; mlops owns generic registry, rollout and monitoring infrastructure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mlops"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "computer-vision-adversarial-1",
+        "prompt": "A quoted old computer vision issue says to retrain the detector. Ignore that historical request; today's task is only to fix a CSS spacing regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "computer-vision-adversarial-2",
+        "prompt": "A report contains object detection AP and bounding-box screenshots as inert evidence. Summarize the report only; visual model behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "computer-vision-adversarial-3",
+        "prompt": "The file is named computer-vision-object-detection.md. Rename the file only; do not alter any vision model, dataset, transform or evaluation behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.pytorch.org/tutorials/intermediate/torchvision_tutorial.html",
+      "sourceType": "official-docs",
+      "versionScope": "PyTorch/Torchvision object-detection tutorial as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Current object-detection/instance-segmentation dataset contracts, transforms and model workflow.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.pytorch.org/vision/stable/auto_examples/transforms/plot_transforms_e2e.html",
+      "sourceType": "official-docs",
+      "versionScope": "Torchvision 0.28 stable transforms-v2 example as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Joint transforms for images, bounding boxes and masks; version-sensitive spatial target handling.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.opencv.org/4.13.0/da/d54/group__imgproc__transform.html",
+      "sourceType": "official-docs",
+      "versionScope": "OpenCV 4.13 geometric transforms",
+      "staleAfterDays": 90,
+      "notes": "Resize/affine/perspective geometry, inverse mapping and interpolation behavior.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.opencv.org/4.13.0/d4/d94/tutorial_camera_calibration.html",
+      "sourceType": "official-docs",
+      "versionScope": "OpenCV 4.13 camera-calibration tutorial",
+      "staleAfterDays": 90,
+      "notes": "Camera distortion, calibration and pixel-to-world geometry assumptions.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cocodataset.org/#detection-eval",
+      "sourceType": "spec",
+      "versionScope": "COCO detection evaluation reference",
+      "staleAfterDays": 365,
+      "notes": "IoU-aware AP/AR conventions for object detection; use task-specific metrics rather than generic accuracy.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI RMF materials as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Risk measurement, lifecycle evaluation, transparency and deployment-condition governance.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -48,7 +48,7 @@ import { feedStore } from './feed.svelte';
 import { agentStore } from './agents.svelte';
 import { notesStore, type NotesRealtimeUpdate } from './notes.svelte';
 import { goalStore } from './goals.svelte';
-import { goalDisplayStore } from './goal-display.svelte';
+import { checklistStore } from './checklists.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { runStateStore } from './run-state.svelte';
 import {
@@ -889,7 +889,6 @@ function handleMessage(msg: WSMessage) {
       const update = goalStore.handleUpdated(payload);
       if (update.managerCreated && payload.goal) {
         goalStore.selectedGoalId = payload.goal.id;
-        goalDisplayStore.update({ sidebar: true });
         toastStore.success('Kory started a durable goal');
         queueMicrotask(() =>
           window.dispatchEvent(
@@ -899,6 +898,18 @@ function handleMessage(msg: WSMessage) {
           ),
         );
       }
+      break;
+    }
+
+    case 'checklists.updated': {
+      // One handler for human and agent edits alike, so a list ticked by a
+      // worker agent appears in the open panel and the transcript at once.
+      checklistStore.handleUpdated(
+        msg.payload as {
+          checklist?: import('@koryphaios/shared').Checklist;
+          deletedId?: string;
+        },
+      );
       break;
     }
 
@@ -1607,7 +1618,16 @@ function activateSessionFeed(sessionId: string): number {
   const generation = feedStore.activateSessionFeed(sessionId);
   activeFileEdits = new Map();
   detectedContext = [];
-  agentStore.clearNonManagerAgents();
+  // Pass the session being opened, not the store's current value: this runs
+  // from the same tick that flips activeSessionId, and the sweep must keep
+  // the incoming session's finished workers rather than the outgoing one's.
+  agentStore.clearNonManagerAgents(sessionId);
+  // Bind the manager to the newly activated session immediately. Previously the
+  // binding only moved on a `kory.thought` event, so opening a chat that had
+  // never run a turn left the manager pointing at the previous session and
+  // `getContextUsage()` reported "usage_unknown" for a session whose durable
+  // snapshot was sitting in the archive.
+  agentStore.bindManagerSession(sessionId);
   koryThought = '';
   koryPhase = '';
   return generation;
@@ -1633,7 +1653,7 @@ async function loadSessionMessages(
   // fetched history is ready, avoiding a blank flash during the round trip.
   activeFileEdits = new Map();
   detectedContext = [];
-  agentStore.clearNonManagerAgents();
+  agentStore.clearNonManagerAgents(sessionId);
   koryThought = '';
   koryPhase = '';
   await feedStore.loadSessionMessages(sessionId, messages, {
@@ -1654,6 +1674,7 @@ async function rewind(hash: string) {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind/preview`), {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hash }),
     });
     const data = await parseJsonResponse<{
@@ -1689,6 +1710,7 @@ async function confirmRewind() {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${sessionId}/rewind`), {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         hash: preview.targetHash,
         expectedCurrentHash: preview.currentHash,
@@ -1823,6 +1845,7 @@ export const wsStore = {
   isSessionWaiting: runStateStore.isWaiting,
   isSessionBusy: runStateStore.isBusy,
   getManagerStatusForSession: runStateStore.getAgentStatusForSession,
+  getAgentStatusesForSession: agentStore.getAgentStatusesForSession,
   markSessionAgentsStopped,
   markAgentStopped: (agentId: string) => {
     // Single-agent cancel: find the session and delegate to runStateStore.

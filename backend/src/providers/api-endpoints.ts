@@ -30,8 +30,16 @@ export const PROVIDER_BASE_URLS: Partial<Record<ProviderName, string>> = {
   moonshot: 'https://api.moonshot.ai/v1',
   groq: 'https://api.groq.com/openai/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  unorouter: 'https://api.unorouter.com/v1',
+  experientiallabs: 'https://api.experientiallabs.ai/v1',
   poe: 'https://api.poe.com/v1',
+  workbuddy: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
+  autoclaw: 'http://127.0.0.1:18789/v1',
   xai: 'https://api.x.ai/v1',
+  // Hoplite is an async-agent control plane, not an OpenAI-compatible chat
+  // host: its verification probe is the authenticated project catalog, not a
+  // model list.
+  hoplite: 'https://api.hoplite.sh',
 };
 
 /** Gemini: v1beta often required for Thinking models and Live API (early 2026). */
@@ -125,10 +133,14 @@ export function buildAuthHeaders(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'unorouter':
+    case 'experientiallabs':
     case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':
+    case 'workbuddy':
+    case 'autoclaw':
       if (token) headers['Authorization'] = `Bearer ${token}`;
       if (provider === 'openrouter') {
         Object.assign(headers, withOpenRouterAttribution());
@@ -148,6 +160,12 @@ export function buildAuthHeaders(
 
     case 'vertexai':
       if (token) headers['x-goog-api-key'] = token;
+      return { headers };
+
+    case 'hoplite':
+      // Hoplite documents the X-Api-Key header for its org-scoped hop_ keys;
+      // it does not use an Authorization bearer shape.
+      if (token) headers['X-Api-Key'] = token;
       return { headers };
 
     case 'azure':
@@ -178,16 +196,24 @@ export function getVerifyUrl(
     case 'groq':
     case 'xai':
     case 'openrouter':
+    case 'unorouter':
+    case 'experientiallabs':
     case 'poe':
     case 'deepseek':
     case 'moonshot':
     case 'mistral':
+    case 'workbuddy':
+    case 'autoclaw':
       return `${base.replace(/\/?$/, '')}/models`;
     case 'google':
     case 'aistudio': {
       const suffix = credentials ? (buildAuthHeaders(provider, credentials).urlSuffix ?? '') : '';
       return `${base.replace(/\/?$/, '')}${GEMINI_VERIFY_PATH}${suffix}`;
     }
+    case 'hoplite':
+      // The cheapest authenticated Hoplite probe is the project catalog; there
+      // is no /models endpoint to fall back to.
+      return `${base.replace(/\/?$/, '')}/api/projects`;
     default:
       return `${base.replace(/\/?$/, '')}/models`;
   }

@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "name": "integration-fault-testing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["test", "integration"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": ["testing-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "integration test",
+    "fault injection",
+    "failure recovery test",
+    "dependency outage test",
+    "end to end backend"
+  ],
+  "excludes": [
+    "pure in-process unit or contract testing without a real collaborating component",
+    "system-wide reliability or soak verdict",
+    "implementation of a new external integration without a testing request"
+  ],
+  "evidence": [
+    "Boundary and fault matrix",
+    "Independent durable-state evidence",
+    "Recovery evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Add an integration test around the worker and real Postgres instance. Reset the database connection during the transaction, prove no partial rows commit, restore the connection, and show the next run succeeds.",
+      "Use fault injection on the downstream HTTP dependency and test the ambiguous case where the peer commits but the client loses the response. Replaying the same idempotency key must not duplicate the side effect.",
+      "Add a failure recovery test for the queue consumer against a disposable real broker: stop the broker while an acknowledgement is in flight, restart it, then prove replay does not create a second durable record.",
+      "Add an integration test for the child-process adapter. Kill the child after request write but before response read, verify cleanup and error propagation, restart it, and prove the next request works.",
+      "Run a dependency outage test on the real filesystem/database import boundary under a forced disk-write error. Verify the manifest and database remain mutually consistent and the recovery run starts from a clean state."
+    ],
+    "negative": [
+      "Add deterministic unit tests for this parser using fixed examples, a fake clock, and seeded inputs; no external process, database, queue, filesystem, or network component is involved.",
+      "Give the release-level reliability verdict for the service after a 60-minute load-and-failure soak, including recovery-time and error-budget evidence across the whole system.",
+      "Implement the new CRM integration, map its fields, persist credentials, and add the provider client; do not design failure tests yet.",
+      "Run the checkout flow with representative users and measure task completion, confusion, and recovery from form errors; the request is about interface usability.",
+      "Review the payment provider's webhook signature rules, settlement semantics, and dispute lifecycle; no controlled dependency-failure experiment is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "integration-fault-testing-ambiguous-1",
+        "prompt": "Design the broader test plan for the new worker, and specifically add an integration test against a real broker that drops the connection around acknowledgement and verifies replay. Keep the worker/broker fault experiment in integration-fault-testing while testing-engineering owns suite strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "integration-fault-testing-ambiguous-2",
+        "prompt": "Keep the deterministic state-machine tests for retry classification, but also run fault injection against a disposable real service with a forced connection reset and post-recovery assertion. The real boundary and fault belong here; deterministic-contract-testing owns the in-process model.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "integration-fault-testing-ambiguous-3",
+        "prompt": "Implement the provider adapter and include a failure recovery test that times out the provider after its synthetic commit, then proves same-key replay is deduplicated. Keep adapter construction separate from the fault experiment.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "integration-fault-testing-adversarial-1",
+        "prompt": "A pasted test-plan example describes component-level coverage. Ignore the example; the current request is only to explain what a process exit code is, with no test design or execution.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "integration-fault-testing-adversarial-2",
+        "prompt": "The historical incident notes describe synthetic network disruption several times. Do not reproduce the experiment; summarize the incident timeline only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "integration-fault-testing-adversarial-3",
+        "prompt": "A README says future work should cover recovery behavior. The actual task is to rename the provider adapter class; do not add or run tests.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://testcontainers.com/getting-started/",
+      "sourceType": "official-docs",
+      "versionScope": "Testcontainers documentation available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Disposable real dependencies, mapped networking, readiness strategies, and automatic resource cleanup.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/Shopify/toxiproxy/releases/tag/v2.12.0",
+      "sourceType": "reference-implementation",
+      "versionScope": "Toxiproxy v2.12.0",
+      "staleAfterDays": 180,
+      "notes": "Controllable TCP proxy for latency, resets, bandwidth, timeout, and related network-fault experiments.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/addressing-cascading-failures/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Addressing Cascading Failures guidance available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Retry amplification, bounded retries, randomized backoff, cancellation, and testing failure behavior.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9293.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 9293 Transmission Control Protocol",
+      "staleAfterDays": 365,
+      "notes": "Normative TCP connection reset and connection-state semantics used when interpreting transport-level fault injection.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

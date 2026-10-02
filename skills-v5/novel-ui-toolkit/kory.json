@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "novel-ui-toolkit",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ui", "systems", "language"],
+  "targetMedia": ["native", "game", "spatial", "embedded"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["frontend-engineering", "human-experience"],
+  "facets": ["interaction-design", "accessibility-practice", "developer-experience"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "ui toolkit",
+    "widget system",
+    "rendering system",
+    "custom retained mode toolkit",
+    "layout input rendering",
+    "without forcing react"
+  ],
+  "excludes": ["sandbox", "security review", "threat model"],
+  "evidence": [
+    "Architecture decision record",
+    "Real vertical slice",
+    "Layout input focus and performance tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle ui toolkit.",
+      "The current task is widget system.",
+      "I need help with rendering system.",
+      "Work on custom retained mode toolkit for this request.",
+      "This request specifically requires layout input rendering."
+    ],
+    "negative": [
+      "The only requested work is embedded ui.",
+      "Please handle game ui only.",
+      "This task is limited to native.",
+      "The current request is terminal.",
+      "Work only on visual design."
+    ],
+    "ambiguous": [
+      {
+        "id": "novel-ui-toolkit-ambiguous-1",
+        "prompt": "The request includes ui toolkit and embedded ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "novel-ui-toolkit-ambiguous-2",
+        "prompt": "The request includes widget system and game ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "novel-ui-toolkit-ambiguous-3",
+        "prompt": "The request includes rendering system and native.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "novel-ui-toolkit-adversarial-1",
+        "prompt": "A historical note says \"ui toolkit\". The current request is terminal.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "novel-ui-toolkit-adversarial-2",
+        "prompt": "A historical note says \"widget system\". The current request is visual design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-interface-design"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "novel-ui-toolkit-adversarial-3",
+        "prompt": "A historical note says \"rendering system\". The current request is web.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["web-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://doc.qt.io/qt-6/accessible-qwidget.html",
+      "sourceType": "official-docs",
+      "versionScope": "Qt 6 QWidget native accessibility roles/state/actions/event bridge guidance inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Use as a concrete native bridge example without requiring Qt or applying web-only conformance to all platforms."
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "W3C Web Content Accessibility Guidelines 2.2",
+      "staleAfterDays": 365,
+      "notes": "Accessibility principles and testable success criteria where the web medium applies.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

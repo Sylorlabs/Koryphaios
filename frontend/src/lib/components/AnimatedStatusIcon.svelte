@@ -10,6 +10,11 @@
   }
 
   let { status, size = 20, isManager = false, isStatic = false, phase: _phase = undefined }: Props = $props();
+
+  // The thinking bulb clips through a document-scoped `url(#...)` reference, so
+  // a fixed id is shared by every status icon on screen and breaks as soon as
+  // one of them unmounts. Scope the clip path to this instance.
+  const bulbClipId = $props.id();
 </script>
 
 <!-- Animated status icons with distinct animations per agent state -->
@@ -20,14 +25,14 @@
   <div class="status-icon thinking" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
       <defs>
-        <clipPath id="bulb-fill">
+        <clipPath id="bulb-fill-{bulbClipId}">
           <path d="M12 4a5.5 5.5 0 0 1 3.7 9.6V16.5a1 1 0 0 1-1 1h-5.4a1 1 0 0 1-1-1v-2.9A5.5 5.5 0 0 1 12 4z"/>
         </clipPath>
       </defs>
       <!-- Bulb body -->
       <path d="M12 4a5.5 5.5 0 0 1 3.7 9.6V16.5a1 1 0 0 1-1 1h-5.4a1 1 0 0 1-1-1v-2.9A5.5 5.5 0 0 1 12 4z"
             class="text-yellow-400" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <g clip-path="url(#bulb-fill)">
+      <g clip-path="url(#bulb-fill-{bulbClipId})">
         <rect x="6.5" y="4" width="11" height="13.5" class="bulb-fill-rect text-yellow-300" fill="currentColor"/>
       </g>
       <!-- Base lines -->
@@ -121,12 +126,12 @@
   </div>
 
 {:else if status === 'analyzing'}
-  <!-- Eye with scanning radar pulse — violet theme -->
+  <!-- Eye with pulse — violet theme.
+       Deliberately no enclosing scan rings: ring circles at r=7/r=10 in a
+       24-unit box rendered at 14px touch the container edge and read as an
+       unwanted circle border around the icon. -->
   <div class="status-icon analyzing" style="width: {size}px; height: {size}px;">
     <svg viewBox="0 0 24 24" fill="none" width={size} height={size}>
-      <!-- Scanning rings -->
-      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="0.8" class="text-violet-400 scan-ring ring-1"/>
-      <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="0.8" class="text-violet-400 scan-ring ring-2"/>
       <!-- Eye shape -->
       <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"
             stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="text-violet-400"/>
@@ -136,8 +141,6 @@
       <circle cx="12" cy="12" r="1.8" fill="currentColor" class="text-slate-900"/>
       <!-- Highlight -->
       <circle cx="13" cy="11" r="0.7" fill="currentColor" class="text-white"/>
-      <!-- Scan sweep line -->
-      <line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1" stroke-linecap="round" class="text-violet-300 analyze-sweep"/>
     </svg>
   </div>
 
@@ -375,35 +378,13 @@
     50% { opacity: 0.5; r: 4.5; }
   }
 
-  /* ── Analyzing: eye with scanning radar ─────────── */
+  /* ── Analyzing: eye with gentle pulse ───────────── */
   .analyzing {
     animation: analyze-pulse 2s ease-in-out infinite;
-  }
-  .analyzing .scan-ring {
-    animation: ring-expand 2.5s ease-out infinite;
-  }
-  .analyzing .ring-2 {
-    animation-delay: 0.4s;
-  }
-  .analyzing .analyze-sweep {
-    animation: sweep-rotate 2s linear infinite;
-    transform-origin: 12px 12px;
   }
   @keyframes analyze-pulse {
     0%, 100% { transform: scale(1); }
     50% { transform: scale(1.05); }
-  }
-  @keyframes ring-expand {
-    0% { opacity: 0.8; transform: scale(0.8); }
-    60% { opacity: 0.2; transform: scale(1.1); }
-    100% { opacity: 0; transform: scale(1.2); }
-  }
-  @keyframes sweep-rotate {
-    0% { transform: rotate(0deg); opacity: 0.6; }
-    25% { opacity: 0.9; }
-    50% { transform: rotate(180deg); opacity: 0.6; }
-    75% { opacity: 0.9; }
-    100% { transform: rotate(360deg); opacity: 0.6; }
   }
 
   /* ── Searching: globe with pulsing signal rings ────────── */

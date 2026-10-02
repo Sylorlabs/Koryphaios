@@ -1,0 +1,68 @@
+{
+  "id": "testing-engineering-full-task-1",
+  "maturity": "individual",
+  "prompt": "A TypeScript HTTP client was fixed so aborting during a `429 Retry-After` backoff cancels the pending retry instead of allowing a second request after the caller has cancelled. The implementation fix is already present, but there is no regression coverage. Add durable tests. Recover the observable cancellation contract from the public client API, choose the smallest faithful boundary, control time deterministically, and prove the regression distinguishes the fixed behavior from the old schedule. Do not assert private timer bookkeeping. Keep the existing retry-on-429 behavior for non-aborted requests covered, and add a broader boundary test only if it observes something the focused regression cannot.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://testing-engineering/retry-abort-regression",
+    "requirements": [
+      "the current client implementation contains the abort-during-backoff fix",
+      "the prior known-bad behavior can be restored through a provided mutation fixture without changing the public API",
+      "the repository provides a fake clock and a local deterministic HTTP responder",
+      "the existing suite already covers ordinary successful requests but not abort during Retry-After backoff",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "testing-retry-contract",
+      "assertion": "The added regression asserts through the public client boundary that an abort during Retry-After backoff produces no subsequent request while preserving ordinary non-aborted retry behavior."
+    },
+    {
+      "id": "testing-retry-mutation",
+      "assertion": "The regression fails against the provided known-bad scheduling mutation and passes against the fixed implementation without relying on wall-clock sleep or private timer fields."
+    },
+    {
+      "id": "testing-retry-layering",
+      "assertion": "Any broader test added covers a distinct integration risk; the same case matrix is not duplicated at multiple layers."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "testing-engineering-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Claim-to-test matrix",
+        "known-bad mutation failure",
+        "fixed-revision passing focused test",
+        "neighboring retry-suite results"
+      ]
+    },
+    {
+      "id": "testing-engineering-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the test protects observable cancellation behavior rather than private implementation",
+        "time and HTTP dependencies are controlled without erasing the production contract",
+        "test layers are complementary rather than duplicated"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Claim-to-test matrix",
+    "test diff",
+    "known-bad mutation failure output",
+    "fixed-revision passing output",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "testing-engineering-scenario-1-test-plan",
+    "testing-engineering-scenario-1-test-diff",
+    "testing-engineering-scenario-1-mutation-proof",
+    "testing-engineering-scenario-1-paired-evaluation"
+  ]
+}

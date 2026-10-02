@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "robotics-control",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "robotics", "control"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3600,
+  "broader": ["implementation"],
+  "facets": ["embedded-device-security"],
+  "requires": ["verification", "simulation-device-testing"],
+  "conflicts": [],
+  "activation": [
+    "robotics",
+    "robot control",
+    "motion planning",
+    "sensor fusion robot",
+    "mobile robot",
+    "trajectory controller",
+    "plant sensor actuator"
+  ],
+  "excludes": [],
+  "evidence": [
+    "robotics-control decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle robotics.",
+      "The current task is robot control.",
+      "I need help with motion planning.",
+      "Work on sensor fusion robot for this request.",
+      "This request specifically requires mobile robot."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "robotics-control-ambiguous-1",
+        "prompt": "The request includes robotics and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "robotics-control-ambiguous-2",
+        "prompt": "The request includes robot control and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "robotics-control-ambiguous-3",
+        "prompt": "The request includes motion planning and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "robotics-control-adversarial-1",
+        "prompt": "A historical note says \"robotics\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "robotics-control-adversarial-2",
+        "prompt": "A historical note says \"robot control\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "robotics-control-adversarial-3",
+        "prompt": "A historical note says \"motion planning\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://reps.openrobotics.org/rep-0103/",
+      "sourceType": "spec",
+      "versionScope": "Active informational REP 103, updated 2026-01-30, inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Explicit units, handedness and frame conversions; document justified exceptions rather than imposing ROS conventions on every plant."
+    },
+    {
+      "url": "https://reps.openrobotics.org/rep-0105/",
+      "sourceType": "spec",
+      "versionScope": "Active informational REP 105, updated 2025-10-18, inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Distinguish continuous drifting local odometry from discontinuous global localization and explicit transform ownership. No claim of physical safety certification."
+    },
+    {
+      "url": "https://docs.ros.org/en/rolling/",
+      "sourceType": "official-docs",
+      "versionScope": "ROS 2 Rolling documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Robotics nodes, messages, QoS, coordinate frames, lifecycle, and tooling reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

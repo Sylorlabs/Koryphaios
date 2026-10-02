@@ -1,0 +1,82 @@
+{
+  "id": "rust-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Rust async service that holds a `std::sync::MutexGuard` across an `.await`, causing executor stalls/deadlock under concurrency. Establish which state truly needs synchronization, shorten the critical section or use an async-aware primitive only when justified, preserve ordering invariants, and verify concurrent requests, cancellation, task panic/error, and no lock held across slow I/O using tests/lints where available.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://rust-engineering/async-mutex-across-await",
+    "requirements": [
+      "Rust async service with shared map and delayed external I/O inside current critical section",
+      "concurrent request harness reproducing stalled progress",
+      "ordering/state invariant that must remain atomic around the shared map mutation",
+      "cancellation/error cases plus pinned async runtime behavior",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "rust-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "rust-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "rust-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "async-mutex-across-await scenario evidence",
+    "rust-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "rust-engineering-individual-scenario-1-result",
+    "rust-engineering-individual-scenario-1-verification",
+    "rust-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual rust-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Use ownership and lifetimes to express resource responsibility rather than fighting the borrow checker with cloning or interior mutability."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Synchronous lock guards never span suspension points, and any state transition that must be atomic is completed inside a bounded non-awaiting critical section."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run cargo check or the repository build matrix plus focused tests for ownership-sensitive behavior, async cancellation, feature combinations, and unsafe invariants."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not add unsafe, leak resources, clone large state, or wrap everything in Arc<Mutex<_>> merely to satisfy compilation."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (rust-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

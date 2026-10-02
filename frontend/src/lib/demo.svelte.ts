@@ -15,7 +15,12 @@ import { feedStore } from '$lib/stores/feed.svelte';
 import { agentStore } from '$lib/stores/agents.svelte';
 import { providersStore } from '$lib/stores/providers.svelte';
 import { wsStore } from '$lib/stores/websocket.svelte';
-import { applyDemoRunArtifacts, getDemoSession, registerDemoSessions, recordDemoMessage } from '$lib/demo-api';
+import {
+  applyDemoRunArtifacts,
+  getDemoSession,
+  registerDemoSessions,
+  recordDemoMessage,
+} from '$lib/demo-api';
 import { isDemoMode, isGuidedDemo, isFullDemo, demoVariant } from '$lib/demo-flags';
 import type { Session } from '@koryphaios/shared';
 
@@ -91,7 +96,7 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['antigravity', 'Antigravity', 'auth_only'],
   ['cursor', 'Cursor', 'auth_only'],
   ['devin', 'Devin', 'auth_only'],
-  ['cline', 'Cline', 'auth_only'],
+  ['cline', 'Cline', 'api_key'],
   ['jules', 'Google Jules', 'api_key'],
   ['azure', 'Azure OpenAI', 'api_key_or_auth'],
   ['bedrock', 'AWS Bedrock', 'env_auth'],
@@ -161,6 +166,8 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['vultr', 'Vultr', 'api_key'],
   ['wandb', 'Weights & Biases', 'api_key'],
   ['poe', 'Poe', 'api_key'],
+  ['workbuddy', 'Work Buddy', 'api_key'],
+  ['autoclaw', 'AutoClaw', 'api_key'],
   ['github-models', 'GitHub Models', 'api_key'],
   ['requesty', 'Requesty', 'api_key'],
   ['inference', 'Inference.net', 'api_key'],
@@ -169,7 +176,7 @@ const AVAILABLE_DEMO_PROVIDERS = [
   ['moark', 'Moark', 'api_key'],
   ['azurecognitive', 'Azure Cognitive', 'api_key'],
   ['sapai', 'SAP AI', 'api_key'],
-  ['gitlab', 'GitLab', 'api_key'],
+  ['gitlab', 'GitLab Duo', 'api_key'],
 ] as const;
 
 // These are clearly marked demo connections. Their model IDs and display
@@ -183,7 +190,14 @@ const CONNECTED_DEMO_PROVIDERS = [
     authenticated: true,
     authSource: 'Demo CLI session',
     models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
-    selectedModels: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
+    selectedModels: [
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ],
     allAvailableModels: [
       {
         id: 'gpt-5.6-sol',
@@ -268,7 +282,12 @@ const CONNECTED_DEMO_PROVIDERS = [
     authenticated: true,
     authSource: 'Demo CLI session',
     models: ['claude-code-fable', 'claude-code-opus', 'claude-code-sonnet', 'claude-code-haiku'],
-    selectedModels: ['claude-code-fable', 'claude-code-opus', 'claude-code-sonnet', 'claude-code-haiku'],
+    selectedModels: [
+      'claude-code-fable',
+      'claude-code-opus',
+      'claude-code-sonnet',
+      'claude-code-haiku',
+    ],
     allAvailableModels: [
       ['claude-code-fable', 'Claude Fable 5'],
       ['claude-code-opus', 'Claude Opus 4.8'],
@@ -443,7 +462,7 @@ function playTurn(prompt: string, opts: { loop: boolean; clear: boolean }) {
       agentId: 'kory-manager',
       agentName: 'Kory',
       glowClass: 'glow-kory',
-      text: 'Analyzing the request — classifying domain and decomposing into subtasks.',
+      text: 'Analyzing the request. Classifying domain and decomposing into subtasks.',
       metadata: { phase: 'analyzing' },
     });
   });
@@ -584,21 +603,38 @@ export function seedDemo(): void {
         ['assistant', REPLY],
       ],
       s2: [
-        ['user', 'Refactor authentication to support passkeys and preserve existing OAuth sessions.'],
-        ['assistant', 'I mapped the current session boundary, added a passkey enrollment flow, and kept the OAuth callback contract stable. The migration includes rollback-safe session invalidation tests.'],
+        [
+          'user',
+          'Refactor authentication to support passkeys and preserve existing OAuth sessions.',
+        ],
+        [
+          'assistant',
+          'I mapped the current session boundary, added a passkey enrollment flow, and kept the OAuth callback contract stable. The migration includes rollback-safe session invalidation tests.',
+        ],
       ],
       s3: [
         ['user', 'Fix the CI pipeline failures and make preview deployments deterministic.'],
-        ['assistant', 'The pipeline now caches Bun dependencies by lockfile, runs the typecheck before the test fan-out, and publishes one immutable preview artifact per commit.'],
+        [
+          'assistant',
+          'The pipeline now caches Bun dependencies by lockfile, runs the typecheck before the test fan-out, and publishes one immutable preview artifact per commit.',
+        ],
       ],
       s4: [
         ['user', 'Migrate the public API to v2 without breaking existing integrations.'],
-        ['assistant', 'The v2 routes use explicit versioned schemas, translate v1 payloads during the deprecation window, and include contract tests for both response shapes.'],
+        [
+          'assistant',
+          'The v2 routes use explicit versioned schemas, translate v1 payloads during the deprecation window, and include contract tests for both response shapes.',
+        ],
       ],
     } as const;
     for (const [sessionId, messages] of Object.entries(seededChats)) {
       for (const [role, content] of messages) {
-        recordDemoMessage(sessionId, role, content, role === 'assistant' ? 'gpt-5.6-sol' : undefined);
+        recordDemoMessage(
+          sessionId,
+          role,
+          content,
+          role === 'assistant' ? 'gpt-5.6-sol' : undefined,
+        );
       }
     }
     playTurn(SCRIPT_PROMPT, { loop: true, clear: true });
@@ -641,7 +677,11 @@ export function demoOnSessionSwitch(): void {
   // Guided mode has four independent canned chats. Stop the animated run
   // before its stale timers can write analytics events into the newly selected
   // workflow; session sync then atomically swaps in that chat's own history.
-  if (isGuidedDemo && guidedPlaybackSessionId && sessionStore.activeSessionId !== guidedPlaybackSessionId) {
+  if (
+    isGuidedDemo &&
+    guidedPlaybackSessionId &&
+    sessionStore.activeSessionId !== guidedPlaybackSessionId
+  ) {
     const previousSessionId = guidedPlaybackSessionId;
     clearTimers();
     guidedPlaybackSessionId = null;

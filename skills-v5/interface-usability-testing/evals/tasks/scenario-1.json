@@ -1,0 +1,70 @@
+{
+  "id": "interface-usability-testing-full-task-1",
+  "maturity": "individual",
+  "prompt": "A desktop account settings screen now lets a user change notification frequency. Add and execute a UI test in the real desktop runtime that starts with saved weekly notifications, opens Settings, changes to daily, exercises a server-rejection state on the first save, recovers without losing the user's selection, saves successfully on retry, closes the window, reopens Settings, and confirms the daily choice remains visible. Record the runtime/window identity and observable state transitions. Do not substitute screenshot comparison for task evidence, and do not claim accessibility conformance from this test.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://interface-usability-testing/scenario-1",
+    "requirements": [
+      "real desktop UI runtime with recorded application/runtime identity",
+      "fixture account initially persisted with weekly notifications",
+      "controllable first-save server rejection followed by successful retry",
+      "independent persisted-preference inspection or reopen path",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "interface-usability-testing-state-path-1",
+      "assertion": "The test reaches Settings through the supported interface, changes weekly to daily through the real control, and records the visible selected state before save."
+    },
+    {
+      "id": "interface-usability-testing-error-recovery-1",
+      "assertion": "The injected first-save rejection produces the intended visible error/feedback state without silently reverting or clearing the selected daily value, and the user can retry through the interface."
+    },
+    {
+      "id": "interface-usability-testing-persistence-1",
+      "assertion": "After a successful retry, closing and reopening Settings shows daily selected, with the persisted preference independently consistent with the interface state."
+    },
+    {
+      "id": "interface-usability-testing-boundary-1",
+      "assertion": "The result distinguishes proven interaction/state behavior from untested visual-layout, accessibility-conformance, and human-comprehension claims."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "interface-usability-testing-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "real runtime interaction trace",
+        "visible error and retained selection evidence",
+        "reopen/persistence evidence",
+        "explicit evidence-boundary labels"
+      ]
+    },
+    {
+      "id": "interface-usability-testing-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "desktop application/runtime identity",
+    "interaction and state transition record",
+    "first-save failure and retry evidence",
+    "reopened persisted state",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "interface-usability-testing-scenario-1-result",
+    "interface-usability-testing-scenario-1-verification",
+    "interface-usability-testing-scenario-1-paired-evaluation"
+  ]
+}

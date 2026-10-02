@@ -21,7 +21,11 @@ import { whichBinary } from './cli-detection';
 import { detectDevinCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
 import { applyModelsDevMetadata, refreshModelsDevCache } from './models-dev';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  inferenceSandboxPolicy,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -187,7 +191,17 @@ export class DevinProvider implements Provider {
       'moonshot',
       'mistral',
       'deepseek',
-    ]);
+    ]).map((m) => ({
+      ...m,
+      // Devin has no reasoning-effort flag: the tier is embedded in the model
+      // id itself (e.g. swe-1.6-fast / swe-1.6-slow, claude-opus-5-5-max), so
+      // choosing the model IS choosing the reasoning — one choice, never a
+      // separate picker. models.dev enrichment above may attach generic
+      // reasoningLevels for ids it recognizes; drop them so the UI never
+      // offers a second reasoning choice. Context windows, output limits,
+      // and costs from enrichment are kept.
+      reasoningLevels: undefined,
+    }));
   }
 
   async refreshModels(): Promise<void> {
@@ -374,6 +388,16 @@ export class DevinProvider implements Provider {
     ];
     if (agentConfigPath) args.push('--agent-config', agentConfigPath);
     const cliModel = this.resolveCliModel(request.model);
+    if (request.reasoningLevel) {
+      // No separate effort flag exists: the tier embedded in the model id
+      // (e.g. -low / -medium / -high / -max) IS the reasoning choice and is
+      // passed to --model verbatim below. Log the mapping so a stale
+      // composer-level value never looks silently dropped.
+      providerLog.debug(
+        { provider: 'devin', model: cliModel, requestedReasoning: request.reasoningLevel },
+        'Devin reasoning tier comes from the model id; Koryphaios reasoning level not applied separately',
+      );
+    }
     if (cliModel) args.push('--model', cliModel);
 
     const baseEnv = buildProviderCliEnv('devin', {
@@ -401,7 +425,9 @@ export class DevinProvider implements Provider {
               ...(agentConfigArtifact ? [agentConfigArtifact.directory] : []),
             ],
             readonlyConfigDirs: [join(homedir(), '.local', 'share', 'devin', 'credentials.toml')],
-            policy: request.sandbox,
+            // The CLI child is the inference transport — it must reach the
+            // model endpoint. See inferenceSandboxPolicy.
+            policy: inferenceSandboxPolicy(request.sandbox),
           })
         : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);

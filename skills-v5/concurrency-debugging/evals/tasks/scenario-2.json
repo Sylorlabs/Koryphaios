@@ -1,0 +1,69 @@
+{
+  "id": "concurrency-debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "The supplied worker pool deadlocks during shutdown only when a session flush starts at the same time. The fixture can pause after shutdown acquires `sessionLock` and after flush acquires `queueLock`. Reproduce the deadlock with those barriers, construct the wait-for graph and lock-order sequence, identify the inconsistent ordering, correct the ownership/order without dropping pending flushes, and add a deterministic regression for the conflicting schedule plus a control showing normal shutdown still drains work. Do not replace the locks with polling or timeouts.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://concurrency-debugging/shutdown-flush-deadlock",
+    "requirements": [
+      "barriers deterministically establish the conflicting lock-acquisition schedule",
+      "normal shutdown without simultaneous flush currently drains correctly",
+      "pending flushes must not be discarded",
+      "timeouts/polling are prohibited as the correctness fix",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "concurrency-deadlock-cycle",
+      "assertion": "The starting revision produces a concrete wait-for cycle under the supplied barriers."
+    },
+    {
+      "id": "concurrency-deadlock-order",
+      "assertion": "The root cause identifies the inconsistent lock/resource ordering or ownership that creates the cycle."
+    },
+    {
+      "id": "concurrency-deadlock-regression",
+      "assertion": "The controlled conflicting schedule completes after the fix, pending flushes are preserved, and the normal drain control remains green."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "concurrency-debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Concurrency timeline",
+        "Violated invariant",
+        "Stress regression",
+        "wait-for graph and lock ordering",
+        "deterministic conflicting-schedule regression"
+      ]
+    },
+    {
+      "id": "concurrency-debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the diagnosis names the resource cycle rather than generic timing",
+        "the correction establishes a coherent ownership/order rule",
+        "the fix preserves required flush semantics"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Concurrency timeline",
+    "Violated invariant",
+    "Stress regression",
+    "pre-fix wait-for evidence",
+    "actual diff and passing controlled schedule",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "concurrency-debugging-scenario-2-wait-for-graph",
+    "concurrency-debugging-scenario-2-lock-order",
+    "concurrency-debugging-scenario-2-regression",
+    "concurrency-debugging-scenario-2-paired-evaluation"
+  ]
+}

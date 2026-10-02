@@ -1,0 +1,68 @@
+{
+  "id": "functional-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A desktop draft editor was changed so closing a dirty document presents Save, Discard, and Cancel outcomes. Run the acceptance test through the supported application boundary. Saving must persist the exact edited Unicode content and reopen it after a fresh process start; Discard must close without changing the last persisted revision; Cancel must leave the editor open and dirty; and an injected save rejection must leave the document open with the prior persisted revision intact and expose the documented error state. Reopen the document after each state-changing branch and report each acceptance claim separately.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://functional-verification/dirty-close-branches",
+    "requirements": [
+      "the starting document has persisted revision 4 with known baseline text",
+      "the fixture can inject one deterministic save rejection without changing storage",
+      "the supported app harness can choose Save, Discard, or Cancel and can restart the process between branches",
+      "persisted revision and content can be inspected independently from the editor view",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "functional-dirty-close-branches",
+      "assertion": "Save persists edited Unicode content, Discard preserves the prior persisted revision, and Cancel leaves the dirty editor open without persisting."
+    },
+    {
+      "id": "functional-dirty-close-rejection",
+      "assertion": "Injected save rejection leaves the document open, surfaces the documented error, and leaves independent persisted state unchanged."
+    },
+    {
+      "id": "functional-dirty-close-reopen",
+      "assertion": "Fresh-process reopen after every state-changing branch matches the independently observed persisted revision and content."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "functional-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Acceptance claim matrix",
+        "Save/Discard/Cancel branch observations",
+        "injected rejection observation",
+        "fresh-process reopen and persisted-state evidence"
+      ]
+    },
+    {
+      "id": "functional-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "branch coverage maps to distinct user-visible state transitions",
+        "persistence is verified independently from the live editor",
+        "failure evidence is not upgraded into a broader reliability claim"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Acceptance claim matrix",
+    "branch-by-branch observable results",
+    "independent persisted-state observations",
+    "fresh-process reopen results",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "functional-verification-scenario-2-acceptance-matrix",
+    "functional-verification-scenario-2-persistence-evidence",
+    "functional-verification-scenario-2-verdict",
+    "functional-verification-scenario-2-paired-evaluation"
+  ]
+}

@@ -19,7 +19,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  inferenceSandboxPolicy,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderContentBlock,
@@ -296,7 +300,9 @@ export class GrokBuildProvider implements Provider {
             promptArtifact.directory,
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
           ],
-          policy: request.sandbox,
+          // The CLI child is the inference transport — it must reach the
+          // model endpoint. See inferenceSandboxPolicy.
+          policy: inferenceSandboxPolicy(request.sandbox),
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);

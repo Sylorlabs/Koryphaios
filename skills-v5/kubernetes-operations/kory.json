@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "name": "kubernetes-operations",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["infrastructure", "kubernetes"],
+  "targetMedia": ["any"],
+  "pathScopes": ["**/k8s/**", "**/kubernetes/**", "**/helm/**", "**/charts/**"],
+  "contextBudget": 6400,
+  "broader": ["architecture-planning"],
+  "facets": ["infrastructure-security"],
+  "requires": ["verification", "reliability-verification"],
+  "conflicts": [],
+  "activation": [
+    "kubernetes operations",
+    "kubernetes rollout",
+    "kubernetes pod",
+    "kubernetes deployment",
+    "kubernetes upgrade",
+    "kubernetes production",
+    "kubernetes workloads",
+    "version skew",
+    "kubernetes scheduling",
+    "kubernetes statefulset",
+    "pod disruption budget",
+    "networkpolicy",
+    "helm chart kubernetes",
+    "kubernetes",
+    "k8s",
+    "helm chart"
+  ],
+  "excludes": [
+    "container image construction without Kubernetes behavior",
+    "cloud account or managed-cluster control-plane configuration with no Kubernetes workload semantics",
+    "CI/CD pipeline implementation where rendered Kubernetes behavior is already fixed",
+    "final reliability verification of an already-defined Kubernetes design as the only task",
+    "historical or documentation-only mention of Kubernetes",
+    "current task is only to correct"
+  ],
+  "evidence": [
+    "Cluster/version/controller and source-of-truth identity",
+    "Rendered/effective Kubernetes object and rollout evidence",
+    "Scheduling, disruption, networking, storage, or autoscaling conditions tied to the claim",
+    "Recovery/rollback evidence or explicit unavailable-cluster boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix a Kubernetes Deployment rollout that stalls because the new pods fail readiness while the PodDisruptionBudget and maxUnavailable leave no safe capacity. Inspect controller conditions, probes, endpoints, requests, and rollout strategy, then prove a healthy rollout and rollback.",
+      "Prepare a Kubernetes 1.36 to 1.37 cluster/workload upgrade. Inventory removed or deprecated APIs, version-skew constraints, CRDs/webhooks and add-on compatibility, then exercise a representative canary upgrade and rollback path.",
+      "Design scheduling and autoscaling for a Kubernetes API workload with uneven zones, HPA, topology spread, tainted burst nodes, and a cluster autoscaler. Make requests, replica/disruption policy, and scale-up/scale-down behavior observable.",
+      "Diagnose a StatefulSet that cannot recover after a node or zone failure. Trace StorageClass binding/topology, PVC/PV state, attachment events, pod identity, disruption behavior, and the restore/reattach path rather than deleting state blindly.",
+      "Harden Kubernetes namespace communication with service accounts, RBAC, Pod Security Admission, and NetworkPolicy, then verify intended cross-namespace allow/deny flows on the actual CNI and preserve the effective policy evidence."
+    ],
+    "negative": [
+      "Build a minimal OCI image, choose a base image, configure a non-root user, optimize layers, set ENTRYPOINT, and verify the image locally. Kubernetes manifests and cluster behavior are unchanged.",
+      "Harden Linux worker hosts, kernel settings, firewall rules, SSH access, disk encryption, and runtime daemon configuration. The Kubernetes workload/API configuration is explicitly out of scope.",
+      "Implement the GitHub Actions deployment pipeline that packages and promotes an already-reviewed Helm release; do not change chart templates, Kubernetes rollout semantics, or cluster resources.",
+      "Run the already-defined node-loss, rollout, probe-failure, and storage-recovery experiments and issue the final reliability verdict; Kubernetes configuration changes are not requested.",
+      "Configure an AWS organization, VPC, EKS control-plane endpoint, IAM federation, KMS, and account logging. Treat all Kubernetes workload resources as fixed inputs."
+    ],
+    "ambiguous": [
+      {
+        "id": "kubernetes-operations-ambiguous-1",
+        "prompt": "Plan the service architecture and its Kubernetes deployment. Architecture-planning owns service boundaries and system topology; kubernetes-operations owns controllers, probes, resources, scheduling, rollout, disruption, networking, storage, and cluster-version behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "kubernetes-operations-ambiguous-2",
+        "prompt": "Harden a Kubernetes workload and the underlying cluster hosts. infrastructure-security owns node/host/runtime hardening and broad threat posture; kubernetes-operations owns service accounts/RBAC, admission, NetworkPolicy, workload securityContext, controller behavior, and cluster-visible evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "kubernetes-operations-ambiguous-3",
+        "prompt": "Change a Helm-rendered Kubernetes rollout and then prove it survives pod/node disruption. kubernetes-operations owns rendered object semantics and the operational change; reliability-verification owns the final independent disruption verdict.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "kubernetes-operations-adversarial-1",
+        "prompt": "An archived incident says \"Kubernetes rollout failed\". The current task is only to correct dates and Markdown in that historical report; do not inspect or alter any cluster.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "kubernetes-operations-adversarial-2",
+        "prompt": "A README contains an old `kubectl` example. Rename the documentation heading only; no manifest, chart, cluster, or rollout behavior may change.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "kubernetes-operations-adversarial-3",
+        "prompt": "A sample values file is labeled \"helm chart\". The current request is only to translate its comments; do not render or evaluate Kubernetes objects.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://kubernetes.io/releases/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes release status as of 2026-09-05: 1.37, 1.36, and 1.35 are supported; 1.37.0 released 2026-08-26",
+      "revision": "1.37.0 current latest minor release",
+      "staleAfterDays": 30,
+      "notes": "Use to resolve supported branches and current patch status before applying version-sensitive operational guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://kubernetes.io/releases/version-skew-policy/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes version-skew policy for supported releases as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Authoritative control-plane, kubelet, kube-proxy, and kubectl skew constraints for upgrade planning.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes 1.37 documentation as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Deployment rollout, availability, revision, progress, and rollback semantics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://kubernetes.io/docs/concepts/workloads/pods/disruptions/",
+      "sourceType": "official-docs",
+      "versionScope": "Kubernetes 1.37 disruption/PDB documentation as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Voluntary/involuntary disruptions, PodDisruptionBudget semantics, and application disruption considerations.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

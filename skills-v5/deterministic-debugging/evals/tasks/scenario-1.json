@@ -1,0 +1,67 @@
+{
+  "id": "deterministic-debugging-full-task-1",
+  "maturity": "individual",
+  "prompt": "The supplied TypeScript parser accepts CRLF-delimited records, but the exact fixture `name=alpha\\r\\ntags=\\r\\n` always loses the empty `tags` value and returns an object with no `tags` key. Debug this reproducible bug. Demonstrate the starting output, reduce the fixture if possible without losing the behavior, trace tokenizer and key/value normalization states to the first divergence from the documented empty-value contract, fix the owning transition, and add a regression that distinguishes an explicitly empty value from an absent key. Keep malformed-line behavior unchanged.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://deterministic-debugging/crlf-empty-value",
+    "requirements": [
+      "the provided CRLF fixture reproduces the missing empty value on every run",
+      "an LF-only sibling fixture currently behaves correctly",
+      "the documented contract distinguishes an empty value from an absent key",
+      "malformed-line handling must remain unchanged",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "deterministic-crlf-repro",
+      "assertion": "The starting revision demonstrably drops the explicit empty tags value for the supplied CRLF fixture."
+    },
+    {
+      "id": "deterministic-crlf-divergence",
+      "assertion": "The analysis identifies the first tokenizer or normalization state that diverges from the empty-value contract."
+    },
+    {
+      "id": "deterministic-crlf-regression",
+      "assertion": "After the fix, explicit empty tags is preserved, absent tags remains absent, and malformed-line checks remain green."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "deterministic-debugging-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Minimal reproduction",
+        "First causal divergence",
+        "pre-fix and post-fix observable parser output",
+        "focused regression and neighboring contract checks"
+      ]
+    },
+    {
+      "id": "deterministic-debugging-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the minimized case remains semantically representative",
+        "the fix addresses the first causal divergence rather than the symptom",
+        "the regression captures the intended contract"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Minimal reproduction",
+    "First causal divergence",
+    "actual focused diff",
+    "passing regression output",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "deterministic-debugging-scenario-1-reproduction",
+    "deterministic-debugging-scenario-1-causal-trace",
+    "deterministic-debugging-scenario-1-regression",
+    "deterministic-debugging-scenario-1-paired-evaluation"
+  ]
+}

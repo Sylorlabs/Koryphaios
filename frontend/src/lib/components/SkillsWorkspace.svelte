@@ -13,6 +13,8 @@
   import NumberStepper from './NumberStepper.svelte';
   import SkillCodeEditor from './SkillCodeEditor.svelte';
   import SkillVisualEditor from './SkillVisualEditor.svelte';
+  import SkillHierarchy from './SkillHierarchy.svelte';
+  import { skillInventoryCounts } from './skill-hierarchy';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import CheckCircle from 'lucide-svelte/icons/check-circle';
   import FileDiff from 'lucide-svelte/icons/file-diff';
@@ -24,7 +26,7 @@
 
   let { active = true }: { active?: boolean } = $props();
 
-  type DetailTab = 'overview' | 'editor' | 'evidence';
+  type DetailTab = 'overview' | 'editor' | 'evidence' | 'health';
   type EditorMode = 'visual' | 'source' | 'split';
   type LibraryGroup = 'Drafts' | 'Updates' | 'Needs attention' | 'Active';
   type DraftBuffer = { sourceContent: string; coreInstructions: string; dirty: boolean };
@@ -106,31 +108,28 @@
       agentSettingsStore.skills.find((skill) => skill.state === 'draft') ??
       agentSettingsStore.skills[0],
   );
-  let activeSkillCount = $derived(
-    agentSettingsStore.skills.filter((skill) => skill.state === 'active' && skill.validation.valid)
-      .length,
-  );
+  let inventory = $derived(skillInventoryCounts(agentSettingsStore.skills));
   let dirtyCount = $derived(Object.values(buffers).filter((buffer) => buffer.dirty).length);
   let creatorDirty = $derived(
     Boolean(
       newName ||
-        newDescription ||
-        newInstructions ||
-        newDomains ||
-        newTriggers ||
-        newPositive ||
-        newNegative ||
-        newEvidence ||
-        newBroader ||
-        newRequires ||
-        newConflicts ||
-        newExcludes ||
-        newSource !== 'personal' ||
-        newFormat !== 'markdown' ||
-        newExtension !== 'prompt' ||
-        newRenderer !== 'plain' ||
-        newTargetMedium !== 'any' ||
-        newContextBudget !== 4000,
+      newDescription ||
+      newInstructions ||
+      newDomains ||
+      newTriggers ||
+      newPositive ||
+      newNegative ||
+      newEvidence ||
+      newBroader ||
+      newRequires ||
+      newConflicts ||
+      newExcludes ||
+      newSource !== 'personal' ||
+      newFormat !== 'markdown' ||
+      newExtension !== 'prompt' ||
+      newRenderer !== 'plain' ||
+      newTargetMedium !== 'any' ||
+      newContextBudget !== 4000,
     ),
   );
   let unsavedCount = $derived(dirtyCount + (creatorDirty ? 1 : 0));
@@ -180,16 +179,24 @@
   let selectedCore = $derived(
     selectedBuffer?.coreInstructions ?? selectedSkill?.coreInstructions ?? '',
   );
+  let selectedHealth = $derived(
+    selectedSkill
+      ? agentSettingsStore.skillHealth?.records.find(
+          (record) =>
+            record.name === selectedSkill.name &&
+            record.source === selectedSkill.source &&
+            record.state === selectedSkill.state &&
+            record.hash === selectedSkill.hash,
+        )
+      : undefined,
+  );
 
   let creatorIssues = $derived.by(() => {
     const issues: string[] = [];
     if (!normalizeName(newName)) issues.push('Use a lowercase skill name.');
     if (newDescription.trim().length < 40)
       issues.push('Describe the skill in at least 40 characters.');
-    if (
-      newFormat === 'custom' &&
-      !isSafeCustomExtension(newExtension)
-    ) {
+    if (newFormat === 'custom' && !isSafeCustomExtension(newExtension)) {
       issues.push('Use a safe custom extension such as rst or prompt.');
     }
     if (newInstructions.trim().length < 40)
@@ -572,9 +579,8 @@
     <div class="min-w-0">
       <h2>Skills workspace</h2>
       <p>
-        {activeSkillCount} active · {agentSettingsStore.skills.length} revisions{unsavedCount
-          ? ` · ${unsavedCount} unsaved`
-          : ''}
+        {inventory.skills} skills · {inventory.activeRevisions} active revisions · {inventory.revisions}
+        total revisions{unsavedCount ? ` · ${unsavedCount} unsaved` : ''}
       </p>
     </div>
     <div class="header-actions">
@@ -587,11 +593,21 @@
         onclick={() => {
           creatorOpen = true;
           showDetailOnNarrow = true;
-        }}
-        ><Plus size={18} />New skill</button
+        }}><Plus size={18} />New skill</button
       >
     </div>
   </header>
+
+  {#if agentSettingsStore.skillHealth}
+    <div class="health-summary" aria-label="Skill library health">
+      <span><strong>{agentSettingsStore.skillHealth.summary.stewarded}</strong> stewarded</span>
+      <span><strong>{agentSettingsStore.skillHealth.summary.ready}</strong> promotion-ready</span>
+      <span><strong>{agentSettingsStore.skillHealth.summary.blocked}</strong> blocked</span>
+      <span class:health-warning={agentSettingsStore.skillHealth.summary.openRegressions > 0}
+        ><strong>{agentSettingsStore.skillHealth.summary.openRegressions}</strong> open regressions</span
+      >
+    </div>
+  {/if}
 
   <div class="workspace-body">
     <aside
@@ -719,7 +735,7 @@
           aria-label="Skill details"
           onkeydown={handleTabKey}
         >
-          {#each [{ id: 'overview', label: 'Overview' }, { id: 'editor', label: 'Editor' }, { id: 'evidence', label: 'Evidence' }] as tab (tab.id)}
+          {#each [{ id: 'overview', label: 'Overview' }, { id: 'editor', label: 'Editor' }, { id: 'evidence', label: 'Evidence' }, { id: 'health', label: 'Health' }] as tab (tab.id)}
             <button
               type="button"
               role="tab"
@@ -749,7 +765,7 @@
                 >
                 <p>
                   {selectedSkill.storageVersion === 1
-                    ? 'Legacy Markdown; migrates only when you save or convert.'
+                    ? 'Legacy Markdown. Migrates only when you save or convert.'
                     : `${selectedSkill.document.renderer} rendering · ${selectedSkill.document.mediaType}`}
                 </p>
               </section>
@@ -768,6 +784,11 @@
                 <p>Compact loading uses the format-neutral core instructions.</p>
               </section>
             </div>
+            <SkillHierarchy
+              skills={agentSettingsStore.skills}
+              selected={selectedSkill}
+              onselect={selectSkill}
+            />
             <section class="wide-card">
               <div>
                 <h3>Routing contract</h3>
@@ -856,8 +877,7 @@
                   type="button"
                   class="secondary-action"
                   disabled={Boolean(selectedBuffer?.dirty) ||
-                    (conversionTarget === 'custom' &&
-                      !isSafeCustomExtension(conversionExtension))}
+                    (conversionTarget === 'custom' && !isSafeCustomExtension(conversionExtension))}
                   onclick={() => void previewConversion()}>Preview conversion</button
                 >
                 {#if selectedBuffer?.dirty}<p class="conversion-blocked">
@@ -978,7 +998,7 @@
                   above.</small
                 ></label
               >{/if}
-          {:else}
+          {:else if detailTab === 'evidence'}
             {@const evaluation =
               agentSettingsStore.skillEvaluationCards[
                 `${selectedSkill.source}:${selectedSkill.name}:${selectedSkill.state}:${selectedSkill.hash}`
@@ -1023,11 +1043,83 @@
                 type="button"
                 class="activate-action"
                 disabled={selectedSkillHasDirtyBuffer}
-                onclick={() => void activateSelected()}
-                >Validate triggers and activate</button
+                onclick={() => void activateSelected()}>Validate triggers and activate</button
               >{#if selectedSkillHasDirtyBuffer}<p class="activation-blocked">
                   Save or reset every unsaved revision of this skill before activation.
                 </p>{/if}{/if}
+          {:else}
+            <div class="health-detail-heading">
+              <div>
+                <h3>Skill health</h3>
+                <p>Observed routing, benchmark, usage, dependency, and stewardship signals.</p>
+              </div>
+              <button
+                type="button"
+                class="secondary-action"
+                onclick={() => void agentSettingsStore.loadSkillHealth()}>Refresh health</button
+              >
+            </div>
+            <div class="overview-grid">
+              <section class="info-card">
+                <span>Steward</span><strong
+                  >{selectedHealth?.steward?.displayLabel ?? 'Not assigned'}</strong
+                >
+                <p>
+                  {selectedHealth?.steward
+                    ? `${selectedHealth.steward.model} · ${selectedHealth.steward.status}`
+                    : 'The steward registry has not assigned this revision yet.'}
+                </p>
+              </section>
+              <section class="info-card">
+                <span>Routing precision</span><strong
+                  >{selectedHealth?.routingPrecision == null
+                    ? 'Unmeasured'
+                    : `${Math.round(selectedHealth.routingPrecision * 100)}%`}</strong
+                >
+                <p>
+                  Recall:
+                  {selectedHealth?.routingRecall == null
+                    ? 'unmeasured'
+                    : `${Math.round(selectedHealth.routingRecall * 100)}%`}
+                </p>
+              </section>
+              <section class="info-card">
+                <span>Quality delta</span><strong
+                  >{selectedHealth?.qualityDelta == null
+                    ? 'Unmeasured'
+                    : `${selectedHealth.qualityDelta >= 0 ? '+' : ''}${(selectedHealth.qualityDelta * 100).toFixed(1)} pts`}</strong
+                >
+                <p>Measured against the recorded baseline when paired evidence exists.</p>
+              </section>
+              <section class="info-card">
+                <span>Regressions</span><strong>{selectedHealth?.openRegressions ?? 0} open</strong>
+                <p>Promotion remains evidence-gated when a regression is unresolved.</p>
+              </section>
+              <section class="info-card">
+                <span>Usage</span><strong>{selectedHealth?.usageCount ?? 0} selections</strong>
+                <p>
+                  {selectedHealth?.lastUsedAt
+                    ? `Last selected ${new Date(selectedHealth.lastUsedAt).toLocaleString()}`
+                    : 'No runtime selections recorded yet.'}
+                </p>
+              </section>
+              <section class="info-card">
+                <span>Last benchmark</span><strong
+                  >{selectedHealth?.lastBenchmarkAt
+                    ? new Date(selectedHealth.lastBenchmarkAt).toLocaleDateString()
+                    : 'Never'}</strong
+                >
+                <p>Promotion state: {selectedHealth?.promotionState ?? 'unmeasured'}.</p>
+              </section>
+              <section class="info-card">
+                <span>Dependencies</span><strong>{selectedHealth?.dependencies.length ?? 0}</strong>
+                <p>{selectedHealth?.dependencies.join(' · ') || 'No declared dependencies.'}</p>
+              </section>
+              <section class="info-card">
+                <span>Conflicts</span><strong>{selectedHealth?.conflicts.length ?? 0}</strong>
+                <p>{selectedHealth?.conflicts.join(' · ') || 'No declared conflicts.'}</p>
+              </section>
+            </div>
           {/if}
         </div>
       {:else}<div class="empty-detail">No local skills found.</div>{/if}
@@ -1094,7 +1186,7 @@
           {#if preview.rejectedCandidates.length}<details>
               <summary>Why other skills were skipped</summary
               >{#each preview.rejectedCandidates as item (item.name)}<p>
-                  <strong>{item.name}</strong> — {item.reason}
+                  <strong>{item.name}</strong>. {item.reason}
                 </p>{/each}
             </details>{/if}
         </div>{/if}
@@ -1204,13 +1296,13 @@
               ><span>Should use this skill</span><textarea
                 bind:value={newPositive}
                 rows="4"
-                placeholder="One example per line; add at least two."
+                placeholder="One example per line. Add at least two."
               ></textarea></label
             ><label
               ><span>Should not use this skill</span><textarea
                 bind:value={newNegative}
                 rows="4"
-                placeholder="One example per line; add at least two."
+                placeholder="One example per line. Add at least two."
               ></textarea></label
             ><label class="full"
               ><span>Completion evidence</span><textarea
@@ -1340,16 +1432,15 @@
           class="comparison-grid"
         >
           <div>
-            <h3
-              >Local · .{agentSettingsStore.bundledComparison.localDocument?.extension ?? 'md'}</h3
-            >
+            <h3>
+              Local · .{agentSettingsStore.bundledComparison.localDocument?.extension ?? 'md'}
+            </h3>
             <pre>{agentSettingsStore.bundledComparison.local}</pre>
           </div>
           <div>
-            <h3
-              >Bundled · .{agentSettingsStore.bundledComparison.bundledDocument?.extension ??
-                'md'}</h3
-            >
+            <h3>
+              Bundled · .{agentSettingsStore.bundledComparison.bundledDocument?.extension ?? 'md'}
+            </h3>
             <pre>{agentSettingsStore.bundledComparison.bundled}</pre>
           </div>
         </div>
@@ -1379,7 +1470,8 @@
             <button
               type="button"
               class="replace-action"
-              onclick={() => void applyBundledUpdate('replace')}>Replace with bundled Markdown</button
+              onclick={() => void applyBundledUpdate('replace')}
+              >Replace with bundled Markdown</button
             >
           </div>
         </div>{/if}
@@ -1421,6 +1513,24 @@
     margin-top: 3px;
     font-size: 13px;
     color: var(--color-text-muted);
+  }
+  .health-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-surface-1);
+    padding: 8px 18px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+  .health-summary strong {
+    color: var(--color-text-primary);
+    font-weight: 700;
+  }
+  .health-summary .health-warning,
+  .health-summary .health-warning strong {
+    color: var(--color-warning);
   }
   .header-actions,
   .detail-actions,
@@ -1949,6 +2059,22 @@
   .evidence-state.blocked {
     border-color: var(--color-error);
     color: var(--color-error);
+  }
+  .health-detail-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  .health-detail-heading h3 {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .health-detail-heading p {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--color-text-muted);
   }
   .activate-action {
     margin-top: 14px;

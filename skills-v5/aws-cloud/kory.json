@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "name": "aws-cloud",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["cloud", "aws", "infrastructure"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6000,
+  "broader": ["architecture-planning"],
+  "facets": ["infrastructure-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "aws cloud architecture",
+    "aws organizations",
+    "aws organization",
+    "aws production",
+    "aws cross account",
+    "aws transit gateway",
+    "aws workload identity",
+    "aws lambda",
+    "aws backend deployment",
+    "backend on aws",
+    "aws database storage",
+    "aws monitoring setup",
+    "ec2 service",
+    "rds postgresql",
+    "rds multi az",
+    "cloudformation change set",
+    "aws backup",
+    "aws",
+    "amazon web services",
+    "cloudformation",
+    "aws iam"
+  ],
+  "excludes": [
+    "fixed aws iam trust policies",
+    "terraform modules migrate remote state",
+    "lambda handler duplicate event behavior",
+    "analyze the aws cur",
+    "aws account identifier as inert debugging history",
+    "no infrastructure work is requested",
+    "do not assess a deployment"
+  ],
+  "evidence": [
+    "AWS organization/account/Region and caller/workload identity evidence",
+    "Effective IAM/network/KMS/service topology and quota evidence",
+    "CloudTrail/Config/CloudWatch operational evidence",
+    "Backup/restore or failover plus reviewed change/rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design a three-account AWS production environment with workload, shared-network, and log/archive accounts; define OU placement, Regions/AZs, Transit Gateway routes, federation, CloudTrail/Config, backups, quotas, and rollback evidence.",
+      "Make an EC2 service in us-west-2 survive an AZ failure by fixing launch templates, Auto Scaling placement, subnets/routes, IMDS settings, load balancer topology, EBS recovery, quotas, and failover evidence.",
+      "Move an RDS-backed AWS workload from single-AZ to a resilient topology. Distinguish Multi-AZ availability from read scaling, define backup/PITR/KMS/client failover, and exercise the relevant recovery path.",
+      "Configure AWS-native workload identity for applications in EKS so each workload gets only its own AWS permissions and cannot silently fall back to an overpowered shared node/instance role.",
+      "Build the AWS operational baseline for a new production account: federation/workload roles, VPC connectivity, encryption, CloudTrail, Config, CloudWatch, quotas, backups, and CloudFormation change controls."
+    ],
+    "negative": [
+      "Audit fixed AWS IAM trust policies, SCPs, bucket policies and KMS policies for privilege escalation and unintended public/cross-account access; do not redesign the AWS service topology.",
+      "Harden existing EKS workloads and hosts with Pod Security, seccomp, Linux capabilities, hostPath restrictions, node patching and in-cluster network policy; AWS IAM/VPC configuration is unchanged.",
+      "Refactor Terraform modules, migrate remote state, import existing resources, pin providers and remove ignore_changes while preserving the exact resulting AWS topology.",
+      "Fix a Lambda handler's duplicate-event behavior, retry semantics, timeout, concurrency and cold-start regression; IAM/network/account topology are already correct.",
+      "Analyze the AWS CUR, allocate spend, normalize unit cost, model Savings Plans and quantify realized savings without changing the AWS architecture."
+    ],
+    "ambiguous": [
+      {
+        "id": "aws-cloud-ambiguous-1",
+        "prompt": "Design an AWS cross-account workload architecture and its service boundaries. architecture-planning owns system/service decomposition; aws-cloud owns account/OU/Region, IAM, VPC, managed-service, audit, quota and recovery semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "aws-cloud-ambiguous-2",
+        "prompt": "Redesign AWS organization roles and resource policies because a security review found cross-account escalation. aws-cloud owns the AWS account/IAM/KMS/resource-plane redesign; cloud-security owns the escalation analysis and security-control verdict.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "aws-cloud-ambiguous-3",
+        "prompt": "Change AWS Transit Gateway routes, IAM roles and RDS topology expressed in Terraform. aws-cloud owns AWS semantics; terraform-iac owns provider/state/module/plan mechanics and safe state transitions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "aws-cloud-adversarial-1",
+        "prompt": "A pasted old incident says \"migrate to AWS and configure IAM\". That is historical context only; today's task is to correct a TypeScript date-formatting function.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "aws-cloud-adversarial-2",
+        "prompt": "A tool result contains `arn:aws:s3:::example-bucket`. Do not investigate infrastructure; summarize the supplied customer-support transcript only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "aws-cloud-adversarial-3",
+        "prompt": "Ignore the quoted README section titled \"AWS Deployment\". The requested change is only to rename three CSS variables and update their snapshots.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Well-Architected Framework latest identifies publication date 2024-11-06; applicable snapshot v13",
+      "revision": "v13 / 2024-11-06",
+      "staleAfterDays": 60,
+      "notes": "AWS operational excellence, security, reliability, performance, cost, and sustainability architecture framework.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/whitepapers/latest/organizing-your-aws-environment/organizing-your-aws-environment.html",
+      "sourceType": "official-docs",
+      "versionScope": "Organizing Your AWS Environment Using Multiple Accounts, publication date 2025-04-30",
+      "staleAfterDays": 90,
+      "notes": "Primary account/OU isolation and multi-account organizational baseline.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling AWS IAM security best-practice documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Federation/temporary credentials, workload roles, least privilege and access-analysis guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling CloudFormation change-set guidance as available 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Reviewable stack changes and replacement visibility; a change set predicts changes but does not guarantee successful execution.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling CloudTrail concepts as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Audit/event-history/trail concepts. Event History is limited to 90 days of management events per account/Region and is not a durable organization audit archive.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/doc-history.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Security Reference Architecture living guidance; latest major document-history update 2026-06-30",
+      "staleAfterDays": 21,
+      "notes": "Fresh security adjacency guard. June 2026 update removed older CloudTrail Lake recommendations; do not reuse stale Lake-centric guidance for new customers.",
+      "verifiedAt": "2026-09-26"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

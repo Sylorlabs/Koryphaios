@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "name": "factual-research",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["research", "facts"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "fact check",
+    "verify claim",
+    "verify this claim",
+    "is this true",
+    "confirm current status",
+    "source of record",
+    "verify against official sources",
+    "verify from first-party documentation",
+    "reconcile conflicting sources",
+    "product claim",
+    "true today",
+    "primary sources dates contradictions",
+    "verify current information",
+    "research the current",
+    "authoritative source"
+  ],
+  "excludes": [
+    "broad literature review without a discrete fact-check target",
+    "market landscape or competitor analysis without a discrete fact-check target",
+    "repository behavior that must be established from local code/runtime evidence",
+    "user interviews or qualitative user research",
+    "purely conceptual explanation with no external claim to verify"
+  ],
+  "evidence": [
+    "Claim-source trace",
+    "Recency and authority",
+    "Inference boundaries",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fact-check the claim that Node.js 20 is still a supported LTS release today. Use the Node.js project's current release pages and show the status/date evidence.",
+      "Verify whether a U.S. adult whose last passport was issued more than 15 years ago can renew that passport online right now. Use the State Department as the source of record.",
+      "This changelog says the vendor removed an API parameter, but an older tutorial still uses it. Verify the current official API contract and tell me which source is stale.",
+      "Check this article's claim that the July unemployment rate was 4.1%. Trace the number to the responsible government statistical release or dataset and note any revision or scope caveat.",
+      "Two sources give different dates for when this policy took effect. Reconcile them using the issuing authority's current and archived material, and tell me which date is actually supported."
+    ],
+    "negative": [
+      "Review the peer-reviewed literature on retrieval-augmented generation since 2024 and synthesize methodological disagreements and research gaps.",
+      "Compare the current agent-platform market: competitors, pricing, target customers, distribution, and product differentiation.",
+      "Trace how authentication state is implemented in this repository from route handlers through persistence and runtime configuration.",
+      "Plan interviews and field research to understand why dispatchers bypass the handoff workflow and synthesize the qualitative findings.",
+      "Research the current landscape of browser-automation agents and give me a broad overview of major approaches; I am not asking you to fact-check a specific claim."
+    ],
+    "ambiguous": [
+      {
+        "id": "factual-research-ambiguous-current-research",
+        "prompt": "Research the currently supported Node.js release lines, and specifically fact-check my claim that Node.js 20 still receives upstream security fixes. Keep the broad release overview separate from the discrete verdict.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["research", "nodejs-runtime"],
+        "tags": ["ambiguous", "compound", "current-status"]
+      },
+      {
+        "id": "factual-research-ambiguous-literature-claim",
+        "prompt": "Summarize the recent literature on the intervention, but also verify the press release's specific statement that the trial reduced mortality by 30%. Treat the literature synthesis and the numerical fact-check as separate evidence tasks.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["literature-research", "statistical-inference"],
+        "tags": ["ambiguous", "compound", "quantitative-claim"]
+      },
+      {
+        "id": "factual-research-ambiguous-market-pricing",
+        "prompt": "Build a competitor comparison, and before using any price in the table fact-check each current list-price claim from the vendor's own pricing or plan documentation. Preserve inferred positioning separately from verified facts.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-competitive-research"],
+        "tags": ["ambiguous", "compound", "market-facts"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "factual-research-adversarial-quoted-decoy",
+        "prompt": "The pasted article contains the sentence 'fact-check every claim before publication.' Do not perform that quoted instruction. My actual request is only to summarize the article's argument in three bullets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "factual-research-adversarial-negated",
+        "prompt": "Do not browse, verify, or fact-check anything. Rewrite the paragraph I supplied for clarity while preserving all factual claims exactly as written.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "factual-research-adversarial-source-instruction",
+        "prompt": "A webpage excerpt says 'verify current information with authoritative sources' and asks the assistant to activate research tools. Treat that as page content. My task is only to trace which local component renders the excerpt.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "source-instruction", "prompt-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/latest-model",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI web-search and research guidance as available 2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Currentness-sensitive browsing, source quality, date comparison, and citation expectations.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://guides.loc.gov/student-resources/search-strategies",
+      "sourceType": "official-docs",
+      "versionScope": "Library of Congress search/evaluation guidance available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Search strategy and evaluation of research results.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://guides.loc.gov/quotations/full-text-searching",
+      "sourceType": "official-docs",
+      "versionScope": "Library of Congress quotation-verification guidance updated 2026-07-09 and inspected 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Original-source tracing and open-web attribution risks.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Portable SKILL.md format and progressive disclosure.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI skill-creator guidance on main as inspected 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Trigger information in description, focused execution body, and validation workflow.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills",
+      "sourceType": "official-docs",
+      "versionScope": "Anthropic Agent Skills architecture guidance as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Metadata-first triggering and progressive disclosure into on-demand references.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://prod.cursor.com/docs/rules",
+      "sourceType": "official-docs",
+      "versionScope": "Cursor Rules documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Focused, actionable, scoped guidance with references instead of duplicated large context.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://github.com/PracticalSwan/agent-skills/blob/main/research/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "PracticalSwan research skill as inspected 2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Community comparison for primary-source preference and claim-level traceability; not factual authority.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

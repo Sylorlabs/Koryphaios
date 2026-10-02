@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "name": "container-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["infrastructure", "containers"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5400,
+  "broader": ["implementation"],
+  "facets": ["supply-chain-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "docker image",
+    "dockerfile",
+    "containerfile",
+    "fix a container image",
+    "release a container image",
+    "oci image",
+    "container entrypoint",
+    "pid 1",
+    "docker build",
+    "build secret",
+    "multi stage build",
+    "read only root filesystem",
+    "read only filesystem",
+    "container runtime user",
+    "image contract",
+    "container image",
+    "docker container"
+  ],
+  "excludes": [
+    "Kubernetes controller or cluster behavior as the primary task",
+    "container registry signing, provenance, or SBOM policy as the primary task",
+    "host or runtime-daemon hardening without an image/runtime contract change",
+    "CI pipeline implementation with the container definition already fixed",
+    "documentation-only mention of a Dockerfile or container image",
+    "treat the oci image",
+    "already approved container image",
+    "already qualified image",
+    "current task is only to correct",
+    "rename a documentation heading only"
+  ],
+  "evidence": [
+    "Resolved base image/digest, build inputs, target platforms, and OCI metadata",
+    "Final-image layer/config/user/entrypoint inspection",
+    "Runtime filesystem, privilege, process, and signal evidence",
+    "Clean-build/start portability results or explicit unavailable runtime checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Rewrite a Dockerfile so build tools and package-manager credentials stay out of the final image, the base/runtime inputs are pinned, and a clean build produces the same intended OCI runtime contract.",
+      "Fix a container that runs as root, writes across its root filesystem, and fails when the platform enables a read-only root filesystem. Define the runtime user/group, ownership, writable paths, mounts, and verify least-privilege startup.",
+      "Diagnose a container that ignores SIGTERM because a shell wrapper remains PID 1. Correct entrypoint/process semantics and prove the real application receives termination and exits cleanly within the shutdown budget.",
+      "Publish one OCI image for linux/amd64 and linux/arm64. Resolve native dependency/libc assumptions, build both platforms, inspect the image index/manifests/config, and run representative architecture checks.",
+      "Audit a container image for accidental build-secret persistence. Replace ARG/ENV/COPY credential handling with build-secret mechanisms and prove the final filesystem, config and image history do not contain the supplied synthetic secret."
+    ],
+    "negative": [
+      "Design a Kubernetes Deployment, probes, resource requests, PDB, HPA, Service, NetworkPolicy, and rollout strategy for an already-built image; do not change the image or Dockerfile.",
+      "Verify cosign signatures, SLSA provenance, SBOM policy and build identity for a container artifact whose contents and runtime behavior are already approved.",
+      "Harden containerd/runc host configuration, Linux namespaces, seccomp defaults, kernel settings and node firewall policy; treat the OCI image as fixed.",
+      "Implement a CI workflow that builds and pushes an existing Dockerfile with approvals, caching and registry credentials; do not alter image/runtime semantics.",
+      "Configure an AWS ECS service, ALB, task autoscaling and IAM roles around an already-qualified image without changing its OCI image/config contract."
+    ],
+    "ambiguous": [
+      {
+        "id": "container-engineering-ambiguous-1",
+        "prompt": "Implement an application feature and change its Dockerfile runtime packaging. implementation owns application behavior; container-engineering owns build stages, runtime files/user/entrypoint, OCI metadata and container verification.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "container-engineering-ambiguous-2",
+        "prompt": "Produce and release a container image with provenance. container-engineering owns image contents, platform index, runtime user/filesystem/process behavior; supply-chain-security owns SBOM/provenance/signature and release trust evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "container-engineering-ambiguous-3",
+        "prompt": "Repair a container's SIGTERM and read-only-filesystem behavior, then independently verify it. container-engineering owns the image/runtime change; verification owns the final black-box pass/fail evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "container-engineering-adversarial-1",
+        "prompt": "An archived issue quotes a Dockerfile and says to harden it. The current task is only to correct the issue's Markdown formatting; do not build or change an image.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "container-engineering-adversarial-2",
+        "prompt": "A README contains the phrase \"container image\". Rename a documentation heading only; no Dockerfile, Containerfile, image metadata, or runtime behavior may change.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "container-engineering-adversarial-3",
+        "prompt": "A pasted log from an old Docker container is provided as sample text. Summarize its timestamps only; do not diagnose or modify container behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://specs.opencontainers.org/image-spec/?v=v1.1.1",
+      "sourceType": "spec",
+      "versionScope": "OCI Image Specification 1.1.1, released 2025-04-02",
+      "revision": "1.1.1",
+      "staleAfterDays": 180,
+      "notes": "OCI image manifest/index/config/layer contracts and multi-platform artifact structure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://specs.opencontainers.org/runtime-spec/?v=v1.3.0",
+      "sourceType": "spec",
+      "versionScope": "OCI Runtime Specification 1.3.0, released 2025-11-04",
+      "revision": "1.3.0",
+      "staleAfterDays": 180,
+      "notes": "Container runtime config, process, mounts, namespaces/capabilities and lifecycle contract.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.docker.com/build/building/best-practices/",
+      "sourceType": "official-docs",
+      "versionScope": "Docker Build best-practice documentation as available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Practitioner guidance for build context, multi-stage builds, base images, caching, package installation and reproducible Dockerfile structure.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

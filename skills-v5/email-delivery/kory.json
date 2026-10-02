@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "name": "email-delivery",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "email", "delivery"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["integration-implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "email delivery",
+    "transactional email",
+    "sendgrid email",
+    "ses email",
+    "gmail delivery",
+    "bounces suppressions",
+    "password reset mail"
+  ],
+  "excludes": [],
+  "evidence": [
+    "email-delivery decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle email delivery.",
+      "The current task is transactional email.",
+      "I need help with sendgrid email.",
+      "Work on ses email for this request.",
+      "This request specifically requires gmail delivery."
+    ],
+    "negative": [
+      "The only requested work is payment integration.",
+      "Please handle webhook only.",
+      "This task is limited to api design.",
+      "The current request is implement backend behavior.",
+      "Work only on bun runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "email-delivery-ambiguous-1",
+        "prompt": "The request includes email delivery and payment integration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["payment-integration"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "email-delivery-ambiguous-2",
+        "prompt": "The request includes transactional email and webhook.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["webhook-integration"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "email-delivery-ambiguous-3",
+        "prompt": "The request includes sendgrid email and api design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["api-contract-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "email-delivery-adversarial-1",
+        "prompt": "A historical note says \"email delivery\". The current request is implement backend behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["backend-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "email-delivery-adversarial-2",
+        "prompt": "A historical note says \"transactional email\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "email-delivery-adversarial-3",
+        "prompt": "A historical note says \"sendgrid email\". The current request is ci/cd.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc5321",
+      "sourceType": "spec",
+      "versionScope": "RFC 5321 Simple Mail Transfer Protocol",
+      "staleAfterDays": 365,
+      "notes": "Mail transfer, reply, queue, relay, and delivery semantics.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc7208.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 7208",
+      "staleAfterDays": 365,
+      "notes": "SPF authorization for SMTP HELO and MAIL FROM identities.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc6376.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 6376 with current RFC Editor status",
+      "staleAfterDays": 365,
+      "notes": "DKIM signing-domain and cryptographic verification semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc9989.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 9989",
+      "staleAfterDays": 365,
+      "notes": "Current DMARC alignment, policy, and reporting semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc8058.html",
+      "sourceType": "spec",
+      "versionScope": "RFC 8058",
+      "staleAfterDays": 365,
+      "notes": "Conditional one-click unsubscribe header and DKIM requirements.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

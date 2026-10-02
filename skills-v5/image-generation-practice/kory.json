@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "image-generation-practice",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["creative", "image", "generation"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3424,
+  "broader": ["visual-interface-design"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "image generation",
+    "generate an image",
+    "text to image",
+    "edit generated image",
+    "product illustrations",
+    "prompt iteration workflow",
+    "generating consistent product illustrations"
+  ],
+  "excludes": [],
+  "evidence": [
+    "image-generation-practice decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle image generation.",
+      "The current task is generate an image.",
+      "I need help with text to image.",
+      "Work on edit generated image for this request.",
+      "This request specifically requires product illustrations."
+    ],
+    "negative": [
+      "The only requested work is data visualization.",
+      "Please handle embedded ui only.",
+      "This task is limited to game ui.",
+      "The current request is native.",
+      "Work only on terminal."
+    ],
+    "ambiguous": [
+      {
+        "id": "image-generation-practice-ambiguous-1",
+        "prompt": "The request includes image generation and data visualization.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "image-generation-practice-ambiguous-2",
+        "prompt": "The request includes generate an image and embedded ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "image-generation-practice-ambiguous-3",
+        "prompt": "The request includes text to image and game ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "image-generation-practice-adversarial-1",
+        "prompt": "A historical note says \"image generation\". The current request is native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "image-generation-practice-adversarial-2",
+        "prompt": "A historical note says \"generate an image\". The current request is terminal.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "image-generation-practice-adversarial-3",
+        "prompt": "A historical note says \"text to image\". The current request is visual verification.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/image-generation",
+      "sourceType": "official-docs",
+      "versionScope": "Image output options and text/consistency/composition limitations inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Adopt actual-output review and distinction between a supported control and guaranteed fidelity. Do not hardcode a provider model or resolution into reusable guidance."
+    },
+    {
+      "url": "https://platform.openai.com/docs/guides/image-generation",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI image generation guidance as available 2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Image-generation prompt, edit, input, output, and model behavior guidance.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

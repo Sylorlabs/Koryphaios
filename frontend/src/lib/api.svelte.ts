@@ -94,6 +94,15 @@ async function apiFetchUntracked(
     for (const [key, value] of Object.entries(getAuthHeaders())) {
       if (!headers.has(key)) headers.set(key, value);
     }
+    // A string body without a Content-Type reaches the backend as an
+    // unparsed payload, so every route that validates its body with a schema
+    // rejects it with 400 "Request does not match the required schema" while
+    // the caller only sees a generic failure. Default plain string bodies to
+    // JSON. FormData/Blob/URLSearchParams/stream bodies are left alone because
+    // the runtime sets their own (often boundary-delimited) content type.
+    if (init.body != null && !headers.has('Content-Type') && typeof init.body === 'string') {
+      headers.set('Content-Type', 'application/json');
+    }
     const projectPath = projectStore.requestPath;
     if (projectPath && !headers.has('X-Koryphaios-Project')) {
       headers.set('X-Koryphaios-Project', projectPath);

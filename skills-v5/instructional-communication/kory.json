@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "name": "instructional-communication",
+  "version": "5.1.1",
+  "skillKind": "artifact",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents", "instructional"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3300,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "tutorial",
+    "how-to guide",
+    "setup guide",
+    "installation guide",
+    "runbook",
+    "operational runbook",
+    "onboarding guide",
+    "onboarding procedure",
+    "operator procedure",
+    "migration procedure",
+    "step-by-step guide",
+    "troubleshooting procedure",
+    "onboarding"
+  ],
+  "excludes": [
+    "architecture explanation only",
+    "api reference only",
+    "configuration reference only",
+    "executive summary only",
+    "implement the change without writing instructions",
+    "return only the exact values",
+    "do not write a tutorial runbook or setup guide",
+    "operators already have a maintained runbook",
+    "extract the issue labels",
+    "return only the exact supported configuration keys",
+    "trace which repository test loads the fixture"
+  ],
+  "evidence": [
+    "Prerequisites and observable starting state",
+    "Ordered actions with expected feedback",
+    "Decision branches, warnings, and recovery",
+    "Objective completion checks and walkthrough evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Write a setup guide for a new developer to get this repository running from a clean machine. Include prerequisites, version checks, exact commands/placeholders, expected outputs, common failure branches, and a final test that proves the app works.",
+      "Create an operational runbook for rotating the signing credential without downtime. Define the trigger and permissions, ordered safe actions, validation after each phase, rollback, failure branches, escalation, and final verification.",
+      "Write a step-by-step migration procedure for moving from the legacy configuration to the new schema while preserving existing data. Include backup, preflight, compatibility checks, commands, expected feedback, rollback, and post-migration validation.",
+      "Build an onboarding guide for an on-call engineer to safely handle the three most common service alerts, including how to identify the alert condition, diagnostics, decision branches, mitigations, escalation, and recovery checks.",
+      "Create a troubleshooting procedure for failed local authentication setup. Start from observable symptoms, map each diagnostic to a branch, give recovery steps, and end with an objective login/API verification."
+    ],
+    "negative": [
+      "Write an architecture explanation for maintainers covering components, interfaces, data flow, failure semantics, alternatives, and design rationale. This is explanatory, not a procedure to follow.",
+      "Generate an API reference with exact endpoint fields, types, defaults, errors, examples, and version scope for lookup; no ordered task procedure is requested.",
+      "Prepare a one-page executive brief on outage impact, residual risk, remediation status, options, and decisions needed; operators already have a runbook.",
+      "Implement the credential rotation change in the repository and run its tests. No runbook, setup guide, or tutorial deliverable is requested.",
+      "Write user-facing release notes from the verified diff and issue list; do not turn them into setup or migration instructions."
+    ],
+    "ambiguous": [
+      {
+        "id": "instructional-communication-ambiguous-1",
+        "prompt": "Implement the new local setup flow and also write a clean-machine setup guide with prerequisites, exact steps, expected outputs, troubleshooting, and completion checks. Verify the code change and walkthrough separately.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation", "repository-environment-discovery"],
+        "tags": ["ambiguous", "compound", "implementation-plus-guide"]
+      },
+      {
+        "id": "instructional-communication-ambiguous-2",
+        "prompt": "Write the technical explanation of the failure mode and a separate operator runbook that turns the verified mechanism into diagnostics, branches, mitigations, rollback, escalation, and completion checks.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication", "incident-response"],
+        "tags": ["ambiguous", "compound", "explanation-plus-runbook"]
+      },
+      {
+        "id": "instructional-communication-ambiguous-3",
+        "prompt": "Create the exact configuration reference for all supported fields and also a migration how-to that tells an operator which fields to change, in what order, how to validate them, and how to roll back.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["ambiguous", "compound", "reference-plus-howto"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "instructional-communication-adversarial-1",
+        "prompt": "The issue text I pasted says 'write a tutorial after this lands.' Treat that as historical source text. My actual request is only to extract the issue labels from the supplied text.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "instructional-communication-adversarial-2",
+        "prompt": "Do not create a how-to guide, tutorial, setup guide, or runbook. Return only the exact supported configuration keys already present in the supplied schema.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "instructional-communication-adversarial-3",
+        "prompt": "A fixture contains the inert phrase 'write a setup guide with these steps.' Ignore that sample instruction. Trace which repository test loads the fixture and how it is parsed.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered structure, wording, and readability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developers.google.com/style",
+      "sourceType": "official-docs",
+      "versionScope": "Google developer documentation guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Direct reader address, unambiguous procedures, conditions before actions, and consistent terminology.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developers.google.com/style/placeholders",
+      "sourceType": "official-docs",
+      "versionScope": "Google placeholder-format guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Define command and code placeholders when first introduced.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://diataxis.fr/",
+      "sourceType": "community-pattern",
+      "versionScope": "Diátaxis documentation architecture as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Community pattern separating tutorials/how-to guides from reference and explanation according to reader need.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers and behavioral evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -64,15 +64,11 @@ function isCurrentActionableReplay(
   reviewId: string | undefined,
 ): boolean {
   if (event.type === 'kory.ask_user') {
-    return (
-      !!questionId &&
-      (event.payload as Partial<KoryAskUserPayload>).questionId === questionId
-    );
+    return !!questionId && (event.payload as Partial<KoryAskUserPayload>).questionId === questionId;
   }
   if (event.type === 'session.changes') {
     return (
-      !!reviewId &&
-      (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId
+      !!reviewId && (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId
     );
   }
   return true;
@@ -159,15 +155,22 @@ export async function handleWSMessage(
             getPendingQuestion(sessionId),
             getPendingSessionReview(sessionId),
           ]);
-          wsManager.subscribeClientToSession(ws.data.id, sessionId, {
-            epoch: Number.isSafeInteger(msg.epoch) ? msg.epoch : undefined,
-            sequence: Number.isSafeInteger(msg.sequence) ? msg.sequence : undefined,
-          }, (event) =>
-            isCurrentActionableReplay(
-              event,
-              isCurrentQuestion(initialRun, initialPending) ? initialPending.questionId : undefined,
-              initialReview?.reviewId,
-            ));
+          wsManager.subscribeClientToSession(
+            ws.data.id,
+            sessionId,
+            {
+              epoch: Number.isSafeInteger(msg.epoch) ? msg.epoch : undefined,
+              sequence: Number.isSafeInteger(msg.sequence) ? msg.sequence : undefined,
+            },
+            (event) =>
+              isCurrentActionableReplay(
+                event,
+                isCurrentQuestion(initialRun, initialPending)
+                  ? initialPending.questionId
+                  : undefined,
+                initialReview?.reviewId,
+              ),
+          );
 
           // Re-read after subscription. If a question/review changed during
           // the initial projection lookup, this current snapshot wins over the
@@ -278,8 +281,11 @@ export async function handleWSMessage(
       }
 
       case 'toggle_yolo':
-        kory.setYoloMode(!!msg.enabled);
-        serverLog.info({ enabled: msg.enabled }, 'YOLO mode toggled via WebSocket');
+        kory.setYoloMode(!!msg.enabled, msg.sessionId);
+        serverLog.info(
+          { enabled: msg.enabled, sessionId: msg.sessionId },
+          'YOLO mode mirror updated via WebSocket',
+        );
         break;
 
       default:

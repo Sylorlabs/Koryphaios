@@ -50,6 +50,7 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
     pendingPermissions: [],
     koryPhase: '',
     getManagerStatusForSession: vi.fn(() => 'idle'),
+    getAgentStatusesForSession: vi.fn(() => []),
     isSessionRunning: vi.fn(() => false),
     loadSessionMessages: vi.fn(),
   },
@@ -71,7 +72,7 @@ vi.mock('$lib/stores/goals.svelte', () => ({
   goalStore: { goals: [], refresh: vi.fn(), selectedGoalId: null },
 }));
 vi.mock('$lib/stores/goal-display.svelte', () => ({
-  goalDisplayStore: { sidebar: false, update: vi.fn() },
+  goalDisplayStore: { composer: true, update: vi.fn() },
 }));
 vi.mock('$lib/utils/now-signal.svelte', () => ({
   useNow: () => ({ now: Date.now(), unsubscribe: vi.fn() }),
@@ -118,6 +119,86 @@ describe('SessionSidebar session controls', () => {
     expect(screen.queryByRole('button', { name: /Collapse project\./i })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Open session Accessibility review' })).toBeNull();
     expect(screen.getByRole('button', { name: /Expand workspace workspace/i })).toBeVisible();
+  });
+
+  it('lists only workspace folders that have chats or are the selected project', () => {
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+      { path: '/tmp/workspace/empty-folder', name: 'empty-folder', modifiedAt: Date.now() },
+      { path: '/tmp/workspace/another-empty', name: 'another-empty', modifiedAt: Date.now() },
+    ];
+
+    render(SessionSidebar);
+
+    // The folder with a chat is in the tree; empty folders are picked from the
+    // workspace new-chat screen instead of being dumped into the sidebar.
+    expect(screen.getByRole('button', { name: /Collapse project\./i })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /empty-folder/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /another-empty/i })).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /Collapse workspace workspace\. 1 project/i }),
+    ).toBeVisible();
+  });
+
+  it('keeps the selected project visible even before it has a chat', () => {
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.currentPath = '/tmp/workspace/fresh';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/workspace/fresh', name: 'fresh', modifiedAt: Date.now() },
+      { path: '/tmp/workspace/empty-folder', name: 'empty-folder', modifiedAt: Date.now() },
+    ];
+
+    render(SessionSidebar);
+
+    expect(screen.getByRole('button', { name: /Collapse fresh\./i })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /empty-folder/i })).toBeNull();
+  });
+
+  it('attaches workspace-root chats directly to the workspace node, never a "Workspace root" folder', () => {
+    const rootSession = {
+      ...session,
+      id: 'root-1',
+      title: 'Root chat',
+      workingDirectory: '/tmp/workspace',
+    };
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    mocks.projectStore.currentPath = '/tmp/workspace';
+    mocks.projectStore.workspaceProjects = [
+      { path: '/tmp/project', name: 'project', modifiedAt: Date.now() },
+    ];
+    mocks.sessionStore.sessions = [session, rootSession];
+    mocks.sessionStore.filteredSessions = [session, rootSession];
+
+    render(SessionSidebar);
+
+    expect(screen.queryByText('Workspace root')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Collapse workspace root\./i })).toBeNull();
+    const rootChats = screen.getByRole('group', { name: 'workspace chats' });
+    expect(rootChats).toContainElement(
+      screen.getByRole('button', { name: 'Open session Root chat' }),
+    );
+    // The nested folder still renders as a normal group with its own chat.
+    expect(screen.getByRole('button', { name: /Collapse project\./i })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Open session Accessibility review' })).toBeVisible();
+  });
+
+  it('routes the workspace "+" through the workspace new-chat screen', async () => {
+    mocks.projectStore.workspaceRoot = '/tmp/workspace';
+    const requested = vi.fn();
+    window.addEventListener('kory:workspace-new-chat', requested);
+
+    try {
+      render(SessionSidebar);
+      await fireEvent.click(
+        screen.getByRole('button', { name: 'New chat in workspace workspace' }),
+      );
+      expect(requested).toHaveBeenCalledTimes(1);
+      // The workspace-level "+" never creates a root chat directly.
+      expect(mocks.sessionStore.newChat).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener('kory:workspace-new-chat', requested);
+    }
   });
 
   it('hides the Teams shortcut by default and restores it from the Teams preference', () => {
@@ -268,5 +349,79 @@ describe('SessionSidebar session controls', () => {
     expect(mocks.sessionStore.fetchArchivedSessions).toHaveBeenCalledOnce();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(mocks.sessionStore.deleteAllSessions).not.toHaveBeenCalled();
+  });
+
+  it('anchors the tracked-spend popover to the viewport so it cannot be clipped by the sidebar', async () => {
+    const paidSession = { ...session, id: 'session-paid', totalCost: 3.386 };
+    mocks.sessionStore.sessions = [paidSession];
+    mocks.sessionStore.groupedSessions = [{ label: 'Today', sessions: [paidSession] }];
+    mocks.sessionStore.filteredSessions = [paidSession];
+    mocks.billingApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        summary: {
+          spendUsd: 3.386,
+          hasMeteredUsage: true,
+          hasKnownCost: true,
+          providers: [],
+        },
+      }),
+    } as Response);
+    const { container } = render(SessionSidebar);
+
+    const costButton = screen.getByRole('button', { name: /Billing detail for/i });
+    await fireEvent.mouseEnter(costButton.parentElement as HTMLElement);
+    await Promise.resolve();
+
+    const popover = container.querySelector('.cost-billing-popover') as HTMLElement;
+    expect(popover).toBeTruthy();
+    expect(popover.getAttribute('role')).toBe('tooltip');
+    // Viewport-anchored placement instead of `absolute left-0`, which overflowed
+    // the scrollable sidebar and got cut off on the right.
+    expect(popover.style.left).toMatch(/^\d+px$/);
+    expect(popover.style.top).toMatch(/^\d+px$/);
+    expect(popover.className).not.toContain('left-0');
+  });
+
+  it('never scrolls the session tree sideways, so rows cannot be sheared off the left edge', () => {
+    const { container } = render(SessionSidebar);
+
+    // Declaring only `overflow-y-auto` makes the browser compute `overflow-x`
+    // to `auto` as well, turning the tree into a horizontal scroll container.
+    // The hover overlays overflow its right edge even at opacity 0, so any
+    // scroll offset sheared the leading glyphs of every row off the window.
+    const tree = container.querySelector('.session-tree') as HTMLElement;
+    expect(tree).toBeTruthy();
+    expect(tree.className).toContain('overflow-x-hidden');
+  });
+
+  it('sizes the launcher menu to the sidebar instead of the "+" button', async () => {
+    const { container } = render(SessionSidebar);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Create or open' }));
+
+    const menu = container.querySelector('.launcher-menu') as HTMLElement;
+    expect(menu).toBeTruthy();
+    // A fixed 288px panel right-aligned to the 32px "+" button overflowed the
+    // 220-272px sidebar and was clipped by the <nav>'s overflow:hidden, so
+    // "Open Project" rendered as "pen Project". Sizing to the toolbar (the
+    // containing block) makes that impossible at any sidebar width.
+    expect(menu.className).not.toContain('w-72');
+    expect(menu.className).not.toContain('right-0');
+    // The four project/workspace actions are a single column: a two-column
+    // grid cannot fit "Open Workspace" inside a 220px sidebar.
+    expect(menu.querySelector('.grid-cols-2')).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Open Workspace' })).toBeVisible();
+  });
+
+  it('closes the launcher menu on Escape', async () => {
+    const { container } = render(SessionSidebar);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Create or open' }));
+    expect(container.querySelector('.launcher-menu')).toBeTruthy();
+
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('.launcher-menu')).toBeNull();
   });
 });

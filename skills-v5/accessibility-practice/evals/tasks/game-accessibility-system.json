@@ -1,0 +1,82 @@
+{
+  "id": "accessibility-practice-full-task-game-system",
+  "prompt": "Design an accessibility system for a controller-first action game across menus, HUD, tutorials, combat cues, communication, pause/settings, and error recovery. The game supports dialogue and non-speech audio cues, fast visual events, camera motion, remappable controls, online co-op, and a dense upgrade menu. Produce a platform-appropriate accessibility design and validation matrix rather than applying a browser checklist.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://accessibility-practice/action-game",
+    "requirements": [
+      "gameplay/UI task inventory",
+      "input/camera/audio/visual communication inventory",
+      "current platform accessibility options",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "game-input-equivalence",
+      "assertion": "Required menu and gameplay actions remain reachable with remappable/controller-compatible input without introducing an input trap or requiring one fixed physical control where the platform permits alternatives."
+    },
+    {
+      "id": "game-sensory-redundancy",
+      "assertion": "Dialogue, non-speech audio cues, fast visual events, combat/status cues, and communication define redundant or configurable channels so critical gameplay information is not conveyed by sound, color, or brief motion alone."
+    },
+    {
+      "id": "game-motion-and-readable-information",
+      "assertion": "Camera/motion intensity, text/readability, HUD information, timing-sensitive prompts, and dense upgrade-menu navigation have concrete configuration or equivalent-access requirements without removing the core gameplay objective."
+    },
+    {
+      "id": "game-runtime-validation-matrix",
+      "assertion": "Validation spans representative menu, tutorial, combat, co-op communication, pause/settings, and recovery tasks across named input/accessibility configurations and identifies which hardware/runtime combinations remain unverified."
+    },
+    {
+      "id": "game-platform-boundary",
+      "assertion": "The design uses game/platform accessibility guidance as requirements or best-practice evidence where applicable, does not import DOM/CSS/browser mechanics, and does not convert guidance into an unsupported compliance claim."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "game-specific-equivalent-access",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "controller/alternative-input strategy",
+        "captions and narration strategy",
+        "redundant sensory cues",
+        "motion/camera customization",
+        "menu/HUD navigation and readable information",
+        "gameplay priorities preserved"
+      ]
+    },
+    {
+      "id": "game-validation-and-boundary-quality",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "representative gameplay and menu task matrix",
+        "assistive/input configurations named",
+        "runtime/hardware validation plan",
+        "XAG-style guidance treated as best practice not compliance",
+        "no DOM/CSS/browser mechanics imported"
+      ]
+    },
+    {
+      "id": "blind-game-accessibility-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "game task and accessibility scope",
+    "input and sensory alternative design",
+    "platform-specific accessibility rationale",
+    "runtime verification matrix",
+    "unverified combinations and limitations"
+  ],
+  "requiredArtifacts": [
+    "game-accessibility-design",
+    "game-accessibility-validation-matrix",
+    "paired-experiment-report"
+  ]
+}

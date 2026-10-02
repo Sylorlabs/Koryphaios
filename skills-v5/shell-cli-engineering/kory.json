@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "shell-cli-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "shell", "cli"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["terminal-interface"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "shell script",
+    "bash script",
+    "zsh script",
+    "command line script",
+    "bash zsh automation",
+    "quoting exit status pipes",
+    "non interactive behavior"
+  ],
+  "excludes": [],
+  "evidence": [
+    "shell-cli-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle shell script.",
+      "The current task is bash script.",
+      "I need help with zsh script.",
+      "Work on command line script for this request.",
+      "This request specifically requires bash zsh automation."
+    ],
+    "negative": [
+      "The only requested work is ai agent.",
+      "Please handle jetpack compose only.",
+      "This task is limited to angular component.",
+      "The current request is bun runtime.",
+      "Work only on c++."
+    ],
+    "ambiguous": [
+      {
+        "id": "shell-cli-engineering-ambiguous-1",
+        "prompt": "The request includes shell script and ai agent.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "shell-cli-engineering-ambiguous-2",
+        "prompt": "The request includes bash script and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "shell-cli-engineering-ambiguous-3",
+        "prompt": "The request includes zsh script and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "shell-cli-engineering-adversarial-1",
+        "prompt": "A historical note says \"shell script\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "shell-cli-engineering-adversarial-2",
+        "prompt": "A historical note says \"bash script\". The current request is c++.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "shell-cli-engineering-adversarial-3",
+        "prompt": "A historical note says \"zsh script\". The current request is c#.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/",
+      "sourceType": "spec",
+      "versionScope": "The Open Group Base Specifications Issue 8 / POSIX.1-2024",
+      "staleAfterDays": 365,
+      "notes": "Shell, utilities, process, stream, signal, and portability contracts.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html",
+      "sourceType": "spec",
+      "versionScope": "POSIX.1-2024 Shell Command Language as verified 2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Adopted for quoting, expansion, pipeline status, and command-exit semantics; Bash and Zsh extensions remain separate contracts.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

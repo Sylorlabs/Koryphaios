@@ -1,0 +1,82 @@
+{
+  "id": "payment-integration-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a checkout integration where a client timeout causes the application to create a second payment attempt even though the provider may have accepted the first. Establish application order/payment identity, use provider idempotency correctly, persist transition state before exposing success, reconcile ambiguous timeouts, and verify duplicate submit, timeout-before-response, provider decline, webhook-late-success, and refresh/restart without double charge.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://payment-integration/idempotent-payment-intent-retry",
+    "requirements": [
+      "checkout/order store plus payment-provider adapter with stable idempotency key support",
+      "provider fixture for accepted-but-response-lost, decline, delayed webhook, and duplicate request",
+      "application restart between provider call and local commit",
+      "ledger/order invariants proving at most one captured charge per logical order",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "payment-integration-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "payment-integration decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "payment-integration-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "idempotent-payment-intent-retry scenario evidence",
+    "payment-integration decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "payment-integration-individual-scenario-1-result",
+    "payment-integration-individual-scenario-1-verification",
+    "payment-integration-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual payment-integration boundary and relevant environment before acting, preserve the hierarchy relationship (broader=integration-implementation; near-neighbor=webhook-integration), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Model currency/minor units, payment intent/order identity, customer/payment-method ownership, authorization/capture, asynchronous states, idempotency keys, refunds, disputes, fees, taxes, and internal ledger/reconciliation."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "One logical order maps to one reconciled provider payment identity; ambiguous transport outcomes are resolved from provider truth rather than creating a fresh charge."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use provider test modes for success, decline, authentication, timeout, duplicate submission, delayed webhook, refund/partial refund, dispute-like states, and reconciliation against provider reports before production changes."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not store raw card secrets, compute money in binary floating point, mark paid solely from client redirects, or retry charges without idempotency and provider-state checks."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (payment-integration decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

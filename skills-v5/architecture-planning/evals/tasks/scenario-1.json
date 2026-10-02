@@ -1,0 +1,68 @@
+{
+  "id": "architecture-planning-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design the architecture for the supplied single-user desktop task runner. Today all tasks execute in the app process and state is stored in one local SQLite database. New requirements are: tasks may run for 30 minutes, work must survive an app UI restart, users must be able to cancel, at most one task may mutate a project at a time, no network service is required, and the team has two engineers. Compare at least (A) retaining execution in-process with durable resumable state and (B) a local sidecar worker. Choose a boundary model only after evaluating lifecycle, state ownership, cancellation, crash recovery, upgrade compatibility, observability, operational cost, and future multi-process needs. Produce responsibilities/interfaces, data/control flow, failure paths, explicit quality scenarios, the decision and tradeoffs, and the evidence/prototype needed before irreversible commitment. Do not assume a sidecar is better merely because tasks are long-running.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://architecture-planning/desktop-task-runner-boundary",
+    "requirements": [
+      "single-user desktop application with existing in-process executor and SQLite state",
+      "tasks can run 30 minutes and must survive UI-process restart",
+      "cancellation and one-project-at-a-time mutation are required",
+      "network/distributed operation is explicitly out of scope",
+      "team size and operational simplicity materially constrain the design"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "architecture-desktop-alternatives",
+      "assertion": "The result compares the incumbent/minimal in-process option and a local sidecar against the same stated decision criteria rather than assuming a process split."
+    },
+    {
+      "id": "architecture-desktop-quality-scenarios",
+      "assertion": "The design includes testable scenarios for restart recovery, cancellation, mutation serialization, and upgrade compatibility."
+    },
+    {
+      "id": "architecture-desktop-boundaries",
+      "assertion": "State ownership, lifecycle, interfaces, failure propagation, and observability responsibilities are explicit for the chosen design."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "architecture-planning-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Boundary model",
+        "Tradeoffs",
+        "Quality scenarios",
+        "same-criteria alternative comparison",
+        "explicit assumptions and reversal triggers"
+      ]
+    },
+    {
+      "id": "architecture-planning-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "architecture is proportional to demonstrated constraints",
+        "tradeoffs are concrete rather than pattern-name assertions",
+        "verification/prototype needs are separated from unproven claims"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Boundary model",
+    "Tradeoffs",
+    "Quality scenarios",
+    "explicit decision assumptions and revisit triggers",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "architecture-planning-scenario-1-boundary-model",
+    "architecture-planning-scenario-1-tradeoff-matrix",
+    "architecture-planning-scenario-1-quality-scenarios",
+    "architecture-planning-scenario-1-paired-evaluation"
+  ]
+}

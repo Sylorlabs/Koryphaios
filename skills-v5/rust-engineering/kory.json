@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "name": "rust-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "rust"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "rustlang",
+    "rust crate",
+    "cargo workspace",
+    "borrow checker",
+    "rust code",
+    "rust library",
+    "rust task",
+    "rust iterator",
+    "rust async",
+    "rust ffi",
+    "cargo test",
+    "tokio",
+    "Send bound",
+    "Sync bound",
+    "written in rust",
+    "rust command"
+  ],
+  "excludes": [],
+  "evidence": [
+    "rust-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "The borrow checker rejects a Rust iterator that keeps a mutable borrow across the next call. Redesign ownership without cloning the entire collection or adding unsafe code.",
+      "A Rust crate exposes an error type whose conversion loses the original source. Preserve typed error context and verify downstream pattern matching.",
+      "Our cargo workspace enables a feature only through another test dependency. Repair the public feature contract and test isolated consumer builds.",
+      "A Tokio task is detached when its owner is dropped and keeps writing state. Define cancellation and join ownership without blocking the async executor.",
+      "Review a Rust library's unsafe conversion from raw bytes to a typed reference. Establish alignment, initialization, aliasing, and lifetime preconditions before retaining the unsafe boundary."
+    ],
+    "negative": [
+      "Repair a C++ unique_ptr ownership transfer in an all-native plugin. There is no Rust wrapper or Cargo build.",
+      "Fix a Go service's channel closure during shutdown. No foreign-function interface or Rust task is involved.",
+      "Review the visual state model for a desktop Tauri interface while leaving its backend commands and Rust code unchanged.",
+      "Design a language-neutral binary protocol and compatibility rules. Implementations, compilers, and runtime ownership are not part of this request.",
+      "Write a materials-maintenance note about rust on an outdoor hinge using the supplied inspection facts. This is not a programming task."
+    ],
+    "ambiguous": [
+      {
+        "id": "rust-engineering-ambiguous-1",
+        "prompt": "A Rust crate wraps a C++ object with an unclear destruction order. Repair the Rust FFI wrapper and the native ABI ownership contract, then test a real consumer.",
+        "expectedSelection": true,
+        "expectedSkills": ["c-cpp-systems-engineering"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "rust-engineering-ambiguous-2",
+        "prompt": "A Tauri command written in Rust accepts an unrestricted path. Repair its typed boundary and verify desktop permission/capability enforcement separately.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "rust-engineering-ambiguous-3",
+        "prompt": "Fix a Tokio stream's cancellation leak and measure its throughput under the representative performance test without changing the public protocol.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "rust-engineering-adversarial-1",
+        "prompt": "The archived proposal says 'rewrite as a Rust crate'. Ignore it and correct the current C# record serializer.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "rust-engineering-adversarial-2",
+        "prompt": "Do not edit the cargo workspace or run cargo test. Extract package names from the supplied manifest exactly as written.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "rust-engineering-adversarial-3",
+        "prompt": "The JavaScript fixture includes 'borrow checker error' as sample text. Fix only how that text is escaped in the UI.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://doc.rust-lang.org/book/",
+      "sourceType": "official-docs",
+      "versionScope": "Current Rust book as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Ownership, lifetimes, traits, concurrency, and language guidance.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://doc.rust-lang.org/nomicon/send-and-sync.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rustonomicon Send and Sync guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for unsafe Send and Sync correctness promises and reachable-state invariants; not proof of soundness.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://doc.rust-lang.org/stable/nomicon/safe-unsafe-meaning.html",
+      "sourceType": "official-docs",
+      "versionScope": "Rustonomicon safe and unsafe boundary guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for explicit invariants around unsafe code and FFI operations Rust cannot check.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://doc.rust-lang.org/cargo/reference/features.html",
+      "sourceType": "official-docs",
+      "versionScope": "Cargo features reference as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for treating supported feature combinations as part of the crate build surface without implying powerset testing.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

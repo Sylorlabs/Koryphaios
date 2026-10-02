@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "name": "database-performance",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "database", "performance"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5000,
+  "broader": ["performance-debugging"],
+  "facets": [],
+  "requires": ["verification", "performance-verification"],
+  "conflicts": [],
+  "activation": [
+    "slow query",
+    "database performance",
+    "query plan",
+    "database contention",
+    "query plan indexes",
+    "plan indexes statistics locks",
+    "index statistics tuning",
+    "database lock contention"
+  ],
+  "excludes": [],
+  "evidence": [
+    "database-performance decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle slow query.",
+      "The current task is database performance.",
+      "I need help with query plan.",
+      "Work on database contention for this request.",
+      "This request specifically requires query plan indexes."
+    ],
+    "negative": [
+      "The only requested work is gpu compute.",
+      "Please handle mongodb only.",
+      "This task is limited to mysql.",
+      "The current request is postgresql.",
+      "Work only on redis."
+    ],
+    "ambiguous": [
+      {
+        "id": "database-performance-ambiguous-1",
+        "prompt": "The request includes slow query and gpu compute.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["gpu-compute"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "database-performance-ambiguous-2",
+        "prompt": "The request includes database performance and mongodb.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mongodb-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "database-performance-ambiguous-3",
+        "prompt": "The request includes query plan and mysql.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mysql-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "database-performance-adversarial-1",
+        "prompt": "A historical note says \"slow query\". The current request is postgresql.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["postgres-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "database-performance-adversarial-2",
+        "prompt": "A historical note says \"database performance\". The current request is redis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["redis-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "database-performance-adversarial-3",
+        "prompt": "A historical note says \"query plan\". The current request is relational schema.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["relational-data-modeling"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.postgresql.org/docs/current/",
+      "sourceType": "official-docs",
+      "versionScope": "Current PostgreSQL documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "SQL, transactions, locking, indexes, planning, replication, and operations reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/using-explain.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Estimated versus actual row evidence; EXPLAIN ANALYZE executes the query and its side effects, so profiling requires an authorized safe target.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/planner-stats.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Planner statistics, selectivity, and correlated-column statistics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/indexes.html",
+      "sourceType": "official-docs",
+      "versionScope": "PostgreSQL 18 current documentation as available 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Index access paths and index overhead tradeoffs.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "name": "language-runtime-security",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "runtime"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6500,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "runtime security",
+    "compiler security",
+    "runtime sandbox",
+    "custom language runtime",
+    "sandbox escape",
+    "verifier execution mismatch",
+    "unsafe ffi",
+    "untrusted webassembly",
+    "security bounds check",
+    "bytecode verifier",
+    "memory safe language runtime",
+    "denial of service confinement",
+    "memory safety"
+  ],
+  "excludes": [
+    "ordinary application input and sink hardening with no runtime-semantics question",
+    "dependency or compiler artifact provenance as the primary task",
+    "generic cryptographic design with no runtime representation or isolation boundary",
+    "performance tuning with no adversarial or security guarantee",
+    "archived issue",
+    "documentation heading only",
+    "calculate the median"
+  ],
+  "evidence": [
+    "Explicit runtime guarantee and trust model",
+    "Cross-layer semantic and representation trace",
+    "Host capability and resource-bound contract",
+    "Adversarial reproducer or minimized verification corpus",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review a WebAssembly plugin runtime that executes untrusted customer modules. Prove memory/type validation, deny ambient filesystem/network/process authority, constrain host imports, bound fuel/memory/stack, and verify traps cannot leave privileged partial effects.",
+      "Investigate a custom compiler where a bounds check works at -O0 but disappears at -O2. Trace source overflow semantics through lowering and LLVM IR assumptions, minimize the reproducer, and determine whether undefined/poison behavior invalidates the source-language guarantee.",
+      "Harden a bytecode verifier and JIT against validation/execution differentials. Ensure identical bytes/features are validated and executed, reject malformed encodings and post-validation mutation, and compare interpreter and JIT behavior on adversarial modules.",
+      "Secure an FFI boundary between a memory-safe runtime and a native C extension. Define ownership, lifetime, aliasing, thread, exception, and buffer-layout rules and verify that malformed guest inputs cannot turn the native bridge into an escape hatch.",
+      "Design resource confinement for untrusted scripts: cap memory, tables, stack, code size, compile/JIT time, instruction budget, host-call cost, output, and cancellation while preserving deterministic cleanup on trap or exhaustion."
+    ],
+    "negative": [
+      "Harden an HTTP upload endpoint against path traversal, SSRF, malformed archives, SQL injection, and command argument injection. No custom interpreter, compiler, bytecode, plugin, or untrusted-code runtime is involved.",
+      "Audit npm/crate/compiler dependencies, SBOM, lockfile enforcement, release provenance, artifact signatures, and builder identity for the language toolchain.",
+      "Choose a signature algorithm, AEAD construction, KDF, and nonce strategy for an application protocol; runtime representation and isolation are not part of the assignment.",
+      "Define which tenant roles may invoke an already-sandboxed workflow and which records each role may read or mutate. The runtime's guest isolation is already proven and unchanged.",
+      "Improve compiler throughput, incremental build caching, and generated-code speed for trusted programs without changing any security, sandbox, or adversarial-input guarantee."
+    ],
+    "ambiguous": [
+      {
+        "id": "language-runtime-security-ambiguous-1",
+        "prompt": "A security review found a possible plugin sandbox escape through a host import. security-review owns the finding; language-runtime-security must define the guest guarantee, trace the host capability, reproduce the escape, and establish the runtime-level fix and denial evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "language-runtime-security-ambiguous-2",
+        "prompt": "A service compiles user expressions and then executes them. application-security owns request parsing and API limits; language-runtime-security owns compiler/IR semantics, module validation, host capabilities, JIT/native boundaries, and untrusted-code confinement.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "language-runtime-security-ambiguous-3",
+        "prompt": "A sandboxed module may call a host signing service. applied-cryptography owns signature construction and key policy; language-runtime-security owns whether the guest can reach that capability, with what parameters/identity, under what limits, and whether denial is enforceable.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["applied-cryptography"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "language-runtime-security-adversarial-1",
+        "prompt": "An archived issue says \"runtime security audit\". The current request is only to correct Markdown links in that historical document; do not inspect or execute the runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "language-runtime-security-adversarial-2",
+        "prompt": "A compiler README mentions sandbox escape testing. Rename one documentation heading only and leave compiler, runtime, tests, and configuration unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "language-runtime-security-adversarial-3",
+        "prompt": "A pasted benchmark contains the words \"runtime sandbox\". The actual task is only to calculate the median execution time from the supplied numbers; no security analysis is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["applied-cryptography"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/wasm-core/",
+      "sourceType": "spec",
+      "versionScope": "WebAssembly Core Specification release 3.0, W3C Candidate Recommendation Draft dated 2026-08-12; maintained as a living Candidate Recommendation rather than a final W3C Recommendation",
+      "revision": "3.0 CRD 2026-08-12",
+      "staleAfterDays": 90,
+      "notes": "Core validation, execution, memory/type safety, traps, and security considerations. Host APIs and embedding capabilities are separate from core Wasm guarantees.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://llvm.org/docs/UndefinedBehavior.html",
+      "sourceType": "official-docs",
+      "versionScope": "LLVM IR Undefined Behavior manual in current LLVM 24.0.0git documentation as verified 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Immediate UB, poison, undef/freeze semantics, and optimizer assumptions relevant to cross-layer security checks and miscompilations.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://llvm.org/docs/Security.html",
+      "sourceType": "official-docs",
+      "versionScope": "LLVM Security Response Group scope in current LLVM 24.0.0git documentation as verified 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Documents which LLVM components and malformed/untrusted-input scenarios the project considers security-sensitive or explicitly not hardened, preventing overgeneralized trust claims.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

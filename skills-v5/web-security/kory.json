@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "web-security",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "web"],
+  "targetMedia": ["web"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "web security",
+    "xss",
+    "csrf",
+    "content security policy",
+    "cors and postmessage",
+    "browser cookies"
+  ],
+  "excludes": [
+    "non-browser parser/file/process/outbound-request security as the primary task",
+    "OAuth/OIDC protocol validation as the primary task",
+    "resource authorization policy without browser-origin concerns",
+    "design is already complete"
+  ],
+  "evidence": [
+    "Origin/credential and source-to-sink map",
+    "CSP/CSRF/CORS/cookie policy",
+    "Browser-state negative and enforcement cases",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review web security for a React app that renders rich user content, uses cookie sessions, embeds a payment iframe, and exchanges postMessage events. Cover XSS sinks/sanitization, CSP, CSRF, framing, and exact message origins.",
+      "Fix XSS in a dashboard that passes URL fragments and API-provided HTML through dangerouslySetInnerHTML. Replace unsafe sinks, sanitize intentional HTML, and add a strict nonce-based Content Security Policy as defense in depth.",
+      "Design CSRF protection for a cookie-authenticated SPA with state-changing JSON requests, including framework token/header behavior, SameSite cookies, Origin/Fetch Metadata checks where appropriate, and failure tests.",
+      "Harden CORS and postMessage for an app spanning app.example.com and reports.example.net. Restrict exact trusted origins, credential sharing, message sender/target origins, and message schemas.",
+      "Review browser session cookies and navigation/framing controls: Secure/HttpOnly/SameSite/Domain/Path, open redirects, frame-ancestors, and the decision about storing any token in JavaScript-accessible storage."
+    ],
+    "negative": [
+      "Trace uploaded archives, filesystem paths, webhook URLs, native converter arguments, serialized state, and server logs; browser origins and DOM execution are not involved.",
+      "Design OAuth/OIDC authorization code plus PKCE with exact redirects, issuer/audience/nonce/state validation, refresh rotation, and sender-constrained tokens.",
+      "Define user, tenant, object, field, and action permissions at the service/data layer, including delegation and revocation; browser controls are already correct.",
+      "Design passkey/password/MFA enrollment, recovery, throttling, replacement, and fresh-authentication policy; the browser shell itself is unchanged.",
+      "Execute the existing XSS/CSRF/CSP/CORS/cookie/framing tests and issue the final control verdict; browser security design is already fixed."
+    ],
+    "ambiguous": [
+      {
+        "id": "web-security-ambiguous-1",
+        "prompt": "The application-security review also found a browser XSS path. Keep server-side parser/file/process concerns in application-security while web-security owns DOM/HTML sinks, sanitization, CSP, and browser-origin defenses.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "web-security-ambiguous-2",
+        "prompt": "The browser client implements an OAuth redirect and also needs CSP/CSRF/cookie/CORS hardening. Keep protocol redirects/PKCE/state/token validation in oauth-oidc and the wider browser origin/execution surface in web-security.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "web-security-ambiguous-3",
+        "prompt": "A cookie-authenticated admin action needs both CSRF protection and server authorization. Web-security owns forged-browser-request defenses; authorization-security still decides whether the user may perform the action.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "web-security-adversarial-1",
+        "prompt": "A historical browser audit discusses script injection. The current request is only to reformat the report; do not assess or change the web application.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "web-security-adversarial-2",
+        "prompt": "An old identity incident mentions a redirect URL. Extract its dates and owners only; no browser or federation work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "web-security-adversarial-3",
+        "prompt": "A permission document includes a browser form example. Rename one Markdown heading only and leave authorization and browser behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/CSP3/",
+      "sourceType": "spec",
+      "versionScope": "Content Security Policy Level 3 Working Draft, 13 August 2026",
+      "staleAfterDays": 60,
+      "notes": "Current CSP3 Working Draft; use its policy semantics with explicit draft status rather than describing it as a Recommendation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP XSS Prevention guidance available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Framework escape hatches, safe sinks, contextual output encoding, HTML sanitization, and CSP as defense in depth rather than the sole XSS defense.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP CSRF Prevention guidance available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Synchronizer/cookie-to-header patterns, SameSite, Origin/Fetch Metadata options, and client-side CSRF caveats.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/OWASP/ASVS/tree/master/5.0/en",
+      "sourceType": "spec",
+      "versionScope": "OWASP ASVS 5.0.0",
+      "revision": "5.0.0",
+      "staleAfterDays": 120,
+      "notes": "Browser/client, encoding/sanitization, session, API, communication, and related security requirements used as the stable application-security baseline.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

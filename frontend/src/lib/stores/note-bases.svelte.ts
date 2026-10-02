@@ -11,12 +11,20 @@ import { projectStore } from './project.svelte';
 let _bases = $state.raw<NoteBase[]>([]);
 let _trashed = $state.raw<NoteBase[]>([]);
 let _schemas = $state.raw<NotePropertySchema[]>([]);
-let _active = $state<NoteBase | null>(null);
+// `raw`: a Base is only ever replaced wholesale, never mutated in place. Deep
+// proxying it made `active.definition` a Proxy, which cannot be cloned — the
+// Bases view clones the definition into its draft and threw DataCloneError on
+// every selection.
+let _active = $state.raw<NoteBase | null>(null);
 let _result = $state.raw<NoteBaseQueryResult | null>(null);
 let _loading = $state(false);
 let _saving = $state(false);
 let _error = $state<string | null>(null);
 let generation = 0;
+/** Owner of the current `_loading` spinner. A superseded request must not
+ *  clear a newer one's spinner — and, more importantly, must not be the reason
+ *  a spinner is left on forever. */
+let loadToken = 0;
 
 export const DEFAULT_NOTE_BASE_DEFINITION: NoteBaseDefinition = {
   version: 1,
@@ -68,13 +76,27 @@ function scopeStillCurrent(request: { path: string; generation: number }): boole
   return request.generation === generation && request.path === projectStore.currentPath;
 }
 
+/** Claim the shared loading spinner. Returns the token that owns it. */
+function beginLoad(): number {
+  loadToken += 1;
+  _loading = true;
+  return loadToken;
+}
+
+/** Release the spinner only if no newer request has claimed it. A request that
+ *  lost its project scope still releases the spinner, so a superseded query can
+ *  never strand the panel on "Indexing and querying this Base…". */
+function endLoad(token: number): void {
+  if (token === loadToken) _loading = false;
+}
+
 async function refresh(): Promise<void> {
   const request = scope();
   if (!request) {
     clear();
     return;
   }
-  _loading = true;
+  const token = beginLoad();
   _error = null;
   try {
     const [basesResponse, schemasResponse] = await Promise.all([
@@ -111,11 +133,14 @@ async function refresh(): Promise<void> {
       _error = error instanceof Error ? error.message : 'Failed to load Bases';
     }
   } finally {
-    if (scopeStillCurrent(request)) _loading = false;
+    endLoad(token);
   }
 }
 
-async function create(name: string, definition = DEFAULT_NOTE_BASE_DEFINITION): Promise<NoteBase | null> {
+async function create(
+  name: string,
+  definition = DEFAULT_NOTE_BASE_DEFINITION,
+): Promise<NoteBase | null> {
   const request = scope();
   if (!request) return null;
   _saving = true;
@@ -256,7 +281,7 @@ async function restore(base: NoteBase): Promise<boolean> {
 async function query(baseId: string, offset = 0): Promise<NoteBaseQueryResult | null> {
   const request = scope();
   if (!request) return null;
-  _loading = true;
+  const token = beginLoad();
   _error = null;
   try {
     const response = await apiFetch(
@@ -279,7 +304,7 @@ async function query(baseId: string, offset = 0): Promise<NoteBaseQueryResult | 
     }
     return null;
   } finally {
-    if (scopeStillCurrent(request)) _loading = false;
+    endLoad(token);
   }
 }
 

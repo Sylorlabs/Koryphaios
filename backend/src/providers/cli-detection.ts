@@ -28,8 +28,6 @@ import {
   createCursorCLIAuthMarker,
   detectDevinCLILogin,
   createDevinCLIAuthMarker,
-  detectClineCLILogin,
-  createClineCLIAuthMarker,
   detectKimiCodeCLILogin,
   detectFreebuffCLILogin,
   createFreebuffCLIAuthMarker,
@@ -46,7 +44,6 @@ export interface AgentCliStatus {
     | 'grok'
     | 'cursor'
     | 'devin'
-    | 'cline'
     | 'kimi'
     | 'freebuff';
   displayName: string;
@@ -210,10 +207,6 @@ export function canAutoEnable(provider: ProviderName): boolean {
       const bin = whichBinary('devin');
       return !!bin && detectDevinCLILogin() && probeCliConnection(bin, provider);
     }
-    case 'cline': {
-      const bin = whichBinary('cline');
-      return !!bin && detectClineCLILogin() && probeCliConnection(bin, provider);
-    }
     case 'kimicode':
       // The kimi CLI owns its own OAuth session. Koryphaios reads the stored
       // token directly, so the binary is NOT required — a ~/.kimi session
@@ -263,8 +256,6 @@ export function cliAutoEnableCreds(
       return { authToken: createCursorCLIAuthMarker() };
     case 'devin':
       return { authToken: createDevinCLIAuthMarker() };
-    case 'cline':
-      return { authToken: createClineCLIAuthMarker() };
     case 'kimicode': {
       // Point at the first discovered ~/.kimi* profile. If none are found
       // (e.g. only KIMI_CODE_AUTH_TOKEN is set), fall back to a managed
@@ -383,18 +374,6 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://docs.devin.ai/',
   });
 
-  const clineLogin = detectClineCLILogin();
-  const cline = mk('cline', 'Cline CLI', ['cline'], 'cline', {
-    loggedIn: clineLogin,
-    authSource: clineLogin ? '~/.cline/data/secrets.json' : null,
-    autoEnabled: canAutoEnable('cline'),
-    workingNote:
-      'Cline credential material detected. Chat is routed through the CLI; provider access is verified only when the CLI runs.',
-    loggedOutNote:
-      'No Cline credential material detected — run "cline auth --provider <p> --apikey <k>".',
-    docsUrl: 'https://docs.cline.bot/cli',
-  });
-
   // ── Kimi Code → `kimicode` provider. The official `kimi` CLI owns its OAuth
   // session at ~/.kimi; Koryphaios reads the stored token directly and calls
   // api.kimi.com/coding/v1 (no subprocess). The binary is optional — a prior
@@ -427,7 +406,7 @@ export function detectAgentClis(): AgentCliStatus[] {
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });
 
-  return [claude, codex, antigravity, grok, cursor, devin, cline, kimi, freebuff];
+  return [claude, codex, antigravity, grok, cursor, devin, kimi, freebuff];
 }
 
 function mk(

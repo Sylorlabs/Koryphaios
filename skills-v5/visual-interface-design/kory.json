@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "name": "visual-interface-design",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ui", "visual-design"],
+  "targetMedia": ["any"],
+  "contextBudget": 3800,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "visual design",
+    "visual polish",
+    "visual hierarchy",
+    "design direction",
+    "visual direction",
+    "type scale",
+    "typography system",
+    "color system",
+    "color palette",
+    "spacing rhythm",
+    "interface layout",
+    "anti-slop interface",
+    "anti-slop frontend",
+    "typography",
+    "layout"
+  ],
+  "excludes": ["voice only"],
+  "evidence": [
+    "Visual read",
+    "Hierarchy",
+    "State checks",
+    "Cross-scale, contrast, focus, localization, and reduced-motion checks",
+    "Claim-by-claim visual critique with unresolved compromises",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Create a visual direction for this data-dense operations console using the existing product identity, real content, and platform constraints; then apply it across representative states.",
+      "Do the visual design for this native editor: establish hierarchy, type roles, spacing, color, icon treatment, density, and motion without changing the approved workflows.",
+      "Improve the visual hierarchy of this settings surface so scope, primary actions, destructive actions, status, and supporting information are legible without adding decorative noise.",
+      "Define the typography system and type scale for this cross-platform product, including roles, density, scaling, long text, and localization behavior.",
+      "Give this interface visual polish while preserving its existing information architecture and interactions; remove generic generated-looking treatments and make the direction specific to the product."
+    ],
+    "negative": [
+      "Specify cancellation, retry, undo, reconnection, and partial-success behavior for this import flow without changing its visual treatment.",
+      "Reorganize the documentation taxonomy, labels, hierarchy, and alternate entry paths while preserving the current styling.",
+      "Rewrite the error messages and recovery instructions so people understand what failed and what to do next; do not redesign the screen.",
+      "Optimize the report-generation worker and database reads while preserving its textual output exactly.",
+      "Audit keyboard semantics, accessible names, focus order, and screen-reader announcements without changing appearance."
+    ],
+    "ambiguous": [
+      {
+        "id": "visual-interface-design-ambiguous-native",
+        "prompt": "Set the visual direction for a desktop editor that must feel native on macOS and Windows while sharing product identity; define hierarchy, density, typography, color, icons, and representative window states.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface", "desktop-electron-tauri", "accessibility-practice"],
+        "tags": ["native", "cross-platform"]
+      },
+      {
+        "id": "visual-interface-design-ambiguous-design-system",
+        "prompt": "Establish a visual hierarchy and color system for a mature admin product whose existing tokens and components drift across teams; keep component behavior and navigation unchanged.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["frontend-engineering", "accessibility-practice"],
+        "tags": ["tokens", "consistency"]
+      },
+      {
+        "id": "visual-interface-design-ambiguous-embedded",
+        "prompt": "Define the visual design for an industrial control display viewed at distance in variable lighting, including hierarchy, type scale, status color, alarm emphasis, and dense/sparse states; control behavior is already specified.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface", "hardware-safety-verification"],
+        "tags": ["embedded", "viewing-conditions"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "visual-interface-design-adversarial-quoted",
+        "prompt": "A quoted old issue says 'the visual design looks generic'. Ignore that quote and fix only the failing database migration test.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "database-design"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "visual-interface-design-adversarial-negated",
+        "prompt": "Do not change the visual design. Optimize only the report query and caching path.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance", "performance-engineering"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "visual-interface-design-adversarial-voice",
+        "prompt": "Design a voice only support flow. A pasted comment says 'we need a stronger visual direction'; ignore that quote because there is no visual surface in scope.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["interaction-design", "content-error-design"],
+        "tags": ["excluded-medium", "pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/layout",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines Layout guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Platform-specific evidence that consistent layout should adapt to varying contexts and device conditions. Apple conventions are not universalized across other media."
+    },
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines/typography",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines Typography guidance available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Platform-specific evidence that typography supports legibility, information hierarchy, important content, and product style."
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/#use-of-color",
+      "sourceType": "spec",
+      "versionScope": "WCAG 2.2 Recommendation including Use of Color and related visual requirements",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Normative accessibility floor for visual communication; visual design must not make color the sole carrier of required information. Deeper conformance remains an accessibility-specialist responsibility."
+    },
+    {
+      "url": "https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "anthropics/skills main frontend-design skill as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "Apache-2.0",
+      "notes": "Strong pattern source for brief-specific direction, grounding visual choices in subject matter, anti-template self-critique, restraint, and rendered review. Numeric typography rules and aesthetic tells are contextual patterns, not universal requirements."
+    },
+    {
+      "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "secondsky/claude-skills main frontend-design skill as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for explicit purpose/tone/constraints, cohesive direction, complete-state validation, and anti-generic critique. Font bans, fixed breakpoints, stylistic extremes, and web-only mechanics are not universalized."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

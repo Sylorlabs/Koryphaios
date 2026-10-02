@@ -53,9 +53,15 @@ describe('KoryManager - Method Signatures', () => {
     expect(KoryManager.length).toBe(8);
   });
 
-  it('setYoloMode should accept boolean', () => {
+  it('setYoloMode should accept a boolean and an optional session id', () => {
     const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'setYoloMode');
-    expect(descriptor?.value?.length).toBe(1); // Takes enabled: boolean
+    // Takes enabled: boolean, sessionId?: string — the mirror is keyed per chat.
+    expect(descriptor?.value?.length).toBe(2);
+  });
+
+  it('getIsYoloMode should resolve the posture for one session', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(KoryManager.prototype, 'getIsYoloMode');
+    expect(descriptor?.value?.length).toBe(1); // Takes sessionId: string
   });
 
   it('handleUserInput should accept sessionId, selection, optional text, and optional questionId', () => {
@@ -225,6 +231,9 @@ describe('KoryManager real compaction', () => {
       expect(request?.model).toBe('gpt-selected');
       expect(request?.sessionId).toStartWith(`${sessionId}:compaction:`);
       expect(request?.messages).toHaveLength(1);
+      expect(request?.cacheLaneKind).toBe('compaction');
+      expect(request?.promptCache?.stableSystemPrompt).toBe(request?.systemPrompt);
+      expect(request?.promptCacheKeepaliveMode).toBe('off');
       expect(request?.sandbox?.preset).toBe('readonly');
       expect(committed).toMatchObject({
         sessionId,

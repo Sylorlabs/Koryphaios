@@ -1310,7 +1310,7 @@
             <SettingsSwitch
               checked={memoryStore.settings?.autosaveEnabled ?? true}
               label="Autosave drafts"
-              description="On saves while editing; off only Save or Ctrl/⌘ S writes to disk"
+              description="On saves while editing. When off, only Save or Ctrl/⌘ S writes to disk"
               onchange={() => toggleSetting('autosaveEnabled')}
               flat
             />

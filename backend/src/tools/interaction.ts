@@ -1,5 +1,6 @@
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { serverLog } from '../logger';
+import { normalizeSkillAssignment } from '../kory/skill-assignment';
 
 /**
  * Tool for the Manager to ask the user a question with predefined options.
@@ -47,7 +48,10 @@ export class AskUserTool implements Tool {
         durationMs: 0,
       };
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'ask_user: error waiting for user input');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'ask_user: error waiting for user input',
+      );
       return {
         callId: call.id,
         name: this.name,
@@ -73,6 +77,18 @@ export class DelegateToWorkerTool implements Tool {
     properties: {
       task: { type: 'string', description: 'Clear task description for the worker' },
       domain: { type: 'string', description: 'Optional: ui | backend | general | test | review' },
+      workerSkills: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Exact installed skill names required for the worker. Missing or conflicting skills block execution.',
+      },
+      criticSkills: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Exact installed skills required for the independent critic, in addition to verification guidance.',
+      },
     },
     required: ['task'],
   };
@@ -98,10 +114,17 @@ export class DelegateToWorkerTool implements Tool {
       };
     }
     try {
-      const result = await ctx.delegateToWorker(task.trim(), domain);
+      const skills = normalizeSkillAssignment({
+        worker: call.input.workerSkills,
+        critic: call.input.criticSkills,
+      });
+      const result = await ctx.delegateToWorker(task.trim(), domain, skills);
       return { callId: call.id, name: this.name, output: result, isError: false, durationMs: 0 };
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'delegate_to_worker: delegation failed');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'delegate_to_worker: delegation failed',
+      );
       return {
         callId: call.id,
         name: this.name,

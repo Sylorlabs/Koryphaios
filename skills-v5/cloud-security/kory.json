@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "cloud-security",
+  "version": "5.0.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "cloud"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["infrastructure-security"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "cloud security",
+    "cloud iam review",
+    "cloud posture",
+    "cloud network security",
+    "cross account",
+    "review of iam",
+    "network exposure encryption logging",
+    "cloud misconfig risk"
+  ],
+  "excludes": [
+    "host/container/Kubernetes runtime hardening as the primary task",
+    "application-level user/resource authorization",
+    "cryptographic key lifecycle without cloud posture/IAM questions"
+  ],
+  "evidence": [
+    "Organization/account and effective-IAM map",
+    "Resource/network/KMS exposure matrix",
+    "Control-plane audit and allowed/denied verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Perform a cloud IAM review for AWS organizations/accounts: human federation, workload roles, assume-role trust, SCPs, resource policies, wildcard permissions, KMS grants, and cross-account access.",
+      "Review cloud security for a GCP project hierarchy using Workforce/Workload Identity Federation, service accounts, IAM conditions, public storage/serverless exposure, VPC paths, audit logs, and organization policy.",
+      "Assess cloud posture for Azure subscriptions: Entra workload/human identity, RBAC scope, managed identities, public endpoints/private links, Key Vault access, diagnostic settings, and policy guardrails.",
+      "Design cloud network security for a multi-account service: separate public ingress, private application/data paths, management/control-plane access, egress destinations, shared-service connectivity, and effective-route verification.",
+      "Harden a cross-account data pipeline so the producer can write only one destination prefix/table, the consumer cannot assume the producer role, KMS grants match the data path, and all policy/role changes are centrally audited."
+    ],
+    "negative": [
+      "Harden the Kubernetes pods themselves with non-root users, seccomp, restricted capabilities, host-mount removal, Pod Security Standards, and namespace NetworkPolicy.",
+      "Define which application tenant users may access each document, field, export, and admin action; cloud workload identity is already least-privileged.",
+      "Design the KMS/HSM key hierarchy, cryptoperiod, envelope encryption, rotation, revocation, backup, and destruction policy independently of cloud-resource access review.",
+      "Verify artifact signatures, SLSA provenance, SBOMs, dependency locks, and CI builder identity before the deployment role accepts an image.",
+      "Execute the finished cloud-policy tests and issue the security verdict for IAM, public exposure, logging, and cross-account access; cloud design is already complete."
+    ],
+    "ambiguous": [
+      {
+        "id": "cloud-security-ambiguous-1",
+        "prompt": "The EKS deployment needs cloud security for AWS accounts, workload IAM roles, KMS/resource policies, public endpoints, and organization guardrails, while infrastructure-security owns pod privilege, host mounts, and in-cluster network policy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "cloud-security-ambiguous-2",
+        "prompt": "Users are authorized in the application and workloads assume cloud roles. Keep user/resource access in authorization-security while cloud-security owns workload identity, trust policies, and provider resource permissions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "cloud-security-ambiguous-3",
+        "prompt": "The cloud design uses KMS encryption. Cloud-security owns which principals/resources may use the cloud key and how services are exposed; secrets-key-management owns key hierarchy, rotation, wrapping, and destruction lifecycle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secrets-key-management"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "cloud-security-adversarial-1",
+        "prompt": "A historical cloud architecture review is attached. Only fix its Markdown formatting; do not inspect or change cloud accounts or policies.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["infrastructure-security"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "cloud-security-adversarial-2",
+        "prompt": "An old access incident mentions an IAM role. Extract the incident dates and owners only; no current cloud or application permission work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "cloud-security-adversarial-3",
+        "prompt": "A key-management README includes a cloud provider example. Rename one section only and leave all KMS and cloud behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secrets-key-management"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS Well-Architected Security Pillar current documentation available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "AWS identity/access, detection, infrastructure/data protection, incident response, and security foundations.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS IAM security best practices current 2026",
+      "staleAfterDays": 90,
+      "notes": "Federation/temporary credentials, MFA, least privilege, Access Analyzer, conditions, and organization guardrails.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cloud.google.com/iam/docs/using-iam-securely",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud IAM secure-use guidance current 2026",
+      "staleAfterDays": 90,
+      "notes": "Workforce/workload identity federation, service-account key avoidance, least privilege, role/condition design, and project hierarchy practices.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/security/benchmark/azure/overview",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft cloud security benchmark v2 overview current 2026",
+      "staleAfterDays": 90,
+      "notes": "Azure/multicloud control guidance for network, identity, privilege, data, logging, posture, endpoint, backup, and governance domains.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

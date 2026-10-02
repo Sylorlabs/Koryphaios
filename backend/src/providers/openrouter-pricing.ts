@@ -323,8 +323,24 @@ export function quoteOpenRouterUsage(
 }
 
 export async function getOpenRouterPricingCatalog(): Promise<OpenRouterPricingCatalog | null> {
-  if (cachedCatalog && Date.now() - cachedCatalog.fetchedAt < CACHE_TTL_MS) return cachedCatalog;
+  return loadCatalog(false);
+}
+
+/**
+ * Re-pull the pricing catalog ignoring its TTL, for the adaptive background
+ * scheduler. A model priced after launch bills at its real rate either way, but
+ * a stale catalog leaves the new model's cost unknown and shows as an unpriced
+ * row until the TTL expires. Single-flight: concurrent callers share one request.
+ */
+export async function refreshOpenRouterPricingCatalog(): Promise<OpenRouterPricingCatalog | null> {
+  return loadCatalog(true);
+}
+
+async function loadCatalog(force: boolean): Promise<OpenRouterPricingCatalog | null> {
   if (inFlight) return inFlight;
+  if (cachedCatalog && (!force || Date.now() - cachedCatalog.fetchedAt < CACHE_TTL_MS)) {
+    return cachedCatalog;
+  }
 
   inFlight = (async () => {
     try {

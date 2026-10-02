@@ -1,0 +1,75 @@
+{
+  "id": "secrets-key-management-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design key management for a multi-tenant document service that already uses a standard AEAD correctly. Each document has a random data-encryption key (DEK); DEKs are wrapped by tenant-scoped KMS key-encryption keys (KEKs). The current design records only a mutable key alias, lets the application role administer and decrypt the KEK, rotates the alias yearly without distinguishing rewrap/re-encryption, and allows key deletion without checking historical ciphertext. Redesign the key hierarchy and metadata, key/version identifiers for historical decrypt, application versus key-administrator access, rotation/rewrap behavior, regional backup/recovery, compromise response, audit, disable/revocation, and deletion/destruction safety. Preserve tenant isolation and explain how a compromised workload grant differs from a compromised KEK. Do not redesign AEAD/nonce semantics.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://secrets-key-management/scenario-1",
+    "requirements": [
+      "multi-tenant envelope-encryption metadata and KMS hierarchy fixture",
+      "current/previous KMS key versions and alias mapping",
+      "application, key-administrator, and break-glass principal fixtures",
+      "regional outage plus compromised-grant/compromised-key scenarios",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "secrets-key-management-hierarchy-1",
+      "assertion": "Every ciphertext/DEK record retains an unambiguous tenant and wrapping-key/version reference sufficient to decrypt historical data after aliases/primary versions change."
+    },
+    {
+      "id": "secrets-key-management-separation-1",
+      "assertion": "Normal application workloads can perform only the required wrap/unwrap/decrypt operations while key administration, policy changes, and deletion are separated into distinct principals/approvals."
+    },
+    {
+      "id": "secrets-key-management-rotation-1",
+      "assertion": "The design distinguishes changing the key/version for new writes from rewrapping DEKs or re-encrypting data, with explicit completion evidence before any old key version is disabled."
+    },
+    {
+      "id": "secrets-key-management-compromise-1",
+      "assertion": "Compromise response separately analyzes a leaked workload grant/credential versus a compromised KEK, names the affected tenant/data scope, revocation propagation, required rewrap/re-encryption actions, and audit evidence."
+    },
+    {
+      "id": "secrets-key-management-recovery-destruction-1",
+      "assertion": "Regional recovery and deletion/destruction rules ensure retained ciphertext never depends solely on a destroyed key, while scheduled deletion has dependency checks, retention/legal-hold handling, and an audited recovery window."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "secrets-key-management-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "key hierarchy/version metadata",
+        "admin/use separation",
+        "rotation/rewrap plan",
+        "compromise/recovery/deletion evidence"
+      ]
+    },
+    {
+      "id": "secrets-key-management-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "tenant/key/version hierarchy",
+    "principal/grant matrix",
+    "rotation and rewrap state transitions",
+    "compromise response",
+    "backup/deletion/destruction contract",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "secrets-key-management-scenario-1-result",
+    "secrets-key-management-scenario-1-verification",
+    "secrets-key-management-scenario-1-paired-evaluation"
+  ]
+}

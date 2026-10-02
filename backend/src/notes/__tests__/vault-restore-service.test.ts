@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -503,6 +504,19 @@ describe('production whole-vault restore adapter', () => {
         ],
       }),
     );
+    const committedJournalPath = join(journalDirectory, `${plan.archiveSha256}.json`);
+    const committedJournal = readFileSync(committedJournalPath, 'utf8');
+    writeFileSync(
+      committedJournalPath,
+      JSON.stringify({
+        ...JSON.parse(committedJournal),
+        projectRoot: join(projectRoot, 'different-project'),
+      }),
+    );
+    await expect(adapter.inspectProject(projectRoot)).rejects.toThrow('invalid identity');
+    expect(readFileSync(join(projectRoot, 'docs/restored.md'))).toEqual(sourceBytes);
+    expect(existsSync(committedJournalPath)).toBe(true);
+    writeFileSync(committedJournalPath, committedJournal);
     await adapter.inspectProject(projectRoot);
     expect(readFileSync(join(projectRoot, 'docs/restored.md'))).toEqual(sourceBytes);
     expect(existsSync(join(journalDirectory, `${plan.archiveSha256}.json`))).toBe(false);

@@ -14,7 +14,11 @@ import { detectCursorCLILogin } from './auth-utils';
 import { providerLog } from '../logger';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  inferenceSandboxPolicy,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import {
   type Provider,
   type ProviderEvent,
@@ -352,11 +356,12 @@ export class CursorProvider implements Provider {
           // all four providers. The catalog key list mirrors the antigravity
           // case (multi-vendor under one subscription).
           refreshModelsDevCache();
-          this.cachedModels = applyModelsDevMetadata(
-            'cursor',
-            models,
-            ['openai', 'anthropic', 'google', 'xai'],
-          );
+          this.cachedModels = applyModelsDevMetadata('cursor', models, [
+            'openai',
+            'anthropic',
+            'google',
+            'xai',
+          ]);
           this.modelsFetchedAt = Date.now();
           this.modelsInFlight = false;
           providerLog.debug(
@@ -503,7 +508,9 @@ export class CursorProvider implements Provider {
       ? wrapCommand(bin, args, {
           cwd,
           configDirs: [cursorHome, ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : [])],
-          policy: request.sandbox,
+          // The CLI child is the inference transport — it must reach the
+          // model endpoint. See inferenceSandboxPolicy.
+          policy: inferenceSandboxPolicy(request.sandbox),
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);

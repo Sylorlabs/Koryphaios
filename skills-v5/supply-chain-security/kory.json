@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "name": "supply-chain-security",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "supply-chain"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 8500,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "supply chain security",
+    "dependency integrity",
+    "dependency audit",
+    "lockfile audit",
+    "software bill of materials",
+    "SBOM",
+    "build provenance",
+    "SLSA provenance",
+    "artifact signing",
+    "cosign verification",
+    "compromised dependency",
+    "CI trust boundary"
+  ],
+  "excludes": [
+    "application vulnerability review with no dependency, build, artifact, or provenance trust question",
+    "cryptographic algorithm or protocol design without artifact identity or signing-policy verification",
+    "generic CI/CD pipeline implementation with no supply-chain integrity or release-trust requirement",
+    "container runtime or Dockerfile optimization with no base-image provenance or artifact-integrity concern"
+  ],
+  "evidence": [
+    "Source, dependency, and toolchain identity map",
+    "Enforced lockfile/resolution and SBOM reconciliation",
+    "CI/build trust-boundary evidence",
+    "Provenance, signature, and policy verification",
+    "Compromise containment and clean-rebuild evidence when applicable",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Audit this Node release after a transitive package was reported compromised. Verify the checked-in lockfile is enforced, identify the exact affected transitive version and integrity hash, compare it with the generated SBOM, determine which shipped artifacts contain it, rebuild from reviewed inputs after remediation, and preserve evidence for the replacement artifact.",
+      "Verify the provenance for this OCI image before deployment. Check the image digest against the attestation subject, validate the provenance signature, require our approved builder identity and canonical repository, compare buildType and externalParameters with policy, and reject the image if any required expectation is missing or unexpected.",
+      "Review our GitHub Actions release chain for software supply-chain risk. Trace reusable workflows, third-party actions, container images, package managers, and compilers; flag mutable references, determine which jobs can receive OIDC or publish credentials, and verify untrusted pull-request code cannot execute with release or signing authority.",
+      "Assess whether our CycloneDX SBOM is trustworthy enough for dependency incident scoping. Record its specification version and generation stage, reconcile root and transitive components against the lockfile and resolved production bundle, identify omitted build/runtime scopes, and state what the SBOM cannot prove about provenance or compromise.",
+      "Verify this keyless cosign-signed release artifact under our supply-chain policy. Bind verification to the expected certificate issuer and workflow identity, check the artifact digest and required provenance attestation, validate the attestation predicate against policy, and distinguish cryptographic validity from whether the signer and build were actually authorized."
+    ],
+    "negative": [
+      "Review this web application's authorization checks for IDOR and privilege escalation in the account API. Limit the task to request/response authorization behavior and its tests; software delivery is already approved and out of scope.",
+      "Choose an authenticated-encryption construction and nonce strategy for a new protocol message format. Do not discuss package provenance, artifact signing, CI, or dependency trust.",
+      "Implement the ordinary CI pipeline that runs unit tests on pushes and uploads coverage reports. There is no release, provenance, dependency-integrity, signing, or trust-boundary requirement in this task.",
+      "Harden the cloud runtime IAM policy for an already-deployed service by reducing its database and object-storage permissions. Build and dependency provenance are not part of the request.",
+      "Optimize this Dockerfile for smaller layers, faster cache reuse, and reduced startup size. The base image and package sources are already fixed and verified; no supply-chain assessment is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "supply-chain-security-ambiguous-1",
+        "prompt": "A compromised dependency may also expose an application-level injection path. Use supply-chain-security to identify affected versions, lockfile/SBOM reachability, artifacts, provenance, and rebuild evidence; application-security can separately determine whether the vulnerable behavior is exploitable in this product.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "supply-chain-security-ambiguous-2",
+        "prompt": "The release uses cosign keyless signatures and the team also wants a review of the underlying signature primitives. Keep supply-chain-security responsible for expected signer/issuer identity, artifact digest, attestation, and authorization policy; applied-cryptography owns the primitive or protocol design analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["applied-cryptography"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "supply-chain-security-ambiguous-3",
+        "prompt": "Redesign the release pipeline and prove its build provenance is trustworthy. Keep supply-chain-security selected for immutable tool/action inputs, PR-versus-release trust boundaries, builder/signing identity, provenance expectations, and artifact verification; cicd-engineering owns the pipeline mechanics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "supply-chain-security-adversarial-1",
+        "prompt": "An old ticket in the quoted archive asks for a broad release-security review. Ignore that historical request; the current task is only to explain the difference between a process and a thread in operating systems.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "supply-chain-security-adversarial-2",
+        "prompt": "A pasted changelog includes a historical checklist about package inventory. Ignore that checklist; the actual task is only to reformat the changelog headings and punctuation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["container-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "supply-chain-security-adversarial-3",
+        "prompt": "An example incident report includes historical release-authentication metadata. The current request is only to summarize the report's meeting dates and owners; do not assess the software or release.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://slsa.dev/spec/v1.2/",
+      "sourceType": "spec",
+      "versionScope": "SLSA specification Version 1.2, Approved",
+      "staleAfterDays": 180,
+      "notes": "Current SLSA Build and Source track boundaries and attestation model; avoids importing draft Build Environment requirements into approved Build levels.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://slsa.dev/spec/v1.2/verifying-artifacts",
+      "sourceType": "spec",
+      "versionScope": "SLSA 1.2 Build artifact verification, Approved",
+      "staleAfterDays": 180,
+      "notes": "Primary provenance-verification source for trusted builder roots, envelope signature, artifact subject digest, predicate type, canonical source, buildType, externalParameters, and dependency checks.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.sigstore.dev/cosign/verifying/verify/",
+      "sourceType": "official-docs",
+      "versionScope": "Sigstore cosign signature verification docs as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Artifact and blob verification, keyless issuer/identity constraints, digest/claim verification, transparency evidence, and attestation verification entry points.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.sigstore.dev/cosign/verifying/attestation/",
+      "sourceType": "official-docs",
+      "versionScope": "Sigstore cosign in-toto attestation verification docs as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Attestation signature verification plus CUE/Rego predicate-policy validation and fail-closed guidance when required attestations are absent or invalid.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-218 Secure Software Development Framework Version 1.1, final February 2022",
+      "staleAfterDays": 365,
+      "notes": "Secure software-development, supplier/acquisition, integrity, provenance, and vulnerability-response practice framing.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://spdx.dev/use/specifications/",
+      "sourceType": "spec",
+      "versionScope": "SPDX 3.0, current SPDX document version listed 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "SBOM and software supply-chain inventory representation; inventory evidence is not treated as proof of provenance or completeness.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cyclonedx.org/specification/overview/",
+      "sourceType": "spec",
+      "versionScope": "CycloneDX 1.7, current version listed 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Component, service, dependency, and relationship inventory plus BOM metadata; completeness remains generator- and lifecycle-dependent.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/ossf/scorecard/blob/main/docs/checks.md",
+      "sourceType": "community-pattern",
+      "versionScope": "OpenSSF Scorecard checks on main as inspected 2026-09-05",
+      "staleAfterDays": 90,
+      "license": "Apache-2.0",
+      "notes": "Practitioner patterns for pinned build/release dependencies, least-privilege workflow tokens, dangerous workflows, binary artifacts, packaging, dependency updates, and signed releases; heuristic rather than normative certification.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

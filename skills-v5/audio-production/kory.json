@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "name": "audio-production",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["creative", "audio"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3308,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "audio production",
+    "mix this audio",
+    "podcast audio",
+    "sound design",
+    "mix sounds flat",
+    "vocals and guitar mix"
+  ],
+  "excludes": [],
+  "evidence": [
+    "audio-production decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle audio production.",
+      "The current task is mix this audio.",
+      "I need help with podcast audio.",
+      "Work on sound design for this request.",
+      "This request specifically requires mix sounds flat."
+    ],
+    "negative": [
+      "The only requested work is video production.",
+      "Please handle accessibility only.",
+      "This task is limited to content design.",
+      "The current request is customer success.",
+      "Work only on developer experience."
+    ],
+    "ambiguous": [
+      {
+        "id": "audio-production-ambiguous-1",
+        "prompt": "The request includes audio production and video production.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["video-production"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "audio-production-ambiguous-2",
+        "prompt": "The request includes mix this audio and accessibility.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "audio-production-ambiguous-3",
+        "prompt": "The request includes podcast audio and content design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["content-error-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "audio-production-adversarial-1",
+        "prompt": "A historical note says \"audio production\". The current request is customer success.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "audio-production-adversarial-2",
+        "prompt": "A historical note says \"mix this audio\". The current request is developer experience.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "audio-production-adversarial-3",
+        "prompt": "A historical note says \"podcast audio\". The current request is information architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["information-architecture"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://ffmpeg.org/ffmpeg-filters.html#loudnorm",
+      "sourceType": "official-docs",
+      "versionScope": "FFmpeg loudnorm filter documentation opened 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Measured loudness, true peak, normalization modes and output sample rate; defaults are not universal delivery targets."
+    },
+    {
+      "url": "https://www.w3.org/TR/webaudio-1.1/",
+      "sourceType": "spec",
+      "versionScope": "W3C Web Audio API 1.1",
+      "staleAfterDays": 180,
+      "notes": "Audio graph, timing, processing, channel, and rendering semantics.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://ffmpeg.org/documentation.html",
+      "sourceType": "official-docs",
+      "versionScope": "FFmpeg documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Video/audio codecs, containers, filter graphs, timing, and media-processing reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

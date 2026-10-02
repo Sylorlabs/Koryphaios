@@ -1,0 +1,82 @@
+{
+  "id": "analytics-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A subscription warehouse joins account snapshots directly to invoices, causing enterprise ARR to multiply when an account changes plan twice in a month. Redesign the analytics layer so account history has explicit slowly-changing semantics, invoice facts retain invoice-line grain, and ARR/churn metric definitions have one governed source. Include migration and rollback checks, identify how historical restatements are handled, and prove that the supplied plan-change cases no longer fan out. Do not drift into application database tuning.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://analytics-engineering/subscription-scd-metric-contract",
+    "requirements": [
+      "account snapshot history with two intra-month plan changes and effective timestamps",
+      "invoice-line facts with known expected monthly ARR totals",
+      "an existing fan-out join that overstates one enterprise account",
+      "a downstream compatibility fixture that consumes the current mart column names",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "analytics-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "analytics-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "analytics-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "subscription-scd-metric-contract scenario evidence",
+    "analytics-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "analytics-engineering-individual-scenario-2-result",
+    "analytics-engineering-individual-scenario-2-verification",
+    "analytics-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual analytics-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=data-analysis; near-neighbor=data-pipeline-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define model grain, source freshness, keys, dimensions, slowly changing behavior, metric semantics, and lineage before writing transformations."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Dimension history may change descriptive context without changing fact grain, and governed ARR/churn calculations must reconcile to known invoice-line totals before and after migration."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run schema/data tests, reconcile important metrics to sources, compare incremental versus full-refresh outputs on sampled periods, and check late-arriving or corrected records."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not bury business logic in dashboards, join tables with unclear grain, define the same metric differently across marts, or treat not-null tests as sufficient quality proof."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (analytics-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

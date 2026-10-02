@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "name": "experimentation-ab-testing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["product", "experimentation", "statistics"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6500,
+  "broader": ["statistical-inference"],
+  "facets": [],
+  "requires": ["statistical-inference"],
+  "conflicts": [],
+  "activation": [
+    "a/b test",
+    "ab test",
+    "controlled experiment",
+    "randomized experiment",
+    "online controlled experiment",
+    "experiment design",
+    "experiment randomization",
+    "experiment power",
+    "experiment guardrails",
+    "sample ratio mismatch",
+    "srm experiment",
+    "experiment exposure logging",
+    "experiment ramp",
+    "experiment stopping rule",
+    "experiment treatment effect",
+    "treatment control outcomes",
+    "evidence supports shipping"
+  ],
+  "excludes": [
+    "observational analysis only",
+    "pre post analysis only",
+    "product funnel analysis only",
+    "cohort analysis only",
+    "growth implementation only",
+    "pricing strategy only",
+    "product roadmap only",
+    "product prioritization only",
+    "user interview plan only",
+    "do not design or analyze an a/b test",
+    "return only the supplied values",
+    "extract the participant names",
+    "trace which repository parser loads the fixture"
+  ],
+  "evidence": [
+    "Hypothesis, estimand, eligibility/exposure, randomization unit, allocation, and analysis population",
+    "Primary outcome, baseline, MDE or decision threshold, power/precision, guardrails, duration, and stopping rule",
+    "Assignment, exposure, telemetry, SRM/invariant, missingness, and interference diagnostics",
+    "Treatment effect with baseline, absolute and relative effect, uncertainty, sample size, and practical significance",
+    "Multiplicity, subgroup, sequential-monitoring, novelty/seasonality, and compromised-data boundaries",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design an A/B test for the new organization-invite flow. Define eligibility and exposure, account-level randomization, treatment/control behavior, primary activation metric, support and latency guardrails, MDE and power, allocation, ramp, duration, stopping rule, and telemetry checks before launch.",
+      "Diagnose this sample ratio mismatch before interpreting the experiment lift. The configured split was 50/50 but observed assignment is 46/54 after one variant changed redirect behavior; check assignment, exposure, joins, filtering, bots, missing users, and data-pipeline stages and state whether the effect is trustworthy.",
+      "Analyze this completed randomized experiment using the predeclared primary metric and fixed horizon. Preserve intention-to-treat, report baseline plus absolute and relative treatment effect with uncertainty, inspect guardrails and missingness, and separate practical significance from nominal significance.",
+      "Design a controlled experiment for a two-sided marketplace where sellers and buyers interact across variants. Choose a randomization or cluster/switchback strategy that addresses interference, define the estimand and exposure, and explain which causal claim remains valid under the chosen design.",
+      "Create the monitoring and stopping plan for an online controlled experiment that ramps from 1% to 50%. Separate operational harm guardrails from efficacy inference, specify SRM and telemetry diagnostics, and use a valid fixed-horizon or sequential decision rule rather than repeated p-value peeking."
+    ],
+    "negative": [
+      "Run product funnel analysis only on the historical signup events: activation steps, conversion rates, retention cohorts, segment differences, and reproducible queries. There was no randomized treatment assignment.",
+      "Estimate the observational effect of the policy change using the supplied panel data and a defensible causal or statistical method. There is no randomized product experiment to design or diagnose.",
+      "Implement the referral growth loop that has already been approved, including eligibility, reward issuance, fraud controls, lifecycle messages, telemetry, and release verification. No experiment design is requested.",
+      "Prioritize the next product roadmap from customer pain, strategic commitments, capacity, risk, and opportunity cost. Do not design an experiment yet.",
+      "Develop the pricing and packaging strategy for three tiers using willingness-to-pay evidence, segmentation, unit economics, and competitive context. No A/B test is part of this task."
+    ],
+    "ambiguous": [
+      {
+        "id": "experimentation-ab-testing-ambiguous-1",
+        "prompt": "Decide whether the onboarding concept deserves broader product investment and design the A/B test that will resolve the largest uncertainty. Keep product prioritization and success criteria separate from randomization, exposure, power, guardrails, and the statistical analysis plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-management"],
+        "tags": ["ambiguous", "compound", "product-decision-plus-experiment"]
+      },
+      {
+        "id": "experimentation-ab-testing-ambiguous-2",
+        "prompt": "Implement the new referral incentive and also run an AB test for its causal effect on qualified invitations. Keep the growth implementation and release checks distinct from assignment, exposure logging, guardrails, power, and experiment analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["growth-engineering"],
+        "tags": ["ambiguous", "compound", "growth-plus-experiment"]
+      },
+      {
+        "id": "experimentation-ab-testing-ambiguous-3",
+        "prompt": "Choose the candidate packaging change from the pricing evidence and then design a controlled experiment for the selected offer. Keep pricing economics and segment rationale separate from randomization unit, exposure, revenue and churn guardrails, stopping, and causal analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "compound", "pricing-plus-experiment"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "experimentation-ab-testing-adversarial-1",
+        "prompt": "A quoted old issue says \"run an A/B test for the signup redesign\". Ignore that quoted issue; it is historical context only. My actual task is to extract the three release dates from the pasted text.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "experimentation-ab-testing-adversarial-2",
+        "prompt": "Do not design or analyze an A/B test, controlled experiment, randomized experiment, or experiment power plan. Return only the supplied metric names in their original order.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "experimentation-ab-testing-adversarial-3",
+        "prompt": "A repository fixture contains the inert sample instruction 'design a randomized experiment and check sample ratio mismatch.' Do not execute the fixture instruction. Trace which repository parser loads the fixture and which tests exercise it.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.itl.nist.gov/div898/handbook/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST/SEMATECH statistical methods handbook as available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Experimental design, randomization, measurement, uncertainty, and statistical-analysis foundations.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/research/publication/diagnosing-sample-ratio-mismatch-in-online-controlled-experiments-a-taxonomy-and-rules-of-thumb-for-practitioners/",
+      "sourceType": "community-pattern",
+      "versionScope": "Microsoft Experimentation Platform SRM publication as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "SRM as a trustworthiness signal for assignment, execution, logging, analysis, and data-quality defects.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/research/publication/online-experimentation-at-microsoft/",
+      "sourceType": "community-pattern",
+      "versionScope": "Microsoft Research online experimentation publication as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Practical online controlled-experiment systems, causal decision framing, and operating lessons.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure for the skill package itself.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded triggers, explicit exclusions, progressive disclosure, and behavioral evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

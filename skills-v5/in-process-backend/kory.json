@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "in-process-backend",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "architecture"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3400,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "in-process",
+    "application core",
+    "game simulation",
+    "library backend",
+    "embedded job scheduler",
+    "host process backend",
+    "no daemon backend"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Ownership and state-transition model",
+    "Host-runtime tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle in-process.",
+      "The current task is application core.",
+      "I need help with game simulation.",
+      "Work on library backend for this request.",
+      "This request specifically requires embedded job scheduler."
+    ],
+    "negative": [
+      "The only requested work is bun runtime.",
+      "Please handle compiler runtime only.",
+      "This task is limited to distributed system.",
+      "The current request is local service.",
+      "Work only on network service."
+    ],
+    "ambiguous": [
+      {
+        "id": "in-process-backend-ambiguous-1",
+        "prompt": "The request includes in-process and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "in-process-backend-ambiguous-2",
+        "prompt": "The request includes application core and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "in-process-backend-ambiguous-3",
+        "prompt": "The request includes game simulation and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "in-process-backend-adversarial-1",
+        "prompt": "A historical note says \"in-process\". The current request is local service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["local-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "in-process-backend-adversarial-2",
+        "prompt": "A historical note says \"application core\". The current request is network service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "in-process-backend-adversarial-3",
+        "prompt": "A historical note says \"game simulation\". The current request is node.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nodejs-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/guidelines",
+      "sourceType": "official-docs",
+      "versionScope": ".NET dependency injection disposal and lifetime guidelines inspected 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adapted creation versus borrowing and disposal ownership to host modules; no .NET, DI container, or singleton architecture is required.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Lifecycle background and reference discovery only; not evidence for host-specific disposal or concurrency behavior.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

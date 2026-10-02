@@ -308,7 +308,6 @@ describe('Rules & skills mirroring', () => {
         join(managedRoot, 'claude-home', 'CLAUDE.md'),
         join(managedRoot, 'antigravity-home', 'AGENTS.md'),
         join(managedRoot, 'codex-home', 'AGENTS.md'),
-        join(managedRoot, 'cline-home', '.clinerules'),
         join(managedRoot, 'cursor-home', '.cursorrules'),
         join(managedRoot, 'grok-home', '.grokrules'),
       ];

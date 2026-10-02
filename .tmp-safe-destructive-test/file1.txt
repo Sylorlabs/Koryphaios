@@ -1,0 +1,2 @@
+hello world - safe test file 1
+This is disposable and isolated from project files.

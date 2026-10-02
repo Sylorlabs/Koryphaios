@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "three-d-graphics",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["creative", "graphics", "3d"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3400,
+  "broader": ["game-spatial-interface"],
+  "facets": [],
+  "requires": ["visual-verification", "performance-verification"],
+  "conflicts": [],
+  "activation": [
+    "3d graphics",
+    "three.js scene",
+    "webgl",
+    "rendering pipeline 3d",
+    "3d scene",
+    "wrong transforms",
+    "coordinate spaces"
+  ],
+  "excludes": [],
+  "evidence": [
+    "three-d-graphics decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle 3d graphics.",
+      "The current task is three.js scene.",
+      "I need help with webgl.",
+      "Work on rendering pipeline 3d for this request.",
+      "This request specifically requires 3d scene."
+    ],
+    "negative": [
+      "The only requested work is audio production.",
+      "Please handle image generation only.",
+      "This task is limited to video production.",
+      "The current request is accessibility.",
+      "Work only on accessibility audit."
+    ],
+    "ambiguous": [
+      {
+        "id": "three-d-graphics-ambiguous-1",
+        "prompt": "The request includes 3d graphics and audio production.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["audio-production"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "three-d-graphics-ambiguous-2",
+        "prompt": "The request includes three.js scene and image generation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["image-generation-practice"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "three-d-graphics-ambiguous-3",
+        "prompt": "The request includes webgl and video production.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["video-production"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "three-d-graphics-adversarial-1",
+        "prompt": "A historical note says \"3d graphics\". The current request is accessibility.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "three-d-graphics-adversarial-2",
+        "prompt": "A historical note says \"three.js scene\". The current request is accessibility audit.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "three-d-graphics-adversarial-3",
+        "prompt": "A historical note says \"webgl\". The current request is ai agent.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://threejs.org/manual/en/color-management.html",
+      "sourceType": "official-docs",
+      "versionScope": "Color-management manual inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt distinctions between color and data textures, working space and output conversion. API flags remain version-specific; three.js is not a mandatory renderer."
+    },
+    {
+      "url": "https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html",
+      "sourceType": "spec",
+      "versionScope": "Khronos glTF 2.0 specification",
+      "staleAfterDays": 365,
+      "notes": "3D scene, mesh, material, animation, coordinate, and asset-interchange semantics.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

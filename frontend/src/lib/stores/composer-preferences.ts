@@ -3,6 +3,7 @@
 type ModelPreference = {
   reasoningLevel?: string;
   fastMode?: boolean;
+  contextWindow?: number;
 };
 
 const STORAGE_KEY = 'koryphaios-composer-preferences-v1';
@@ -28,8 +29,17 @@ function readAll(): Record<string, ModelPreference> {
           ? { reasoningLevel: value.reasoningLevel.slice(0, 80) }
           : {}),
         ...(typeof value.fastMode === 'boolean' ? { fastMode: value.fastMode } : {}),
+        ...(typeof value.contextWindow === 'number' &&
+        Number.isFinite(value.contextWindow) &&
+        value.contextWindow > 0
+          ? { contextWindow: value.contextWindow }
+          : {}),
       };
-      if (preference.reasoningLevel !== undefined || preference.fastMode !== undefined) {
+      if (
+        preference.reasoningLevel !== undefined ||
+        preference.fastMode !== undefined ||
+        preference.contextWindow !== undefined
+      ) {
         result[model.slice(0, 300)] = preference;
       }
     }
@@ -60,6 +70,14 @@ export function saveComposerPreference(model: string, next: ModelPreference): vo
   const key = safeModel(model);
   if (!key) return;
   const all = readAll();
-  all[key] = { ...all[key], ...next };
+  const merged = { ...all[key], ...next };
+  // An explicit undefined erases the field: only defined values are stored,
+  // so "Default" clears the persisted session budget instead of keeping a
+  // stale one.
+  const stored: ModelPreference = {};
+  if (merged.reasoningLevel !== undefined) stored.reasoningLevel = merged.reasoningLevel;
+  if (merged.fastMode !== undefined) stored.fastMode = merged.fastMode;
+  if (merged.contextWindow !== undefined) stored.contextWindow = merged.contextWindow;
+  all[key] = stored;
   writeAll(all);
 }

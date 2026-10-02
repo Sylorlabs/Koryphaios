@@ -45,11 +45,70 @@ describe('parseCodexCliModelsCache', () => {
 
   it('falls back to max_context_window when context_window is missing', () => {
     const raw = JSON.stringify({
-      models: [
-        { slug: 'm', max_context_window: 512_000, visibility: 'list' },
-      ],
+      models: [{ slug: 'm', max_context_window: 512_000, visibility: 'list' }],
     });
     expect(parseCodexCliModelsCache(raw).get('m')?.contextWindow).toBe(512_000);
+  });
+
+  it('prefers the explicit auto_compact_token_limit for bridge/web models', () => {
+    const raw = JSON.stringify({
+      models: [
+        {
+          slug: 'chatgpt-web/light',
+          display_name: 'ChatGPT Web — Instant',
+          context_window: 333_579,
+          max_context_window: 333_579,
+          auto_compact_token_limit: 285_000,
+          effective_context_window_percent: 85,
+          visibility: 'list',
+        },
+      ],
+    });
+    expect(parseCodexCliModelsCache(raw).get('chatgpt-web/light')?.contextWindow).toBe(285_000);
+  });
+
+  it('derives the enforced boundary from effective_context_window_percent', () => {
+    const raw = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-6-astra',
+          context_window: 272_000,
+          effective_context_window_percent: 95,
+          visibility: 'list',
+        },
+      ],
+    });
+    // 272000 * 95% = 258400 — the boundary Codex itself compacts at.
+    expect(parseCodexCliModelsCache(raw).get('gpt-6-astra')?.contextWindow).toBe(258_400);
+  });
+
+  it('never stamps a window larger than the raw limit', () => {
+    const raw = JSON.stringify({
+      models: [
+        {
+          slug: 'generous',
+          context_window: 100_000,
+          auto_compact_token_limit: 500_000,
+          visibility: 'list',
+        },
+        {
+          slug: 'bad-percent',
+          context_window: 100_000,
+          effective_context_window_percent: 150,
+          visibility: 'list',
+        },
+        {
+          slug: 'tiny-limit',
+          context_window: 100_000,
+          auto_compact_token_limit: 10,
+          visibility: 'list',
+        },
+      ],
+    });
+    const parsed = parseCodexCliModelsCache(raw);
+    expect(parsed.get('generous')?.contextWindow).toBe(100_000);
+    expect(parsed.get('bad-percent')?.contextWindow).toBe(100_000);
+    expect(parsed.get('tiny-limit')?.contextWindow).toBe(100_000);
   });
 
   it('returns an empty map for malformed or empty input', () => {

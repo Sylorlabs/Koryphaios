@@ -26,6 +26,10 @@ export function buildIntentDiscoveryBatch(
   depth: 'off' | 'adaptive' | 'deep',
 ): IntentQuestion[] {
   if (depth === 'off') return [];
+  // Bare continuation intents ("continue", "go", "retry") carry no ambiguity
+  // to resolve — bypass the interview batch and go straight to execution.
+  const compact = request.trim();
+  if (compact.length > 0 && compact.length < 10 && !/\s/.test(compact)) return [];
   const text = request.trim().toLowerCase();
   const vague =
     text.length < 45 ||
@@ -110,7 +114,10 @@ export function validateClarificationDecision(
 
     return result.data;
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to parse clarification gate decision');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to parse clarification gate decision',
+    );
     return null;
   }
 }

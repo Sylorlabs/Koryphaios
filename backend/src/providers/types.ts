@@ -6,6 +6,11 @@ import type { ModelDef, ProviderConfig, ProviderName } from '@koryphaios/shared'
 // Export model catalog and helpers from the new modular structure
 export * from './models';
 
+// ─── Prompt-cache topology ──────────────────────────────────────────────────
+
+export type PromptCacheLaneKind =
+  'manager' | 'worker' | 'critic' | 'compaction' | 'research' | 'memory' | 'default';
+
 // ─── Provider Events (streaming protocol) ───────────────────────────────────
 
 export type ProviderEventType =
@@ -35,6 +40,11 @@ export interface ProviderEvent {
   toolInput?: string;
   tokensIn?: number;
   tokensOut?: number;
+  /** True when tokensIn is cumulative across the turn's internal provider
+   *  requests (agentic CLI harnesses such as Codex) rather than the final
+   *  live context occupancy. Consumers must clamp it to the trusted window,
+   *  surface it as estimated, and never trigger auto-compact on it. */
+  estimated?: boolean;
   /** Input tokens processed across every provider request in one agentic turn.
    * This may differ from `tokensIn`, which is the final context occupancy used
    * by Kory's context meter. Billing prefers this field when present. */
@@ -63,10 +73,25 @@ export interface ProviderEvent {
    * provider these may be included in tokensIn (OpenAI/Google) or excluded
    * from it (Anthropic). Informational and billing metadata only. */
   tokensCacheWrite?: number;
+  /** The harness expected this request to reuse an already-warm cache route. */
+  cacheExpectedWarm?: boolean;
+  /** Provider telemetry proved an expected-warm request performed a fresh
+   * cache write with zero cache reads. */
+  cacheUnexpectedMiss?: boolean;
+  /** Cache lane that produced the provider outcome, for user-facing diagnostics. */
+  cacheLaneKind?: PromptCacheLaneKind;
   /** Account selected by Koryphaios for this provider-emitted usage event. */
   accountId?: string;
   finishReason?: 'end_turn' | 'tool_use' | 'max_tokens' | 'stop';
   error?: string;
+  /** The provider aborted this attempt for a reason it knows is worth retrying:
+   *  a typed upstream `api_error`, a stream that died mid-flight, an empty
+   *  response body, or an expired poll deadline. The registry retries the same
+   *  model on this signal instead of inferring retryability from `error` text,
+   *  so redacted/bounded display strings can never suppress a retry. Never set
+   *  it for configuration, credential, or request-rejection failures — those
+   *  must stay fail-closed. */
+  errorTransient?: boolean;
   // file_edit (agentic providers): a file the agent just created/edited.
   filePath?: string;
   fileContent?: string;
@@ -130,6 +155,10 @@ export interface StreamRequest {
   messages: ProviderMessage[];
   systemPrompt: string;
   tools?: ProviderToolDef[];
+  /** Turn-level subset of the declared tool universe that may be called.
+   * Keeping this separate lets provider tool declarations stay byte-stable
+   * for prompt caching while host policy can still change per turn. */
+  allowedToolNames?: string[];
   maxTokens?: number;
   temperature?: number;
   /** For reasoning models — never restrict this. Can be "low"|"medium"|"high" or provider-specific like "8192" */
@@ -163,6 +192,15 @@ export interface StreamRequest {
   /** Harness-authored cache topology. Providers validate the prefix hash
    * before using it and silently fall back to implicit caching if stale. */
   promptCache?: PromptCachePlan;
+  /** Unattended cache refresh policy selected by the workspace. */
+  promptCacheKeepaliveMode?: 'economic' | 'always' | 'off';
+  /** Optional explicit cache-lane override for nonstandard subprocesses.
+   * Normal manager/worker/critic lanes are inferred from harnessRole. */
+  cacheLaneKind?: PromptCacheLaneKind;
+  /** Controlled diagnostics/benchmark override for testing whether reasoning
+   * variants truly share one provider-native cache domain. Normal product
+   * requests leave this unset and use the provider capability registry. */
+  cacheReasoningScopeOverride?: 'shared' | 'isolated';
   /** Narrow provider-native research subprocess. It receives no Kory MCP,
    * workspace, or general agent authority and may only return cited text. */
   capabilityProfile?: 'research-only';
@@ -173,6 +211,11 @@ export interface PromptCachePlan {
   /** Exact immutable prefix of systemPrompt, never a second source of truth. */
   stableSystemPrompt: string;
   stablePrefixHash: string;
+  /** Opaque workspace namespace. Tabs in one project share it; unrelated
+   * workspaces cannot collide even when their stable prompt text is identical. */
+  workspaceScopeHash?: string;
+  /** Hashes of named stable prompt sections for cache-break attribution. */
+  stableComponentHashes?: Record<string, string>;
   /** Opaque, non-identifying routing bucket. Provider adapters may combine it
    * with model, tool-schema, and reasoning hashes. */
   cacheKey: string;

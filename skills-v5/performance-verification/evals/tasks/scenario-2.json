@@ -1,0 +1,88 @@
+{
+  "id": "performance-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A completed streaming-export patch claims it is at least 20% faster than the prior release and meets the release resource budget. Use the existing exporter benchmark and fixed 20 GiB corpus; do not change the harness or implementation. The protocol runs a declared warmup pass that is excluded from measurement, then five measured corpus runs at concurrency 8. The absolute gate is median throughput >= 180 MiB/s, p95 per-record processing latency <= 95 ms, p99 <= 140 ms, zero failed records, peak RSS <= 1.5 GiB, and a final output hash exactly matching the reference corpus. The relative claim requires >=20% median-throughput improvement over a materially equivalent baseline. The fixture contains both a tempting older baseline captured on a larger VM and the tagged prior-release baseline captured on the same host/runtime/build mode/corpus/concurrency as the candidate; only the equivalent baseline can support the speedup claim. The candidate's equivalent-baseline throughput improvement exceeds 20% and its latency/errors/hash pass, but peak RSS exceeds 1.5 GiB in multiple measured repeats. Return environment/workload identity, baseline selection rationale, warmup separation, all five run summaries with throughput/p50/p95/p99/errors/peak RSS and variance, correctness evidence, and the bounded gate verdict. Do not profile or fix the memory behavior.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-verification/batch-export-gate",
+    "requirements": [
+      "the fixture exposes candidate metadata, an equivalent tagged prior-release baseline, and a non-equivalent larger-VM baseline decoy",
+      "the fixed 20 GiB corpus, concurrency 8, runtime, build mode, and host limits are explicit",
+      "the benchmark separates one warmup pass from five measured corpus runs",
+      "each measured run exposes throughput, p50/p95/p99 record latency, failed-record count, peak RSS, CPU/storage saturation, and output hash",
+      "the reference output hash is available through an independent correctness oracle",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-verification-export-baseline",
+      "assertion": "The larger-VM historical baseline is explicitly rejected for the relative speedup claim and the tagged same-host/runtime/build-mode/corpus/concurrency prior-release baseline is used instead."
+    },
+    {
+      "id": "performance-verification-export-warmup",
+      "assertion": "The declared warmup pass is reported as non-measured state and excluded from all five gate-run aggregates and variance calculations."
+    },
+    {
+      "id": "performance-verification-export-distributions",
+      "assertion": "All five measured runs report throughput plus p50/p95/p99 record latency, and the declared median/percentile rules are checked against >=180 MiB/s, <=95 ms p95, and <=140 ms p99."
+    },
+    {
+      "id": "performance-verification-export-relative-claim",
+      "assertion": "The candidate's median throughput improvement is computed only against the equivalent baseline and is verified as at least 20%."
+    },
+    {
+      "id": "performance-verification-export-memory",
+      "assertion": "Peak RSS is checked per measured repeat against <=1.5 GiB and the release gate is failed when multiple candidate runs exceed that independent resource budget even though throughput improves."
+    },
+    {
+      "id": "performance-verification-export-correctness",
+      "assertion": "Zero failed records and an exact match to the independent reference output hash are verified under the measured concurrency; speed is not accepted as a substitute for correctness."
+    },
+    {
+      "id": "performance-verification-export-variance-verdict",
+      "assertion": "The result reports five-run variance and relevant CPU/storage/load-generator resource evidence, then returns FAIL for the absolute release gate while separately noting that the relative speedup claim passes."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "equivalent versus non-equivalent baseline decision",
+        "warmup exclusion and five measured run summaries",
+        "throughput and p50/p95/p99/error/RSS/resource evidence",
+        "reference-hash correctness evidence",
+        "separate relative-claim and absolute-gate verdict reasoning"
+      ]
+    },
+    {
+      "id": "performance-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the tempting but incomparable baseline is not used to prove a speedup",
+        "the independent memory budget is not hidden by improved throughput",
+        "the response stays at verdict/evidence level instead of drifting into memory-leak diagnosis"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Performance claim-to-gate matrix",
+    "candidate and baseline environment/workload identity",
+    "equivalent-baseline selection rationale",
+    "warmup versus five measured runs",
+    "throughput/p50/p95/p99/errors/peak-RSS/resource summaries with variance",
+    "failed-record and reference-hash correctness results",
+    "bounded relative-claim and release-gate verdicts",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "performance-verification-scenario-2-result",
+    "performance-verification-scenario-2-verification",
+    "performance-verification-scenario-2-paired-evaluation"
+  ]
+}

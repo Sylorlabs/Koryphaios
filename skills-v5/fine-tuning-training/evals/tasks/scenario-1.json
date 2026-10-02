@@ -1,0 +1,91 @@
+{
+  "id": "fine-tuning-training-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply fine tuning expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is fine-tuning-training: Start from a measured base-model failure and decide whether training, retrieval, prompting, tools, or product logic is the right intervention. The adjacent computer-vision discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://fine-tuning-training/scenario-1",
+    "requirements": [
+      "base model/tokenizer/chat-template identity plus current provider eligibility/deprecation fixture",
+      "training corpus with source/customer IDs, near-duplicates, PII/licensing violations and overlength examples",
+      "separate baseline, train, validation and immutable final-holdout manifests",
+      "pilot/checkpoint metrics plus serving latency/cost and rollback fixtures",
+      "paired same-model skill/no-skill execution",
+      "fine-tuning-training parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual fine-tuning-training boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=computer-vision), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Start from a measured base-model failure and decide whether training, retrieval, prompting, tools, or product logic is the right intervention."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Compare against the untouched base model on held-out tasks and safety slices, inspect overfitting and catastrophic regressions, measure serving cost/latency, and preserve exact data/model/config provenance for reproducibility."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not train on evaluation answers, assume more epochs improve behavior, use private/licensed data without authority, or claim general capability gains from a narrow training distribution."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Provider/runtime/base-model/tokenizer eligibility and lifecycle identity; Authorized, deduplicated and leakage-safe train/validation/test dataset provenance; Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence; Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "fine-tuning-training-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
+        "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
+        "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
+        "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "fine-tuning-training-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Provider/runtime/base-model/tokenizer eligibility and lifecycle identity",
+    "Authorized, deduplicated and leakage-safe train/validation/test dataset provenance",
+    "Objective/hyperparameter/checkpoint/seed/runtime identity plus training and validation evidence",
+    "Untouched base-versus-adapted target/regression/safety evaluation plus serving and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "fine-tuning-training-individual-scenario-1-result",
+    "fine-tuning-training-individual-scenario-1-verification",
+    "fine-tuning-training-individual-scenario-1-paired-evaluation"
+  ]
+}

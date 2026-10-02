@@ -1343,7 +1343,7 @@ async function importMemoryAsNotes(): Promise<void> {
           }
           return nodes;
         };
-        const nextFolderTree = structuredClone(_folderTree);
+        const nextFolderTree = $state.snapshot(_folderTree);
         for (const note of imported) ensureFolderPath(nextFolderTree, note.folderPath);
         _folderTree = nextFolderTree;
 

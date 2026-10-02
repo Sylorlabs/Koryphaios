@@ -1,0 +1,75 @@
+{
+  "id": "infrastructure-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Review host hardening for a Linux service fleet built from a mutable VM image. Hosts expose SSH and an internal admin port broadly, several unused daemons/packages remain installed, the service runs under a shared privileged account, patches are applied manually without a rollback policy, and local privilege elevation is poorly audited. Design a secure baseline covering supported image/package lifecycle, dedicated non-root service identity, minimized installed/listening surface, restricted management network path, sudo/admin separation, file/config permissions, logging of privileged/config changes, immutable-image rebuild preference, emergency access, and evidence comparing desired configuration with the running host. Keep cloud-account IAM and resource policies in cloud-security.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://infrastructure-security/scenario-2",
+    "requirements": [
+      "Linux host inventory and package/listener snapshot",
+      "service/admin identity fixture",
+      "management and service network topology",
+      "patch/rebuild/rollback controls",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "infrastructure-security-surface-2",
+      "assertion": "Unused services/packages/listeners are identified and removed/disabled, with the remaining service and management ports tied to explicit operational need."
+    },
+    {
+      "id": "infrastructure-security-least-privilege-2",
+      "assertion": "The application runs under a dedicated non-root identity and administrative privilege is separated, time/audit constrained, and not shared with normal service execution."
+    },
+    {
+      "id": "infrastructure-security-management-2",
+      "assertion": "SSH/admin interfaces are reachable only from the intended management path and are not exposed on the general service network."
+    },
+    {
+      "id": "infrastructure-security-patching-2",
+      "assertion": "The design defines supported base-image/package update ownership, risk-based remediation timing, rebuild/rollback behavior, and how emergency fixes converge back to managed configuration."
+    },
+    {
+      "id": "infrastructure-security-effective-state-2",
+      "assertion": "A post-deploy check compares intended packages, listeners, identities, permissions, network exposure, patch versions, and audit controls to actual running state."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "infrastructure-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "host baseline",
+        "identity and management-path rules",
+        "patch/rebuild lifecycle",
+        "effective-state verification"
+      ]
+    },
+    {
+      "id": "infrastructure-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "host/package/listener inventory",
+    "service/admin identity controls",
+    "management reachability",
+    "patch/rollback policy",
+    "desired-versus-running evidence",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "infrastructure-security-scenario-2-result",
+    "infrastructure-security-scenario-2-verification",
+    "infrastructure-security-scenario-2-paired-evaluation"
+  ]
+}

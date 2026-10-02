@@ -1,19 +1,35 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  applySessionAgentOverrides,
   assembleAgentContext,
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_SANDBOX_SETTINGS,
+  loadAgentSettings,
+  loadAgentSettingsForSession,
   mergeAgentSettings,
   mergeSandboxSettings,
   readPreferences,
   rememberExplicitPreference,
 } from '../agent-settings';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  getSessionAgentOverrides,
+  resetSessionAgentOverridesCache,
+  setSessionAgentOverrides,
+} from '../stores/session-agent-overrides';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ToolRegistry, type Tool } from '../tools';
 
 describe('autonomy limits', () => {
+  it('keeps cold prompt prewarm opt-in while accepting an explicit enable', () => {
+    expect(DEFAULT_AGENT_SETTINGS.promptCacheColdPrewarmEnabled).toBe(false);
+    expect(
+      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { promptCacheColdPrewarmEnabled: true })
+        .promptCacheColdPrewarmEnabled,
+    ).toBe(true);
+  });
+
   it('persists only recognized composer permission modes', () => {
     expect(DEFAULT_AGENT_SETTINGS.permissionMode).toBe('guarded');
     for (const permissionMode of ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const) {
@@ -233,5 +249,113 @@ describe('tool allowlist and blocklist merging', () => {
     let merged = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { toolAllowlist: ['bash'] });
     merged = mergeAgentSettings(merged, { toolAllowlist: [] });
     expect(merged.toolAllowlist).toEqual([]);
+  });
+});
+
+describe('pruning default migration', () => {
+  it('uses the loosened pruning defaults for fresh installs', () => {
+    expect(DEFAULT_AGENT_SETTINGS.contextKeepRecentTurns).toBe(8);
+    expect(DEFAULT_AGENT_SETTINGS.contextPruneMinChars).toBe(2000);
+  });
+
+  it('bumps persisted stale pruning defaults (3/600) in memory and on disk', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-pruning-migration-'));
+    try {
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({
+          agentSettings: { contextKeepRecentTurns: 3, contextPruneMinChars: 600 },
+        }),
+      );
+      const migrated = loadAgentSettings(root);
+      expect(migrated.contextKeepRecentTurns).toBe(8);
+      expect(migrated.contextPruneMinChars).toBe(2000);
+      const persisted = JSON.parse(readFileSync(join(root, 'koryphaios.json'), 'utf-8')) as {
+        agentSettings: { contextKeepRecentTurns: number; contextPruneMinChars: number };
+      };
+      expect(persisted.agentSettings.contextKeepRecentTurns).toBe(8);
+      expect(persisted.agentSettings.contextPruneMinChars).toBe(2000);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves user-customized pruning values alone', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-pruning-custom-'));
+    try {
+      const before = JSON.stringify({
+        agentSettings: { contextKeepRecentTurns: 5, contextPruneMinChars: 900 },
+      });
+      writeFileSync(join(root, 'koryphaios.json'), before);
+      const loaded = loadAgentSettings(root);
+      expect(loaded.contextKeepRecentTurns).toBe(5);
+      expect(loaded.contextPruneMinChars).toBe(900);
+      expect(readFileSync(join(root, 'koryphaios.json'), 'utf-8')).toBe(before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('per-chat agent overrides', () => {
+  it('layers a chat approval preset over the workspace default without touching it', () => {
+    const project = { ...DEFAULT_AGENT_SETTINGS, permissionMode: 'guarded' as const };
+    const overridden = applySessionAgentOverrides(project, { permissionMode: 'yolo' });
+    expect(overridden.permissionMode).toBe('yolo');
+    expect(project.permissionMode).toBe('guarded');
+  });
+
+  it('leaves unset fields on the workspace value', () => {
+    const project = {
+      ...DEFAULT_AGENT_SETTINGS,
+      permissionMode: 'guarded' as const,
+      agentExecutionMode: 'multi' as const,
+      criticGateEnabled: true,
+    };
+    const overridden = applySessionAgentOverrides(project, { criticGateEnabled: false });
+    expect(overridden.criticGateEnabled).toBe(false);
+    expect(overridden.permissionMode).toBe('guarded');
+    expect(overridden.agentExecutionMode).toBe('multi');
+  });
+
+  it('resolves each chat from the same project defaults independently', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kory-session-overrides-'));
+    try {
+      writeFileSync(
+        join(root, 'koryphaios.json'),
+        JSON.stringify({ agentSettings: { permissionMode: 'guarded', criticGateEnabled: true } }),
+      );
+      setSessionAgentOverrides('chat-yolo', { permissionMode: 'yolo' });
+      setSessionAgentOverrides('chat-off', { criticGateEnabled: false });
+      try {
+        expect(loadAgentSettingsForSession(root, 'chat-yolo').permissionMode).toBe('yolo');
+        expect(loadAgentSettingsForSession(root, 'chat-yolo').criticGateEnabled).toBe(true);
+
+        expect(loadAgentSettingsForSession(root, 'chat-off').permissionMode).toBe('guarded');
+        expect(loadAgentSettingsForSession(root, 'chat-off').criticGateEnabled).toBe(false);
+
+        // A chat that never chose anything keeps the project default, and the
+        // workspace file itself is never rewritten by a chat-scoped change.
+        expect(loadAgentSettingsForSession(root, 'chat-untouched').permissionMode).toBe('guarded');
+        const persisted = JSON.parse(readFileSync(join(root, 'koryphaios.json'), 'utf-8')) as {
+          agentSettings: { permissionMode: string };
+        };
+        expect(persisted.agentSettings.permissionMode).toBe('guarded');
+      } finally {
+        resetSessionAgentOverridesCache();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('drops the override when a chat clears it', () => {
+    setSessionAgentOverrides('chat-clear', { permissionMode: 'yolo' });
+    setSessionAgentOverrides('chat-clear', undefined);
+    try {
+      expect(getSessionAgentOverrides('chat-clear')).toEqual({});
+    } finally {
+      resetSessionAgentOverridesCache();
+    }
   });
 });

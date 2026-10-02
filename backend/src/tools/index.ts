@@ -52,7 +52,8 @@ export { DelegateToJulesTool } from './jules';
 export { MCPDetectErrorsTool, MCPAnalyzeErrorTool, MCPSuggestFixesTool } from './mcp';
 export { ManageMcpServerTool } from './manage-mcp';
 export { FetchContextTool, PruneContextTool } from './context';
-export { CreateGoalTool, UpdateGoalTool } from './goals';
+export { CreateGoalTool, UpdateGoalTool, EditGoalChecklistTool } from './goals';
+export { checklistTools } from './checklists';
 export { LoadSkillDetailTool } from './skills';
 export {
   ListWorkflowsTool,

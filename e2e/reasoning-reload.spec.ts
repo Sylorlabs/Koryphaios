@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createAuthSession } from './helpers/auth';
+import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { ApiClient } from './helpers/api';
 import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 import { moveAndReadDbPath } from './helpers/db-path';
@@ -58,9 +58,10 @@ test('reasoning traces and errors survive a full app reload', async ({ page, req
 
   // Auth token must survive reload — install it via addInitScript
   // before the first navigation, then the same script runs on reload.
-  await page.addInitScript((token) => {
-    localStorage.setItem('koryphaios-local-auth-token', token);
-  }, auth.bearerToken);
+  // `injectAuthIntoPage` does exactly that and also marks the first-launch
+  // walkthrough as finished; without the latter the modal overlays the app and
+  // swallows the session click below.
+  await injectAuthIntoPage(page, auth.bearerToken);
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 40_000 });
 

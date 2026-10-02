@@ -30,7 +30,6 @@
   import ToastContainer from '$lib/components/ToastContainer.svelte';
   import CommandPalette from '$lib/components/CommandPalette.svelte';
   import WorkflowPanel from '$lib/components/WorkflowPanel.svelte';
-  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import { parseGoalSlashCommand, type GoalActionRequest } from '$lib/utils/goal-actions';
   import MenuBar from '$lib/components/MenuBar.svelte';
   import ThemePickerModal from '$lib/components/ThemePickerModal.svelte';
@@ -68,6 +67,16 @@
     parseProviderModelSelection,
   } from '$lib/utils/model-config';
   import { loadLastSessionId } from '$lib/stores/navigation-preferences';
+  import {
+    buildCacheFabricLabel,
+    buildCacheReceiptLabel,
+    buildProviderCacheCards,
+  } from '$lib/utils/cache-metrics';
+  import {
+    buildCacheDiagnosticsNotice,
+    normalizeCacheDiagnostics,
+    type CacheDiagnostics,
+  } from '$lib/utils/cache-diagnostics';
   import { registerEligibleEscape } from '$lib/utils/double-escape';
   import {
     implementationPrompt,
@@ -119,87 +128,6 @@
   let currentProjectContent = $state('');
   let composerProjectFiles = $state<string[]>([]);
   let contextBarHover = $state(false);
-  type CacheDiagnostics = {
-    prompt: {
-      dispatches: number;
-      cold: number;
-      warmCandidates: number;
-      workspaceWarmCandidates: number;
-      providerOutcomes: number;
-      providerWarmHits: number;
-      providerUnexpectedMisses: number;
-      providerUnexpectedMissWriteTokens: number;
-      breaks: Record<string, number>;
-    };
-    recent: Array<{
-      state: 'cold' | 'warm-candidate' | 'workspace-warm-candidate';
-      laneKind: string;
-      reasons: string[];
-      details?: {
-        toolsAdded: string[];
-        toolsRemoved: string[];
-        toolSchemasChanged: boolean;
-        stableComponentsChanged: string[];
-        historyRewriteAt?: number;
-      };
-      warmCandidateStreak: number;
-      workspaceReuseCount: number;
-      observedAt: number;
-    }>;
-    evidence: {
-      hits: number;
-      misses: number;
-      waits: number;
-      loads: number;
-      invalidations: number;
-      evictions: number;
-      size: number;
-      inFlight: number;
-    };
-    maintenance: {
-      observations: number;
-      scheduled: number;
-      refreshes: number;
-      skippedEconomics: number;
-      skippedInactive: number;
-      skippedUnsupported: number;
-      skippedUnknownPricing: number;
-      cancelledIdentityChanges: number;
-      failures: number;
-      prewarms: number;
-      prewarmSkips: number;
-      estimatedSavingsUsd: number;
-    };
-    deferredTools: {
-      selections: number;
-      fullSchemaChars: number;
-      residentSchemaChars: number;
-      schemaCharsDeferred: number;
-      schemasRequested: number;
-      invocations: number;
-    };
-    durable: {
-      requests: number;
-      inputTokens: number;
-      cacheReadTokens: number;
-      cacheWriteTokens: number;
-      hitRate: number;
-      savingsUsd: number;
-      averageTtftMs: number | null;
-      averageLatencyMs: number | null;
-      byProvider: Array<{
-        provider: string;
-        requests: number;
-        inputTokens: number;
-        cacheReadTokens: number;
-        cacheWriteTokens: number;
-        hitRate: number;
-        savingsUsd: number;
-        averageTtftMs: number | null;
-        averageLatencyMs: number | null;
-      }>;
-    };
-  };
   let cacheDiagnostics = $state<CacheDiagnostics | null>(null);
   // Set when the user tries to send without a project open — holds the pending
   // message so it can be dispatched after they pick a project or opt into home.
@@ -218,13 +146,46 @@
   // (output is patched in from the provider usage report); the TOTAL width
   // stays pinned to the provider's real token count so estimates can't
   // overstate usage.
+  // Labels are written for someone who has never seen a token meter, and every
+  // label carries a plain-language `hint` shown on hover so no bucket name is a
+  // mystery.
   const CONTEXT_SEGMENTS = [
-    { key: 'system', label: 'System', color: '#8b5cf6' },
-    { key: 'memory', label: 'Memory', color: '#14b8a6' },
-    { key: 'skills', label: 'Skills', color: '#a78bfa' },
-    { key: 'tools', label: 'Tools', color: '#f59e0b' },
-    { key: 'chat', label: 'Chat', color: '#3b82f6' },
-    { key: 'output', label: 'Output', color: '#f472b6' },
+    {
+      key: 'system',
+      label: 'System prompt',
+      color: '#8b5cf6',
+      hint: 'The standing instructions and persona Kory sends on every request.',
+    },
+    {
+      key: 'memory',
+      label: 'Memory',
+      color: '#14b8a6',
+      hint: 'Durable notes and facts the agent was told to remember.',
+    },
+    {
+      key: 'skills',
+      label: 'Skills',
+      color: '#a78bfa',
+      hint: 'Workflow guidance loaded from the skills attached to this session.',
+    },
+    {
+      key: 'tools',
+      label: 'Tool defs',
+      color: '#f59e0b',
+      hint: 'The schemas for every tool the agent is allowed to call.',
+    },
+    {
+      key: 'chat',
+      label: 'Chat',
+      color: '#3b82f6',
+      hint: 'Your messages and the agent replies in this session.',
+    },
+    {
+      key: 'output',
+      label: 'Output',
+      color: '#f472b6',
+      hint: "Tokens the model generated in the agent's latest reply.",
+    },
   ] as const;
   let contextSegments = $derived.by(() => {
     const usage = wsStore.contextUsage;
@@ -253,9 +214,10 @@
           widthPercent: (b[s.key] ?? 0) * perToken,
         })),
         {
-          key: 'provider-remainder',
-          label: 'Provider remainder',
+          key: 'unattributed',
+          label: 'Unattributed',
           color: '#9ca3af',
+          hint: 'Tokens the provider counted that we could not map to a bucket — usually a CLI harness, tokenizer differences, or hidden formatting. They are real context.',
           tokens: remainder,
           widthPercent: remainder * perToken,
         },
@@ -281,59 +243,41 @@
 
   let cacheTurnReceipt = $derived.by(() => {
     const usage = wsStore.contextUsage;
-    const read = Math.max(0, usage.cachedInputTokens ?? 0);
-    const write = Math.max(0, usage.cacheWriteInputTokens ?? 0);
-    const cost = usage.estimatedCostUsd;
-    const savings = usage.cacheSavingsUsd;
-    if (read <= 0 && write <= 0 && cost === undefined && savings === undefined) return '';
-    const parts = [`${formatTokenCount(read)} read`, `${formatTokenCount(write)} write`];
-    if (cost !== undefined) parts.push(`$${cost.toFixed(4)} est. turn`);
-    if (savings !== undefined) {
-      parts.push(
-        savings >= 0
-          ? `$${savings.toFixed(4)} cache saved`
-          : `$${Math.abs(savings).toFixed(4)} cache premium`,
-      );
-    }
-    return `Cache receipt: ${parts.join(' · ')}`;
+    return buildCacheReceiptLabel({
+      readTokens: usage.cachedInputTokens,
+      writeTokens: usage.cacheWriteInputTokens,
+      costUsd: usage.estimatedCostUsd,
+      savingsUsd: usage.cacheSavingsUsd,
+    });
+  });
+
+  let cacheFabricLabel = $derived.by(() => {
+    const diagnostics = cacheDiagnostics;
+    if (!diagnostics) return null;
+    return buildCacheFabricLabel({
+      warmCandidates:
+        diagnostics.prompt.warmCandidates + diagnostics.prompt.workspaceWarmCandidates,
+      dispatches: diagnostics.prompt.dispatches,
+      evidenceHits: diagnostics.evidence.hits,
+      evidenceMisses: diagnostics.evidence.misses,
+      waits: diagnostics.evidence.waits,
+    });
+  });
+
+  let cacheLastBust = $derived.by(() => {
+    const last = cacheDiagnostics?.recent.at(-1);
+    return last?.state === 'cold' && last.reasons.length > 0
+      ? last.reasons.join(', ')
+      : null;
   });
 
   let cacheDiagnosticsNotice = $derived.by(() => {
     const diagnostics = cacheDiagnostics;
-    if (!diagnostics) return '';
-    const prompt = diagnostics.prompt;
-    const warm = prompt.warmCandidates + prompt.workspaceWarmCandidates;
-    const evidence = diagnostics.evidence;
-    const evidenceTotal = evidence.hits + evidence.misses;
-    const evidenceHitRate = evidenceTotal > 0 ? Math.round((evidence.hits / evidenceTotal) * 100) : 0;
-    const last = diagnostics.recent.at(-1);
-    const breakDetails: string[] = [];
-    if (last?.details?.toolsAdded.length) breakDetails.push(`tools added: ${last.details.toolsAdded.join(', ')}`);
-    if (last?.details?.toolsRemoved.length) breakDetails.push(`tools removed: ${last.details.toolsRemoved.join(', ')}`);
-    if (last?.details?.toolSchemasChanged) breakDetails.push('tool schema changed');
-    if (last?.details?.stableComponentsChanged.length) breakDetails.push(`system sections: ${last.details.stableComponentsChanged.join(', ')}`);
-    if (last?.details?.historyRewriteAt !== undefined) breakDetails.push(`history rewritten at message ${last.details.historyRewriteAt + 1}`);
-    const lastBreak = last?.state === 'cold' && last.reasons.length > 0
-      ? ` Last cold reason: ${last.reasons.join(', ')}${breakDetails.length ? ` (${breakDetails.join('; ')})` : ''}.`
-      : '';
-    const maintenance = diagnostics.maintenance;
-    const deferred = diagnostics.deferredTools;
-    const durable = diagnostics.durable;
-    const deferredKb = Math.round(deferred.schemaCharsDeferred / 102.4) / 10;
-    const durableHitRate = Math.round(durable.hitRate * 1000) / 10;
-    const durableValue = durable.savingsUsd >= 0
-      ? `$${durable.savingsUsd.toFixed(4)} net saved`
-      : `$${Math.abs(durable.savingsUsd).toFixed(4)} net cache premium`;
-    const providerOutcome = prompt.providerOutcomes > 0
-      ? ` Provider-confirmed warm hits: ${prompt.providerWarmHits}; unexpected warm misses: ${prompt.providerUnexpectedMisses}${prompt.providerUnexpectedMisses > 0 ? ` (${formatTokenCount(prompt.providerUnexpectedMissWriteTokens)} rewritten tokens)` : ''}.`
-      : '';
-    return `Harness cache: ${warm}/${prompt.dispatches} warm candidates.${providerOutcome} Evidence cache: ${evidence.hits} hits, ${evidence.waits} concurrent waits, ${evidenceHitRate}% hit rate. Cache maintenance: ${maintenance.refreshes}/${maintenance.scheduled} economical refreshes, ${maintenance.prewarms} typing prewarms. Durable 30-day provider cache: ${durableHitRate}% hit rate, ${durableValue}. Deferred tool schemas: ${deferredKb} KB avoided across ${deferred.selections} dispatches.${lastBreak}`;
+    return diagnostics ? buildCacheDiagnosticsNotice(diagnostics) : '';
   });
 
   let cacheProviderScorecard = $derived.by(() =>
-    (cacheDiagnostics?.durable.byProvider ?? [])
-      .filter((row) => row.requests > 0)
-      .slice(0, 4),
+    buildProviderCacheCards(cacheDiagnostics?.durable.byProvider, 4),
   );
 
   function formatTokenCount(n: number): string {
@@ -346,7 +290,7 @@
       const res = await apiFetch(apiUrl('/api/providers/cache-diagnostics'));
       if (!res.ok) return;
       const payload = await res.json();
-      cacheDiagnostics = payload?.data ?? null;
+      cacheDiagnostics = normalizeCacheDiagnostics(payload?.data);
     } catch {
       // Diagnostics are best-effort and must never interrupt the chat surface.
     }
@@ -439,9 +383,9 @@
       description: 'Attach a host-owned workflow to the current task.',
     },
     {
-      command: 'agents',
-      label: 'Toggle subagents',
-      description: 'Show or hide the current worker and critic agents above the chat.',
+      command: 'activity',
+      label: 'Toggle Activity',
+      description: 'Show or hide recent work above the chat.',
     },
     {
       command: 'goal create',
@@ -958,7 +902,7 @@
 
     if (root === 'help') {
       toastStore.info(
-        'Commands: /new, /resume, /compact, /rewind, /agents, /workflow, /goal, /clear, /settings, /theme, /sidebar, /zen',
+        'Commands: /new, /resume, /compact, /rewind, /activity, /workflow, /goal, /clear, /settings, /theme, /sidebar, /zen',
       );
       return true;
     }
@@ -1013,7 +957,7 @@
       return true;
     }
 
-    if (root === 'agents') {
+    if (root === 'activity' || root === 'agents') {
       if (parts.length > 1) {
         toastStore.error('Usage: /agents');
       } else {
@@ -1023,9 +967,8 @@
     }
 
     if (root === 'goal') {
-      // Goal creation happens in the composer above the chat; the sidebar only
-      // previews goals once they exist.
-      if (parts[1]?.toLowerCase() !== 'create') goalDisplayStore.update({ sidebar: true });
+      // Goal creation and goal detail both happen above the chat; the composer
+      // bubble is the single Goal Mode surface.
       const request = parseGoalSlashCommand(parts.slice(1));
       queueMicrotask(() =>
         window.dispatchEvent(
@@ -1416,9 +1359,8 @@
 
   async function handleMenuAction(action: string) {
     if (action.startsWith('goal_')) {
-      // Goal creation happens in the composer above the chat; the sidebar only
-      // previews goals once they exist.
-      if (action !== 'goal_create') goalDisplayStore.update({ sidebar: true });
+      // Goal Mode renders above the chat; the composer bubble handles every
+      // non-create action itself.
       queueMicrotask(() =>
         window.dispatchEvent(
           new CustomEvent<GoalActionRequest>('kory:goal-action', {
@@ -1765,7 +1707,7 @@
       ? `${collaborationStore.activeJoinedSession.sessionName} — Koryphaios`
       : projectStore.currentPath
         ? `${projectStore.displayName} — Koryphaios`
-        : 'Koryphaios — AI Agent Orchestrator'}</title
+        : 'Koryphaios — Workspace'}</title
   >
 </svelte:head>
 
@@ -2053,8 +1995,12 @@
         onmouseenter={() => (contextBarHover = true)}
         onmouseleave={() => (contextBarHover = false)}
       >
-        <div class="flex items-center gap-3">
-          <span class="shrink-0" style="font-size: var(--text-xs); color: var(--color-text-muted);">
+        <div class="flex items-center gap-3" role="group" aria-label="Context window usage">
+          <span
+            class="w-[74px] shrink-0"
+            style="font-size: var(--text-xs); color: var(--color-text-muted);"
+            title="How much of the model's context window this session is using. The bar splits that total by what fills it — hover to see every part."
+          >
             Context
           </span>
           <div
@@ -2070,7 +2016,7 @@
               {#each contextSegments as seg (seg.key)}
                 <div
                   class="h-full transition-all"
-                  title="{seg.label}: ~{formatTokenCount(seg.tokens)} tokens"
+                  title="{seg.label}: ~{formatTokenCount(seg.tokens)} tokens — {seg.hint}"
                   style="width: {seg.widthPercent}%; transition-duration: var(--duration-slower); background: {seg.color};"
                 ></div>
               {/each}
@@ -2154,59 +2100,47 @@
             </span>
           </div>
         {/if}
-        {#if cacheTurnReceipt}
+        <!-- Cache health sits in its own group under a hairline so the context
+             meter stays the one thing read at a glance. The per-turn receipt
+             is the only part visible by default; the harness/30d breakdown is
+             hover-only, and every part of it is omitted while it reads zero. -->
+        {#if cacheTurnReceipt || (contextBarHover && (cacheFabricLabel || cacheLastBust || cacheProviderScorecard.length > 0))}
           <div
-            class="pt-1"
-            style="font-size: var(--text-xs); color: var(--color-text-muted);"
-            title={cachedContextNotice || cacheTurnReceipt}
+            class="flex flex-col gap-1"
+            style="margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--color-border); font-size: var(--text-xs); color: var(--color-text-muted);"
           >
-            {cacheTurnReceipt}
-          </div>
-        {/if}
-        {#if cacheDiagnosticsNotice && (contextBarHover || cacheTurnReceipt)}
-          <div
-            class="pt-1"
-            style="font-size: var(--text-xs); color: var(--color-text-muted);"
-            title={cacheDiagnosticsNotice}
-          >
-            {#if cacheDiagnostics}
-              {@const promptWarm =
-                cacheDiagnostics.prompt.warmCandidates +
-                cacheDiagnostics.prompt.workspaceWarmCandidates}
-              {@const evidenceTotal =
-                cacheDiagnostics.evidence.hits + cacheDiagnostics.evidence.misses}
-              Cache fabric {promptWarm}/{cacheDiagnostics.prompt.dispatches} warm
-              <span class="opacity-60">·</span>
-              evidence {cacheDiagnostics.evidence.hits}/{evidenceTotal} hits
-              {#if cacheDiagnostics.evidence.waits > 0}
-                <span class="opacity-60">·</span>
-                {cacheDiagnostics.evidence.waits} duplicate reads avoided
-              {/if}
-              {#if cacheDiagnostics.recent.at(-1)?.state === 'cold' && cacheDiagnostics.recent.at(-1)?.reasons.length}
-                <span class="opacity-60">· last bust:</span>
-                {cacheDiagnostics.recent.at(-1)?.reasons.join(', ')}
-              {/if}
-
-              {#if cacheDiagnostics.durable.requests > 0}
-                <div
-                  class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 border-t pt-1.5"
-                  style="border-color: var(--color-border);"
-                >
-                  <span class="font-medium" style="color: var(--color-text-secondary);">
-                    30d provider cache
-                  </span>
-                  {#each cacheProviderScorecard as row (row.provider)}
-                    <span class="tabular-nums" title={`${row.requests} requests · ${formatTokenCount(row.cacheReadTokens)} cache-read tokens · ${formatTokenCount(row.cacheWriteTokens)} cache-write tokens${row.averageTtftMs === null ? '' : ` · ${Math.round(row.averageTtftMs)}ms TTFT`}${row.averageLatencyMs === null ? '' : ` · ${Math.round(row.averageLatencyMs)}ms total`}`}>
-                      {row.provider}
-                      {Math.round(row.hitRate * 1000) / 10}%
-                      {row.savingsUsd >= 0 ? `· +$${row.savingsUsd.toFixed(4)}` : `· -$${Math.abs(row.savingsUsd).toFixed(4)}`}
-                      {#if row.averageTtftMs !== null}
-                        · {Math.round(row.averageTtftMs)}ms TTFT
-                      {/if}
+            {#if cacheTurnReceipt}
+              <div class="flex items-baseline gap-3">
+                <span class="w-[74px] shrink-0">Cache</span>
+                <span class="min-w-0 truncate" title={cachedContextNotice || cacheTurnReceipt}>
+                  {cacheTurnReceipt}
+                </span>
+              </div>
+            {/if}
+            {#if contextBarHover && (cacheFabricLabel || cacheLastBust)}
+              <div class="flex items-baseline gap-3" title={cacheDiagnosticsNotice}>
+                <span class="w-[74px] shrink-0">Cache fabric</span>
+                <span class="min-w-0 truncate">
+                  {cacheFabricLabel ?? ''}{#if cacheLastBust}<span class="opacity-60"
+                      >· last bust: {cacheLastBust}</span
+                    >{/if}
+                </span>
+              </div>
+            {/if}
+            {#if contextBarHover && cacheProviderScorecard.length > 0}
+              <div class="flex items-baseline gap-3" title={cacheDiagnosticsNotice}>
+                <span class="w-[74px] shrink-0">30d cache</span>
+                <div class="flex flex-wrap gap-x-4 gap-y-0.5 min-w-0">
+                  {#each cacheProviderScorecard as card (card.provider)}
+                    <span class="flex items-baseline gap-1.5" title={card.tooltip}>
+                      <span style="color: var(--color-text-secondary);">{card.provider}</span>
+                      {#if card.hitRateLabel}<span class="tabular-nums">{card.hitRateLabel}</span>{/if}
+                      {#if card.savingsLabel}<span class="tabular-nums">{card.savingsLabel}</span>{/if}
+                      {#if card.ttftLabel}<span class="tabular-nums opacity-60">{card.ttftLabel}</span>{/if}
                     </span>
                   {/each}
                 </div>
-              {/if}
+              </div>
             {/if}
           </div>
         {/if}

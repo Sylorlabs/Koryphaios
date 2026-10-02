@@ -42,5 +42,7 @@ export function formatKey(key: string): string {
   if (key === 'Meta') {
     return isMac() ? '⌘' : 'Win';
   }
+  // The fn key is labelled in lower case on the key cap itself.
+  if (key.toLowerCase() === 'fn') return 'fn';
   return key;
 }

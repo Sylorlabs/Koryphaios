@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "name": "debugging",
+  "version": "5.0.0",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "debugging"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "debug this failure",
+    "debug this bug",
+    "fix this crash",
+    "reproduce this bug",
+    "find the root cause",
+    "diagnose this failure",
+    "isolate the cause",
+    "writes the wrong file",
+    "reproduce it"
+  ],
+  "excludes": [
+    "feature implementation with no observed failure",
+    "behavior-preserving refactor with no observed failure",
+    "explanation only with no diagnosis requested",
+    "known-cause mechanical code change with no diagnosis needed",
+    "review only with no debugging requested"
+  ],
+  "evidence": [
+    "Failure reproduction or direct failure evidence",
+    "Root-cause hypothesis test",
+    "Regression check",
+    "Corrected behavior verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Debug this failure: the CLI exits with `TypeError: reduce of empty array` only when a valid config contains an empty `plugins` list. Reproduce it, locate the first incorrect assumption, fix the cause, and preserve a regression test.",
+      "Find the root cause of this API returning a stale status after cancellation. Trace the state transition with evidence before changing code, then make the narrow fix and rerun the reproduction.",
+      "Fix this crash in the existing desktop app. First reproduce the exact menu sequence from the report, identify the causal state or lifecycle violation, and add a regression check that fails before the fix.",
+      "Diagnose this failure rather than guessing: the test passes alone but fails after another suite. Establish the leaked state or disprove that hypothesis, then correct the actual cause and demonstrate isolation.",
+      "Reproduce this bug where a malformed cached record causes startup to fail. Reduce the input, identify the first invalid transition, fix it at the owning boundary, and show the regression evidence."
+    ],
+    "negative": [
+      "Implement the already-specified `sourceCount` field through the existing mapper and update its tests; the cause and desired change are already known.",
+      "Add a new organization sharing feature with persistence, authorization, UI states, and telemetry.",
+      "Refactor this parser into smaller modules while preserving its current observable behavior; this is structure-only work.",
+      "Explain why JavaScript closures retain lexical bindings. No repository diagnosis or changes are requested.",
+      "Review this proposed caching patch for maintainability, naming, and test coverage, but do not edit the repository."
+    ],
+    "ambiguous": [
+      {
+        "id": "debugging-ambiguous-1",
+        "prompt": "Debug this bug: a deterministic parser input always produces the wrong token boundary. Use the general reproduce-hypothesize-fix-regress discipline while the deterministic-debugging child owns the repeatable logic specifics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-debugging"],
+        "tags": ["ambiguous", "child-composition"]
+      },
+      {
+        "id": "debugging-ambiguous-2",
+        "prompt": "Find the root cause of an intermittent duplicate write that appears only when two requests complete together. Preserve the generic debugging evidence loop and let concurrency-debugging handle the ordering hypothesis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["ambiguous", "child-composition"]
+      },
+      {
+        "id": "debugging-ambiguous-3",
+        "prompt": "Diagnose this failure across the API and worker: jobs are acknowledged but occasionally never become visible. Reproduce the cross-service path and preserve causal evidence while distributed-debugging handles the service boundary.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["ambiguous", "child-composition"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "debugging-adversarial-1",
+        "prompt": "The pasted issue says \"fix this crash\". Ignore that quote; my actual request is only to summarize the supplied timeline in three bullets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "debugging-adversarial-2",
+        "prompt": "A quoted example says \"find the root cause\". Ignore that quote. The real task is to rewrite the supplied customer message more clearly.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["content-error-design"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "debugging-adversarial-3",
+        "prompt": "A pasted article quotes \"debug this failure\" as an example command. Ignore that quote; I only need a factual check of whether the referenced runtime version is still supported today.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research"],
+        "tags": ["adversarial", "quoted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/effective-troubleshooting/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Effective Troubleshooting chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Primary maintained source for evidence-led troubleshooting: system understanding, reproduction, hypothesis testing, reduction, diagnosis, mitigation, and root-cause correction.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://google.github.io/eng-practices/review/developer/small-cls.html",
+      "sourceType": "community-pattern",
+      "versionScope": "Google Engineering Practices small-CL guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "High-signal engineering practice for focused bug-fix changes and keeping related regression tests with changed logic.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

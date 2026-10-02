@@ -10,9 +10,10 @@
   interface Props {
     open: boolean;
     onClose: () => void;
+    target?: 'primary' | 'secondary';
   }
 
-  let { open, onClose }: Props = $props();
+  let { open, onClose, target = 'primary' }: Props = $props();
 
   // ---- Color state (HSV internally, hex as the canonical exchange format) ----
   // Start from the current effective accent so the picker opens on a sensible value.
@@ -302,7 +303,7 @@
   // Initialize from current accent when opening
   $effect(() => {
     if (!open) return;
-    const cur = theme.currentAccent;
+    const cur = target === 'secondary' ? theme.currentSecondaryAccent : theme.currentAccent;
     const rgb = hexToRgb(cur.main);
     if (rgb) {
       const [h, s, v] = rgbToHsv(rgb[0], rgb[1], rgb[2]);
@@ -325,7 +326,8 @@
 
   function apply() {
     const custom: CustomAccent = { main: currentHex, hover: effectiveHover };
-    theme.setCustomAccent(custom);
+    if (target === 'secondary') theme.setCustomSecondaryAccent(custom);
+    else theme.setCustomAccent(custom);
     onClose();
   }
 
@@ -371,7 +373,7 @@
 
 {#if open}
   <div
-    class="fixed inset-0 z-[120] flex items-start justify-center pt-[8vh] px-4 backdrop-blur-sm"
+    class="fixed inset-0 z-[140] flex items-start justify-center pt-[8vh] px-4 backdrop-blur-sm"
     style="background: rgba(0,0,0,0.5);"
     onmousedown={onClose}
     role="presentation"
@@ -391,7 +393,7 @@
           <Pipette size={16} style="color: var(--color-accent);" />
           <div>
             <div class="text-sm font-bold" style="color: var(--color-text-primary);">
-              Custom Accent Color
+              Custom {target === 'secondary' ? 'Secondary' : 'Primary'} Accent
             </div>
             <div class="text-[11px]" style="color: var(--color-text-muted);">
               Pick any color with the wheel, hex, or eyedropper
@@ -593,8 +595,7 @@
           </div>
           {#if hoverAuto}
             <p class="text-[10px] mt-1.5" style="color: var(--color-text-muted);">
-              Auto-derived from main (+35% toward white). Click the hex field or toggle to Manual to
-              customize.
+              Derived from the main color. Click the hex field or switch to Manual to customize.
             </p>
           {/if}
         </div>

@@ -143,7 +143,11 @@ async function readLiveSource<T>(
   return { ...result, health: liveSourceHealth(state, result.refreshing) };
 }
 
-async function safeBillingResult<T>(name: string, work: () => Promise<T> | T, fallback: T): Promise<T> {
+async function safeBillingResult<T>(
+  name: string,
+  work: () => Promise<T> | T,
+  fallback: T,
+): Promise<T> {
   try {
     return await work();
   } catch (err: unknown) {
@@ -289,9 +293,9 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
       repriced: 0,
     });
     refreshPricingCatalogInBackground();
-    const rows = (await safeBillingResult('session-costs', () => getUsageCostBreakdown(), [])).filter(
-      (row) => providerAllowed(row.provider, excluded),
-    );
+    const rows = (
+      await safeBillingResult('session-costs', () => getUsageCostBreakdown(), [])
+    ).filter((row) => providerAllowed(row.provider, excluded));
     const detailed = summarizeSessionCosts(rows);
     const sessions = Object.fromEntries(
       Object.entries(detailed).map(([sessionId, summary]) => [
@@ -317,7 +321,11 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
     });
     refreshPricingCatalogInBackground();
     const rows = (
-      await safeBillingResult('session-cost-detail', () => getUsageCostBreakdown(params.sessionId), [])
+      await safeBillingResult(
+        'session-cost-detail',
+        () => getUsageCostBreakdown(params.sessionId),
+        [],
+      )
     ).filter((row) => providerAllowed(row.provider, excluded));
     const summary = summarizeSessionCosts(rows)[params.sessionId] ?? null;
     return { ok: true, summary };
@@ -342,7 +350,11 @@ export const billingRoutes = new Elysia({ prefix: '/api/billing' })
       driftPercent: null,
       highlightDrift: false,
     });
-    const allUsageRows = await safeBillingResult('usage-cost-breakdown', () => getUsageCostBreakdown(), []);
+    const allUsageRows = await safeBillingResult(
+      'usage-cost-breakdown',
+      () => getUsageCostBreakdown(),
+      [],
+    );
     const visibleUsageRows = allUsageRows.filter((row) => providerAllowed(row.provider, excluded));
     const spend = summarizeBillingSpend(visibleUsageRows);
 

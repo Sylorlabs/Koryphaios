@@ -1,0 +1,91 @@
+{
+  "id": "kubernetes-operations-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply kubernetes expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is kubernetes-operations: Confirm cluster/version, workload controller, scheduling constraints, resource requests/limits, probes, disruption, network policy, ingress, storage, secrets, service accounts, rollout strategy, and autoscaling. The adjacent aws-cloud discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://kubernetes-operations/scenario-1",
+    "requirements": [
+      "synthetic Kubernetes 1.37 cluster fixture with Deployment, Service, PDB, topology spread and three-zone nodes",
+      "server-side effective object snapshots, events, rollout history, EndpointSlices and CPU/scheduling metrics",
+      "slow-start and downstream-readiness behavior plus one draining old pod",
+      "rollback revision and controlled node-drain/disruption harness",
+      "paired same-model skill/no-skill execution",
+      "kubernetes-operations parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual kubernetes-operations boundary and relevant environment before acting, preserve the hierarchy relationship (broader=architecture-planning; near-neighbor=aws-cloud), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm cluster/version, workload controller, scheduling constraints, resource requests/limits, probes, disruption, network policy, ingress, storage, secrets, service accounts, rollout strategy, and autoscaling."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Render/validate manifests, exercise rollout/rollback, probe failures, pod/node disruption, scaling, persistent storage, denied network/RBAC paths, and logs/metrics in a representative cluster."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use latest tags, omit resource requests by default, mount broad credentials, equate liveness with readiness, or edit live objects manually without a source-of-truth plan."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Cluster/version/controller and source-of-truth identity; Rendered/effective Kubernetes object and rollout evidence; Scheduling, disruption, networking, storage, or autoscaling conditions tied to the claim; Recovery/rollback evidence or explicit unavailable-cluster boundary), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "kubernetes-operations-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Cluster/version/controller and source-of-truth identity",
+        "Rendered/effective Kubernetes object and rollout evidence",
+        "Scheduling, disruption, networking, storage, or autoscaling conditions tied to the claim",
+        "Recovery/rollback evidence or explicit unavailable-cluster boundary",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "kubernetes-operations-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Cluster/version/controller and source-of-truth identity",
+    "Rendered/effective Kubernetes object and rollout evidence",
+    "Scheduling, disruption, networking, storage, or autoscaling conditions tied to the claim",
+    "Recovery/rollback evidence or explicit unavailable-cluster boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "kubernetes-operations-individual-scenario-1-result",
+    "kubernetes-operations-individual-scenario-1-verification",
+    "kubernetes-operations-individual-scenario-1-paired-evaluation"
+  ]
+}

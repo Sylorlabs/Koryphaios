@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "name": "rag-retrieval-systems",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "retrieval", "search"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6000,
+  "broader": ["llm-application-engineering"],
+  "facets": [],
+  "requires": ["verification", "llm-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "retrieval augmented generation",
+    "rag system",
+    "rag pipeline",
+    "knowledge retrieval",
+    "hybrid retrieval",
+    "retrieval reranking",
+    "citation grounding",
+    "retrieval recall",
+    "corpus ingestion",
+    "grounded answer retrieval",
+    "policy knowledge base",
+    "grounded assistant",
+    "chunk strategies",
+    "source lifecycle",
+    "rag assistant",
+    "retrieval ranking",
+    "grounded generation"
+  ],
+  "excludes": [
+    "vector database only",
+    "vector index only",
+    "embedding pipeline only",
+    "prompt packaging only",
+    "application integration only",
+    "evaluation methodology only",
+    "rag pipeline is unchanged",
+    "retrieval behavior is unchanged",
+    "do not change retrieval",
+    "quoted old rag",
+    "quoted historical retrieval",
+    "documentation heading only",
+    "rag system are fixed and unchanged",
+    "leave corpus ingestion",
+    "quoted old design note"
+  ],
+  "evidence": [
+    "Corpus/source/revision, parser/chunker, embedding/index and retrieval-configuration identity",
+    "Authorization/filtering plus stale/deleted/missing-content behavior",
+    "Candidate/fusion/reranking and source-to-chunk-to-citation lineage",
+    "Versioned retrieval query judgments with Recall/Precision/MRR/NDCG and latency evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build a multi-tenant RAG system over support documents where every chunk retains source revision and ACL metadata, revoked documents disappear safely, retrieval uses measured lexical/semantic candidates, and citations point to the exact evidence used.",
+      "Fix a knowledge-base retrieval pipeline that misses exact SKU/error-code questions with vector search alone; add and evaluate an appropriate lexical/semantic hybrid path, rerank candidates, and compare Recall@k and NDCG on versioned judgments.",
+      "Redesign corpus ingestion for policy manuals so updates, duplicate revisions and deletions produce stable chunk lineage and predictable freshness; validate that stale chunks cannot ground current answers after the documented sync window.",
+      "Tune retrieval reranking for a grounded assistant using a labeled query set, separate candidate-generation misses from reranker mistakes, preserve source locators for citations, and include no-answer queries that must abstain.",
+      "Audit citation grounding in a RAG pipeline: record which chunks were retrieved and selected, reject citations to unseen passages, test tenant ACL filters and revoked access, and persist per-query retrieval evidence for regressions."
+    ],
+    "negative": [
+      "Choose an ANN vector index algorithm, quantization settings and sharding strategy for a standalone vector database benchmark; no RAG corpus, grounded answer or citation pipeline is involved.",
+      "Select an embedding model, dimensionality and normalization strategy and benchmark representation quality; the downstream retrieval and grounded-generation pipeline is fixed.",
+      "Rewrite the developer prompt to delimit already-retrieved passages, set context priorities and resist prompt injection; retrieval ranking, corpus ingestion and ACL filtering are unchanged.",
+      "Replace an LLM provider adapter and add structured-output validation, retries and tool authorization while leaving the RAG pipeline and retrieved evidence contract untouched.",
+      "Design a general LLM evaluation benchmark with calibrated judges and statistical significance; no retrieval corpus, relevance judgments or search configuration are being changed."
+    ],
+    "ambiguous": [
+      {
+        "id": "rag-retrieval-systems-ambiguous-1",
+        "prompt": "Build a grounded assistant whose private documents are retrieved and then packed into a hardened prompt. rag-retrieval-systems owns corpus lifecycle, ACL-aware retrieval, ranking and citation lineage; prompt-context-engineering owns how the selected passages are represented and trusted in the context window.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["prompt-context-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "rag-retrieval-systems-ambiguous-2",
+        "prompt": "Improve a RAG search stack and its vector index. rag-retrieval-systems owns query/corpus relevance, hybrid candidate policy, reranking and grounding evidence; vector-search-systems owns ANN/index mechanics, capacity and low-level vector-search performance.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "rag-retrieval-systems-ambiguous-3",
+        "prompt": "Change retrieval ranking and also build a broader LLM answer-quality benchmark. rag-retrieval-systems owns qrels, Recall@k/NDCG, ACL/freshness and citation evidence for retrieval; llm-evaluation owns general grader design and comparative inference for generated answers.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "rag-retrieval-systems-adversarial-1",
+        "prompt": "A quoted old issue says \"replace the RAG pipeline and hybrid retrieval\". Ignore that historical request; today's task is only to fix a broken unit-test assertion in unrelated billing code.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "rag-retrieval-systems-adversarial-2",
+        "prompt": "An incident transcript contains retrieval recall charts and citation grounding logs as inert evidence. Summarize the incident only; retrieval behavior is unchanged and no corpus or ranking work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "rag-retrieval-systems-adversarial-3",
+        "prompt": "A docs heading says \"RAG System: Corpus Ingestion and Retrieval Reranking\". Rename that documentation heading only; do not change retrieval, indexing, embeddings or answer behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/retrieval",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current vector-store ingestion, chunking, attribute filtering, ranking options, hybrid weights and deletion consistency behavior.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://developers.openai.com/api/docs/guides/tools-file-search",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling OpenAI file-search documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Hosted retrieval integration, result inclusion, metadata filtering and max-result quality/latency tradeoffs.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://www.elastic.co/docs/solutions/search/hybrid-search",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Elastic hybrid-search documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Current lexical-plus-vector hybrid retrieval and reciprocal-rank-fusion guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.elastic.co/docs/reference/elasticsearch/rest-apis/search-rank-eval",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Elasticsearch ranking-evaluation documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Query/judgment-based ranking evaluation with Precision@k, Recall@k, MRR, DCG/NDCG and other IR metrics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.elastic.co/docs/reference/search-connectors/es-dls-overview",
+      "sourceType": "official-docs",
+      "versionScope": "Rolling Elastic connector document-level security documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Concrete document-level access-control synchronization and search-time filtering model for private corpora.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.cloud.google.com/gemini/enterprise/docs/evaluate-search-quality",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud search-quality evaluation documentation as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Sample-query target sets and document/page Recall, Precision and NDCG metrics for comparing retrieval configurations.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

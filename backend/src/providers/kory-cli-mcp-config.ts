@@ -42,7 +42,6 @@ export function buildKoryCliMcpConfig(
 
 export function serializeKoryMcpServers(
   servers: CliMcpServerConfig[],
-  cline = false,
 ): Record<string, unknown> {
   const mcpServers: Record<string, unknown> = {};
   for (const server of servers) {
@@ -50,7 +49,6 @@ export function serializeKoryMcpServers(
       command: server.command,
       args: server.args,
       env: server.env ?? {},
-      ...(cline ? { disabled: false, autoApprove: [] } : {}),
     };
   }
   return { mcpServers };

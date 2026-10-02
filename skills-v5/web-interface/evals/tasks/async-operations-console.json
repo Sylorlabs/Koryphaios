@@ -1,0 +1,82 @@
+{
+  "id": "web-interface-full-task-async-operations-console",
+  "prompt": "Improve an existing browser-based operations console used to start, monitor, cancel, and retry long-running jobs. Preserve direct URLs and browser history. The UI must represent queued, running, partial, stale, completed, failed, cancellation-requested, cancellation-failed, and retrying states; survive refresh; recover focus after dialogs or navigation; handle slow and failed network requests; and work at narrow and wide supported viewports. Use the repository's existing framework and design system. Produce an implementation and real-browser verification contract without inventing backend behavior.",
+  "environment": {
+    "kind": "browser",
+    "startingState": "fixture://web-interface/async-operations-console",
+    "requirements": [
+      "browser application fixture",
+      "existing routes, framework, components, and tokens",
+      "job-state and network-failure fixtures",
+      "representative narrow and wide viewports",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "web-console-url-history-refresh",
+      "assertion": "Direct URLs, browser history/back-forward behavior, refresh, and deep links preserve or recover the correct job/interface state using the existing routing model."
+    },
+    {
+      "id": "web-console-async-state-contract",
+      "assertion": "Queued, running, partial, stale, completed, failed, cancellation-requested, cancellation-failed, and retrying states are distinguishable and do not invent server-side cancellation/retry guarantees absent from the supplied backend contract."
+    },
+    {
+      "id": "web-console-focus-semantics",
+      "assertion": "Dialogs, navigation, cancellation/retry actions, loading/error feedback, and return flows use semantic controls with deterministic keyboard/focus restoration rather than click-only behavior."
+    },
+    {
+      "id": "web-console-responsive-network",
+      "assertion": "Representative narrow/wide viewports, long/overflow content, slow requests, failed requests, refresh, and stale data preserve critical action/state access without layout-specific happy-path assumptions."
+    },
+    {
+      "id": "web-console-real-browser-proof",
+      "assertion": "Verification exercises the real browser application with runtime/console evidence and the repository's existing framework/design system; static screenshots alone do not prove navigation, focus, async, or recovery behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "browser-contract-and-state-integrity",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "URL, history, refresh, and deep-link behavior",
+        "semantic interaction and focus contract",
+        "all required async and cancellation states",
+        "existing framework and design-system reuse",
+        "no invented backend semantics"
+      ]
+    },
+    {
+      "id": "responsive-accessible-runtime-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "narrow and wide layout behavior",
+        "keyboard and focus verification",
+        "slow and failed request behavior",
+        "overflow and long-content checks",
+        "real-browser runtime and console evidence"
+      ]
+    },
+    {
+      "id": "blind-async-browser-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "browser navigation and state contract",
+    "async failure and recovery matrix",
+    "responsive and input behavior",
+    "accessibility and focus checks",
+    "real-browser verification plan"
+  ],
+  "requiredArtifacts": [
+    "web-interface-implementation-contract",
+    "browser-state-and-viewport-matrix",
+    "paired-experiment-report"
+  ]
+}

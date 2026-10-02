@@ -1,0 +1,69 @@
+{
+  "id": "verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A completed CLI patch claims that `kory export --format json fixture/input.json` now emits machine-readable JSON from the command users actually invoke. Verify the claim without editing code. The fixture contains passing formatter unit tests and a passing type check, but the packaged CLI entry point still loads the old text renderer. Run the supported focused gates once on fresh state, then run the exact consumer command and validate its output as JSON. The correct completion verdict must account for the real entry point failing even though the internal checks pass. Return the claim-to-oracle map, exact commands and relevant outputs, bounded verdict, and any unavailable evidence; do not rebuild or repair the package.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://verification/cli-entrypoint-stale-artifact",
+    "requirements": [
+      "completed CLI patch is already present and repository edits are out of scope",
+      "formatter unit tests pass on the starting revision",
+      "type checking passes on the starting revision",
+      "the repository documents `kory export --format json fixture/input.json` as the consumer-facing command",
+      "the packaged CLI entry point still emits legacy text for that command and therefore fails JSON parsing"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "verification-cli-internal-gates",
+      "assertion": "The verifier records the passing focused formatter test and type-check evidence without treating either as proof that the packaged consumer entry point changed."
+    },
+    {
+      "id": "verification-cli-real-entrypoint",
+      "assertion": "The exact documented CLI command is executed on fresh state and its stdout is checked with a real JSON parser or equivalent deterministic JSON oracle."
+    },
+    {
+      "id": "verification-cli-verdict",
+      "assertion": "The overall JSON-export completion claim is refuted because the consumer-facing command still emits legacy text, despite passing source-level gates; no repair or rebuild is performed."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "claim-to-oracle map for JSON export",
+        "fresh passing formatter-test output",
+        "fresh passing type-check output",
+        "exact documented CLI invocation",
+        "deterministic JSON-parse failure from the CLI output",
+        "explicit refuted completion verdict"
+      ]
+    },
+    {
+      "id": "verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "internal gates are correctly scoped to what they exercised",
+        "consumer-surface evidence controls the user-facing completion claim",
+        "the verifier stays within verification scope and reports the defect rather than repairing it"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "claim-to-oracle map",
+    "fresh focused gate outputs",
+    "exact consumer CLI output",
+    "deterministic JSON validation result",
+    "explicit refuted or inconclusive labels for unsupported claims",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "verification-scenario-2-result",
+    "verification-scenario-2-verification",
+    "verification-scenario-2-paired-evaluation"
+  ]
+}

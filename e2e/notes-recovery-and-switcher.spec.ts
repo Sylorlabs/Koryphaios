@@ -52,7 +52,7 @@ test('Notes quick-create, stable save, history, Trash, and restore work through 
 
     // The panel-level shortcut must beat Chromium's native Ctrl+O handling and
     // search the complete catalog even while the visible list is filtered.
-    await page.keyboard.press('Control+O');
+    await page.keyboard.press('ControlOrMeta+O');
     const switcher = page.getByRole('dialog', { name: 'Open a note' });
     await expect(switcher).toBeVisible();
     const switcherInput = switcher.getByRole('combobox', { name: 'Search notes' });
@@ -62,7 +62,7 @@ test('Notes quick-create, stable save, history, Trash, and restore work through 
     const createResponsePromise = page.waitForResponse((response) =>
       isNotesMutationResponse(response, 'POST'),
     );
-    await switcherInput.press('Control+Enter');
+    await switcherInput.press('ControlOrMeta+Enter');
     const createResponse = await createResponsePromise;
     expect(createResponse.ok(), `Creating a note failed: ${createResponse.status()}`).toBe(true);
     const createBody = (await createResponse.json()) as { data?: { id?: string } };
@@ -112,7 +112,7 @@ test('Notes quick-create, stable save, history, Trash, and restore work through 
     const saveResponsePromise = page.waitForResponse((response) =>
       isNotesMutationResponse(response, 'PUT', noteId),
     );
-    await contentInput.press('Control+S');
+    await contentInput.press('ControlOrMeta+S');
     const saveResponse = await saveResponsePromise;
     expect(saveResponse.ok(), `Saving the note failed: ${saveResponse.status()}`).toBe(true);
     await expect(saveButton).toContainText('Saved');
@@ -186,7 +186,7 @@ test('Notes quick-create, stable save, history, Trash, and restore work through 
 
     // Reopen through the same keyboard retrieval path and prove the saved body
     // survived the complete active -> trash -> restored lifecycle.
-    await page.keyboard.press('Control+O');
+    await page.keyboard.press('ControlOrMeta+O');
     await expect(switcher).toBeVisible();
     await switcherInput.fill(noteTitle);
     await switcherInput.press('Enter');

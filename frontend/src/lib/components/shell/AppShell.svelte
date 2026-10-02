@@ -145,14 +145,14 @@
               <span
                 class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
                 style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
-                title="Koryphaios is in beta — expect rapid changes">Beta</span
+                title="Koryphaios is in beta. Expect rapid changes">Beta</span
               >
             </h1>
             <p
               class="leading-tight"
               style="font-size: var(--text-xs); color: var(--color-text-muted);"
             >
-              Agent workspace
+              Workspace
             </p>
           </div>
         </div>
@@ -249,14 +249,14 @@
             <span
               class="rounded px-1 py-px text-[9px] font-bold uppercase tracking-wider"
               style="background: color-mix(in srgb, var(--color-accent) 18%, transparent); color: var(--color-accent);"
-              title="Koryphaios is in beta — expect rapid changes">Beta</span
+              title="Koryphaios is in beta. Expect rapid changes">Beta</span
             >
           </h1>
           <p
             class="leading-tight"
             style="font-size: var(--text-xs); color: var(--color-text-muted);"
           >
-            Agent workspace
+            Workspace
           </p>
         </div>
       </div>
@@ -376,7 +376,9 @@
               {#if NotesPanelComponent}
                 <NotesPanelComponent />
               {:else if notesPanelLoadError}
-                <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+                <div
+                  class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+                >
                   <p class="text-sm" style="color: var(--color-error);">{notesPanelLoadError}</p>
                   <button
                     type="button"
@@ -403,7 +405,10 @@
                   <p class="text-sm" style="color: var(--color-text-primary);">
                     The Notes Network hit an unexpected error
                   </p>
-                  <p class="text-xs" style="color: var(--color-text-muted); overflow-wrap: anywhere;">
+                  <p
+                    class="text-xs"
+                    style="color: var(--color-text-muted); overflow-wrap: anywhere;"
+                  >
                     {error instanceof Error ? error.message : String(error)}
                   </p>
                   <button

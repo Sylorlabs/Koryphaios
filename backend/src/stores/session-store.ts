@@ -1,9 +1,37 @@
-import type { Session as SharedSession } from '@koryphaios/shared';
+import type { Session as SharedSession, SessionAgentOverrides } from '@koryphaios/shared';
 import { nanoid } from 'nanoid';
 import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
 import { serverLog } from '../logger';
+
+const PERMISSION_MODES = ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const;
+const AGENT_EXECUTION_MODES = ['auto', 'single', 'multi'] as const;
+
+/** Keep only known, well-typed override fields so a hand-edited metadata blob
+ *  can never widen this chat's approval posture with an unrecognized value. */
+export function sanitizeSessionAgentOverrides(value: unknown): SessionAgentOverrides | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const overrides: SessionAgentOverrides = {};
+  if (
+    typeof raw.permissionMode === 'string' &&
+    (PERMISSION_MODES as readonly string[]).includes(raw.permissionMode)
+  ) {
+    overrides.permissionMode = raw.permissionMode as SessionAgentOverrides['permissionMode'];
+  }
+  if (
+    typeof raw.agentExecutionMode === 'string' &&
+    (AGENT_EXECUTION_MODES as readonly string[]).includes(raw.agentExecutionMode)
+  ) {
+    overrides.agentExecutionMode =
+      raw.agentExecutionMode as SessionAgentOverrides['agentExecutionMode'];
+  }
+  if (typeof raw.criticGateEnabled === 'boolean') {
+    overrides.criticGateEnabled = raw.criticGateEnabled;
+  }
+  return Object.keys(overrides).length > 0 ? overrides : undefined;
+}
 
 export interface ISessionStore {
   create(
@@ -36,7 +64,11 @@ export interface ISessionStore {
 }
 
 function toSharedSession(s: DbSession): SharedSession {
-  let metadata: { interactionMode?: 'act' | 'plan'; planNoteId?: string } = {};
+  let metadata: {
+    interactionMode?: 'act' | 'plan';
+    planNoteId?: string;
+    agentOverrides?: unknown;
+  } = {};
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
   } catch (err: unknown) {
@@ -55,6 +87,7 @@ function toSharedSession(s: DbSession): SharedSession {
     workingDirectory: s.workingDirectory ?? undefined,
     interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
     planNoteId: typeof metadata.planNoteId === 'string' ? metadata.planNoteId : undefined,
+    agentOverrides: sanitizeSessionAgentOverrides(metadata.agentOverrides),
     messageCount: s.messageCount ?? 0,
     totalTokensIn: s.tokensIn ?? 0,
     totalTokensOut: s.tokensOut ?? 0,
@@ -173,7 +206,11 @@ export class SessionStore implements ISessionStore {
     if (updates.totalCost !== undefined) drizzleUpdates.totalCost = updates.totalCost;
     if (updates.workingDirectory !== undefined)
       drizzleUpdates.workingDirectory = updates.workingDirectory || null;
-    if (updates.interactionMode !== undefined || updates.planNoteId !== undefined) {
+    if (
+      updates.interactionMode !== undefined ||
+      updates.planNoteId !== undefined ||
+      updates.agentOverrides !== undefined
+    ) {
       const prior = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
       let metadata: Record<string, unknown> = {};
       try {
@@ -187,6 +224,13 @@ export class SessionStore implements ISessionStore {
       }
       if (updates.interactionMode !== undefined) metadata.interactionMode = updates.interactionMode;
       if (updates.planNoteId !== undefined) metadata.planNoteId = updates.planNoteId;
+      if (updates.agentOverrides !== undefined) {
+        const sanitized = sanitizeSessionAgentOverrides(updates.agentOverrides);
+        // An empty patch clears the per-chat overrides so the chat falls back
+        // to the project-wide agent settings again.
+        if (sanitized) metadata.agentOverrides = sanitized;
+        else delete metadata.agentOverrides;
+      }
       drizzleUpdates.metadata = JSON.stringify(metadata);
     }
 

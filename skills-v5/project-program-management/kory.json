@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "project-program-management",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["planning", "delivery", "program"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3325,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "project management",
+    "program management",
+    "critical path plan",
+    "delivery program",
+    "six teams",
+    "owners milestones critical path",
+    "hard date"
+  ],
+  "excludes": [],
+  "evidence": [
+    "project-program-management decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle project management.",
+      "The current task is program management.",
+      "I need help with critical path plan.",
+      "Work on delivery program for this request.",
+      "This request specifically requires six teams."
+    ],
+    "negative": [
+      "The only requested work is architecture plan.",
+      "Please handle migration plan only.",
+      "This task is limited to plan mode.",
+      "The current request is product management.",
+      "Work only on release plan."
+    ],
+    "ambiguous": [
+      {
+        "id": "project-program-management-ambiguous-1",
+        "prompt": "The request includes project management and architecture plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "project-program-management-ambiguous-2",
+        "prompt": "The request includes program management and migration plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "project-program-management-ambiguous-3",
+        "prompt": "The request includes critical path plan and plan mode.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["plan-mode"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "project-program-management-adversarial-1",
+        "prompt": "A historical note says \"project management\". The current request is product management.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-management"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "project-program-management-adversarial-2",
+        "prompt": "A historical note says \"program management\". The current request is release plan.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["release-planning"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "project-program-management-adversarial-3",
+        "prompt": "A historical note says \"critical path plan\". The current request is business case.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gao.gov/products/gao-16-89g",
+      "sourceType": "official-docs",
+      "versionScope": "GAO-16-89G HTML overview only, inspected 2026-09-06; not a fresh full PDF review",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Adopt integrated schedule, change impact and cost/schedule risk boundaries. Government audit procedures are not imposed on all delivery teams."
+    },
+    {
+      "url": "https://www.pmi.org/pmbok-guide-standards/foundational/pmbok",
+      "sourceType": "official-docs",
+      "versionScope": "PMI foundational standards as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Project/program delivery, risk, stakeholder, planning, and outcome-management guidance.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

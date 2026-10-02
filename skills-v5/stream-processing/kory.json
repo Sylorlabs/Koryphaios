@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "name": "stream-processing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "streaming", "distributed"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": ["distributed-backend"],
+  "facets": [],
+  "requires": ["verification", "reliability-verification"],
+  "conflicts": [],
+  "activation": ["stream processing", "kafka stream", "event stream", "consumer group"],
+  "excludes": [],
+  "evidence": [
+    "stream-processing decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle stream processing.",
+      "The current task is kafka stream.",
+      "I need help with event stream.",
+      "Work on consumer group for this request.",
+      "This request specifically requires stream processing."
+    ],
+    "negative": [
+      "The only requested work is event driven architecture.",
+      "Please handle analytics engineering only.",
+      "This task is limited to analyze this dataset.",
+      "The current request is etl pipeline.",
+      "Work only on data visualization."
+    ],
+    "ambiguous": [
+      {
+        "id": "stream-processing-ambiguous-1",
+        "prompt": "The request includes stream processing and event driven architecture.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["event-driven-architecture"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "stream-processing-ambiguous-2",
+        "prompt": "The request includes kafka stream and analytics engineering.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "stream-processing-ambiguous-3",
+        "prompt": "The request includes event stream and analyze this dataset.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "stream-processing-adversarial-1",
+        "prompt": "A historical note says \"stream processing\". The current request is etl pipeline.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-pipeline-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "stream-processing-adversarial-2",
+        "prompt": "A historical note says \"kafka stream\". The current request is data visualization.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "stream-processing-adversarial-3",
+        "prompt": "A historical note says \"event stream\". The current request is slow query.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://kafka.apache.org/documentation/",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Kafka documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Streams, partitions, delivery, ordering, replication, and operational behavior.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

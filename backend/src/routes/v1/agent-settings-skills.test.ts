@@ -10,7 +10,7 @@ process.env.KORYPHAIOS_SKILLS_HOME = skillsHome;
 const { Elysia } = await import('elysia');
 const { buildLocalBearerToken } = await import('../../auth/local-route-auth');
 const { localAuth } = await import('../../auth/local-auth');
-const { listSkills } = await import('../../kory/skills');
+const { listSkills, BUNDLED_SKILL_DEFINITIONS } = await import('../../kory/skills');
 const { errorHandler } = await import('../../middleware/error-handling');
 const { agentSettingsRoutes } = await import('./agent-settings');
 
@@ -39,7 +39,122 @@ function request(path: string, body: unknown, method = 'POST'): Request {
   });
 }
 
+function getRequest(path: string): Request {
+  return new Request(`http://localhost${path}`, {
+    headers: {
+      authorization,
+      'x-koryphaios-project': projectRoot,
+    },
+  });
+}
+
 describe('agent settings skill routes', () => {
+  test('exposes a stewarded health snapshot for the expanded skill library', async () => {
+    const response = await app.handle(getRequest('/api/agent/skills/health'));
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      ok: boolean;
+      data: {
+        summary: { active: number; stewarded: number };
+        records: Array<{
+          name: string;
+          steward: { displayLabel: string; model: string } | null;
+        }>;
+      };
+    };
+    expect(payload.ok).toBe(true);
+    const bundledNames = BUNDLED_SKILL_DEFINITIONS.map((skill) => skill.name).sort();
+    expect(payload.data.summary.active).toBe(bundledNames.length);
+    expect(payload.data.summary.stewarded).toBe(bundledNames.length);
+    expect(payload.data.records.map((record) => record.name).sort()).toEqual(bundledNames);
+    expect(
+      payload.data.records.find((record) => record.name === 'dash-free-writing')?.steward,
+    ).toMatchObject({ model: 'chatgpt-web/pro' });
+    expect(
+      payload.data.records.find((record) => record.name === 'planning')?.steward,
+    ).toMatchObject({
+      displayLabel: 'ChatGPT web — planning',
+      model: 'chatgpt-web/pro',
+    });
+  });
+
+  test('accepts protocol-v3 evaluation evidence through the live API', async () => {
+    const response = await app.handle(
+      request('/api/agent/skills/evaluations', {
+        id: 'route-protocol-v3-infrastructure-run',
+        skill: 'skill-authoring-evaluation',
+        revisionHash: 'a'.repeat(64),
+        caseId: 'skill-authoring-full-task-routing-repair',
+        provider: 'test-provider',
+        model: 'subject-model',
+        harnessVersion: 'v3',
+        role: 'worker',
+        evaluator: 'deterministic',
+        passed: false,
+        quality: 0,
+        verification: 0,
+        integrityFailure: false,
+        evidence: ['provider-timeout-log'],
+        recordedAt: '2026-09-01T21:30:00Z',
+        protocolVersion: 3,
+        variant: 'without-skill',
+        caseCategory: 'full-task',
+        comparisonId: 'route-protocol-v3-pair',
+        routing: {
+          expectedSelection: true,
+          selected: false,
+          selectedSkills: ['testing-engineering'],
+          expectedSkills: ['skill-authoring-evaluation'],
+          forbiddenSkills: ['plugin-creator'],
+        },
+        suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+        scenarioId: 'skill-authoring-full-task-routing-repair',
+        experimentId: 'route-protocol-v3-pair:without-skill',
+        infrastructureFailure: {
+          kind: 'provider',
+          retryable: true,
+          evidence: ['provider-timeout-log'],
+          detail: 'Synthetic provider timeout used to verify the V3 API contract.',
+        },
+        artifacts: [
+          {
+            kind: 'log',
+            location: 'artifact://provider-timeout-log',
+            sha256: 'b'.repeat(64),
+          },
+        ],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      ok: boolean;
+      data: {
+        protocolVersion: number;
+        suiteId: string;
+        scenarioId: string;
+        experimentId: string;
+        routing: { selectedSkills: string[]; expectedSkills: string[]; forbiddenSkills: string[] };
+        infrastructureFailure: { kind: string };
+        artifacts: Array<{ kind: string; location: string }>;
+      };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({
+      protocolVersion: 3,
+      suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+      scenarioId: 'skill-authoring-full-task-routing-repair',
+      experimentId: 'route-protocol-v3-pair:without-skill',
+      routing: {
+        selectedSkills: ['testing-engineering'],
+        expectedSkills: ['skill-authoring-evaluation'],
+        forbiddenSkills: ['plugin-creator'],
+      },
+      infrastructureFailure: { kind: 'provider' },
+      artifacts: [{ kind: 'log', location: 'artifact://provider-timeout-log' }],
+    });
+  });
+
   test('validates legacy and v2 native documents through one compatible endpoint', async () => {
     const legacyResponse = await app.handle(
       request('/api/agent/skills/validate', {
@@ -98,7 +213,7 @@ describe('agent settings skill routes', () => {
     expect(await staleHash.json()).toMatchObject({ ok: false, code: 'CONFLICT' });
   });
 
-  test('returns the live budget-preview shape consumed by the frontend', async () => {
+  test('returns the live budget-preview shape and reports lossless instruction overflow', async () => {
     const response = await app.handle(
       request('/api/agent/skills/resolve', {
         prompt: 'Build an accessible browser analytics interface',
@@ -133,12 +248,19 @@ describe('agent settings skill routes', () => {
         rejectedCandidateCount: number;
         rejectedCandidatesTruncated: boolean;
         blocked: boolean;
+        hierarchyErrors: string[];
+        warnings: string[];
+        omittedLazyAncestors: string[];
       };
     };
     expect(payload.ok).toBe(true);
     expect(payload.data.planningOnly).toBe(true);
     expect(payload.data.planningLimit).toContain('Final manager selection is recomputed');
+    // Mandatory overflow degrades gracefully: the preview is not blocked, and
+    // the overflow is reported as warnings instead of hierarchy errors.
     expect(payload.data.blocked).toBe(false);
+    expect(payload.data.hierarchyErrors).toEqual([]);
+    expect(payload.data.warnings.join(' ')).toContain('Mandatory skill guidance requires');
     expect(Array.isArray(payload.data.compressedByBudget)).toBe(true);
     expect(payload.data.compressedByBudget!.length).toBeGreaterThan(0);
     for (const item of payload.data.selected) {
@@ -163,7 +285,7 @@ describe('agent settings skill routes', () => {
     expect(payload.data.promptText).toContain('## Active local skills');
     expect(payload.data.promptText).toContain('Manifest sha256:');
     expect(payload.data.contextBudget).toBe(16_000);
-    expect(payload.data.totalContextCost).toBeLessThanOrEqual(16_000);
+    expect(payload.data.totalContextCost).toBeGreaterThan(16_000);
     expect(payload.data.rejectedCandidateCount).toBeGreaterThan(0);
     expect(payload.data.rejectedCandidates.length).toBeLessThanOrEqual(24);
     expect(
@@ -172,6 +294,16 @@ describe('agent settings skill routes', () => {
       ),
     ).toBe(true);
     expect(typeof payload.data.rejectedCandidatesTruncated).toBe('boolean');
+    const roomyResponse = await app.handle(
+      request('/api/agent/skills/resolve', {
+        prompt: 'Build an accessible browser analytics interface',
+      }),
+    );
+    expect(roomyResponse.status).toBe(200);
+    const roomy = (await roomyResponse.json()) as typeof payload;
+    expect(roomy.data.blocked).toBe(false);
+    expect(roomy.data.contextBudget).toBe(30_000);
+    expect(roomy.data.totalContextCost).toBeLessThanOrEqual(roomy.data.contextBudget);
   });
 
   test('creates structured broader and facet relations through the live API', async () => {

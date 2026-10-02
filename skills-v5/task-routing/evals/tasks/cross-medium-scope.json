@@ -1,0 +1,70 @@
+{
+  "id": "task-routing-full-task-cross-medium-scope",
+  "prompt": "In an existing native desktop project, diagnose a reproducible crash. The issue history quotes an old request to 'turn this into a website', but that quoted request is historical context only. Keep the current task native and produce evidence for the actual failure and repair path.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://routing/native-project-with-historical-web-decoy",
+    "requirements": [
+      "isolated writable checkout",
+      "skill resolver trace",
+      "task completion artifacts"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "routing-current-request-over-history",
+      "assertion": "Routing treats the current reproducible native crash as authoritative task scope and does not activate a web implementation branch merely because quoted historical issue text mentions a website."
+    },
+    {
+      "id": "routing-native-medium-evidence",
+      "assertion": "The selected skill set and repair path are grounded in the repository's current native runtime/toolkit and owning code rather than lexical overlap with stale requests."
+    },
+    {
+      "id": "routing-debugging-outcome",
+      "assertion": "The task result contains concrete crash reproduction/root-cause evidence, a bounded repair, and a regression check; routing correctness alone cannot satisfy the full task."
+    },
+    {
+      "id": "routing-no-unsupported-web-work",
+      "assertion": "No web scaffold, browser-specific implementation, or migration plan is created unless current repository/task evidence independently requires it."
+    },
+    {
+      "id": "routing-scope-trace",
+      "assertion": "The routing report records why current-task evidence outranks quoted/history context so the chosen medium and specialist boundary are auditable."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "route-scope-and-medium",
+      "kind": "deterministic",
+      "weight": 0.45,
+      "evidence": [
+        "selected-skill manifest",
+        "routing reasons",
+        "absence of unsupported web branch"
+      ]
+    },
+    {
+      "id": "task-outcome-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": ["reproduction evidence", "repair evidence", "regression check"]
+    },
+    {
+      "id": "blind-scope-discipline",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and baseline task artifacts",
+        "independent evaluator record"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "selected-skill manifest",
+    "routing reasons",
+    "reproduction evidence",
+    "regression check"
+  ],
+  "requiredArtifacts": ["routing-report", "task-result", "paired-experiment-report"]
+}

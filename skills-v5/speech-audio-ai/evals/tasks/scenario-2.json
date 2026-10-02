@@ -1,0 +1,91 @@
+{
+  "id": "speech-audio-ai-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply speech recognition expertise to this task\". The source material includes conflicting loudness/color/format assumptions, multiple delivery targets, and a final-output verification step rather than editor-preview confidence. The acceptance boundary is speech-audio-ai: Define sample rates/codecs, acoustic environment, speaker/language distribution, streaming versus batch latency, diarization, punctuation, synthesis voice constraints, and privacy/consent. The adjacent embedding-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://speech-audio-ai/scenario-2",
+    "requirements": [
+      "authorized voice/model/version and provider-lifecycle fixtures",
+      "representative navigation/accessibility text with pronunciation and multilingual references",
+      "text-normalization rules plus encoded synthesis and target-playback captures",
+      "audio-integrity, human quality and first-audio/total-latency evidence",
+      "paired same-model skill/no-skill execution",
+      "speech-audio-ai parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual speech-audio-ai boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=embedding-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define sample rates/codecs, acoustic environment, speaker/language distribution, streaming versus batch latency, diarization, punctuation, synthesis voice constraints, and privacy/consent."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use held-out recordings across noise, accents/languages, overlapping speakers, device/channel conditions, long utterances, silence, interruptions, and streaming boundaries; measure latency and word/semantic error or human quality as appropriate."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not train or clone voices without authority, tune only on clean studio audio, treat one language/accent as representative, or hide hallucinated transcription in average WER."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Codec/sample-rate/channel, model/version, language/speaker and streaming timing identity; WER/CER plus critical entity, hallucination, diarization, language/noise/device and boundary-slice evidence; Interim/final/endpoint timing and end-to-end streaming latency or TTS synthesis/playback evidence; Voice authorization/provenance, target-channel quality, migration and rollback artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "speech-audio-ai-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Codec/sample-rate/channel, model/version, language/speaker and streaming timing identity",
+        "WER/CER plus critical entity, hallucination, diarization, language/noise/device and boundary-slice evidence",
+        "Interim/final/endpoint timing and end-to-end streaming latency or TTS synthesis/playback evidence",
+        "Voice authorization/provenance, target-channel quality, migration and rollback artifacts",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "speech-audio-ai-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Codec/sample-rate/channel, model/version, language/speaker and streaming timing identity",
+    "WER/CER plus critical entity, hallucination, diarization, language/noise/device and boundary-slice evidence",
+    "Interim/final/endpoint timing and end-to-end streaming latency or TTS synthesis/playback evidence",
+    "Voice authorization/provenance, target-channel quality, migration and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "speech-audio-ai-individual-scenario-2-result",
+    "speech-audio-ai-individual-scenario-2-verification",
+    "speech-audio-ai-individual-scenario-2-paired-evaluation"
+  ]
+}

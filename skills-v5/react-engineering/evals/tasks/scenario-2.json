@@ -1,0 +1,87 @@
+{
+  "id": "react-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply react component expertise to this task\". The fixture mixes existing design-system conventions with one tempting framework shortcut; verify lifecycle, async cleanup, recovery, and the actual target medium. The acceptance boundary is react-engineering: Separate server or external state, durable application state, URL state, and ephemeral view state. The adjacent svelte-engineering discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "browser",
+    "startingState": "fixture://react-engineering/virtual-list-key-state",
+    "requirements": [
+      "editable React list with stable item ids, index keys, and local row draft state",
+      "sort/filter/insert/delete sequences that move list positions",
+      "server refresh fixture updating one item while another has an unsaved draft",
+      "focus and render-count checks for a large representative list",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "react-engineering parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "react-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "react-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "react-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "react-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "react-engineering-individual-scenario-2-result",
+    "react-engineering-individual-scenario-2-verification",
+    "react-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual react-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=frontend-engineering; near-neighbor=svelte-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Separate server or external state, durable application state, URL state, and ephemeral view state."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise real user interactions, rerenders, async races, unmount or navigation cleanup, keyboard behavior, loading/error/empty states, and performance-sensitive lists or transitions in the supported browser runtime."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not mirror props into state without a synchronization contract, use effects to derive renderable values, hide unstable dependencies, or memoize indiscriminately."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (react-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

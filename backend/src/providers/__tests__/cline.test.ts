@@ -1,291 +1,426 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { SANDBOX_PRESETS, type ProviderConfig } from '@koryphaios/shared';
-import { detectClineCLILogin } from '../auth-utils';
-import { clineRequiresArgvPrompt, ClineProvider, readConfiguredClineModels, shouldUseClinePlanMode } from '../cline';
-import type { ProviderEvent, StreamRequest } from '../types';
+import { describe, expect, it, beforeEach, afterEach } from 'bun:test';
+import { ClineProvider, CLINE_API_BASE_URL } from '../cline';
+import {
+  CLINE_EFFORT_REASONING_LEVELS,
+  CLINE_TOGGLE_REASONING_MODELS,
+} from '../cline-catalog.generated';
+import type { ProviderConfig } from '@koryphaios/shared';
 
-type MapResult = {
-  recognized: boolean;
-  completed: boolean;
-  events: ProviderEvent[];
-};
+const CATALOG_URL = 'https://api.cline.bot/api/v1/ai/cline/models';
+const RECOMMENDED_URL = 'https://api.cline.bot/api/v1/ai/cline/recommended-models';
 
-type ClineParser = {
-  mapEvent: (event: Record<string, unknown>, lastLegacyText: string) => MapResult;
-};
+const originalFetch = globalThis.fetch;
 
-function makeProvider(): ClineProvider {
-  return new ClineProvider({ name: 'cline', disabled: false } as ProviderConfig);
-}
-
-function makeRequest(overrides: Partial<StreamRequest> = {}): StreamRequest {
+/** Cline's rich public catalog row, trimmed to the fields the adapter reads. */
+function catalogRow(overrides: Record<string, unknown> = {}) {
   return {
-    model: 'cline-default',
-    messages: [{ role: 'user', content: 'test' }],
-    systemPrompt: '',
+    id: 'anthropic/synthetic-sonnet',
+    name: 'Anthropic: Synthetic Sonnet',
+    context_length: 1_000_000,
+    architecture: { input_modalities: ['text'] },
+    pricing: { prompt: '0.000003', completion: '0.000015', input_cache_read: '0.0000003' },
+    top_provider: { max_completion_tokens: 128_000 },
+    supported_parameters: ['max_tokens', 'tools'],
     ...overrides,
   };
 }
 
-function parse(
-  provider: ClineProvider,
-  event: Record<string, unknown>,
-  lastLegacyText = '',
-): MapResult {
-  return (provider as unknown as ClineParser).mapEvent(event, lastLegacyText);
+/** Read a request's Authorization header regardless of Headers vs plain object. */
+function authHeader(init?: RequestInit): string | undefined {
+  const headers = new Headers((init?.headers as HeadersInit) ?? {});
+  return headers.get('authorization') ?? undefined;
 }
 
-describe('Cline CLI configuration detection', () => {
-  let home = '';
-  let originalHome: string | undefined;
-  let originalUserProfile: string | undefined;
-
-  beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'kory-cline-auth-'));
-    originalHome = process.env.HOME;
-    originalUserProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
   });
+}
 
-  afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalUserProfile;
-    rmSync(home, { recursive: true, force: true });
+interface RouteOptions {
+  servedIds?: string[];
+  catalog?: unknown[];
+  recommended?: unknown;
+  authRequired?: boolean;
+}
+
+function installRoutes(options: RouteOptions = {}) {
+  const served = options.servedIds ?? ['anthropic/synthetic-sonnet'];
+  const seen: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    seen.push(url);
+    if (url === CATALOG_URL) return jsonResponse({ data: options.catalog ?? [catalogRow()] });
+    if (url === RECOMMENDED_URL) {
+      return jsonResponse(options.recommended ?? { recommended: [], free: [] });
+    }
+    if (url.endsWith('/models')) {
+      if (options.authRequired !== false && !authHeader(init)) {
+        return jsonResponse({ error: 'Unauthorized' }, 401);
+      }
+      return jsonResponse({
+        object: 'list',
+        data: served.map((id) => ({ id, object: 'model', owned_by: id.split('/')[0] })),
+      });
+    }
+    return jsonResponse({ data: [] }, 404);
+  }) as typeof fetch;
+  return seen;
+}
+
+function provider(overrides: Partial<ProviderConfig> = {}): ClineProvider {
+  return new ClineProvider({
+    name: 'cline',
+    apiKey: 'sk-synthetic-cline-key',
+    baseUrl: '',
+    disabled: false,
+    ...overrides,
   });
+}
 
-  it('detects modern provider settings without requiring a plaintext secret', () => {
-    const settings = join(home, '.cline', 'data', 'settings');
-    mkdirSync(settings, { recursive: true });
-    writeFileSync(
-      join(settings, 'providers.json'),
-      JSON.stringify({ selectedProvider: 'openrouter', model: 'anthropic/claude-sonnet' }),
-    );
-
-    expect(detectClineCLILogin()).toBe(true);
-  });
-
-  it('retains legacy secrets.json detection', () => {
-    const data = join(home, '.cline', 'data');
-    mkdirSync(data, { recursive: true });
-    writeFileSync(
-      join(data, 'secrets.json'),
-      JSON.stringify({ apiKey: 'synthetic-cline-secret-value-123456' }),
-    );
-
-    expect(detectClineCLILogin()).toBe(true);
-  });
-
-  it('does not treat an empty settings object as a configured account', () => {
-    const settings = join(home, '.cline', 'data', 'settings');
-    mkdirSync(settings, { recursive: true });
-    writeFileSync(join(settings, 'providers.json'), '{}');
-
-    expect(detectClineCLILogin()).toBe(false);
-  });
-});
-
-describe('Cline CLI execution policy', () => {
-  it('uses Plan for research, critics, and explicit Plan turns', () => {
-    expect(shouldUseClinePlanMode(makeRequest(), true, true)).toBe(true);
-    expect(
-      shouldUseClinePlanMode(makeRequest({ harnessRole: 'critic' }), false, true),
-    ).toBe(true);
-    expect(
-      shouldUseClinePlanMode(makeRequest({ permissionMode: 'plan' }), false, true),
-    ).toBe(true);
-  });
-
-  it('allows non-YOLO Act only with filesystem isolation and a real kernel jail', () => {
-    const guarded = makeRequest({
-      permissionMode: 'guarded',
-      sandbox: SANDBOX_PRESETS.balanced,
-    });
-    expect(shouldUseClinePlanMode(guarded, false, true)).toBe(false);
-    expect(shouldUseClinePlanMode(guarded, false, false)).toBe(true);
-    expect(
-      shouldUseClinePlanMode(makeRequest({ permissionMode: 'guarded' }), false, true),
-    ).toBe(true);
-  });
-
-  it('keeps explicit YOLO as the only unsandboxed Act escape hatch', () => {
-    expect(
-      shouldUseClinePlanMode(makeRequest({ permissionMode: 'yolo' }), false, false),
-    ).toBe(false);
-  });
-});
-
-describe('Cline CLI argv prompt contract', () => {
-  it('requires an argv prompt placeholder for Cline 3.x JSON mode', () => {
-    expect(clineRequiresArgvPrompt('3.0.60')).toBe(true);
-    expect(clineRequiresArgvPrompt('3.1.0')).toBe(true);
-    expect(clineRequiresArgvPrompt('v3.0.0')).toBe(true);
-  });
-
-  it('keeps legacy stdin-only prompt behavior for pre-3.x and unknown versions', () => {
-    expect(clineRequiresArgvPrompt('2.1.0')).toBe(false);
-    expect(clineRequiresArgvPrompt('1.9.9')).toBe(false);
-    expect(clineRequiresArgvPrompt(undefined)).toBe(false);
-    expect(clineRequiresArgvPrompt('')).toBe(false);
-    expect(clineRequiresArgvPrompt('not-a-version')).toBe(false);
-  });
-});
-
-describe('Cline real model list resolution', () => {
-  let home = '';
-  let originalHome: string | undefined;
-  let originalUserProfile: string | undefined;
-
-  beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'kory-cline-models-'));
-    originalHome = process.env.HOME;
-    originalUserProfile = process.env.USERPROFILE;
-    process.env.HOME = home;
-    process.env.USERPROFILE = home;
-  });
-
-  afterEach(() => {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-    else process.env.USERPROFILE = originalUserProfile;
-    rmSync(home, { recursive: true, force: true });
-  });
-
-  function writeProvidersJson(payload: unknown): void {
-    const settings = join(home, '.cline', 'data', 'settings');
-    mkdirSync(settings, { recursive: true });
-    writeFileSync(join(settings, 'providers.json'), JSON.stringify(payload));
+/** Drive discovery to completion, then read the catalog. */
+async function discovered(overrides: Partial<ProviderConfig> = {}): Promise<ClineProvider> {
+  const p = provider(overrides);
+  p.listModels();
+  // The refresh is kicked off in the background; poll until the ids land.
+  for (let i = 0; i < 200 && p.listModels().length === 0; i++) {
+    await new Promise((r) => setTimeout(r, 5));
   }
+  return p;
+}
 
-  it('returns the last-used provider model exactly as the CLI resolves it', () => {
-    writeProvidersJson({
-      version: 1,
-      lastUsedProvider: 'cline',
-      providers: {
-        cline: { settings: { provider: 'cline', model: 'z-ai/glm-5.3-flash' } },
-        openrouter: { settings: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' } },
-        sapaicore: { settings: { provider: 'sapaicore', model: 'anthropic--claude-3.5-sonnet' } },
-      },
-    });
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
-    const models = readConfiguredClineModels();
-    expect(models).toHaveLength(1);
-    expect(models[0]).toMatchObject({
-      id: 'cline-z-ai/glm-5.3-flash',
-      apiModelId: 'z-ai/glm-5.3-flash',
-      provider: 'cline',
-    });
+describe('ClineProvider availability', () => {
+  it('is a plain API-key provider: no key means no adapter', () => {
+    expect(provider().isAvailable()).toBe(true);
+    expect(provider({ apiKey: '   ' }).isAvailable()).toBe(false);
+    expect(provider({ apiKey: undefined }).isAvailable()).toBe(false);
+    expect(provider({ disabled: true }).isAvailable()).toBe(false);
+    // An authToken is still an accepted credential for this provider.
+    expect(provider({ apiKey: undefined, authToken: 'tok' }).isAvailable()).toBe(true);
   });
 
-  it('does not scrape models from unrelated providers or secret material', () => {
-    writeProvidersJson({
-      lastUsedProvider: 'openrouter',
-      providers: {
-        openrouter: { settings: { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.6' } },
-      },
-    });
-    // Legacy secret-bearing files must never contribute model entries.
-    const data = join(home, '.cline', 'data');
-    mkdirSync(data, { recursive: true });
-    writeFileSync(
-      join(data, 'secrets.json'),
-      JSON.stringify({ actModeApiKeyModelId: 'moonshot/kimi-k2' }),
-    );
-
-    const models = readConfiguredClineModels();
-    expect(models).toHaveLength(1);
-    expect(models[0]?.apiModelId).toBe('anthropic/claude-sonnet-4.6');
+  it('points at Cline\\u2019s real OpenAI-compatible base URL', () => {
+    expect(CLINE_API_BASE_URL).toBe('https://api.cline.bot/api/v1');
   });
 
-  it('falls back to the harness "default" model when nothing is configured', () => {
-    expect(readConfiguredClineModels()).toEqual([
-      expect.objectContaining({ id: 'cline-default', apiModelId: 'default' }),
-    ]);
-  });
-
-  it('falls back to "default" when the last-used provider has no model set', () => {
-    writeProvidersJson({
-      lastUsedProvider: 'cline',
-      providers: { cline: { settings: { provider: 'cline' } } },
-    });
-    expect(readConfiguredClineModels()).toEqual([
-      expect.objectContaining({ id: 'cline-default', apiModelId: 'default' }),
-    ]);
+  it('explains the missing credential instead of guessing a model list', () => {
+    expect(provider({ apiKey: undefined }).getModelDiscoveryError()).toContain('Cline API key');
+    expect(provider().getModelDiscoveryError()).toBeUndefined();
   });
 });
 
-describe('Cline CLI event compatibility', () => {
-  it('maps current agent_event text chunks', () => {
-    const result = parse(makeProvider(), {
-      type: 'agent_event',
-      event: { type: 'content_start', contentType: 'text', text: 'hello' },
-    });
+describe('ClineProvider model discovery', () => {
+  it('reads all three endpoints and publishes the deployment inventory', async () => {
+    const seen = installRoutes({ servedIds: ['anthropic/synthetic-sonnet', 'openai/synthetic'] });
+    const models = (await discovered()).listModels();
 
-    expect(result).toEqual({
-      recognized: true,
-      completed: false,
-      events: [{ type: 'content_delta', content: 'hello' }],
-    });
-  });
-
-  it('maps current tool completion and preserves structured evidence', () => {
-    const result = parse(makeProvider(), {
-      type: 'agent_event',
-      event: {
-        type: 'content_end',
-        contentType: 'tool',
-        toolCallId: 'tool-1',
-        toolName: 'read_file',
-        input: { path: 'README.md' },
-        output: 'contents',
-      },
-    });
-
-    expect(result.recognized).toBe(true);
-    expect(result.events[0]).toMatchObject({
-      type: 'tool_executed',
-      toolCallId: 'tool-1',
-      toolName: 'read_file',
-      toolOutput: 'contents',
-      isError: false,
-    });
-    expect(result.events[0]?.toolInput).toContain('README.md');
-  });
-
-  it('maps current done records to usage and completion', () => {
-    const result = parse(makeProvider(), {
-      type: 'agent_event',
-      event: {
-        type: 'done',
-        usage: { inputTokens: 12, outputTokens: 4 },
-      },
-    });
-
-    expect(result.completed).toBe(true);
-    expect(result.events).toEqual([
-      { type: 'usage_update', tokensIn: 12, tokensOut: 4 },
-      { type: 'complete', finishReason: 'end_turn' },
+    expect(seen).toContain(CATALOG_URL);
+    expect(seen).toContain(RECOMMENDED_URL);
+    expect(seen.some((u) => u === `${CLINE_API_BASE_URL}/models`)).toBe(true);
+    // Every served id is offered, each carrying its real catalog metadata.
+    expect(models.map((m) => m.apiModelId).sort()).toEqual([
+      'anthropic/synthetic-sonnet',
+      'openai/synthetic',
     ]);
   });
 
-  it('keeps legacy cumulative say records compatible', () => {
-    const result = parse(
-      makeProvider(),
-      { type: 'say', say: 'text', text: 'hello world' },
-      'hello ',
-    );
+  it('never attaches a key to the public catalog reads', async () => {
+    const authed: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (authHeader(init)) authed.push(url);
+      if (url === CATALOG_URL) return jsonResponse({ data: [catalogRow()] });
+      if (url === RECOMMENDED_URL) return jsonResponse({ recommended: [], free: [] });
+      return jsonResponse({ object: 'list', data: [{ id: 'anthropic/synthetic-sonnet' }] });
+    }) as typeof fetch;
 
-    expect(result.events).toEqual([{ type: 'content_delta', content: 'world' }]);
+    await discovered();
+    expect(authed.every((u) => !u.includes('/ai/cline/'))).toBe(true);
   });
 
-  it('does not silently accept an unknown protocol frame', () => {
-    const result = parse(makeProvider(), { type: 'future_protocol', payload: {} });
-    expect(result).toEqual({ recognized: false, completed: false, events: [] });
+  it('maps Cline\\u2019s rich catalog onto real per-model metadata', async () => {
+    installRoutes();
+    const [model] = (await discovered()).listModels();
+
+    expect(model).toMatchObject({
+      provider: 'cline',
+      apiModelId: 'anthropic/synthetic-sonnet',
+      name: 'Anthropic: Synthetic Sonnet',
+      contextWindow: 1_000_000,
+      contextVerified: true,
+      maxOutputTokens: 128_000,
+      supportsStreaming: true,
+      // pricing is decimal USD per token; the catalog is USD per million.
+      costPerMInputTokens: 3,
+      costPerMOutputTokens: 15,
+      costPerMInputCached: 0.3,
+    });
+    expect(model!.functionCall).toBe(true);
+  });
+
+  it('reports vision and attachments only from real input modalities', async () => {
+    installRoutes({ catalog: [catalogRow({ architecture: { input_modalities: ['text', 'image'] } })] });
+    const [vision] = (await discovered()).listModels();
+    expect(vision!.vision).toBe(true);
+    expect(vision!.supportsAttachments).toBe(true);
+
+    // A fresh provider so the previous catalog cache cannot leak in.
+    installRoutes({ catalog: [catalogRow({ architecture: { input_modalities: ['text'] } })] });
+    const [textOnly] = (await discovered()).listModels();
+    expect(textOnly!.vision).toBeUndefined();
+  });
+
+  it('leaves the picker empty rather than inventing a list when discovery fails', async () => {
+    globalThis.fetch = (async () => new Response('nope', { status: 500 })) as typeof fetch;
+    const p = provider();
+    p.listModels();
+    await new Promise((r) => setTimeout(r, 40));
+    expect(p.listModels()).toEqual([]);
+  });
+
+  it('re-reads the catalog on a forced refresh', async () => {
+    let catalogReads = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === CATALOG_URL) {
+        catalogReads += 1;
+        return jsonResponse({ data: [catalogRow()] });
+      }
+      if (String(input) === RECOMMENDED_URL) return jsonResponse({ recommended: [], free: [] });
+      return jsonResponse({ object: 'list', data: [{ id: 'anthropic/synthetic-sonnet' }] });
+    }) as typeof fetch;
+
+    const p = await discovered();
+    const before = catalogReads;
+    p.refreshModels(true);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(catalogReads).toBeGreaterThan(before);
+  });
+
+  it('still publishes models when the cosmetic badge endpoint is down', async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === CATALOG_URL) return jsonResponse({ data: [catalogRow()] });
+      if (url === RECOMMENDED_URL) return new Response('down', { status: 503 });
+      return jsonResponse({ object: 'list', data: [{ id: 'anthropic/synthetic-sonnet' }] });
+    }) as typeof fetch;
+
+    expect((await discovered()).listModels()).toHaveLength(1);
+  });
+
+  it('puts Cline\\u2019s recommended models first in the picker', async () => {
+    installRoutes({
+      servedIds: ['zzz/synthetic-last', 'aaa/synthetic-first', 'mmm/synthetic-middle'],
+      recommended: { recommended: [{ id: 'mmm/synthetic-middle' }], free: [] },
+    });
+    const order = (await discovered()).listModels().map((m) => m.apiModelId);
+    expect(order[0]).toBe('mmm/synthetic-middle');
+    // The rest stay alphabetical for a stable list.
+    expect(order.slice(1)).toEqual(['aaa/synthetic-first', 'zzz/synthetic-last']);
+  });
+});
+
+describe('ClineProvider reasoning', () => {
+  const effortModel = Object.keys(CLINE_EFFORT_REASONING_LEVELS)[0]!;
+  const toggleModel = [...CLINE_TOGGLE_REASONING_MODELS][0]!;
+
+  it('uses the exact ladder Cline publishes, in canonical order', async () => {
+    installRoutes({ servedIds: [effortModel], catalog: [catalogRow({ id: effortModel })] });
+    const [model] = (await discovered()).listModels();
+    expect(model!.canReason).toBe(true);
+    expect(model!.reasoningLevels).toEqual([...CLINE_EFFORT_REASONING_LEVELS[effortModel]!]);
+  });
+
+  it('offers on/off for toggle-only models, which have no effort ladder', async () => {
+    installRoutes({
+      servedIds: [toggleModel],
+      catalog: [
+        catalogRow({
+          id: toggleModel,
+          supported_parameters: ['max_tokens', 'reasoning', 'include_reasoning'],
+        }),
+      ],
+    });
+    const [model] = (await discovered()).listModels();
+    expect(model!.canReason).toBe(true);
+    expect(model!.reasoningLevels).toEqual(['off', 'on']);
+  });
+
+  it('shows no reasoning picker for a model with no declared ladder', async () => {
+    installRoutes({
+      servedIds: ['mystery/unknown-model'],
+      catalog: [catalogRow({ id: 'mystery/unknown-model' })],
+    });
+    const [model] = (await discovered()).listModels();
+    // No ladder declared, so the reasoning picker is not shown and no control is
+    // ever sent. `canReason` stays at the shared default of false rather than
+    // being guessed upward from a bare `reasoning` parameter name.
+    expect(model!.reasoningLevels).toBeUndefined();
+    expect(model!.canReason).toBe(false);
+  });
+
+  it('sends reasoning_effort only for a tier the model actually declares', () => {
+    const p = provider();
+    const def = { apiModelId: effortModel } as never;
+    const levels = CLINE_EFFORT_REASONING_LEVELS[effortModel]!;
+    const declared = levels[0]!;
+
+    const ok: Record<string, unknown> = {};
+    (p as never as { applyReasoningControls: Function }).applyReasoningControls(ok, {
+      canReason: true,
+      effort: declared,
+      supported: new Set(levels),
+      modelDef: def,
+      requestModel: effortModel,
+    });
+    expect(ok).toEqual({ reasoning_effort: declared });
+
+    // A tier this model does not declare must never reach the wire.
+    const undeclared = ['none', 'low', 'medium', 'high', 'xhigh', 'max'].find(
+      (l) => !levels.includes(l),
+    )!;
+    const rejected: Record<string, unknown> = {};
+    (p as never as { applyReasoningControls: Function }).applyReasoningControls(rejected, {
+      canReason: true,
+      effort: undeclared,
+      supported: new Set([...levels, undeclared]),
+      modelDef: def,
+      requestModel: effortModel,
+    });
+    expect(rejected).toEqual({});
+  });
+
+  it('maps a toggle model\\u2019s selection onto the boolean include_reasoning control', () => {
+    const p = provider();
+    const def = { apiModelId: toggleModel } as never;
+    const send = (effort: string) => {
+      const params: Record<string, unknown> = {};
+      (p as never as { applyReasoningControls: Function }).applyReasoningControls(params, {
+        canReason: true,
+        effort,
+        supported: new Set(['off', 'on']),
+        modelDef: def,
+        requestModel: toggleModel,
+      });
+      return params;
+    };
+    expect(send('on')).toEqual({ include_reasoning: true });
+    expect(send('off')).toEqual({ include_reasoning: false });
+    // A tier name cannot leak onto a toggle-only model.
+    expect(send('high')).toEqual({});
+  });
+
+  it('never sends a reasoning control for a model with no declared ladder', () => {
+    const p = provider();
+    const params: Record<string, unknown> = {};
+    (p as never as { applyReasoningControls: Function }).applyReasoningControls(params, {
+      canReason: true,
+      effort: 'high',
+      supported: new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']),
+      modelDef: { apiModelId: 'mystery/unknown-model' } as never,
+      requestModel: 'mystery/unknown-model',
+    });
+    expect(params).toEqual({});
+  });
+
+  it('sends the control from the request model id, with no live discovery at all', () => {
+    // Regression: the hook once read the ladder only from `listModels()`, which
+    // is populated asynchronously. On a cold adapter the user's reasoning
+    // selection was therefore dropped even though the model supports it.
+    const p = provider();
+    const params: Record<string, unknown> = {};
+    (p as never as { applyReasoningControls: Function }).applyReasoningControls(params, {
+      canReason: false, // live discovery has not run, so nothing knows this yet
+      effort: 'low',
+      supported: new Set(),
+      modelDef: undefined,
+      requestModel: effortModel,
+    });
+    expect(params).toEqual({ reasoning_effort: 'low' });
+  });
+
+  it('keeps the generated catalog internally consistent', () => {
+    const effortIds = Object.keys(CLINE_EFFORT_REASONING_LEVELS);
+    const toggleIds = [...CLINE_TOGGLE_REASONING_MODELS];
+    expect(effortIds.length).toBeGreaterThan(0);
+    expect(toggleIds.length).toBeGreaterThan(0);
+    // A model has exactly one control; a ladder and a toggle are exclusive.
+    expect(effortIds.filter((id) => CLINE_TOGGLE_REASONING_MODELS.has(id))).toEqual([]);
+    for (const [id, levels] of Object.entries(CLINE_EFFORT_REASONING_LEVELS)) {
+      expect(levels.length).toBeGreaterThan(0);
+      // Levels are ordered cheapest-effort first and never duplicated.
+      expect(new Set(levels).size).toBe(levels.length);
+      expect(levels).toEqual([...levels].sort((a, b) => levels.indexOf(a) - levels.indexOf(b)));
+      expect(id).toMatch(/^[\w.~-]+\/[\w.:~-]+$/);
+    }
+  });
+});
+
+describe('ClineProvider credential verification through the registry', () => {
+  it('verifies against the real catalog when the stored base URL is blank', async () => {
+    // Regression: `baseUrl ?? defaultBase` treated a configured-but-blank
+    // baseUrl — what the Settings UI and the shipped koryphaios.json both
+    // write — as authoritative, so verification answered "Unsupported
+    // provider" for every built-in OpenAI-compatible provider with a known
+    // default URL. A blank value must fall back to the provider's own default.
+    const { ProviderRegistry } = await import('../registry');
+    const seen: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      // Only the inference catalog; the public capability catalog under
+      // /ai/cline/models is a different route and is unauthenticated.
+      if (url === `${CLINE_API_BASE_URL}/models`) {
+        seen.push(url);
+        if (!authHeader(init)) return new Response('{"error":"Unauthorized"}', { status: 401 });
+        return new Response(
+          JSON.stringify({
+            object: 'list',
+            data: [{ id: 'anthropic/synthetic-sonnet', object: 'model', owned_by: 'anthropic' }],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return jsonResponse({ data: [] });
+    }) as typeof fetch;
+
+    for (const baseUrl of ['', '   ', CLINE_API_BASE_URL]) {
+      const registry = new ProviderRegistry({
+        server: { port: 3001, host: '127.0.0.1' },
+        providers: { cline: { name: 'cline', apiKey: 'sk-synthetic-key', baseUrl, disabled: false } },
+      } as never);
+      const result = await registry.verifyConnection('cline');
+      expect(result, `baseUrl=${JSON.stringify(baseUrl)}`).toEqual({ success: true });
+    }
+    // Every request reached Cline's real catalog endpoint — never a bare host
+    // root. Background discovery adds its own call per registry, so assert the
+    // invariant over all of them rather than an exact count.
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+    for (const url of seen) expect(url).toBe(`${CLINE_API_BASE_URL}/models`);
+  });
+});
+
+describe('ClineProvider attribution headers', () => {
+  let seen: Headers | undefined;
+
+  beforeEach(() => {
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seen = new Headers(init?.headers as HeadersInit);
+      return jsonResponse({ object: 'list', data: [] });
+    }) as typeof fetch;
+  });
+
+  it("sends Cline's documented usage-attribution headers", async () => {
+    await discovered();
+    expect(seen?.get('HTTP-Referer')).toBe('https://koryphaios.com');
+    expect(seen?.get('X-Title')).toBe('Koryphaios');
+  });
+
+  it('lets user-configured headers override the defaults', async () => {
+    await discovered({ headers: { 'X-Title': 'My App' } });
+    expect(seen?.get('X-Title')).toBe('My App');
   });
 });

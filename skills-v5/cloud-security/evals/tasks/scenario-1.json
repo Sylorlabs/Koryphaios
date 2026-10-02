@@ -1,0 +1,79 @@
+{
+  "id": "cloud-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Review cloud security for an AWS organization with prod and non-prod accounts. Engineers currently have IAM users with long-lived keys, an EKS workload uses the node role, a cross-account analytics role trusts the whole source account, one S3 bucket policy grants broad read to that role, KMS grants are undocumented, and CloudTrail is account-local. Redesign human federation and emergency access, workload-specific temporary identity, cross-account trust conditions and resource scope, S3/KMS permissions, organization guardrails, public-access posture, and centralized protected audit logs. Show how to verify the effective allow/deny paths with actual IAM/resource-policy analysis and safe test calls. Pod/container privilege itself belongs to infrastructure-security.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://cloud-security/scenario-1",
+    "requirements": [
+      "AWS organization/account/IAM/resource-policy fixture",
+      "EKS workload and node-role identity paths",
+      "S3/KMS cross-account access fixture",
+      "CloudTrail/organization policy controls",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "cloud-security-human-identity-1",
+      "assertion": "Standing human IAM access keys are replaced by federated/temporary access where feasible, root/emergency access is separately protected, and privileged paths are explicitly audited."
+    },
+    {
+      "id": "cloud-security-workload-identity-1",
+      "assertion": "The EKS workload uses a workload-specific role/identity rather than inheriting the broader node role, with only the service actions/resources it needs."
+    },
+    {
+      "id": "cloud-security-cross-account-1",
+      "assertion": "Cross-account role trust and S3/KMS resource permissions are constrained to the intended principal/actions/resources/conditions rather than trusting an entire account plus broad bucket/key access."
+    },
+    {
+      "id": "cloud-security-guardrails-1",
+      "assertion": "Organization/account guardrails and public-access policy are explicit, preventive where appropriate, and tested against a representative prohibited configuration."
+    },
+    {
+      "id": "cloud-security-audit-1",
+      "assertion": "Cloud control-plane and relevant resource-policy changes are centrally logged to a protected destination with evidence that workload/account admins cannot silently erase the primary audit trail."
+    },
+    {
+      "id": "cloud-security-effective-access-1",
+      "assertion": "The review verifies both intended allowed calls and representative cross-account/public/escalation denials using provider policy analysis and/or safe non-production calls."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "cloud-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "organization/IAM map",
+        "effective S3/KMS trust matrix",
+        "guardrail/public exposure policy",
+        "central audit and allow/deny verification"
+      ]
+    },
+    {
+      "id": "cloud-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "account/org identity map",
+    "cross-account IAM/resource/KMS policy",
+    "public/guardrail controls",
+    "central audit evidence",
+    "effective allow/deny tests",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "cloud-security-scenario-1-result",
+    "cloud-security-scenario-1-verification",
+    "cloud-security-scenario-1-paired-evaluation"
+  ]
+}

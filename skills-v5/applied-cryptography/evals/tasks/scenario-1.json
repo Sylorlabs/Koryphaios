@@ -1,0 +1,75 @@
+{
+  "id": "applied-cryptography-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design the cryptography for a versioned encrypted document format. Each document belongs to a tenant and has document ID, format version, content type, and creation sequence. A random data-encryption key is supplied by the key-management layer; the application must choose the AEAD envelope, nonce strategy safe across process restart, concurrent writers, VM snapshot/clone, and key rotation, associated data, serialized fields, key/algorithm identifiers, tamper behavior, and migration from version 1 to future algorithms. Use standard library constructions, never process unauthenticated plaintext as valid content, and define negative cases for nonce reuse, ciphertext/tag tamper, metadata substitution between tenant/document IDs, truncation, wrong key/version, and downgrade. KMS generation/wrapping/rotation is out of scope.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://applied-cryptography/scenario-1",
+    "requirements": [
+      "document envelope fixture with tenant/document/version metadata",
+      "random DEKs supplied externally",
+      "restart/concurrency/snapshot nonce-allocation scenarios",
+      "tampered/substituted/truncated ciphertext corpus",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "applied-cryptography-aead-1",
+      "assertion": "The format uses a standard AEAD construction with explicit algorithm/key identifiers and rejects authentication failure before treating decrypted bytes as trusted content."
+    },
+    {
+      "id": "applied-cryptography-nonce-1",
+      "assertion": "Nonce generation/allocation has an explicit uniqueness argument under each key that covers concurrent writers, restart, cloned/snapshotted state, and key rotation rather than relying on an unqualified random-nonce assumption."
+    },
+    {
+      "id": "applied-cryptography-aad-1",
+      "assertion": "Tenant/document identity, format/version, and other immutable meaning-changing metadata are cryptographically bound through associated data or the authenticated envelope so ciphertext cannot be transplanted between domains."
+    },
+    {
+      "id": "applied-cryptography-serialization-1",
+      "assertion": "The serialized envelope has an unambiguous canonical/versioned field representation and validates lengths/algorithm IDs before cryptographic processing without permitting attacker-selected downgrade."
+    },
+    {
+      "id": "applied-cryptography-migration-1",
+      "assertion": "The design explains how old records are recognized, decrypted, and migrated/re-encrypted under later algorithms/keys while preserving authenticated version semantics."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "applied-cryptography-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "AEAD/envelope design",
+        "nonce uniqueness analysis",
+        "associated-data/domain binding",
+        "tamper/migration cases"
+      ]
+    },
+    {
+      "id": "applied-cryptography-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "security-property/envelope spec",
+    "nonce uniqueness contract",
+    "associated-data mapping",
+    "negative tamper/substitution cases",
+    "migration design",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "applied-cryptography-scenario-1-result",
+    "applied-cryptography-scenario-1-verification",
+    "applied-cryptography-scenario-1-paired-evaluation"
+  ]
+}

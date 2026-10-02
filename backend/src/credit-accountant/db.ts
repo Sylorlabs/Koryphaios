@@ -144,7 +144,7 @@ export function recordUsage(
       Number.isFinite(cacheUsage?.ttftMs) ? Math.max(0, cacheUsage?.ttftMs ?? 0) : null,
       Number.isFinite(cacheUsage?.latencyMs) ? Math.max(0, cacheUsage?.latencyMs ?? 0) : null,
       costUsd,
-      (cacheUsage?.costKnown ?? (costUsd !== 0)) ? 1 : 0,
+      (cacheUsage?.costKnown ?? costUsd !== 0) ? 1 : 0,
     ],
   );
 }
@@ -190,9 +190,12 @@ export function getUsageCostBreakdown(sessionId?: string): UsageCostBreakdownRow
   const suffix = `AND (tokens_in > 0 OR tokens_out > 0)
     GROUP BY session_id, provider, model
     ORDER BY known_cost_usd DESC, provider, model`;
-  const rows = sessionId === undefined
-    ? d.query<UsageCostBreakdownDbRow, []>(`${projection} WHERE 1 = 1 ${suffix}`).all()
-    : d.query<UsageCostBreakdownDbRow, [string]>(`${projection} WHERE session_id = ? ${suffix}`).all(sessionId);
+  const rows =
+    sessionId === undefined
+      ? d.query<UsageCostBreakdownDbRow, []>(`${projection} WHERE 1 = 1 ${suffix}`).all()
+      : d
+          .query<UsageCostBreakdownDbRow, [string]>(`${projection} WHERE session_id = ? ${suffix}`)
+          .all(sessionId);
 
   return rows.map((row) => ({
     sessionId: row.session_id,
@@ -221,18 +224,33 @@ export interface UnknownCostUsageRow {
 export function getUnknownCostUsage(limit = 1_000): UnknownCostUsageRow[] {
   const d = getCreditDb();
   const safeLimit = Math.max(1, Math.min(10_000, Math.floor(limit)));
-  return d.query<{
-      id: number; provider: string; model: string; tokens_in: number; tokens_out: number;
-      cache_read_tokens: number; cache_write_tokens: number;
-    }, [number]>(
+  return d
+    .query<
+      {
+        id: number;
+        provider: string;
+        model: string;
+        tokens_in: number;
+        tokens_out: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+      },
+      [number]
+    >(
       `SELECT id, provider, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
        FROM credit_usage
        WHERE cost_known = 0 AND (tokens_in > 0 OR tokens_out > 0)
        ORDER BY ts DESC LIMIT ?`,
-    ).all(safeLimit).map((row) => ({
-      id: row.id, provider: row.provider, model: row.model,
-      tokensIn: row.tokens_in ?? 0, tokensOut: row.tokens_out ?? 0,
-      cacheReadTokens: row.cache_read_tokens ?? 0, cacheWriteTokens: row.cache_write_tokens ?? 0,
+    )
+    .all(safeLimit)
+    .map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      model: row.model,
+      tokensIn: row.tokens_in ?? 0,
+      tokensOut: row.tokens_out ?? 0,
+      cacheReadTokens: row.cache_read_tokens ?? 0,
+      cacheWriteTokens: row.cache_write_tokens ?? 0,
     }));
 }
 
@@ -322,7 +340,8 @@ export function getPromptCacheUsageSummary(
       cacheWriteTokens: acc.cacheWriteTokens + row.cacheWriteTokens,
       savingsUsd: acc.savingsUsd + row.savingsUsd,
       weightedTtftMs:
-        acc.weightedTtftMs + (row.averageTtftMs ?? 0) * (row.averageTtftMs === null ? 0 : row.requests),
+        acc.weightedTtftMs +
+        (row.averageTtftMs ?? 0) * (row.averageTtftMs === null ? 0 : row.requests),
       weightedLatencyMs:
         acc.weightedLatencyMs +
         (row.averageLatencyMs ?? 0) * (row.averageLatencyMs === null ? 0 : row.requests),

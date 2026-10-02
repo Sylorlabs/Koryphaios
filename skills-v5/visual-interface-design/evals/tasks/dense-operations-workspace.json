@@ -1,0 +1,82 @@
+{
+  "id": "visual-interface-design-full-task-dense-operations-workspace",
+  "prompt": "Redesign the visual system of a mature fraud-operations workspace without changing its information architecture or interaction behavior. Analysts spend hours in dense tables and case detail, the existing component library is inconsistent across teams, risk/status colors are overused, primary actions compete with secondary controls, and generated-looking cards/shadows were added during recent feature work. Use the supplied real content, product identity, tokens, and state inventory to produce an implementation-ready visual direction and representative state set.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://visual-interface-design/dense-operations-workspace",
+    "requirements": [
+      "existing screenshots and component/token inventory",
+      "real dense and sparse content samples",
+      "state and severity inventory",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "operations-visual-brief-grounding",
+      "assertion": "The direction uses supplied fraud-operations content, screenshots, product identity, tokens, and state inventory; it does not invent product evidence or generic card-based content structures."
+    },
+    {
+      "id": "operations-visual-hierarchy",
+      "assertion": "Primary actions, secondary controls, dense table/case information, and risk/status signals have an explicit hierarchy that reduces competition without changing information architecture or interaction behavior."
+    },
+    {
+      "id": "operations-color-token-discipline",
+      "assertion": "Risk/status meaning is not dependent on indiscriminate color reuse, existing tokens are reused or deliberately revised with rationale, and new shadows/cards are not added as generic generated-design defaults."
+    },
+    {
+      "id": "operations-representative-state-set",
+      "assertion": "Verification includes dense and sparse content, focus/selection, normal/status/error states, long/localized content, and applicable viewing/theme conditions instead of only a polished happy-path composition."
+    },
+    {
+      "id": "operations-visual-boundary",
+      "assertion": "The implementation-ready proposal stays within visual-system ownership and records unresolved accessibility/visual tradeoffs; it does not silently redesign workflow, information architecture, or product behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "brief-specific-direction-and-hierarchy",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "visual read grounded in supplied product evidence",
+        "coherent hierarchy and emphasis",
+        "type/spacing/color rationale",
+        "reuse or justified revision of existing tokens",
+        "no fabricated product evidence"
+      ]
+    },
+    {
+      "id": "state-coverage-and-render-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "dense and sparse states",
+        "selection/focus/status/error states",
+        "long or localized content",
+        "light/dark or relevant viewing-condition checks",
+        "anti-generic self-critique tied to the brief",
+        "verification plan or rendered evidence"
+      ]
+    },
+    {
+      "id": "blind-visual-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "brief-specific visual read",
+    "visual hierarchy and token rationale",
+    "representative state matrix",
+    "rendered or faithful-prototype verification",
+    "unresolved visual/accessibility compromises"
+  ],
+  "requiredArtifacts": [
+    "visual-direction-spec",
+    "representative-state-matrix",
+    "paired-experiment-report"
+  ]
+}

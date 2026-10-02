@@ -28,10 +28,9 @@
   import Target from 'lucide-svelte/icons/target';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
-  import ActiveGoals from './ActiveGoals.svelte';
-  import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { formatGoalRuntime, isActiveGoal } from '$lib/utils/goal-actions';
+  import { formatUsd, USD_UNKNOWN } from '$lib/utils/usd';
   import {
     isSessionActionWarningSuppressed,
     suppressSessionActionWarning,
@@ -105,11 +104,7 @@
     onAction?: (action: string) => void | Promise<void>;
   }
 
-  let {
-    currentSessionId = $bindable(''),
-    recentProjects = [],
-    onAction,
-  }: Props = $props();
+  let { currentSessionId = $bindable(''), recentProjects = [], onAction }: Props = $props();
 
   let editingId = $state<string>('');
   let editTitle = $state<string>('');
@@ -130,6 +125,8 @@
   let sessionBilling = $state<Record<string, SessionBillingSummary>>({});
   let sessionBillingDetails = $state<Record<string, SessionBillingSummary | null | undefined>>({});
   let hoveredCostSessionId = $state('');
+  /** Viewport coordinates for the fixed tracked-spend popover. */
+  let costPopoverAnchor = $state<{ left: number; top: number } | null>(null);
   let billingExcludedProviders = $state<string[]>([]);
   let showSubscriptionApiEquivalent = $state(true);
   let sessionBillingTimer: ReturnType<typeof setInterval> | null = null;
@@ -144,7 +141,9 @@
   function loadSidebarBillingPreferences() {
     if (typeof localStorage === 'undefined') return;
     try {
-      const parsed = JSON.parse(localStorage.getItem(SESSION_BILLING_PREFERENCES_STORAGE_KEY) ?? '{}') as {
+      const parsed = JSON.parse(
+        localStorage.getItem(SESSION_BILLING_PREFERENCES_STORAGE_KEY) ?? '{}',
+      ) as {
         excludedProviders?: string[];
         showSubscriptionApiEquivalent?: boolean;
       };
@@ -184,7 +183,11 @@
 
   async function loadSessionBilling() {
     try {
-      const response = await apiFetch(apiUrl(sidebarBillingPath('/api/billing/session-costs')), {}, 3_000);
+      const response = await apiFetch(
+        apiUrl(sidebarBillingPath('/api/billing/session-costs')),
+        {},
+        3_000,
+      );
       if (!response.ok) return;
       const payload = await response.json();
       if (payload?.ok && payload.sessions) sessionBilling = payload.sessions;
@@ -210,21 +213,15 @@
     }
   }
 
-  function formatSessionUsd(value: number | null | undefined): string {
-    if (value == null || !Number.isFinite(value)) return '$?.??';
-    if (value === 0) return '$0.00';
-    return `$${value.toFixed(value >= 1 ? 4 : 6)}`;
-  }
-
   function sessionCostLabel(session: Session): string {
     const summary = sessionBilling[session.id];
     if (summary) {
-      if (!summary.hasMeteredUsage && summary.hasSubscriptionUsage) return '$0.00';
-      if (summary.hasMeteredUsage && !summary.hasKnownCost) return '$?.??';
-      return formatSessionUsd(summary.spendUsd ?? summary.spendCents / 100);
+      if (!summary.hasMeteredUsage && summary.hasSubscriptionUsage) return formatUsd(0);
+      if (summary.hasMeteredUsage && !summary.hasKnownCost) return USD_UNKNOWN;
+      return formatUsd(summary.spendUsd ?? summary.spendCents / 100);
     }
-    if (session.totalCost > 0) return formatSessionUsd(session.totalCost);
-    if ((session.totalTokensIn ?? 0) > 0 || (session.totalTokensOut ?? 0) > 0) return '$?.??';
+    if (session.totalCost > 0) return formatUsd(session.totalCost);
+    if ((session.totalTokensIn ?? 0) > 0 || (session.totalTokensOut ?? 0) > 0) return USD_UNKNOWN;
     return '';
   }
 
@@ -245,8 +242,14 @@
     return () => {
       nowClock.unsubscribe();
       if (sessionBillingTimer) clearInterval(sessionBillingTimer);
-      window.removeEventListener('kory:billing-preferences-changed', handleBillingPreferencesChanged);
-      window.removeEventListener('kory:team-ui-preferences-changed', handleTeamUiPreferencesChanged);
+      window.removeEventListener(
+        'kory:billing-preferences-changed',
+        handleBillingPreferencesChanged,
+      );
+      window.removeEventListener(
+        'kory:team-ui-preferences-changed',
+        handleTeamUiPreferencesChanged,
+      );
     };
   });
 
@@ -286,7 +289,7 @@
 
     for (const session of sessions) {
       const managerStatus = wsStore.getManagerStatusForSession(session.id);
-      const workerStatuses = wsStore.getAgentStatusesForSession?.(session.id) ?? [];
+      const workerStatuses = wsStore.getAgentStatusesForSession(session.id);
       for (const status of [managerStatus, ...workerStatuses]) {
         const category = statusCategory(status);
         if (category) counts[category] += 1;
@@ -350,15 +353,24 @@
     return `${project.sessions.length} ${project.sessions.length === 1 ? 'chat' : 'chats'}`;
   }
 
+  const WORKSPACE_ROOT_KEY = '__workspace_root__';
+
   const projectGroups = $derived.by(() => {
+    const workspaceRoot = projectStore.workspaceRoot;
     const sessionsByProject = new Map<
       string,
-      { label: string; path: string; sessions: Session[]; latestActivity: number }
+      {
+        label: string;
+        path: string;
+        sessions: Session[];
+        latestActivity: number;
+        isWorkspaceRoot?: boolean;
+      }
     >();
 
-    // A workspace is a real tree in the sidebar, so show its immediate project
-    // folders even before they have a chat. This keeps navigation stable and
-    // gives every project a visible place to start its first chat.
+    // Candidate project folders come from the workspace listing, but a folder
+    // with no chat is only reachable through the workspace new-chat screen.
+    // Dumping every empty folder into the sidebar buries the chats that exist.
     for (const project of projectStore.workspaceProjects ?? []) {
       sessionsByProject.set(project.path, {
         label: project.name,
@@ -370,6 +382,26 @@
 
     for (const session of sidebarSessions) {
       const path = session.workingDirectory?.trim() ?? '';
+      // A chat rooted at the workspace itself (or with no working directory)
+      // belongs to the workspace node, not to a synthetic "Workspace root"
+      // folder nested inside it.
+      if (workspaceRoot && (!path || path === workspaceRoot)) {
+        const root = sessionsByProject.get(WORKSPACE_ROOT_KEY);
+        if (root) {
+          root.sessions.push(session);
+          root.latestActivity = Math.max(root.latestActivity, session.updatedAt);
+        } else {
+          sessionsByProject.set(WORKSPACE_ROOT_KEY, {
+            label: '',
+            path: workspaceRoot,
+            sessions: [session],
+            latestActivity: session.updatedAt,
+            isWorkspaceRoot: true,
+          });
+        }
+        continue;
+      }
+
       const key = path || '__workspace__';
       const existing = sessionsByProject.get(key);
       if (existing) {
@@ -379,19 +411,25 @@
       }
 
       const knownProject = projectStore.workspaceProjects?.find((project) => project.path === path);
-      const workspaceLabel = projectStore.workspaceRoot
-        ? projectDisplayName(projectStore.workspaceRoot)
-        : 'Workspace';
+      const workspaceLabel = workspaceRoot ? projectDisplayName(workspaceRoot) : 'Workspace';
       sessionsByProject.set(key, {
-        label:
-          knownProject?.name ||
-          (projectStore.workspaceRoot && path === projectStore.workspaceRoot
-            ? 'Workspace root'
-            : projectDisplayName(path) || workspaceLabel),
+        label: knownProject?.name || projectDisplayName(path) || workspaceLabel,
         path,
         sessions: [session],
         latestActivity: session.updatedAt,
       });
+    }
+
+    // Drop folders that never received a chat, unless the reader is currently
+    // inside one — the selected project must stay reachable.
+    for (const [key, project] of [...sessionsByProject]) {
+      if (
+        !project.isWorkspaceRoot &&
+        project.sessions.length === 0 &&
+        project.path !== projectStore.currentPath
+      ) {
+        sessionsByProject.delete(key);
+      }
     }
 
     return [...sessionsByProject.entries()]
@@ -413,6 +451,16 @@
       });
   });
 
+  /** Project folders under the workspace, excluding the workspace node itself. */
+  const workspaceProjectCount = $derived(
+    projectGroups.filter((project) => !project.isWorkspaceRoot).length,
+  );
+
+  /** Chats attached directly to the workspace node. */
+  const workspaceRootChatCount = $derived.by(
+    () => projectGroups.find((project) => project.isWorkspaceRoot)?.sessions.length ?? 0,
+  );
+
   function toggleProjectGroup(key: string) {
     const next = new Set(collapsedProjectKeys);
     if (next.has(key)) next.delete(key);
@@ -427,6 +475,20 @@
   function isWorkspaceExpanded(): boolean {
     const root = projectStore.workspaceRoot;
     return !root || Boolean(sessionStore.searchQuery.trim()) || collapsedWorkspaceRoot !== root;
+  }
+
+  /** Chats rooted at the workspace are created from the workspace new-chat
+   *  screen (which can target a project folder), never directly from here. */
+  /** Measure the trigger so the fixed popover can sit just below it in
+   *  viewport coordinates instead of being clipped by the sidebar. */
+  function anchorCostPopover(trigger: HTMLElement) {
+    const rect = trigger.getBoundingClientRect();
+    costPopoverAnchor = { left: Math.round(rect.left), top: Math.round(rect.bottom + 4) };
+  }
+
+  function requestWorkspaceNewChat() {
+    if (isGuidedDemo) return;
+    window.dispatchEvent(new CustomEvent('kory:workspace-new-chat'));
   }
 
   function toggleWorkspace() {
@@ -456,10 +518,12 @@
     return labels[status];
   }
 
+  // The per-chat goal chip is a redirect: it opens the chat and hands the goal
+  // to the Goal Mode bubble above the composer, which is where all goal detail
+  // is shown.
   function openSessionGoal(sessionId: string, goalId: string) {
     void selectSession(sessionId);
     goalStore.selectedGoalId = goalId;
-    goalDisplayStore.update({ sidebar: true });
     queueMicrotask(() =>
       window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })),
     );
@@ -668,9 +732,23 @@
   }
 </script>
 
+<!-- The launcher is a role="menu" with no other dismiss affordance than the
+     toggle button, so it has to answer Escape. Deliberately not a document
+     click handler: the sidebar is mounted twice (mobile overlay + desktop
+     nav), and a shared window-level click would let one instance's handler
+     immediately close the menu another instance had just opened. -->
+<svelte:window
+  onkeydown={(event) => {
+    if (launcherOpen && event.key === 'Escape') launcherOpen = false;
+  }}
+/>
+
 <div class="h-full flex flex-col" style="background: var(--color-surface-1);">
+  <!-- relative on the toolbar (not on the "+" button) so the launcher menu is
+       measured against the sidebar, not a 32px button pinned 12px from its
+       right edge. -->
   <div
-    class="sidebar-toolbar flex items-center gap-2 border-b px-3 py-2.5"
+    class="sidebar-toolbar relative flex items-center gap-2 border-b px-3 py-2.5"
     style="border-color: var(--color-border); background: var(--color-surface-1);"
   >
     <div class="relative min-w-0 flex-1">
@@ -705,93 +783,102 @@
           <Plus size={16} />
         {/if}
       </button>
-      {#if launcherOpen}
-        <div
-          class="absolute right-0 top-10 z-[90] w-72 overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-1.5 shadow-2xl"
-          role="menu"
-          aria-label="Create or open"
+    </div>
+    {#if launcherOpen}
+      <div
+        class="launcher-menu absolute z-[90] overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-1.5 shadow-2xl"
+        role="menu"
+        aria-label="Create or open"
+      >
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
+          onclick={() => runLauncherAction('new_session')}
+          role="menuitem"
         >
+          <MessageSquare size={14} /> New Chat
+        </button>
+
+        {#if projectStore.workspaceRoot || recentProjects.length > 0}
+          <div class="my-1 border-t border-[var(--color-border)]"></div>
+          <div
+            class="px-3 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
+          >
+            Recent
+          </div>
+          {#if projectStore.workspaceRoot}
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+              onclick={() =>
+                runLauncherAction(
+                  `select_project:${encodeURIComponent(projectStore.workspaceRoot ?? '')}`,
+                )}
+              role="menuitem"
+              title={projectStore.workspaceRoot}
+            >
+              <FolderOpen size={13} class="shrink-0" />
+              <span class="truncate">{projectDisplayName(projectStore.workspaceRoot)}</span>
+              <span class="ml-auto shrink-0 text-[9px] text-[var(--color-text-muted)]"
+                >workspace</span
+              >
+            </button>
+          {/if}
+          {#each recentProjects.slice(0, 5) as project (project.id)}
+            <button
+              type="button"
+              class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+              onclick={() => runLauncherAction(`open_recent:${project.id}`)}
+              role="menuitem"
+              title={project.path || project.fileName || project.title}
+            >
+              <FolderOpen size={13} class="shrink-0" />
+              <span class="truncate">{project.title}</span>
+            </button>
+          {/each}
+        {/if}
+
+        <div class="my-1 border-t border-[var(--color-border)]"></div>
+        <!-- One column, not two: the menu is only as wide as the sidebar
+             (220-272px), so a two-column grid squeezes "Open Workspace" past
+             its own left edge. -->
+        <div class="flex flex-col gap-0.5">
           <button
             type="button"
-            class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
-            onclick={() => runLauncherAction('new_session')}
-            role="menuitem"
+            class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+            onclick={() => runLauncherAction('open_project_folder')}
+            role="menuitem">Open Project</button
           >
-            <MessageSquare size={14} /> New Chat
-          </button>
-
-          {#if projectStore.workspaceRoot || recentProjects.length > 0}
-            <div class="my-1 border-t border-[var(--color-border)]"></div>
-            <div
-              class="px-3 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]"
-            >
-              Recent
-            </div>
-            {#if projectStore.workspaceRoot}
-              <button
-                type="button"
-                class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-                onclick={() =>
-                  runLauncherAction(
-                    `select_project:${encodeURIComponent(projectStore.workspaceRoot ?? '')}`,
-                  )}
-                role="menuitem"
-                title={projectStore.workspaceRoot}
-              >
-                <FolderOpen size={13} class="shrink-0" />
-                <span class="truncate">{projectDisplayName(projectStore.workspaceRoot)}</span>
-                <span class="ml-auto shrink-0 text-[9px] text-[var(--color-text-muted)]"
-                  >workspace</span
-                >
-              </button>
-            {/if}
-            {#each recentProjects.slice(0, 5) as project (project.id)}
-              <button
-                type="button"
-                class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-                onclick={() => runLauncherAction(`open_recent:${project.id}`)}
-                role="menuitem"
-                title={project.path || project.fileName || project.title}
-              >
-                <FolderOpen size={13} class="shrink-0" />
-                <span class="truncate">{project.title}</span>
-              </button>
-            {/each}
-          {/if}
-
-          <div class="my-1 border-t border-[var(--color-border)]"></div>
-          <div class="grid grid-cols-2 gap-1">
-            <button
-              type="button"
-              class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-              onclick={() => runLauncherAction('open_project_folder')}
-              role="menuitem">Open Project</button
-            >
-            <button
-              type="button"
-              class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-              onclick={() => runLauncherAction('new_project')}
-              role="menuitem">New Project</button
-            >
-            <button
-              type="button"
-              class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-              onclick={() => runLauncherAction('open_workspace')}
-              role="menuitem">Open Workspace</button
-            >
-            <button
-              type="button"
-              class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
-              onclick={() => runLauncherAction('new_workspace')}
-              role="menuitem">New Workspace</button
-            >
-          </div>
+          <button
+            type="button"
+            class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+            onclick={() => runLauncherAction('new_project')}
+            role="menuitem">New Project</button
+          >
+          <button
+            type="button"
+            class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+            onclick={() => runLauncherAction('open_workspace')}
+            role="menuitem">Open Workspace</button
+          >
+          <button
+            type="button"
+            class="rounded-lg px-3 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)]"
+            onclick={() => runLauncherAction('new_workspace')}
+            role="menuitem">New Workspace</button
+          >
         </div>
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 
-  <div class="session-tree flex-1 overflow-y-auto px-2 pb-3 pt-2">
+  <!-- overflow-x-hidden is load-bearing: with only overflow-y-auto the browser
+       computes overflow-x to auto as well, so the tree becomes a horizontal
+       scroll container. The hover overlays below overflow its right edge even
+       at opacity 0, which leaves a scroll range, and any scroll offset shears
+       the leading glyphs of every row off the left edge of the window, where
+       the overflow:hidden ancestors make them unreachable. -->
+  <div class="session-tree flex-1 overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2">
     {#if showTeamSidebarShortcut}
       <button
         type="button"
@@ -893,7 +980,7 @@
         <button
           type="button"
           class="workspace-row flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-          aria-label={`${workspaceExpanded ? 'Collapse' : 'Expand'} workspace ${projectDisplayName(projectStore.workspaceRoot)}. ${projectGroups.length} ${projectGroups.length === 1 ? 'project' : 'projects'}, ${sidebarSessions.length} ${sidebarSessions.length === 1 ? 'chat' : 'chats'}`}
+          aria-label={`${workspaceExpanded ? 'Collapse' : 'Expand'} workspace ${projectDisplayName(projectStore.workspaceRoot)}. ${workspaceProjectCount} ${workspaceProjectCount === 1 ? 'project' : 'projects'}, ${workspaceRootChatCount} ${workspaceRootChatCount === 1 ? 'chat' : 'chats'}`}
           aria-expanded={workspaceExpanded}
           aria-controls="workspace-project-tree"
           onclick={toggleWorkspace}
@@ -915,8 +1002,21 @@
             {projectDisplayName(projectStore.workspaceRoot)}
           </span>
           <span class="shrink-0 text-[9px]" style="color: var(--color-text-muted);">
-            {projectGroups.length}
+            {workspaceProjectCount}
           </span>
+        </button>
+        <button
+          type="button"
+          class="workspace-new-chat flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--color-surface-2)]"
+          style="color: var(--color-text-muted);"
+          disabled={isGuidedDemo}
+          onclick={requestWorkspaceNewChat}
+          aria-label={`New chat in workspace ${projectDisplayName(projectStore.workspaceRoot)}`}
+          title={isGuidedDemo
+            ? 'Sample sessions are read-only in the guided demo'
+            : `New chat in workspace ${projectDisplayName(projectStore.workspaceRoot)}`}
+        >
+          <Plus size={12} />
         </button>
       </div>
     {/if}
@@ -926,407 +1026,474 @@
         id={projectStore.workspaceRoot ? 'workspace-project-tree' : undefined}
         class:workspace-children={Boolean(projectStore.workspaceRoot)}
       >
-    {#each projectGroups as project (project.key)}
-      {@const expanded = isProjectGroupExpanded(project.key)}
-      {@const statusTotal = project.statusSlices.reduce((sum, slice) => sum + slice.count, 0)}
-      <section class="project-group mb-1" aria-label={`${project.label} chats`}>
-        <div class="project-header flex items-center gap-0.5">
-          <button
-            type="button"
-            class="project-row flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
-            class:is-current-project={project.path === projectStore.currentPath}
-            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${project.label}. ${projectStatusText(project)}`}
-            aria-expanded={expanded}
-            aria-controls={`project-chats-${project.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-            onclick={() => toggleProjectGroup(project.key)}
+        {#each projectGroups as project (project.key)}
+          {@const expanded = isProjectGroupExpanded(project.key)}
+          {@const statusTotal = project.statusSlices.reduce((sum, slice) => sum + slice.count, 0)}
+          <!-- Workspace-root chats hang off the workspace node itself, so they get a
+           plain labelled group rather than a nested "Workspace root" folder. -->
+          <section
+            class="project-group mb-1"
+            role={project.isWorkspaceRoot ? 'group' : undefined}
+            aria-label={project.isWorkspaceRoot ? 'workspace chats' : `${project.label} chats`}
           >
-            <span
-              class="flex h-4 w-4 shrink-0 items-center justify-center"
-              style="color: var(--color-text-muted);"
-            >
-              {#if expanded}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
-            </span>
-            <span class="project-folder-icon flex h-4 w-4 shrink-0 items-center justify-center">
-              <FolderOpen size={14} />
-            </span>
-            <span
-              class="min-w-0 flex-1 truncate text-xs font-semibold"
-              style="color: var(--color-text-primary);"
-            >
-              {project.label}
-            </span>
-            {#if statusTotal > 0}
-              <span
-                class="project-status-indicator relative inline-flex shrink-0 items-center justify-center"
-                aria-label={project.statusSlices
-                  .map((slice) => `${slice.count} ${slice.label.toLowerCase()}`)
-                  .join(', ')}
-              >
-                <span class="status-orb" aria-hidden="true">
-                  <svg viewBox="0 0 32 32">
-                    {#each statusPieWedges(project.statusSlices) as wedge (wedge.color)}
-                      <path d={wedge.d} fill={wedge.color} stroke={wedge.color} stroke-width="0.6" />
-                    {/each}
-                    {#if project.statusSlices.length === 0}
-                      <circle cx="16" cy="16" r="16" fill="var(--color-surface-4)" />
-                    {/if}
-                  </svg>
-                </span>
-                <span class="status-popover" role="tooltip">
-                  <span class="status-popover-heading">
-                    <span class="status-pie" aria-hidden="true">
-                      <svg viewBox="0 0 32 32">
-                        {#each statusPieWedges(project.statusSlices) as wedge (wedge.color)}
-                          <path d={wedge.d} fill={wedge.color} stroke={wedge.color} stroke-width="0.6" />
-                        {/each}
-                        {#if project.statusSlices.length === 0}
-                          <circle cx="16" cy="16" r="16" fill="var(--color-surface-4)" />
-                        {/if}
-                      </svg>
-                    </span>
-                    <span>
-                      <strong>{statusTotal}</strong>
-                      <small>{statusTotal === 1 ? 'agent tracked' : 'agents tracked'}</small>
-                    </span>
-                  </span>
-                  <span class="status-legend">
-                    {#each project.statusSlices as slice (slice.key)}
-                      <span class="status-legend-row">
-                        <span class="status-swatch" style:background={slice.color}></span>
-                        <span class="status-legend-label">{slice.label}</span>
-                        <strong>{slice.count}</strong>
-                        <small>{Math.round((slice.count / statusTotal) * 100)}%</small>
-                      </span>
-                    {/each}
-                  </span>
-                </span>
-              </span>
-            {/if}
-          </button>
-          <button
-            type="button"
-            class="project-new-chat flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
-            style="color: var(--color-text-muted);"
-            disabled={creating || isGuidedDemo}
-            onclick={(event) => handleCreateProjectSession(event, project.path)}
-            aria-label={`New chat in ${project.label}`}
-            title={isGuidedDemo
-              ? 'Sample sessions are read-only in the guided demo'
-              : `New chat in ${project.label}`}
-          >
-            {#if creating}
-              <LoaderCircle size={11} class="animate-spin" />
-            {:else}
-              <Plus size={12} />
-            {/if}
-          </button>
-        </div>
-
-        {#if expanded}
-          <div
-            id={`project-chats-${project.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
-            class="project-children"
-          >
-            {#each project.sessions as session (session.id)}
-              {@const managerStatus = wsStore.getManagerStatusForSession(session.id)}
-              {@const sessionGoals = goalsForSession(session.id)}
-              {@const primaryGoal = sessionGoals[0]}
-              {@const needsApproval = wsStore.pendingPermissions.some(
-                (permission) => permission.sessionId === session.id,
-              )}
-              <div
-                class="session-item session-row group relative mx-0.5 flex min-h-12 items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition-colors"
-                class:active-session={sessionStore.activeSessionId === session.id &&
-                  !collaborationStore.activeJoinedSession}
-              >
-                {#if editingId === session.id}
-                  <div class="relative z-[2] flex min-w-0 flex-1 flex-col gap-0.5">
-                    <div class="flex items-center gap-1">
-                      <input
-                        type="text"
-                        class="input h-7 min-w-0 flex-1 text-xs {editError ? 'border-red-500' : ''}"
-                        bind:value={editTitle}
-                        maxlength={80}
-                        oninput={() => {
-                          if (editTitle.trim()) editError = false;
-                        }}
-                        onclick={(event) => event.stopPropagation()}
-                        ondblclick={(event) => event.stopPropagation()}
-                        onkeydown={(event) => {
-                          event.stopPropagation();
-                          if (event.key === 'Enter') saveRename(session.id);
-                          if (event.key === 'Escape') cancelRename();
-                        }}
-                      />
-                      <button
-                        type="button"
-                        class="rounded p-1"
-                        style="color: var(--color-success);"
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          saveRename(session.id);
-                        }}
-                        aria-label="Save rename"
-                      >
-                        <Check size={12} />
-                      </button>
-                      <button
-                        type="button"
-                        class="rounded p-1"
-                        style="color: var(--color-text-muted);"
-                        onclick={(event) => {
-                          event.stopPropagation();
-                          cancelRename();
-                        }}
-                        aria-label="Cancel rename"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                    <span
-                      class="px-0.5 text-[9px]"
-                      style="color: {editError ? 'var(--color-error)' : 'var(--color-text-muted)'};"
-                    >
-                      {editError ? 'Name cannot be empty' : `${editTitle.length}/80`}
-                    </span>
-                  </div>
-                {:else}
-                  <button
-                    type="button"
-                    class="absolute inset-0 z-0 rounded-lg bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
-                    aria-label={sessionStore.activeSessionId === session.id &&
-                    !collaborationStore.activeJoinedSession
-                      ? `Open session ${session.title}, currently open`
-                      : `Open session ${session.title}`}
-                    aria-current={sessionStore.activeSessionId === session.id &&
-                    !collaborationStore.activeJoinedSession
-                      ? 'page'
-                      : undefined}
-                    onclick={() => selectSession(session.id)}
-                    ondblclick={() => !isGuidedDemo && startRename(session.id, session.title)}
-                  ></button>
-
-                  <div
-                    class="status-cell pointer-events-none relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
-                    class:is-running={managerStatus !== 'idle'}
-                    title={managerStatus !== 'idle'
-                      ? statusLabel(managerStatus)
-                      : primaryGoal
-                        ? 'Assigned to an active goal'
-                        : 'Chat is idle'}
+            {#if !project.isWorkspaceRoot}
+              <div class="project-header flex items-center gap-0.5">
+                <button
+                  type="button"
+                  class="project-row flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                  class:is-current-project={project.path === projectStore.currentPath}
+                  aria-label={`${expanded ? 'Collapse' : 'Expand'} ${project.label}. ${projectStatusText(project)}`}
+                  aria-expanded={expanded}
+                  aria-controls={`project-chats-${project.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+                  onclick={() => toggleProjectGroup(project.key)}
+                >
+                  <span
+                    class="flex h-4 w-4 shrink-0 items-center justify-center"
+                    style="color: var(--color-text-muted);"
                   >
-                    {#if managerStatus !== 'idle'}
-                      <AnimatedStatusIcon
-                        status={managerStatus}
-                        size={15}
-                        isManager={true}
-                        phase={sessionStore.activeSessionId === session.id ? wsStore.koryPhase : ''}
-                      />
-                    {:else if primaryGoal}
-                      <Target size={12} style="color: var(--color-accent);" />
-                    {:else}
-                      <MessageSquare size={12} style="color: var(--color-text-muted);" />
-                    {/if}
-                  </div>
-
-                  <div class="session-copy pointer-events-none relative z-[1] min-w-0 flex-1">
-                    <div class="flex min-w-0 items-center gap-1.5">
-                      <span
-                        class="min-w-0 flex-1 truncate text-xs font-medium"
-                        style="color: var(--color-text-primary);"
-                      >
-                        {session.title}
-                      </span>
-                      {#if needsApproval && sessionStore.activeSessionId !== session.id}
-                        <span
-                          class="approval-badge inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[9px] font-semibold"
-                          title="An agent in this chat is waiting for your approval"
-                        >
-                          <ShieldAlert size={9} />Approve
-                        </span>
-                      {/if}
-                    </div>
-                    <div
-                      class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px]"
-                      style="color: var(--color-text-muted);"
-                    >
-                      <span class="shrink-0">{formatTime(session.updatedAt)}</span>
-                      <span aria-hidden="true">·</span>
-                      <span class="shrink-0">{session.messageCount} msgs</span>
-                      <span aria-hidden="true">·</span>
-                      {#if sessionCostLabel(session)}
+                    {#if expanded}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}
+                  </span>
+                  <span
+                    class="project-folder-icon flex h-4 w-4 shrink-0 items-center justify-center"
+                  >
+                    <FolderOpen size={14} />
+                  </span>
+                  <span
+                    class="min-w-0 flex-1 truncate text-xs font-semibold"
+                    style="color: var(--color-text-primary);"
+                  >
+                    {project.label}
+                  </span>
+                  {#if statusTotal > 0}
                     <span
-                      class="pointer-events-auto relative z-20 shrink-0"
-                      role="group"
-                      onmouseenter={() => {
-                        hoveredCostSessionId = session.id;
-                        void loadSessionBillingDetail(session.id);
-                      }}
-                      onmouseleave={() => (hoveredCostSessionId = '')}
+                      class="project-status-indicator relative inline-flex shrink-0 items-center justify-center"
+                      aria-label={project.statusSlices
+                        .map((slice) => `${slice.count} ${slice.label.toLowerCase()}`)
+                        .join(', ')}
                     >
+                      <span class="status-orb" aria-hidden="true">
+                        <svg viewBox="0 0 32 32">
+                          {#each statusPieWedges(project.statusSlices) as wedge (wedge.color)}
+                            <path
+                              d={wedge.d}
+                              fill={wedge.color}
+                              stroke={wedge.color}
+                              stroke-width="0.6"
+                            />
+                          {/each}
+                          {#if project.statusSlices.length === 0}
+                            <circle cx="16" cy="16" r="16" fill="var(--color-surface-4)" />
+                          {/if}
+                        </svg>
+                      </span>
+                      <span class="status-popover" role="tooltip">
+                        <span class="status-popover-heading">
+                          <span class="status-pie" aria-hidden="true">
+                            <svg viewBox="0 0 32 32">
+                              {#each statusPieWedges(project.statusSlices) as wedge (wedge.color)}
+                                <path
+                                  d={wedge.d}
+                                  fill={wedge.color}
+                                  stroke={wedge.color}
+                                  stroke-width="0.6"
+                                />
+                              {/each}
+                              {#if project.statusSlices.length === 0}
+                                <circle cx="16" cy="16" r="16" fill="var(--color-surface-4)" />
+                              {/if}
+                            </svg>
+                          </span>
+                          <span>
+                            <strong>{statusTotal}</strong>
+                            <small>{statusTotal === 1 ? 'agent tracked' : 'agents tracked'}</small>
+                          </span>
+                        </span>
+                        <span class="status-legend">
+                          {#each project.statusSlices as slice (slice.key)}
+                            <span class="status-legend-row">
+                              <span class="status-swatch" style:background={slice.color}></span>
+                              <span class="status-legend-label">{slice.label}</span>
+                              <strong>{slice.count}</strong>
+                              <small>{Math.round((slice.count / statusTotal) * 100)}%</small>
+                            </span>
+                          {/each}
+                        </span>
+                      </span>
+                    </span>
+                  {/if}
+                </button>
+                <button
+                  type="button"
+                  class="project-new-chat flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
+                  style="color: var(--color-text-muted);"
+                  disabled={creating || isGuidedDemo}
+                  onclick={(event) => handleCreateProjectSession(event, project.path)}
+                  aria-label={`New chat in ${project.label}`}
+                  title={isGuidedDemo
+                    ? 'Sample sessions are read-only in the guided demo'
+                    : `New chat in ${project.label}`}
+                >
+                  {#if creating}
+                    <LoaderCircle size={11} class="animate-spin" />
+                  {:else}
+                    <Plus size={12} />
+                  {/if}
+                </button>
+              </div>
+            {/if}
+
+            {#if project.isWorkspaceRoot || expanded}
+              <div
+                id={`project-chats-${project.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
+                class="project-children"
+              >
+                {#each project.sessions as session (session.id)}
+                  {@const managerStatus = wsStore.getManagerStatusForSession(session.id)}
+                  {@const sessionGoals = goalsForSession(session.id)}
+                  {@const primaryGoal = sessionGoals[0]}
+                  {@const needsApproval = wsStore.pendingPermissions.some(
+                    (permission) => permission.sessionId === session.id,
+                  )}
+                  <div
+                    class="session-item session-row group relative mx-0.5 flex min-h-12 items-center gap-2 rounded-lg border border-transparent px-1.5 py-1.5 transition-colors"
+                    class:active-session={sessionStore.activeSessionId === session.id &&
+                      !collaborationStore.activeJoinedSession}
+                  >
+                    {#if editingId === session.id}
+                      <div class="relative z-[2] flex min-w-0 flex-1 flex-col gap-0.5">
+                        <div class="flex items-center gap-1">
+                          <input
+                            type="text"
+                            class="input h-7 min-w-0 flex-1 text-xs {editError
+                              ? 'border-red-500'
+                              : ''}"
+                            bind:value={editTitle}
+                            maxlength={80}
+                            oninput={() => {
+                              if (editTitle.trim()) editError = false;
+                            }}
+                            onclick={(event) => event.stopPropagation()}
+                            ondblclick={(event) => event.stopPropagation()}
+                            onkeydown={(event) => {
+                              event.stopPropagation();
+                              if (event.key === 'Enter') saveRename(session.id);
+                              if (event.key === 'Escape') cancelRename();
+                            }}
+                          />
+                          <button
+                            type="button"
+                            class="rounded p-1"
+                            style="color: var(--color-success);"
+                            onclick={(event) => {
+                              event.stopPropagation();
+                              saveRename(session.id);
+                            }}
+                            aria-label="Save rename"
+                          >
+                            <Check size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            class="rounded p-1"
+                            style="color: var(--color-text-muted);"
+                            onclick={(event) => {
+                              event.stopPropagation();
+                              cancelRename();
+                            }}
+                            aria-label="Cancel rename"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                        <span
+                          class="px-0.5 text-[9px]"
+                          style="color: {editError
+                            ? 'var(--color-error)'
+                            : 'var(--color-text-muted)'};"
+                        >
+                          {editError ? 'Name cannot be empty' : `${editTitle.length}/80`}
+                        </span>
+                      </div>
+                    {:else}
                       <button
                         type="button"
-                        class="rounded px-0.5 font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-secondary)]"
-                        style="font-size: var(--text-xs); color: var(--color-text-muted);"
-                        onclick={(event) => event.stopPropagation()}
-                        aria-label={`Billing detail for ${session.title}`}
+                        class="absolute inset-0 z-0 rounded-lg bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
+                        aria-label={sessionStore.activeSessionId === session.id &&
+                        !collaborationStore.activeJoinedSession
+                          ? `Open session ${session.title}, currently open`
+                          : `Open session ${session.title}`}
+                        aria-current={sessionStore.activeSessionId === session.id &&
+                        !collaborationStore.activeJoinedSession
+                          ? 'page'
+                          : undefined}
+                        onclick={() => selectSession(session.id)}
+                        ondblclick={() => !isGuidedDemo && startRename(session.id, session.title)}
+                      ></button>
+
+                      <div
+                        class="status-cell pointer-events-none relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                        class:is-running={managerStatus !== 'idle'}
+                        title={managerStatus !== 'idle'
+                          ? statusLabel(managerStatus)
+                          : primaryGoal
+                            ? 'Assigned to an active goal'
+                            : 'Chat is idle'}
                       >
-                        {sessionCostLabel(session)}
-                      </button>
-                      {#if hoveredCostSessionId === session.id}
-                        <div class="absolute left-0 top-full z-[80] mt-1 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-left shadow-2xl" role="tooltip">
-                          {#if sessionBillingDetails[session.id] === undefined}
-                            <div class="text-[10px] text-[var(--color-text-muted)]">Loading billing detail…</div>
-                          {:else if sessionBillingDetails[session.id] === null}
-                            <div class="text-[10px] text-[var(--color-text-muted)]">Billing detail unavailable</div>
-                          {:else}
-                            {@const detail = sessionBillingDetails[session.id]}
-                            <div class="mb-2 flex items-start justify-between gap-3">
-                              <div>
-                                <div class="text-[10px] font-semibold text-[var(--color-text-primary)]">Tracked spend</div>
-                                {#if detail?.pricingIncomplete}<div class="text-[9px] text-[var(--color-warning)]">Pricing incomplete</div>{/if}
-                              </div>
-                              <div class="font-mono text-[11px] font-bold text-[var(--color-text-primary)]">
-                                {detail?.hasMeteredUsage && !detail?.hasKnownCost ? '$?.??' : formatSessionUsd(detail?.spendUsd ?? 0)}
-                              </div>
-                            </div>
-                            <div class="space-y-2">
-                              {#each detail?.providers ?? [] as provider (provider.name)}
-                                <div>
-                                  <div class="flex items-center justify-between gap-2 text-[10px]">
-                                    <span class="font-semibold text-[var(--color-text-secondary)]">{provider.name}</span>
-                                    <span class="font-mono text-[var(--color-text-primary)]">
-                                      {provider.subscription
-                                        ? showSubscriptionApiEquivalent && provider.apiEquivalentUsd != null
-                                          ? `API eq ${formatSessionUsd(provider.apiEquivalentUsd)}`
-                                          : 'Subscription'
-                                        : provider.hasKnownCost
-                                          ? formatSessionUsd(provider.spendUsd ?? 0)
-                                          : '$?.??'}
-                                    </span>
-                                  </div>
-                                  {#each provider.models ?? [] as model (model.model)}
-                                    <div class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[9px] text-[var(--color-text-muted)]">
-                                      <span class="min-w-0 truncate font-mono">{model.model}</span>
-                                      <span class="shrink-0 font-mono">
-                                        {model.subscription
-                                          ? showSubscriptionApiEquivalent && model.apiEquivalentUsd != null
-                                            ? `API eq ${formatSessionUsd(model.apiEquivalentUsd)}`
-                                            : 'subscription'
-                                          : model.hasKnownCost
-                                            ? formatSessionUsd(model.spendUsd ?? 0)
-                                            : '$?.??'}
-                                      </span>
-                                    </div>
-                                  {/each}
-                                </div>
-                              {/each}
-                            </div>
+                        {#if managerStatus !== 'idle'}
+                          <AnimatedStatusIcon
+                            status={managerStatus}
+                            size={15}
+                            isManager={true}
+                            phase={sessionStore.activeSessionId === session.id
+                              ? wsStore.koryPhase
+                              : ''}
+                          />
+                        {:else if primaryGoal}
+                          <Target size={12} style="color: var(--color-accent);" />
+                        {:else}
+                          <MessageSquare size={12} style="color: var(--color-text-muted);" />
+                        {/if}
+                      </div>
+
+                      <div class="session-copy pointer-events-none relative z-[1] min-w-0 flex-1">
+                        <div class="flex min-w-0 items-center gap-1.5">
+                          <span
+                            class="min-w-0 flex-1 truncate text-xs font-medium"
+                            style="color: var(--color-text-primary);"
+                          >
+                            {session.title}
+                          </span>
+                          {#if needsApproval && sessionStore.activeSessionId !== session.id}
+                            <span
+                              class="approval-badge inline-flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[9px] font-semibold"
+                              title="An agent in this chat is waiting for your approval"
+                            >
+                              <ShieldAlert size={9} />Approve
+                            </span>
                           {/if}
                         </div>
-                      {/if}
-                    </span>
-                  {/if}
-                      {#if primaryGoal}
-                        <span aria-hidden="true">·</span>
-                        <button
-                          type="button"
-                          class="pointer-events-auto relative z-10 inline-flex min-w-0 items-center gap-1 truncate rounded px-1 py-0.5 font-semibold"
-                          style="color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent);"
-                          title={sessionGoals.map((goal) => goal.objective).join('\n')}
-                          aria-label={`${sessionGoals.length > 1 ? `${sessionGoals.length} goals assigned to this chat` : `Goal ${primaryGoal.status}: ${primaryGoal.objective}`}. Active time ${formatGoalRuntime(primaryGoal, goalClock)}`}
-                          onclick={(event) => {
-                            event.stopPropagation();
-                            openSessionGoal(session.id, primaryGoal.id);
-                          }}
+                        <!-- Meta row packs price, message count and timestamp into a
+                             single tight left-aligned group so no width is wasted. -->
+                        <div
+                          class="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px]"
+                          style="color: var(--color-text-muted);"
                         >
-                          <Target size={8} class="shrink-0" />
-                          <span class="truncate">
-                            {sessionGoals.length > 1
-                              ? `${sessionGoals.length} goals`
-                              : primaryGoal.status === 'blocked'
-                                ? 'blocked'
-                                : primaryGoal.status === 'paused'
-                                  ? 'paused'
-                                  : `${goalProgress(primaryGoal)}%`}
-                          </span>
-                        </button>
-                      {/if}
-                    </div>
-                  </div>
-
-                  {#if !isGuidedDemo}
-                    <div
-                      class="session-actions pointer-events-auto absolute right-1 z-10 flex items-center gap-0.5 rounded-md p-0.5"
-                    >
-                      <span class="session-action-wrap">
-                        <button
-                          type="button"
-                          class="session-action"
-                          onclick={(event) => {
-                            event.stopPropagation();
-                            startRename(session.id, session.title);
-                          }}
-                          ondblclick={(event) => event.stopPropagation()}
-                          aria-label="Rename session"
-                          aria-describedby={`rename-session-${session.id}-tooltip`}
-                        >
-                          <Pencil size={11} />
-                        </button>
-                        <span
-                          id={`rename-session-${session.id}-tooltip`}
-                          class="session-action-tooltip"
-                          role="tooltip">Rename</span
-                        >
-                      </span>
-                      <span class="session-action-wrap">
-                        <button
-                          type="button"
-                          class="session-action"
-                          disabled={archivingId === session.id}
-                          onclick={(event) => handleArchive(event, session.id)}
-                          ondblclick={(event) => event.stopPropagation()}
-                          aria-label="Archive chat"
-                          aria-describedby={`archive-session-${session.id}-tooltip`}
-                        >
-                          {#if archivingId === session.id}
-                            <LoaderCircle size={11} class="animate-spin" />
-                          {:else}
-                            <Archive size={11} />
+                          {#if sessionCostLabel(session)}
+                            <span
+                              class="pointer-events-auto relative z-20 shrink-0"
+                              role="group"
+                              onmouseenter={(event) => {
+                                hoveredCostSessionId = session.id;
+                                anchorCostPopover(event.currentTarget as HTMLElement);
+                                void loadSessionBillingDetail(session.id);
+                              }}
+                              onmouseleave={() => {
+                                hoveredCostSessionId = '';
+                                costPopoverAnchor = null;
+                              }}
+                            >
+                              <button
+                                type="button"
+                                class="rounded px-0.5 font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-secondary)]"
+                                style="font-size: var(--text-xs); color: var(--color-text-muted);"
+                                onclick={(event) => event.stopPropagation()}
+                                aria-label={`Billing detail for ${session.title}`}
+                              >
+                                {sessionCostLabel(session)}
+                              </button>
+                              {#if hoveredCostSessionId === session.id}
+                                <!-- Viewport-anchored: the sidebar is a scroll container, so an
+                                 absolutely positioned panel overflowed it and was clipped. -->
+                                <div
+                                  class="cost-billing-popover fixed z-[80] w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-left shadow-2xl"
+                                  role="tooltip"
+                                  style="left: {costPopoverAnchor?.left ??
+                                    0}px; top: {costPopoverAnchor?.top ?? 0}px;"
+                                >
+                                  {#if sessionBillingDetails[session.id] === undefined}
+                                    <div class="text-[10px] text-[var(--color-text-muted)]">
+                                      Loading billing detail…
+                                    </div>
+                                  {:else if sessionBillingDetails[session.id] === null}
+                                    <div class="text-[10px] text-[var(--color-text-muted)]">
+                                      Billing detail unavailable
+                                    </div>
+                                  {:else}
+                                    {@const detail = sessionBillingDetails[session.id]}
+                                    <div class="mb-2 flex items-start justify-between gap-3">
+                                      <div>
+                                        <div
+                                          class="text-[10px] font-semibold text-[var(--color-text-primary)]"
+                                        >
+                                          Tracked spend
+                                        </div>
+                                        {#if detail?.pricingIncomplete}<div
+                                            class="text-[9px] text-[var(--color-warning)]"
+                                          >
+                                            Pricing incomplete
+                                          </div>{/if}
+                                      </div>
+                                      <div
+                                        class="font-mono text-[11px] font-bold text-[var(--color-text-primary)]"
+                                      >
+                                        {detail?.hasMeteredUsage && !detail?.hasKnownCost
+                                          ? USD_UNKNOWN
+                                          : formatUsd(detail?.spendUsd ?? 0)}
+                                      </div>
+                                    </div>
+                                    <div class="space-y-2">
+                                      {#each detail?.providers ?? [] as provider (provider.name)}
+                                        <div>
+                                          <div
+                                            class="flex items-center justify-between gap-2 text-[10px]"
+                                          >
+                                            <span
+                                              class="font-semibold text-[var(--color-text-secondary)]"
+                                              >{provider.name}</span
+                                            >
+                                            <span
+                                              class="font-mono text-[var(--color-text-primary)]"
+                                            >
+                                              {provider.subscription
+                                                ? showSubscriptionApiEquivalent &&
+                                                  provider.apiEquivalentUsd != null
+                                                  ? `API eq ${formatUsd(provider.apiEquivalentUsd)}`
+                                                  : 'Subscription'
+                                                : provider.hasKnownCost
+                                                  ? formatUsd(provider.spendUsd ?? 0)
+                                                  : USD_UNKNOWN}
+                                            </span>
+                                          </div>
+                                          {#each provider.models ?? [] as model (model.model)}
+                                            <div
+                                              class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[9px] text-[var(--color-text-muted)]"
+                                            >
+                                              <span class="min-w-0 truncate font-mono"
+                                                >{model.model}</span
+                                              >
+                                              <span class="shrink-0 font-mono">
+                                                {model.subscription
+                                                  ? showSubscriptionApiEquivalent &&
+                                                    model.apiEquivalentUsd != null
+                                                    ? `API eq ${formatUsd(model.apiEquivalentUsd)}`
+                                                    : 'subscription'
+                                                  : model.hasKnownCost
+                                                    ? formatUsd(model.spendUsd ?? 0)
+                                                    : USD_UNKNOWN}
+                                              </span>
+                                            </div>
+                                          {/each}
+                                        </div>
+                                      {/each}
+                                    </div>
+                                  {/if}
+                                </div>
+                              {/if}
+                            </span>
                           {/if}
-                        </button>
-                        <span
-                          id={`archive-session-${session.id}-tooltip`}
-                          class="session-action-tooltip"
-                          role="tooltip">Archive chat</span
+                          {#if primaryGoal}
+                            <button
+                              type="button"
+                              class="pointer-events-auto relative z-10 inline-flex min-w-0 shrink-0 items-center gap-1 truncate rounded px-1 py-0.5 font-semibold"
+                              style="color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 12%, transparent);"
+                              title={sessionGoals.map((goal) => goal.objective).join('\n')}
+                              aria-label={`${sessionGoals.length > 1 ? `${sessionGoals.length} goals assigned to this chat` : `Goal ${primaryGoal.status}: ${primaryGoal.objective}`}. Active time ${formatGoalRuntime(primaryGoal, goalClock)}`}
+                              onclick={(event) => {
+                                event.stopPropagation();
+                                openSessionGoal(session.id, primaryGoal.id);
+                              }}
+                            >
+                              <Target size={8} class="shrink-0" />
+                              <span class="truncate">
+                                {sessionGoals.length > 1
+                                  ? `${sessionGoals.length} goals`
+                                  : primaryGoal.status === 'blocked'
+                                    ? 'blocked'
+                                    : primaryGoal.status === 'paused'
+                                      ? 'paused'
+                                      : `${goalProgress(primaryGoal)}%`}
+                              </span>
+                            </button>
+                          {/if}
+                          <span class="min-w-0 shrink-0 truncate"
+                            >{session.messageCount} msgs</span
+                          >
+                          <span class="shrink-0 tabular-nums">{formatTime(session.updatedAt)}</span>
+                        </div>
+                      </div>
+
+                      {#if !isGuidedDemo}
+                        <div
+                          class="session-actions pointer-events-auto absolute right-1 z-10 flex items-center gap-0.5 rounded-md p-0.5"
                         >
-                      </span>
-                      <span class="session-action-wrap">
-                        <button
-                          type="button"
-                          class="session-action session-action-danger"
-                          onclick={(event) => confirmDelete(event, session.id)}
-                          ondblclick={(event) => event.stopPropagation()}
-                          aria-label="Delete session"
-                          aria-describedby={`delete-session-${session.id}-tooltip`}
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                        <span
-                          id={`delete-session-${session.id}-tooltip`}
-                          class="session-action-tooltip"
-                          role="tooltip">Delete · Shift-click skips confirmation</span
-                        >
-                      </span>
-                    </div>
-                  {/if}
-                {/if}
+                          <span class="session-action-wrap">
+                            <button
+                              type="button"
+                              class="session-action"
+                              onclick={(event) => {
+                                event.stopPropagation();
+                                startRename(session.id, session.title);
+                              }}
+                              ondblclick={(event) => event.stopPropagation()}
+                              aria-label="Rename session"
+                              aria-describedby={`rename-session-${session.id}-tooltip`}
+                            >
+                              <Pencil size={11} />
+                            </button>
+                            <span
+                              id={`rename-session-${session.id}-tooltip`}
+                              class="session-action-tooltip"
+                              role="tooltip">Rename</span
+                            >
+                          </span>
+                          <span class="session-action-wrap">
+                            <button
+                              type="button"
+                              class="session-action"
+                              disabled={archivingId === session.id}
+                              onclick={(event) => handleArchive(event, session.id)}
+                              ondblclick={(event) => event.stopPropagation()}
+                              aria-label="Archive chat"
+                              aria-describedby={`archive-session-${session.id}-tooltip`}
+                            >
+                              {#if archivingId === session.id}
+                                <LoaderCircle size={11} class="animate-spin" />
+                              {:else}
+                                <Archive size={11} />
+                              {/if}
+                            </button>
+                            <span
+                              id={`archive-session-${session.id}-tooltip`}
+                              class="session-action-tooltip"
+                              role="tooltip">Archive chat</span
+                            >
+                          </span>
+                          <span class="session-action-wrap">
+                            <button
+                              type="button"
+                              class="session-action session-action-danger"
+                              onclick={(event) => confirmDelete(event, session.id)}
+                              ondblclick={(event) => event.stopPropagation()}
+                              aria-label="Delete session"
+                              aria-describedby={`delete-session-${session.id}-tooltip`}
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                            <span
+                              id={`delete-session-${session.id}-tooltip`}
+                              class="session-action-tooltip"
+                              role="tooltip">Shift-click to delete</span
+                            >
+                          </span>
+                        </div>
+                      {/if}
+                    {/if}
+                  </div>
+                {/each}
               </div>
-            {/each}
-          </div>
-        {/if}
-      </section>
-    {/each}
+            {/if}
+          </section>
+        {/each}
       </div>
     {/if}
 
@@ -1342,14 +1509,15 @@
       </div>
     {/if}
   </div>
-  {#if goalDisplayStore.sidebar}<ActiveGoals />{/if}
 </div>
 
 <ConfirmDialog
   open={pendingLifecycle !== null}
   title={pendingLifecycle ? sessionLifecycleTitle(pendingLifecycle.action) : ''}
   message={pendingLifecycle ? sessionLifecycleWarning(pendingLifecycle.action) : ''}
-  confirmLabel={pendingLifecycle ? sessionLifecycleConfirmLabel(pendingLifecycle.action) : 'Confirm'}
+  confirmLabel={pendingLifecycle
+    ? sessionLifecycleConfirmLabel(pendingLifecycle.action)
+    : 'Confirm'}
   cancelLabel="Cancel"
   variant={pendingLifecycle?.action === 'delete' ? 'danger' : 'warning'}
   showSuppressOption
@@ -1373,6 +1541,20 @@
 <style>
   .sidebar-toolbar {
     box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 4%, transparent);
+  }
+
+  /* Sized to the sidebar, not to the "+" button. The button is 32px wide and
+     sits 12px from the sidebar's right edge, while the sidebar itself is only
+     --sidebar-min-width (220px) to --sidebar-width (272px) wide, so a fixed
+     288px panel right-aligned to the button put its left column 28-80px off
+     the left of the window, where the <nav>'s overflow:hidden clipped it and
+     "Open Project" rendered as "pen Project". Sizing to the containing block
+     makes overflow geometrically impossible at any sidebar width. */
+  .launcher-menu {
+    top: calc(100% + 6px);
+    right: 8px;
+    width: calc(100% - 16px);
+    max-height: min(70vh, 520px);
   }
 
   .sidebar-search::placeholder {
@@ -1435,10 +1617,14 @@
   .status-popover {
     position: absolute;
     top: calc(100% + 9px);
-    right: -30px;
+    /* Flush with the row's right edge, not 30px past it. The tree is now
+       overflow-x-hidden, so a negative offset would be clipped rather than
+       scrolling, and at the 220px sidebar floor a 218px panel would lose its
+       left column. */
+    right: 0;
     z-index: var(--z-tooltip);
     display: flex;
-    width: 218px;
+    width: 200px;
     flex-direction: column;
     gap: var(--space-3);
     padding: var(--space-3);
@@ -1558,8 +1744,8 @@
 
   .project-children {
     position: relative;
-    margin-left: 15px;
-    padding: 2px 0 3px 8px;
+    margin-left: 10px;
+    padding: 2px 0 3px 5px;
     border-left: 1px solid var(--color-border);
   }
 
@@ -1661,7 +1847,11 @@
     bottom: calc(100% + 7px);
     z-index: var(--z-tooltip);
     width: max-content;
-    max-width: 220px;
+    /* A nested chat row sits ~60px from the sidebar's left edge, and the
+       sidebar floor is 220px wide, so a wider nowrap panel would reach past
+       the window. Keep labels short enough to fit (see the label copy) and
+       cap the box as a backstop. */
+    max-width: 180px;
     padding: 5px 8px;
     border: 1px solid color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
     border-radius: 6px;

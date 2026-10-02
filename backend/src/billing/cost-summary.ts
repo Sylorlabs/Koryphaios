@@ -272,7 +272,9 @@ export function summarizeBillingSpend(rows: UsageCostBreakdownRow[]): BillingSpe
   };
 }
 
-export function summarizeSessionCosts(rows: UsageCostBreakdownRow[]): Record<string, SessionCostSummary> {
+export function summarizeSessionCosts(
+  rows: UsageCostBreakdownRow[],
+): Record<string, SessionCostSummary> {
   const bySession = new Map<string, UsageCostBreakdownRow[]>();
   for (const row of rows) {
     if (!row.sessionId) continue;

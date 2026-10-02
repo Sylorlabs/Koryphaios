@@ -6,21 +6,29 @@
   import Zap from 'lucide-svelte/icons/zap';
   import Type from 'lucide-svelte/icons/type';
   import Check from 'lucide-svelte/icons/check';
-  import Plus from 'lucide-svelte/icons/plus';
   import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
-  import {
-    theme,
-    type ThemePreset,
-    type AccentColor,
-    type FontFamily,
-  } from '$lib/stores/theme.svelte';
+  import { theme, type ThemePreset, type FontFamily } from '$lib/stores/theme.svelte';
 
-  let { showColorPicker = $bindable(false) }: { showColorPicker?: boolean } = $props();
+  let {
+    showColorPicker = $bindable(false),
+    colorPickerTarget = $bindable<'primary' | 'secondary'>('primary'),
+  }: {
+    showColorPicker?: boolean;
+    colorPickerTarget?: 'primary' | 'secondary';
+  } = $props();
 
   const fontCategories = $derived([...new Set(theme.fonts.map((f) => f.category))]);
   const usesDefaults = $derived(
-    theme.preset === 'kintsugi' && theme.accent === 'gold' && theme.font === 'inter',
+    theme.preset === 'kintsugi' &&
+      theme.accent === 'gold' &&
+      theme.secondaryAccent === 'gold' &&
+      theme.font === 'inter',
   );
+
+  function openColorPicker(target: 'primary' | 'secondary') {
+    colorPickerTarget = target;
+    showColorPicker = true;
+  }
 </script>
 
 <div class="flex-1 overflow-y-auto px-6 py-5 space-y-10 w-full max-w-7xl mx-auto">
@@ -30,7 +38,7 @@
     <div>
       <div class="text-sm font-semibold text-[var(--color-text-primary)]">Device appearance</div>
       <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-        Changes apply immediately and are saved only on this device.
+        Changes apply immediately and are saved for this device.
       </p>
     </div>
     <button
@@ -151,59 +159,52 @@
     <div class="flex items-center gap-3 mb-6">
       <Zap size={20} class="text-[var(--color-accent)]" />
       <div>
-        <h3 class="text-base font-bold text-[var(--color-text-primary)]">Accent Color</h3>
+        <h3 class="text-base font-bold text-[var(--color-text-primary)]">Accent colors</h3>
         <p class="text-xs text-[var(--color-text-muted)]">
-          Customize the primary interaction color
+          Set the primary action color and a secondary color for supporting emphasis.
         </p>
       </div>
     </div>
-    <div
-      class="flex flex-wrap gap-4 p-4 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]"
-    >
-      {#each theme.accents as color (color.id)}
-        <button
-          type="button"
-          class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md
-                 {theme.accent === color.id
-            ? 'ring-2 ring-[var(--color-text-primary)] ring-offset-4 ring-offset-[var(--color-surface-2)]'
-            : 'opacity-80 hover:opacity-100'}"
-          style="background-color: {color.color};"
-          onclick={() => theme.setAccent(color.id as AccentColor)}
-          title={color.label}
-        >
-          {#if theme.accent === color.id}
-            <Check size={20} class="mx-auto text-white drop-shadow-md" strokeWidth={3} />
-          {/if}
-        </button>
-      {/each}
-      <!-- Custom accent swatch (only shown when a custom color is active) -->
-      {#if theme.accent === 'custom' && theme.customAccent}
-        <button
-          type="button"
-          class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md ring-2 ring-[var(--color-text-primary)] ring-offset-4 ring-offset-[var(--color-surface-2)]"
-          style="background-color: {theme.customAccent.main};"
-          onclick={() => (showColorPicker = true)}
-          title="Custom color — click to edit"
-        >
-          <Check size={20} class="mx-auto text-white drop-shadow-md" strokeWidth={3} />
-        </button>
-      {/if}
-      <!-- + button to open the custom color picker -->
+    <div class="border-y border-[var(--color-border)]">
       <button
         type="button"
-        class="group relative w-12 h-12 rounded-xl transition-all hover:scale-110 active:scale-95 shadow-md border-2 border-dashed flex items-center justify-center
-               {theme.accent === 'custom'
-          ? 'border-[var(--color-text-primary)]'
-          : 'border-[var(--color-text-muted)] hover:border-[var(--color-text-secondary)]'}"
-        style="background: var(--color-surface-3);"
-        onclick={() => (showColorPicker = true)}
-        title="Custom color picker"
-        aria-label="Open custom color picker"
+        onclick={() => openColorPicker('primary')}
+        class="group flex w-full items-center gap-4 py-4 text-left outline-none transition-colors hover:bg-[var(--color-surface-2)]/55 focus-visible:bg-[var(--color-surface-2)]/55"
+        aria-label="Edit primary accent"
       >
-        <Plus
-          size={20}
-          class="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)]"
-        />
+        <span
+          class="ml-1 h-8 w-8 shrink-0 rounded-lg border border-[var(--color-border-bright)] shadow-inner"
+          style="background: {theme.currentAccent.main};"
+          aria-hidden="true"
+        ></span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-semibold text-[var(--color-text-primary)]">Primary accent</span>
+          <span class="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+            Buttons, active controls, selection and focus states
+          </span>
+        </span>
+        <span class="font-mono text-xs text-[var(--color-text-secondary)]">{theme.currentAccent.main.toUpperCase()}</span>
+        <span class="mr-1 text-xs font-medium text-[var(--color-accent)]">Choose color</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => openColorPicker('secondary')}
+        class="group flex w-full items-center gap-4 border-t border-[var(--color-border)] py-4 text-left outline-none transition-colors hover:bg-[var(--color-surface-2)]/55 focus-visible:bg-[var(--color-surface-2)]/55"
+        aria-label="Edit secondary accent"
+      >
+        <span
+          class="ml-1 h-8 w-8 shrink-0 rounded-lg border border-[var(--color-border-bright)] shadow-inner"
+          style="background: {theme.currentSecondaryAccent.main};"
+          aria-hidden="true"
+        ></span>
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-semibold text-[var(--color-text-primary)]">Secondary accent</span>
+          <span class="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+            Supporting emphasis, charts and secondary status detail
+          </span>
+        </span>
+        <span class="font-mono text-xs text-[var(--color-text-secondary)]">{theme.currentSecondaryAccent.main.toUpperCase()}</span>
+        <span class="mr-1 text-xs font-medium" style="color: var(--color-accent-secondary);">Choose color</span>
       </button>
     </div>
   </section>

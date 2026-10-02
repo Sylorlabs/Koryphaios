@@ -951,6 +951,11 @@ export function writeRules(
 
 const SETTINGS_FILE = '.koryphaios/memory-settings.json';
 
+/** Previous default memory budget. Persisted settings still carrying exactly
+ *  this value are bumped to the new default on load; customized values are
+ *  never touched. */
+const LEGACY_DEFAULT_CONTEXT_BUDGET_TOKENS = 2_000;
+
 export function getSettingsPath(projectRoot: string): string {
   return join(projectRoot, SETTINGS_FILE);
 }
@@ -1036,8 +1041,22 @@ export function loadMemorySettings(projectRoot: string): MemorySettings {
 
   try {
     const content = readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(content);
-    return normalizeMemorySettings(parsed as Partial<MemorySettings>);
+    const parsed = JSON.parse(content) as Partial<MemorySettings>;
+    // One-time loosening migration: bump budgets still sitting on the old
+    // default; user-customized values are left untouched.
+    if (parsed?.maxContextTokens === LEGACY_DEFAULT_CONTEXT_BUDGET_TOKENS) {
+      const migrated = normalizeMemorySettings({
+        ...parsed,
+        maxContextTokens: DEFAULT_MEMORY_SETTINGS.maxContextTokens,
+      });
+      try {
+        atomicWriteText(filePath, JSON.stringify(migrated, null, 2));
+      } catch {
+        // Best-effort persistence only; the returned values are already migrated.
+      }
+      return migrated;
+    }
+    return normalizeMemorySettings(parsed);
   } catch (err) {
     serverLog.error({ err }, 'Failed to load memory settings');
     return DEFAULT_MEMORY_SETTINGS;
@@ -1089,6 +1108,33 @@ export function assembleMemoryContext(
     rules: effectiveSettings.rulesEnabled ? readRules(projectRoot) : null,
     settings: effectiveSettings,
   };
+}
+
+/** Search the current enabled memory files, with opt-in semantic retrieval and local fallback.
+ * Rules remain mandatory context and are never relevance-filtered.
+ */
+export async function searchMemory(
+  projectRoot: string,
+  sessionId: string | null,
+  query: string,
+  options: {
+    limit?: number;
+    client?: import('./semantic-embeddings').EmbeddingClient | null;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
+): Promise<import('./semantic-retrieval').MemorySearchResult> {
+  const { retrieveMemory } = await import('./semantic-retrieval');
+  const context = assembleMemoryContext(projectRoot, sessionId);
+  const documents = [context.session, context.project, context.universal]
+    .filter((file): file is MemoryFile => !!file?.exists && !!file.content)
+    .map((file) => ({ id: file.path, content: file.content }));
+  return retrieveMemory(
+    JSON.stringify([resolveMemoryRoot(projectRoot), sessionId]),
+    documents,
+    query,
+    options,
+  );
 }
 
 export function formatMemoryForContext(context: MemoryContext): string {

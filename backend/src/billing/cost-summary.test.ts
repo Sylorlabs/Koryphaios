@@ -55,7 +55,12 @@ describe('billing cost summaries', () => {
 
   test('never adds subscription usage to tracked API spend', () => {
     const rows = [
-      row({ provider: 'codex', model: 'unmapped-subscription-model', knownCostUsd: 9.99, knownRows: 1 }),
+      row({
+        provider: 'codex',
+        model: 'unmapped-subscription-model',
+        knownCostUsd: 9.99,
+        knownRows: 1,
+      }),
       row({ provider: 'openai', knownCostUsd: 0.4242, knownRows: 1 }),
     ];
     const billing = summarizeBillingSpend(rows);
@@ -65,7 +70,9 @@ describe('billing cost summaries', () => {
     expect(billing.byProvider.map((provider) => provider.name)).toEqual(['openai']);
     expect(sessions['session-1']?.spendUsd).toBeCloseTo(0.4242);
     expect(sessions['session-1']?.hasSubscriptionUsage).toBe(true);
-    expect(sessions['session-1']?.providers.find((provider) => provider.name === 'codex')?.spendUsd).toBeNull();
+    expect(
+      sessions['session-1']?.providers.find((provider) => provider.name === 'codex')?.spendUsd,
+    ).toBeNull();
   });
 
   test('session summaries keep known spend visible when some metered usage is unpriced', () => {

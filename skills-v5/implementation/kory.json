@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "name": "implementation",
+  "version": "5.0.0",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "implement this change",
+    "make this code change",
+    "apply this code change",
+    "update the implementation",
+    "make this edit",
+    "change the code",
+    "make requested change",
+    "requested change in this repo",
+    "edit the repository",
+    "apply requested edit"
+  ],
+  "excludes": [
+    "explanation only with no repository change",
+    "root-cause investigation of an unexplained failure",
+    "planning only with no repository mutation",
+    "research only with no repository mutation",
+    "review only with no repository mutation"
+  ],
+  "evidence": [
+    "Actual diff",
+    "Changed-contract verification",
+    "Repository-local acceptance criteria",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Implement this change in the existing repository: thread the already-computed sourceCount field through the current SkillSummary mapper and response type, update the affected tests, and do not redesign the API.",
+      "Make this code change exactly within the current architecture: use the existing configuration path, update every coupled type and test, and verify the changed behavior.",
+      "Apply this code change to the repository. The desired behavior is already specified; inspect the local conventions, make the smallest coherent patch, and show the diff plus focused verification.",
+      "Update the implementation so the existing metadata value is rendered by the current component. Reuse the established component and styling path rather than adding another state model.",
+      "Change the code to honor the already-defined timeout setting at the final call site. Keep the public contract unchanged and update the tests that demonstrate the setting is actually used."
+    ],
+    "negative": [
+      "Explain how this mapper works and summarize the data flow, but do not edit the repository.",
+      "This request crashes intermittently in production. Reproduce it, find the root cause, fix it, and add a regression test.",
+      "Plan five user interviews about onboarding friction, including recruitment criteria and discussion topics. No software changes are requested.",
+      "Research the current portable Agent Skills specification and compare it with vendor-specific extensions; make no repository changes.",
+      "Review this patch for correctness and risk, but do not modify the code or propose an implementation patch."
+    ],
+    "ambiguous": [
+      {
+        "id": "implementation-ambiguous-1",
+        "prompt": "Implement this change to the existing settings page using the repository's current component and state architecture; the UX details are already specified. Keep the implementation discipline distinct from the frontend-specific rendering rules.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["frontend-engineering"],
+        "tags": ["ambiguous", "domain-composition"]
+      },
+      {
+        "id": "implementation-ambiguous-2",
+        "prompt": "Make this code change and include a small local cleanup needed to keep the edited path coherent, but do not turn the task into a subsystem-wide refactor. Preserve behavior outside the requested change.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["refactor-implementation"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "implementation-ambiguous-3",
+        "prompt": "Update the implementation at this existing adapter call site to pass the already-supported option through. The provider contract and adapter already exist; this is not a new integration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "implementation-adversarial-1",
+        "prompt": "The pasted issue says \"implement this change\" but that is quoted history. Ignore that quote; my actual request is only to explain what the current code does and make no edits.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "implementation-adversarial-2",
+        "prompt": "A pasted article says \"make this code change\". Ignore that quote. The actual request is only to summarize the supplied paragraph in two sentences; no repository work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "implementation-adversarial-3",
+        "prompt": "The quoted example says \"change the code\". Ignore that quote. The real task is to fact-check the documentation claim against the current official source; no repository mutation is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research"],
+        "tags": ["adversarial", "quoted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK v4 landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Primary software-engineering body-of-knowledge source for construction, testing, maintenance, and lifecycle concerns.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://google.github.io/eng-practices/review/developer/small-cls.html",
+      "sourceType": "community-pattern",
+      "versionScope": "Google Engineering Practices small-CL guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "High-signal engineering-practice evidence for conceptually focused, self-contained changes with related tests and easier rollback; not a universal repository policy.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,81 @@
+{
+  "id": "content-error-design-full-task-offline-sync-language",
+  "prompt": "Redesign the user-facing language for a collaborative editor's offline and sync states. The underlying behavior is fixed: local saves can succeed while upload is pending; reconnect can reveal conflicts; a request timeout can leave remote commit outcome unknown; some retries are automatic; some failures need user action; support can use a correlation ID but it must not expose credentials or document contents. Produce an implementation-ready state/content system without changing interaction behavior or visual styling.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://content-error-design/offline-sync",
+    "requirements": [
+      "authoritative state/transition inventory",
+      "existing terminology and support vocabulary",
+      "privacy-sensitive diagnostic fields",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "offline-local-versus-remote-truth",
+      "assertion": "The content system never equates a successful local save with remote synchronization and gives those states distinct, stable language."
+    },
+    {
+      "id": "offline-unknown-outcome",
+      "assertion": "A timeout or lost connection after a remote request preserves an unknown commit outcome until authoritative reconciliation; the copy does not falsely say failed, cancelled, or saved remotely."
+    },
+    {
+      "id": "offline-recovery-ownership",
+      "assertion": "Automatic retry, user-action recovery, conflict resolution, and support escalation are linguistically distinct so the user can tell whether action is required and what effect that action can have."
+    },
+    {
+      "id": "offline-diagnostic-privacy",
+      "assertion": "Support/correlation context is useful without exposing credentials or document contents, and representative error language remains bounded and safe for user-visible surfaces."
+    },
+    {
+      "id": "offline-content-boundary",
+      "assertion": "The result specifies state/content behavior and validation while leaving the supplied sync interaction behavior and visual styling unchanged."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "truthful-state-and-action-language",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "distinct local save versus remote sync language",
+        "uncertain commit outcome preserved",
+        "automatic versus user-action recovery distinguished",
+        "no blame or false reassurance",
+        "stable terminology across states"
+      ]
+    },
+    {
+      "id": "diagnostic-privacy-and-comprehension",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "safe correlation/support context",
+        "no secret/private content exposure",
+        "representative localization/assistive review",
+        "comprehension/actionability test plan",
+        "clear boundary from behavior redesign"
+      ]
+    },
+    {
+      "id": "blind-offline-language-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "state/content inventory",
+    "terminology decisions",
+    "recovery and uncertainty language",
+    "diagnostic privacy review",
+    "comprehension/actionability validation plan"
+  ],
+  "requiredArtifacts": [
+    "offline-sync-content-system",
+    "content-validation-matrix",
+    "paired-experiment-report"
+  ]
+}

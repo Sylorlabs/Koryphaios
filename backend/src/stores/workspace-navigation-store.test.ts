@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { basename, join, parse } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { WorkspaceNavigationStore } from './workspace-navigation-store';
 
 const roots: string[] = [];
@@ -140,5 +140,31 @@ describe('WorkspaceNavigationStore', () => {
     expect(child.selectedProject).toBe(join(root, 'alpha'));
     expect(child.workspaceRoot).toBe(root);
     database.close();
+  });
+
+  test('selects a home-directory project so its existing chats stay openable', () => {
+    const { database, store } = createStore();
+    const home = canonicalRoot(homedir());
+
+    const selected = store.selectProject(home);
+    expect(selected.selectedProject).toBe(home);
+    expect(selected.projects.map((entry) => entry.name)).toEqual([basename(home)]);
+    // Survives a fresh snapshot instead of being flagged unavailable.
+    expect(store.snapshot().selectedProject).toBe(home);
+    expect(store.snapshot().unavailableProject).toBeNull();
+    database.close();
+  });
+
+  test('rejects the filesystem root as a project directory', () => {
+    const { store } = createStore();
+    expect(() => store.selectProject(parse(process.cwd()).root)).toThrow(
+      'Project directory is too broad',
+    );
+  });
+
+  test('still refuses a home or temp directory as a workspace root', () => {
+    const { store } = createStore();
+    expect(() => store.openWorkspace(homedir())).toThrow('Workspace root is too broad');
+    expect(() => store.openWorkspace(tmpdir())).toThrow('Workspace root is too broad');
   });
 });

@@ -395,7 +395,9 @@ function requireString(
 
 function requireId(value: unknown, label: string): string {
   const id = requireString(value, label, { max: 512 });
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._:@-]*$/.test(id)) {
+  // Nano ID uses URL-safe '_' and '-' in every position, including the first.
+  // Keep separators, controls, and dot-prefixed path-like identities forbidden.
+  if (!/^[a-zA-Z0-9_-][a-zA-Z0-9._:@-]*$/.test(id)) {
     throw new ValidationError(`${label} contains unsupported characters`);
   }
   return id;

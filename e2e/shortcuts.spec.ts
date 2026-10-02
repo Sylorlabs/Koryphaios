@@ -21,7 +21,7 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
 
   // Open settings via keyboard shortcut
-  await page.keyboard.press('Control+,');
+  await page.keyboard.press('ControlOrMeta+,');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
   await settingsDialog.getByRole('button', { name: 'Keyboard shortcuts This device' }).click();
@@ -46,10 +46,59 @@ test('a reassigned shortcut takes effect immediately and replaces its old bindin
   await expect(shortcutsHeading).not.toBeVisible({ timeout: 5_000 });
 
   // The old shortcut should no longer open settings
-  await page.keyboard.press('Control+,');
+  await page.keyboard.press('ControlOrMeta+,');
   await expect(shortcutsHeading).not.toBeVisible({ timeout: 2_000 });
 
   // The new shortcut should open settings
   await page.keyboard.press('Control+Alt+O');
   await expect(shortcutsHeading).toBeVisible({ timeout: 5_000 });
+});
+
+test('voice mode ships a default push-to-talk binding in the shortcuts list', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+
+  const auth = await createAuthSession(request, BACKEND_URL);
+  await injectAuthIntoPage(page, auth.bearerToken);
+
+  await page.goto('/');
+  await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
+
+  await page.keyboard.press('ControlOrMeta+,');
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
+  await settingsDialog.getByRole('button', { name: 'Keyboard shortcuts This device' }).click();
+
+  const voiceMode = settingsDialog.locator('[data-shortcut-id="voice_mode"]');
+  await expect(voiceMode).toBeVisible();
+  // The primary chord is fn, and the chord that always works is listed beside
+  // it, because macOS never reports fn to a webview.
+  await expect(voiceMode.getByRole('button', { name: 'fn' })).toBeVisible();
+  await expect(voiceMode).toContainText(/Ctrl\s*\+\s*Shift\s*\+\s*M|⌘\s*\+\s*Shift\s*\+\s*M/);
+  await expect(voiceMode).toContainText(/hold to record/i);
+});
+
+test('the voice mode binding can be reassigned and the old chord stops firing', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(60_000);
+
+  const auth = await createAuthSession(request, BACKEND_URL);
+  await injectAuthIntoPage(page, auth.bearerToken);
+
+  await page.goto('/');
+  await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
+
+  await page.keyboard.press('ControlOrMeta+,');
+  const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
+  await settingsDialog.getByRole('button', { name: 'Keyboard shortcuts This device' }).click();
+
+  const voiceMode = settingsDialog.locator('[data-shortcut-id="voice_mode"]');
+  await voiceMode.getByRole('button').click();
+  await page.keyboard.press('Control+Alt+G');
+  await expect(voiceMode.getByRole('button', { name: 'Ctrl + Alt + G' })).toBeVisible();
 });

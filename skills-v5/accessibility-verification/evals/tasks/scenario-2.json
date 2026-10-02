@@ -1,0 +1,68 @@
+{
+  "id": "accessibility-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "An Android Compose notification-settings screen is finished. Perform the accessibility test on the supplied emulator/device profile with TalkBack and the supported alternate switch-input path. Verify that each channel row exposes a concise label, the switch role and checked state, disabled channels communicate why they cannot change, changing a switch produces the expected spoken state without duplicate labels, and returning from the detail screen restores the accessibility focus context. Repeat with the platform's maximum supported text scaling in the fixture and a long localized channel name; all required controls must remain discoverable and operable. Run the Compose accessibility checks as supporting evidence and report any mismatch between automation and manual TalkBack/switch results.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://accessibility-verification/android-notification-settings",
+    "requirements": [
+      "the fixture records Android/API, app build, and TalkBack versions",
+      "TalkBack and a supported alternate switch-input path are available",
+      "the fixture includes enabled, disabled, selected, and long-localization rows",
+      "the fixture can apply its maximum supported text scaling and run Compose accessibility checks",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "a11y-android-semantics",
+      "assertion": "TalkBack reports each setting's purpose, switch role/state, and disabled meaning without duplicate or misleading announcements."
+    },
+    {
+      "id": "a11y-android-alternate-input",
+      "assertion": "The alternate switch-input path can discover and operate every enabled setting and return from detail with usable accessibility focus context."
+    },
+    {
+      "id": "a11y-android-scaling",
+      "assertion": "At the fixture's maximum text scale with long localized content, required controls remain discoverable and operable, and manual results are reconciled with automated Compose checks."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "accessibility-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Manual TalkBack task results",
+        "alternate-input traversal results",
+        "large-text observations",
+        "Compose automated findings and residual limitations"
+      ]
+    },
+    {
+      "id": "accessibility-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "native-platform semantics are tested with native assistive technology",
+        "large-text and localization are integrated into task completion rather than screenshot-only review",
+        "automation/manual discrepancies are preserved instead of averaged away"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Manual TalkBack task results",
+    "alternate switch-input task results",
+    "large-text/localization evidence",
+    "automated findings and residual limitations",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "accessibility-verification-scenario-2-task-matrix",
+    "accessibility-verification-scenario-2-at-evidence",
+    "accessibility-verification-scenario-2-verdict",
+    "accessibility-verification-scenario-2-paired-evaluation"
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "id": "gpu-compute-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a GPU reduction kernel that returns slightly different—and occasionally grossly wrong—sums when input length is not a multiple of the block size. Establish launch/index/shared-memory bounds, preserve performance intent, and compare against a CPU reference across boundary sizes, NaNs/infinities policy, repeated runs, and sanitizer/race tooling. Do not replace the GPU path with CPU execution.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://gpu-compute/cuda-reduction-nondeterminism",
+    "requirements": [
+      "GPU kernel fixture with block reduction and failing non-multiple input lengths",
+      "CPU reference plus tolerance policy for floating-point accumulation",
+      "test sizes around block boundaries and repeated-run nondeterminism checks",
+      "GPU memory/race checking available for the pinned runtime or explicitly simulated equivalent",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "gpu-compute-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "gpu-compute decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "gpu-compute-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "cuda-reduction-nondeterminism scenario evidence",
+    "gpu-compute decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "gpu-compute-individual-scenario-1-result",
+    "gpu-compute-individual-scenario-1-verification",
+    "gpu-compute-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual gpu-compute boundary and relevant environment before acting, preserve the hierarchy relationship (broader=performance-debugging; near-neighbor=database-performance), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Establish target GPU/API, data layout, host-device transfers, kernel launch geometry, synchronization, precision, reductions/atomics, memory hierarchy, and workload sizes."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "All threads access only initialized in-bounds data and synchronize according to the kernel memory model; numeric deviation remains within the declared reference tolerance."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Compare numerical results to a trusted CPU/reference path across edge sizes and precision, profile transfer/kernel timing and occupancy/cache behavior, test synchronization/races, and validate representative target hardware."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not measure only kernel time while ignoring transfer/synchronization, assume floating-point associativity, add shared-memory complexity without profiling, or generalize one GPU architecture to all targets."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (gpu-compute decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

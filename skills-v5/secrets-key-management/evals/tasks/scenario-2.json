@@ -1,0 +1,75 @@
+{
+  "id": "secrets-key-management-full-task-2",
+  "maturity": "individual",
+  "prompt": "Plan credential rotation for a service fleet that uses one database credential and two third-party API credentials. Today the values are copied into CI variables and long-lived process environments; some replicas restart only weekly, one batch worker can be offline for hours, and operators have no authoritative consumer inventory. Move delivery to workload identity or a managed secret service where supported, build a complete consumer/version inventory, design a staged rotation that can tolerate overlapping old/new values only for a bounded period, verify every consumer has switched, revoke the old credentials, and define rollback/emergency compromise behavior plus audit. Keep end-user login credentials out of scope.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://secrets-key-management/scenario-2",
+    "requirements": [
+      "API/worker/batch service consumers with staggered restart/offline behavior",
+      "database and vendor credential stores supporting controlled old/new overlap",
+      "managed secret/workload identity delivery fixture",
+      "access/audit logs showing which credential version each consumer uses",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "secrets-key-management-inventory-2",
+      "assertion": "The plan identifies every service/replica/batch consumer and current credential version before rotation, including offline/stale consumers rather than assuming deployment completion implies credential adoption."
+    },
+    {
+      "id": "secrets-key-management-delivery-2",
+      "assertion": "New credentials are delivered through a managed secret/workload identity path that avoids source control, CI plaintext variables, command-line exposure, broad process inheritance, and ordinary logs."
+    },
+    {
+      "id": "secrets-key-management-cutover-2",
+      "assertion": "Rotation uses the provider/database-supported overlap or staged cutover with an explicit deadline, verifies successful use of the new version for every consumer, and only then revokes the old value."
+    },
+    {
+      "id": "secrets-key-management-rollback-2",
+      "assertion": "Rollback has a bounded path that restores service without leaving both credentials accepted indefinitely or reintroducing an untracked legacy secret."
+    },
+    {
+      "id": "secrets-key-management-compromise-2",
+      "assertion": "Emergency compromise response can bypass the normal leisurely rotation cadence, revoke the affected credential, identify impacted consumers/data, reissue safely, and preserve administrative/use audit evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "secrets-key-management-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "consumer/version inventory",
+        "managed delivery design",
+        "cutover/revoke evidence",
+        "rollback/compromise plan"
+      ]
+    },
+    {
+      "id": "secrets-key-management-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "complete consumer/version inventory",
+    "delivery/storage boundaries",
+    "staged rotation and revoke proof",
+    "rollback/emergency path",
+    "audit evidence",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "secrets-key-management-scenario-2-result",
+    "secrets-key-management-scenario-2-verification",
+    "secrets-key-management-scenario-2-paired-evaluation"
+  ]
+}

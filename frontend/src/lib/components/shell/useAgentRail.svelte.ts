@@ -1,9 +1,14 @@
 import { wsStore } from '$lib/stores/websocket.svelte';
+import { agentStore } from '$lib/stores/agents.svelte';
 import { sessionStore } from '$lib/stores/sessions.svelte';
-import { ACTIVE_AGENT_STATUSES } from '$lib/stores/run-state-core';
+import { toastStore } from '$lib/stores/toast.svelte';
+import { ACTIVE_AGENT_STATUSES, TERMINAL_AGENT_STATUSES } from '$lib/stores/run-state-core';
+import { apiUrl } from '$lib/utils/api-url';
+import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 
 export function useAgentRail() {
   let selectedAgentId = $state('');
+  let closingAgentIds = $state(new Set<string>());
 
   let sessionAgentChats = $derived(
     [...wsStore.agents.values()]
@@ -80,6 +85,48 @@ export function useAgentRail() {
     }
   }
 
+  /**
+   * Close a sub-agent card. A still-running worker is cancelled on the backend
+   * first so the process actually stops; a finished one is only a view concern
+   * and closes locally. Either way the card is removed from the rail and, if it
+   * was the open transcript, the feed returns to the manager.
+   *
+   * A failed cancel keeps the card and reports the error — dropping a card
+   * whose worker is still running would hide live work from the user.
+   */
+  async function closeAgent(agentId: string): Promise<void> {
+    if (closingAgentIds.has(agentId)) return;
+    const agent = wsStore.agents.get(agentId);
+    if (!agent) return;
+
+    const isRunning = !TERMINAL_AGENT_STATUSES.has(agent.status);
+    closingAgentIds = new Set(closingAgentIds).add(agentId);
+    if (isRunning) {
+      try {
+        const res = await apiFetch(apiUrl(`/api/agent/${encodeURIComponent(agentId)}/cancel`), {
+          method: 'POST',
+        });
+        const data = await parseJsonResponse<{ ok?: boolean; error?: string }>(res);
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error || `Request failed: ${res.status} ${res.statusText}`);
+        }
+      } catch (error) {
+        closingAgentIds = new Set([...closingAgentIds].filter((id) => id !== agentId));
+        toastStore.error(
+          error instanceof Error && error.message
+            ? `Could not stop ${agent.identity.name}: ${error.message}`
+            : `Could not stop ${agent.identity.name}.`,
+        );
+        return;
+      }
+    }
+
+    wsStore.markAgentStopped(agentId);
+    agentStore.removeAgent(agentId);
+    if (selectedAgentId === agentId) clearSelection();
+    closingAgentIds = new Set([...closingAgentIds].filter((id) => id !== agentId));
+  }
+
   return {
     get selectedAgentId() {
       return selectedAgentId;
@@ -99,11 +146,15 @@ export function useAgentRail() {
     get selectedAgentIsRunning() {
       return selectedAgentIsRunning;
     },
+    get closingAgentIds() {
+      return closingAgentIds;
+    },
     get inputPlaceholder() {
       return inputPlaceholder;
     },
     clearSelection,
     selectAgent,
+    closeAgent,
   };
 }
 

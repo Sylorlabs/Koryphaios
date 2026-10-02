@@ -16,6 +16,8 @@
 //
 // Model discovery: `agy models` → one model name per line, refreshed with a 5-min TTL.
 // Antigravity exposes Gemini, Claude, and GPT models under a single Google subscription.
+// It publishes reasoning effort as separate per-tier slugs; those families are collapsed
+// into one base model each and the composer's effort picks the tier at spawn time.
 
 import type { ProviderConfig, ModelDef, ModelQuota } from '@koryphaios/shared';
 import { spawn, spawnSync } from 'node:child_process';
@@ -42,7 +44,11 @@ import {
 import { detectAntigravityCLILogin } from './auth-utils';
 import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  inferenceSandboxPolicy,
+  wrapCommand,
+} from '../collaboration/sandbox-runner';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
 import {
   fetchAntigravityQuota,
@@ -73,6 +79,10 @@ import { applyModelsDevMetadata } from './models-dev';
 const AGY_TIMEOUT_MS = 300_000;
 const MODELS_CACHE_TTL_MS = 5 * 60_000;
 const LOG_POLL_INTERVAL_MS = 150;
+/** Budget for the read-only `agy models` discovery probe. It authenticates
+ *  (keychain/D-Bus unlock) and then calls Google's account backend, so it needs
+ *  the same allowance as `agy --print /usage`. */
+const AGY_MODELS_PROBE_TIMEOUT_MS = 8_000;
 
 // ── Session → agy conversation continuity ────────────────────────────────────
 // agy supports `--conversation <id>` to resume. Without it every Koryphaios turn
@@ -226,72 +236,126 @@ function detectNewConversation(before: Set<string>): string | null {
 let cachedModels: ModelDef[] | null = null;
 let cachedModelsAt = 0;
 let modelsFetchInProgress = false;
+let modelsFetchPromise: Promise<ModelDef[]> | null = null;
 /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
  *  name. Refreshed alongside the model list and merged into ModelDef.quota. */
 let cachedQuota: Map<string, ModelQuota> | null = null;
 /** Full quota group detail (weekly + 5h buckets) for the API endpoint. */
 let cachedQuotaGroups: AntigravityQuotaGroup[] | null = null;
 
-function refreshModelsInBackground(): void {
-  if (modelsFetchInProgress) return;
+/** Environment for the read-only `agy models` discovery probe.
+ *
+ *  This deliberately does NOT use the Kory-managed isolated HOME that the
+ *  agentic turn runs under. agy keeps its Google OAuth token in the OS
+ *  credential store (macOS login keychain: service "gemini", account
+ *  "antigravity"; libsecret over the D-Bus user bus on Linux). The Security
+ *  framework resolves the login keychain from the *user's* home directory, so
+ *  a child launched with a replaced HOME finds no keychain and reports
+ *  "Please sign in to view available models" — producing a verified provider
+ *  with an empty model catalog.
+ *
+ *  Discovery is a pure read (`agy models` lists the account's model slugs and
+ *  writes nothing Koryphaios depends on), so running it under the real, safe
+ *  environment is both correct and side-effect free. The credential itself is
+ *  never read or copied by Koryphaios: agy reads it, in its own process, from
+ *  the keychain it already uses interactively. This mirrors
+ *  `fetchAntigravityQuotaGroups` in antigravity-quota.ts and
+ *  `probeCliConnection` in cli-detection.ts, which both already probe agy with
+ *  the real environment. */
+function agyDiscoveryEnv(): NodeJS.ProcessEnv {
+  return getSafeSubprocessEnv();
+}
+
+function buildAntigravityModels(
+  raw: ModelDef[],
+  quota: Map<string, ModelQuota> | null,
+): ModelDef[] {
+  // Collapse first: enrichment then looks up one bare slug per family, which is
+  // what models.dev catalogs, and the surviving base model carries the effort
+  // levels the collapsed tiers had.
+  const collapsed = collapseAgyReasoningTiers(raw);
+  const enriched = applyModelsDevMetadata('antigravity', collapsed, [
+    'google',
+    'anthropic',
+    'openai',
+  ]);
+  const withWindows = enriched.map((m) => {
+    if (m.contextWindow && m.contextWindow > 0) return m;
+    const apiId = (m.apiModelId ?? m.id).toLowerCase();
+    let fallback = 0;
+    let out = m.maxOutputTokens;
+    if (apiId.startsWith('gemini-')) {
+      fallback = 1_048_576;
+      out = out || 8192;
+    } else if (apiId.startsWith('claude-')) {
+      fallback = 200_000;
+      out = out || 8192;
+    } else if (apiId.startsWith('gpt-')) {
+      fallback = 131_072;
+      out = out || 16384;
+    } else {
+      fallback = 200_000;
+      out = out || 8192;
+    }
+    return { ...m, contextWindow: fallback, contextVerified: true, maxOutputTokens: out };
+  });
+  return mergeQuotaIntoModels(withWindows, quota);
+}
+
+/** Refresh the model catalog (and live quota) from the agy CLI.
+ *
+ *  Returns a promise so `ProviderRegistry.refreshModelCatalogsInternal` awaits
+ *  the real fetch instead of returning before the catalog lands — previously
+ *  this returned void, so a forced refresh served a still-empty list. */
+function refreshModelsInBackground(): Promise<ModelDef[]> {
+  if (modelsFetchInProgress) return modelsFetchPromise ?? Promise.resolve(cachedModels ?? []);
   const bin = whichBinary('agy');
-  if (!bin) return;
+  if (!bin) return Promise.resolve(cachedModels ?? []);
 
   modelsFetchInProgress = true;
-  Promise.all([fetchAgyModels(bin), fetchAntigravityQuotaGroups()])
+  modelsFetchPromise = Promise.all([fetchAgyModels(bin), fetchAntigravityQuotaGroups()])
     .then(([models, groups]) => {
-      if (models.length > 0) {
-        cachedQuotaGroups = groups;
-        const quotaMap = new Map<string, ModelQuota>();
-        if (groups) {
-          for (const g of groups) {
-            const buckets = g.buckets;
-            if (buckets.length === 0) continue;
-            const binding = buckets.reduce((min, b) =>
-              b.remainingFraction < min.remainingFraction ? b : min,
-            );
-            quotaMap.set(g.name, {
-              remainingFraction: binding.remainingFraction,
-              resetTime: binding.resetTime ? Date.parse(binding.resetTime) : 0,
-            });
-          }
-        }
-        cachedQuota = quotaMap;
-        const enriched = applyModelsDevMetadata('antigravity', models, [
-          'google',
-          'anthropic',
-          'openai',
-        ]);
-        const withLiveWindows = enriched.map((m) => {
-          if (m.contextWindow && m.contextWindow > 0) return m;
-          const apiId = (m.apiModelId ?? m.id).toLowerCase();
-          let fallback = 0;
-          let out = m.maxOutputTokens;
-          if (apiId.startsWith('gemini-')) {
-            fallback = 1_048_576;
-            out = out || 8192;
-          } else if (apiId.startsWith('claude-')) {
-            fallback = 200_000;
-            out = out || 8192;
-          } else if (apiId.startsWith('gpt-')) {
-            fallback = 131_072;
-            out = out || 16384;
-          } else {
-            fallback = 200_000;
-            out = out || 8192;
-          }
-          return { ...m, contextWindow: fallback, contextVerified: true, maxOutputTokens: out };
-        });
-        cachedModels = mergeQuotaIntoModels(withLiveWindows, quotaMap);
-        cachedModelsAt = Date.now();
+      if (models.length === 0) {
+        providerLog.warn(
+          { provider: 'antigravity' },
+          'agy models returned no models; keeping the previous catalog',
+        );
+        return cachedModels ?? [];
       }
+      cachedQuotaGroups = groups;
+      const quotaMap = new Map<string, ModelQuota>();
+      if (groups) {
+        for (const g of groups) {
+          const buckets = g.buckets;
+          if (buckets.length === 0) continue;
+          const binding = buckets.reduce((min, b) =>
+            b.remainingFraction < min.remainingFraction ? b : min,
+          );
+          quotaMap.set(g.name, {
+            remainingFraction: binding.remainingFraction,
+            resetTime: binding.resetTime ? Date.parse(binding.resetTime) : 0,
+          });
+        }
+      }
+      cachedQuota = quotaMap;
+      cachedModels = buildAntigravityModels(models, quotaMap);
+      cachedModelsAt = Date.now();
+      providerLog.debug(
+        { provider: 'antigravity', models: cachedModels.length },
+        'Antigravity model catalog refreshed',
+      );
+      return cachedModels;
     })
-    .catch(() => {
+    .catch((err) => {
       /* best-effort; an empty list truthfully represents unavailable discovery */
+      providerLog.warn({ provider: 'antigravity', err }, 'Antigravity model discovery failed');
+      return cachedModels ?? [];
     })
     .finally(() => {
       modelsFetchInProgress = false;
+      modelsFetchPromise = null;
     });
+  return modelsFetchPromise;
 }
 
 /** Merge live quota info into the model list. The quota map is keyed by
@@ -320,13 +384,12 @@ function tryFetchAgyModelsSync(): ModelDef[] | null {
   try {
     const result = spawnSync(bin, ['models'], {
       encoding: 'utf8',
-      timeout: 4000,
+      // The probe hits Google's account backend to enumerate the subscription's
+      // model slugs. Budget it like `agy --print /usage` does; a cold keychain
+      // unlock plus the round trip regularly exceeds 4s.
+      timeout: AGY_MODELS_PROBE_TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: buildProviderCliEnv('antigravity', {
-        ANTIGRAVITY_HOME: getKoryphaiosAntigravityHome(),
-        HOME: getKoryphaiosAntigravityHome(),
-        USERPROFILE: getKoryphaiosAntigravityHome(),
-      }),
+      env: agyDiscoveryEnv(),
     });
     const out = (result.stdout ?? '').toString();
     const lines = out
@@ -343,15 +406,27 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin, ['models'], {
       stdio: ['ignore', 'pipe', 'ignore'],
-      env: buildProviderCliEnv('antigravity', {
-        ANTIGRAVITY_HOME: getKoryphaiosAntigravityHome(),
-        HOME: getKoryphaiosAntigravityHome(),
-        USERPROFILE: getKoryphaiosAntigravityHome(),
-      }),
+      env: agyDiscoveryEnv(),
     });
     let out = '';
+    let settled = false;
+    const finish = (value: ModelDef[]) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish([]);
+    }, AGY_MODELS_PROBE_TIMEOUT_MS);
     child.stdout.on('data', (c: Buffer) => (out += c.toString()));
-    child.once('error', reject);
+    child.once('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
     child.once('exit', () => {
       const lines = out
         .split('\n')
@@ -362,6 +437,16 @@ async function fetchAgyModels(bin: string): Promise<ModelDef[]> {
   });
 }
 
+const AGY_MODEL_ID_PREFIX = 'antigravity-';
+
+/** Koryphaios catalog id for an agy slug (`gemini-3.8-flash` → `antigravity-gemini-3-8-flash`). */
+function agyModelId(slug: string): string {
+  return `${AGY_MODEL_ID_PREFIX}${slug
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+$/, '')}`;
+}
+
 export function modelDefFromCliName(line: string): ModelDef {
   // agy models outputs "cliName\tdisplayName" pairs, e.g.:
   //   gemini-3.6-flash-high\tGemini 3.6 Flash (High)
@@ -369,12 +454,8 @@ export function modelDefFromCliName(line: string): ModelDef {
   // human-readable display name for the UI.
   const [cliName, displayName] = line.split('\t');
   const name = displayName?.trim() || cliName;
-  const id = `antigravity-${cliName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+$/, '')}`;
   return {
-    id,
+    id: agyModelId(cliName),
     name,
     provider: 'antigravity',
     apiModelId: cliName,
@@ -383,6 +464,144 @@ export function modelDefFromCliName(line: string): ModelDef {
     supportsAttachments: false,
     supportsStreaming: true,
   };
+}
+
+// ── Reasoning-effort families ─────────────────────────────────────────────────
+// agy has no reasoning parameter. It publishes effort as separate model slugs —
+// "Gemini 3.8 Flash (High)", "(Medium)", "(Low)" — so `agy models` returns one
+// row per effort and the picker used to offer the user's raw model choice where
+// a reasoning control belongs. Koryphaios collapses each family into ONE base
+// model ("Gemini 3.8 Flash") with the real effort levels attached, and maps the
+// composer's effort back onto the matching agy slug when it spawns the CLI
+// (resolveAgyVariant). That makes effort a Koryphaios control here exactly as
+// it is for providers that take a reasoning parameter.
+
+/** Effort tokens agy encodes as a slug suffix, ordered from least to most effort. */
+const AGY_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max'] as const;
+
+type AgyEffort = (typeof AGY_EFFORT_ORDER)[number];
+
+function agyEffortOf(slug: string): AgyEffort | null {
+  const tail = slug.slice(slug.lastIndexOf('-') + 1).toLowerCase();
+  return (AGY_EFFORT_ORDER as readonly string[]).includes(tail) ? (tail as AgyEffort) : null;
+}
+
+/** Split "gemini-3.8-flash-high" into its base slug and its effort token. */
+export function splitAgyModelSlug(slug: string): { base: string; effort: AgyEffort | null } {
+  const effort = agyEffortOf(slug);
+  if (!effort) return { base: slug, effort: null };
+  return { base: slug.slice(0, slug.length - effort.length - 1), effort };
+}
+
+/** "Gemini 3.8 Flash (High)" → "Gemini 3.8 Flash" (unchanged if agy's format shifts). */
+function agyBaseDisplayName(name: string): string {
+  const stripped = name.replace(
+    new RegExp(`\\s*\\((?:${AGY_EFFORT_ORDER.join('|')})\\)\\s*$`, 'i'),
+    '',
+  );
+  return stripped.trim() || name;
+}
+
+/** Collapse every per-effort slug family into a single base model.
+ *
+ *  A family is only collapsed when the CLI reported at least two slugs for it,
+ *  so a single-tier account keeps reporting that tier verbatim instead of
+ *  inventing levels. Untiered models pass through untouched. */
+export function collapseAgyReasoningTiers(models: ModelDef[]): ModelDef[] {
+  const families = new Map<string, ModelDef[]>();
+  for (const model of models) {
+    const { base } = splitAgyModelSlug(model.apiModelId ?? model.id);
+    const family = families.get(base);
+    if (family) family.push(model);
+    else families.set(base, [model]);
+  }
+
+  const collapsedBases = new Set<string>();
+  const out: ModelDef[] = [];
+  for (const model of models) {
+    const slug = model.apiModelId ?? model.id;
+    const { base } = splitAgyModelSlug(slug);
+    const family = families.get(base);
+    const tiered = family?.filter((m) => agyEffortOf(m.apiModelId ?? m.id) !== null) ?? [];
+    if (!family || tiered.length < 2) {
+      out.push(model);
+      continue;
+    }
+    if (collapsedBases.has(base)) continue;
+    collapsedBases.add(base);
+    out.push(collapseAgyFamily(family, tiered, base));
+  }
+  return out;
+}
+
+function collapseAgyFamily(family: ModelDef[], tiered: ModelDef[], base: string): ModelDef {
+  // The bare slug is agy's own default, so it wins when the CLI reports one
+  // alongside tiers; otherwise medium is the balanced default Koryphaios has
+  // always used as its reasoning default.
+  const bare = family.find((m) => agyEffortOf(m.apiModelId ?? m.id) === null);
+  const fallback = tiered.find((m) => agyEffortOf(m.apiModelId ?? m.id) === 'medium') ?? tiered[0];
+  const primary = bare ?? fallback;
+
+  const reasoningVariants: Record<string, string> = {};
+  const efforts: AgyEffort[] = [];
+  for (const member of tiered) {
+    const effort = agyEffortOf(member.apiModelId ?? member.id);
+    if (!effort) continue;
+    efforts.push(effort);
+    reasoningVariants[effort] = member.apiModelId ?? member.id;
+  }
+  efforts.sort((a, b) => AGY_EFFORT_ORDER.indexOf(a) - AGY_EFFORT_ORDER.indexOf(b));
+
+  const baseId = agyModelId(base);
+  // Both id forms of every superseded member stay resolvable: sessions saved
+  // before the collapse hold the catalog id, and anything else may hold the
+  // agy slug that id was built from.
+  const aliases = [...new Set(family.flatMap((m) => [m.id, m.apiModelId ?? m.id]))].filter(
+    (id) => id !== baseId && id !== primary.apiModelId,
+  );
+  return {
+    ...primary,
+    id: baseId,
+    name: bare ? agyBaseDisplayName(bare.name) : agyBaseDisplayName(primary.name),
+    apiModelId: primary.apiModelId,
+    canReason: true,
+    reasoningLevels: efforts.length > 1 ? [...efforts, 'auto'] : efforts,
+    reasoningVariants,
+    ...(aliases.length > 0 ? { aliases } : {}),
+  };
+}
+
+/** The agy slug a reasoning level resolves to, or undefined to use the model's
+ *  own default. Auto/adaptive deliberately fall through to that default. */
+export function resolveAgyVariant(
+  model: ModelDef | undefined,
+  effort?: string,
+): string | undefined {
+  const variants = model?.reasoningVariants;
+  if (!variants || !effort) return undefined;
+  const key = effort.trim().toLowerCase();
+  if (!key || key === 'auto' || key === 'adaptive') return undefined;
+  return variants[key];
+}
+
+/** Resolve a requested model id to a catalog entry.
+ *
+ *  Also accepts the superseded per-effort ids kept in `aliases`, and reports the
+ *  effort they encoded so a session saved before the collapse keeps running at
+ *  the tier the user actually had selected. */
+export function matchAgyModel(
+  models: ModelDef[],
+  modelId: string,
+): { model: ModelDef; legacyEffort?: AgyEffort } | undefined {
+  const exact = models.find((m) => m.id === modelId || m.apiModelId === modelId);
+  if (exact) return { model: exact };
+  const alias = models.find((m) => m.aliases?.includes(modelId));
+  if (!alias) return undefined;
+  const slug = modelId.startsWith(AGY_MODEL_ID_PREFIX)
+    ? modelId.slice(AGY_MODEL_ID_PREFIX.length)
+    : modelId;
+  const { effort } = splitAgyModelSlug(slug);
+  return effort ? { model: alias, legacyEffort: effort } : { model: alias };
 }
 
 // ── File-edit tool detection ──────────────────────────────────────────────────
@@ -561,7 +780,7 @@ export class AntigravityProvider implements Provider {
     if (this.config.disabled) return false;
     const available = !!this.config.authToken || detectAntigravityCLILogin();
     if (available && Date.now() - cachedModelsAt > MODELS_CACHE_TTL_MS) {
-      refreshModelsInBackground();
+      void refreshModelsInBackground();
     }
     return available;
   }
@@ -573,37 +792,20 @@ export class AntigravityProvider implements Provider {
     if (cachedModels && cachedModels.length > 0) return cachedModels;
     const sync = tryFetchAgyModelsSync();
     if (sync && sync.length > 0) {
-      const enriched = applyModelsDevMetadata('antigravity', sync, [
-        'google',
-        'anthropic',
-        'openai',
-      ]);
-      const withWindows = enriched.map((m) => {
-        if (m.contextWindow && m.contextWindow > 0) return m;
-        const apiId = (m.apiModelId ?? m.id).toLowerCase();
-        let fallback = 200_000;
-        if (apiId.startsWith('gemini-')) fallback = 1_048_576;
-        else if (apiId.startsWith('claude-')) fallback = 200_000;
-        else if (apiId.startsWith('gpt-')) fallback = 131_072;
-        return {
-          ...m,
-          contextWindow: fallback,
-          contextVerified: true,
-          maxOutputTokens: m.maxOutputTokens || 8192,
-        };
-      });
-      cachedModels = mergeQuotaIntoModels(withWindows, cachedQuota);
+      cachedModels = buildAntigravityModels(sync, cachedQuota);
       cachedModelsAt = Date.now();
       return cachedModels;
     }
-    refreshModelsInBackground();
+    void refreshModelsInBackground();
     return cachedModels ?? [];
   }
 
-  /** Force-refresh the model list and quota from the live sources. */
-  refreshModels(): void {
+  /** Force-refresh the model list and quota from the live sources.
+   *  Returns a promise so callers that await a catalog refresh actually wait
+   *  for it; the registry only awaits thenables. */
+  refreshModels(): Promise<ModelDef[]> {
     cachedModelsAt = 0;
-    refreshModelsInBackground();
+    return refreshModelsInBackground();
   }
 
   /** Live per-group quota from the agy CLI's `/usage` command, keyed by group
@@ -613,7 +815,7 @@ export class AntigravityProvider implements Provider {
     if (cachedQuota && Date.now() - cachedModelsAt < MODELS_CACHE_TTL_MS) {
       return cachedQuota;
     }
-    refreshModelsInBackground();
+    void refreshModelsInBackground();
     return cachedQuota;
   }
 
@@ -623,15 +825,23 @@ export class AntigravityProvider implements Provider {
     return cachedQuotaGroups;
   }
 
-  private resolveCliModel(modelId: string): string | undefined {
+  private resolveCliModel(modelId: string, reasoningLevel?: string): string | undefined {
     const models = this.listModels();
-    const model = models.find((m) => m.id === modelId || m.apiModelId === modelId);
-    if (model?.apiModelId) return model.apiModelId;
-    if (models[0]?.apiModelId) return models[0].apiModelId;
-    if (modelId) {
-      return modelId.startsWith('antigravity-') ? modelId.slice('antigravity-'.length) : modelId;
+    const match = matchAgyModel(models, modelId);
+    if (!match) {
+      if (models[0]?.apiModelId) return models[0].apiModelId;
+      if (modelId) {
+        return modelId.startsWith(AGY_MODEL_ID_PREFIX)
+          ? modelId.slice(AGY_MODEL_ID_PREFIX.length)
+          : modelId;
+      }
+      return undefined;
     }
-    return undefined;
+    // agy carries effort in the slug, so the composer's reasoning level (or the
+    // tier baked into a pre-collapse model id) picks the row here.
+    return (
+      resolveAgyVariant(match.model, reasoningLevel ?? match.legacyEffort) ?? match.model.apiModelId
+    );
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -701,7 +911,7 @@ export class AntigravityProvider implements Provider {
       return;
     }
 
-    const cliModel = this.resolveCliModel(request.model);
+    const cliModel = this.resolveCliModel(request.model, request.reasoningLevel);
     if (!cliModel) {
       attachmentScope.cleanup();
       yield {
@@ -846,7 +1056,9 @@ export class AntigravityProvider implements Provider {
           ],
           readonlyConfigDirs: existsSync(realGeminiDir) ? [realGeminiDir] : [],
           sockets: userBus ? [userBus.socket] : [],
-          policy: request.sandbox,
+          // The CLI child is the inference transport — it must reach the
+          // model endpoint. See inferenceSandboxPolicy.
+          policy: inferenceSandboxPolicy(request.sandbox),
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);

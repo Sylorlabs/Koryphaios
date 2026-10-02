@@ -9,6 +9,7 @@ import {
 import { getDb } from '../db';
 import { ConflictError, DuplicateError, NotFoundError, ValidationError } from '../errors/types';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { resolveProjectIdentity } from '../runtime/request-project';
 import { getLocalNotesPrincipalId } from './notes-principal';
 import {
   assertProjectPropertyProjectionCurrent,
@@ -182,11 +183,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizedProjectRoot(projectRoot: string): string {
-  return resolve(projectRoot);
+  return resolveProjectIdentity(projectRoot);
 }
 
 function includesLegacyProjectRows(projectRoot: string): boolean {
-  return normalizedProjectRoot(projectRoot) === resolve(PROJECT_ROOT);
+  return normalizedProjectRoot(projectRoot) === normalizedProjectRoot(PROJECT_ROOT);
 }
 
 function normalizedPropertyKey(key: string): string {

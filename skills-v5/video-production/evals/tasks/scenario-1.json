@@ -1,0 +1,87 @@
+{
+  "id": "video-production-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply video production expertise to this task\". The source material has target-format constraints, noisy or incomplete input, accessibility/legibility requirements, and an export path that can silently degrade quality. The acceptance boundary is video-production: Define audience, outcome, duration, platform/aspect, narrative beats, shot grammar, pacing, visual continuity, motion language, voice/music/SFX, captions, and brand constraints. The adjacent audio-production discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://video-production/tutorial-edit-accessibility",
+    "requirements": [
+      "screen recording, narration, pickup clips, and transcript with known correction points",
+      "1080p delivery spec, frame-rate/source metadata, loudness/true-peak target, and caption format",
+      "UI legibility/crop safe-area requirements and music stem",
+      "final encoded-file QC for sync, dropped/duplicated frames, captions, and audio",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "video-production parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "video-production-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "video-production decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "video-production-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "video-production decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "video-production-individual-scenario-1-result",
+    "video-production-individual-scenario-1-verification",
+    "video-production-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual video-production boundary and relevant environment before acting, preserve the hierarchy relationship (broader=human-experience; near-neighbor=audio-production), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define audience, outcome, duration, platform/aspect, narrative beats, shot grammar, pacing, visual continuity, motion language, voice/music/SFX, captions, and brand constraints."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Review full renders plus key frames for pacing, cuts, legibility, caption timing, audio levels, clipping, motion continuity, encoding, and target-platform dimensions; test beginning/end and seek points explicitly."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not overuse motion presets, let captions obscure primary content, rely on draft-preview timing as final render proof, or use copyrighted media without appropriate rights."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (video-production decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

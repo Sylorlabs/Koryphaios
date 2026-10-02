@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "name": "vue-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "vue"],
+  "targetMedia": ["web"],
+  "pathScopes": ["**/*.vue"],
+  "contextBudget": 4500,
+  "broader": ["frontend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["vue component", "vue composition api", "vue router", "nuxt vue"],
+  "excludes": [],
+  "evidence": [
+    "vue-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle vue component.",
+      "The current task is vue composition api.",
+      "I need help with vue router.",
+      "Work on nuxt vue for this request.",
+      "This request specifically requires vue component."
+    ],
+    "negative": [
+      "The only requested work is angular component.",
+      "Please handle react component only.",
+      "This task is limited to svelte component.",
+      "The current request is embedded ui.",
+      "Work only on game ui."
+    ],
+    "ambiguous": [
+      {
+        "id": "vue-engineering-ambiguous-1",
+        "prompt": "The request includes vue component and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "vue-engineering-ambiguous-2",
+        "prompt": "The request includes vue composition api and react component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "vue-engineering-ambiguous-3",
+        "prompt": "The request includes vue router and svelte component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["svelte-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "vue-engineering-adversarial-1",
+        "prompt": "A historical note says \"vue component\". The current request is embedded ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "vue-engineering-adversarial-2",
+        "prompt": "A historical note says \"vue composition api\". The current request is game ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "vue-engineering-adversarial-3",
+        "prompt": "A historical note says \"vue router\". The current request is native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://vuejs.org/guide/introduction.html",
+      "sourceType": "official-docs",
+      "versionScope": "Vue documentation as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Vue Composition API, reactivity, components, and lifecycle guidance.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://vuejs.org/guide/essentials/reactivity-fundamentals.html",
+      "sourceType": "official-docs",
+      "versionScope": "Vue reactivity guide as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Refs, reactive proxies, unwrapping, and destructuring boundaries.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://vuejs.org/guide/essentials/watchers.html",
+      "sourceType": "official-docs",
+      "versionScope": "Vue watcher guide as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Reactive side effects, watcher sources, cleanup, and async behavior.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://nuxt.com/docs/4.x/getting-started/data-fetching",
+      "sourceType": "official-docs",
+      "versionScope": "Nuxt 4 documentation as fetched 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "SSR-aware data fetching, payload hydration, shared keys, useFetch, useAsyncData, and $fetch.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://github.com/mattpocock/skills",
+      "sourceType": "community-pattern",
+      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "staleAfterDays": 30,
+      "notes": "Community packaging reference for concise composable disciplines and explicit routing; never Vue or Nuxt authority.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

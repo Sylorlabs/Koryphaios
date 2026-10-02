@@ -1,0 +1,87 @@
+{
+  "id": "customer-success-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply customer success expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The acceptance boundary is customer-success: Define the customer outcome, stakeholders, implementation milestones, activation/adoption behaviors, dependencies, support burden, health signals, business review cadence, and renewal decision. The adjacent audio-production discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://customer-success/implementation-to-steady-state-handoff",
+    "requirements": [
+      "implementation handoff with completed technical checklist and two documented open defects",
+      "department-level activation/usage data with one adopted and two under-adopted groups",
+      "stated executive outcome and six-week value-review date",
+      "owner matrix separating customer-success actions from implementation engineering defects",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "customer-success parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "customer-success-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "customer-success decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "customer-success-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "customer-success decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "customer-success-individual-scenario-2-result",
+    "customer-success-individual-scenario-2-verification",
+    "customer-success-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual customer-success boundary and relevant environment before acting, preserve the hierarchy relationship (broader=human-experience; near-neighbor=audio-production), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define the customer outcome, stakeholders, implementation milestones, activation/adoption behaviors, dependencies, support burden, health signals, business review cadence, and renewal decision."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Track milestone completion, representative usage/outcome metrics, unresolved support/product gaps, stakeholder changes, and explicit value evidence through onboarding and renewal cycles."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not optimize touch count, treat logins as value universally, hide product gaps behind relationship management, or use health scores without interpretable components and actions."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (customer-success decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

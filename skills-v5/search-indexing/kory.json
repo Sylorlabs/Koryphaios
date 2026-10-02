@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "name": "search-indexing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "search"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "full text search",
+    "search index",
+    "elasticsearch",
+    "opensearch",
+    "lexical search",
+    "analyzers tokenization",
+    "refresh update behavior"
+  ],
+  "excludes": [],
+  "evidence": [
+    "search-indexing decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle full text search.",
+      "The current task is search index.",
+      "I need help with elasticsearch.",
+      "Work on opensearch for this request.",
+      "This request specifically requires lexical search."
+    ],
+    "negative": [
+      "The only requested work is vector database.",
+      "Please handle mongodb only.",
+      "This task is limited to redis.",
+      "The current request is relational schema.",
+      "Work only on bun runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "search-indexing-ambiguous-1",
+        "prompt": "The request includes full text search and vector database.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "search-indexing-ambiguous-2",
+        "prompt": "The request includes search index and mongodb.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mongodb-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "search-indexing-ambiguous-3",
+        "prompt": "The request includes elasticsearch and redis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["redis-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "search-indexing-adversarial-1",
+        "prompt": "A historical note says \"full text search\". The current request is relational schema.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["relational-data-modeling"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "search-indexing-adversarial-2",
+        "prompt": "A historical note says \"search index\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "search-indexing-adversarial-3",
+        "prompt": "A historical note says \"elasticsearch\". The current request is compiler runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://lucene.apache.org/core/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Apache Lucene current core documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Reference implementation for indexing, analysis, scoring, and search internals.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

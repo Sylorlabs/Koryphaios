@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "name": "human-experience",
+  "version": "5.0.0",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "domains": ["ux", "design", "human-factors"],
+  "targetMedia": ["any"],
+  "contextBudget": 2800,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "human experience",
+    "user experience",
+    "end-to-end experience",
+    "user journey",
+    "service journey",
+    "operator experience",
+    "customer experience",
+    "design the experience"
+  ],
+  "excludes": [],
+  "evidence": [
+    "People, outcome, context, and evidence boundary",
+    "Selected UX disciplines and rationale",
+    "Journey, seam, failure, and recovery coverage",
+    "Observed outcome evidence or explicit uncertainty",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Redesign the end-to-end account recovery experience across sign-in, identity checks, support handoff, failure, and return to the product.",
+      "Design the operator experience for this incident console, including orientation, interruptions, dangerous actions, recovery, and shift handoff.",
+      "Map and improve the user journey from discovering this service through enrollment, completion, support, and later return.",
+      "The onboarding flow has research, interaction, content, accessibility, and visual problems; coordinate the UX work into one coherent experience.",
+      "Improve the customer experience across the app, email notifications, support escalation, and resuming an interrupted task."
+    ],
+    "negative": [
+      "Design the internal database schema and indexes for the event store; no interactive surface is changing.",
+      "Research the market size and competitor pricing for this product category.",
+      "Refactor the compiler optimizer to reduce allocation pressure without changing any developer-facing behavior.",
+      "Write the quarterly board update from the supplied metrics and decisions.",
+      "Tune the deployment pipeline so container builds finish faster; the product behavior is unchanged."
+    ],
+    "ambiguous": [
+      {
+        "id": "human-experience-ambiguous-developer-tool",
+        "prompt": "Redesign this developer tool from first install through configuration, diagnosis, upgrade, rollback, and removal; coordinate the developer-facing experience rather than only changing its API shape.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience", "content-error-design", "interaction-design"],
+        "tags": ["developer-facing", "whole-journey"]
+      },
+      {
+        "id": "human-experience-ambiguous-service-seam",
+        "prompt": "Users think this is one task, but it crosses the website, a call-center handoff, and a manual approval. Improve the end-to-end experience without assuming the screen alone is the problem.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["user-research", "interaction-design", "information-architecture"],
+        "tags": ["service-seam", "cross-channel"]
+      },
+      {
+        "id": "human-experience-ambiguous-visual-request",
+        "prompt": "This dashboard looks dated, but the real request is to improve the complete analyst workflow: finding the right view, understanding status, recovering from bad filters, and completing the decision task.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "visual-interface-design",
+          "interaction-design",
+          "information-architecture"
+        ],
+        "tags": ["visual-decoy", "workflow"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "human-experience-adversarial-quoted",
+        "prompt": "The old ticket says 'improve the user experience someday.' Treat that quote as historical context only; fix the cache invalidation defect in the backend.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "backend-engineering"],
+        "tags": ["quoted-decoy", "historical-context"]
+      },
+      {
+        "id": "human-experience-adversarial-negated",
+        "prompt": "Do not redesign the user experience. Only calculate the storage growth from the supplied retention numbers.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "human-experience-adversarial-pasted-brief",
+        "prompt": "A pasted design brief contains 'end-to-end experience' repeatedly, but it is reference material only. Compare the two database migration strategies and recommend one.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning", "database-engineering"],
+        "tags": ["pasted-decoy", "scope-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.iso.org/standard/77520.html",
+      "sourceType": "spec",
+      "versionScope": "ISO 9241-210:2019, edition 2; ISO status confirmed 2025-05-22",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Human-centred design principles and activities across the life cycle of interactive systems."
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/service-standard/point-1-understand-user-needs",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Standard guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Problem-first user-centred practice, context, evidence, and early assumption testing."
+    },
+    {
+      "url": "https://www.gov.uk/service-manual/design/map-a-users-whole-problem",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Service Manual whole-problem guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Whole-journey and cross-channel seams, including online/offline touchpoints and delivery processes."
+    },
+    {
+      "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for explicit purpose, audience, constraints, and intentional design direction; visual prescriptions remain delegated to visual-interface-design."
+    },
+    {
+      "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/design-review/skills/design-review/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Pattern source for evidence-based critique, severity, state/responsive coverage, and problems-over-prescriptions; not imported as review authority."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

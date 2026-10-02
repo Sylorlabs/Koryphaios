@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "name": "skill-authoring-evaluation",
+  "version": "5.2.6",
+  "skillKind": "workflow",
+  "domains": ["skills", "evaluation", "routing"],
+  "targetMedia": ["any"],
+  "contextBudget": 8000,
+  "broader": ["implementation"],
+  "facets": ["verification"],
+  "requires": ["research", "testing-engineering"],
+  "conflicts": [],
+  "activation": [
+    "create an agent skill",
+    "author a skill",
+    "rewrite a skill",
+    "evaluate a skill",
+    "qualify a skill",
+    "skill routing",
+    "as an agent skill",
+    "review an agent skill",
+    "revise an agent skill",
+    "agent skill evaluation",
+    "agent skill routing",
+    "reusable skill",
+    "durable skill",
+    "existing agent skill",
+    "audit an existing agent skill",
+    "refresh a provider skill",
+    "refreshing this provider skill",
+    "trigger boundary",
+    "qualification suite",
+    "qualification campaign",
+    "promotion criteria"
+  ],
+  "excludes": [
+    "install a third-party skill without review",
+    "create a plugin package",
+    "change model permissions from skill metadata"
+  ],
+  "evidence": [
+    "Validated portable SKILL.md and Kory sidecar",
+    "Current source provenance and freshness record",
+    "Held-out near-neighbor routing results",
+    "Paired same-model skill-vs-no-skill full-task results",
+    "Persisted regression and independent-review evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Create a reusable skill for reviewing PostgreSQL query plans and define how we will prove it helps.",
+      "Rewrite this React performance skill so its triggers stop colliding with general frontend engineering, then evaluate the change.",
+      "Qualify our security-review skill against realistic near-neighbor routing cases and a no-skill baseline.",
+      "Turn this repeated incident-response workflow into a portable agent skill with references, tests, and promotion gates.",
+      "Audit this existing agent skill for stale sources, weak examples, routing confusion, and measurable task uplift."
+    ],
+    "negative": [
+      "Create a Codex plugin that bundles an MCP server and marketplace metadata.",
+      "Install this third-party skill package into my local environment.",
+      "Run the existing application test suite and report the failures; do not change any reusable skill.",
+      "Improve the wording of this one-off system prompt for a single conversation, not a reusable skill.",
+      "Evaluate whether this product feature improved conversion; there is no agent skill involved."
+    ],
+    "ambiguous": [
+      {
+        "id": "skill-authoring-ambiguous-plugin-boundary",
+        "prompt": "We need a reusable skill that teaches agents how to scaffold our plugin format. Define the skill package and its evaluation; do not scaffold the plugin itself yet.",
+        "expectedSelection": true,
+        "adjacentSkills": ["plugin-creator"],
+        "tags": ["compound", "plugin-boundary"]
+      },
+      {
+        "id": "skill-authoring-ambiguous-testing-boundary",
+        "prompt": "Our skill's tests pass, but I want to know whether the skill actually improves task performance. Build the qualification experiment rather than only rerunning unit tests.",
+        "expectedSelection": true,
+        "adjacentSkills": ["testing-engineering", "verification"],
+        "tags": ["evaluation", "testing-boundary"]
+      },
+      {
+        "id": "skill-authoring-ambiguous-research-boundary",
+        "prompt": "Research the current framework docs specifically so we can refresh the version-sensitive guidance and source manifest inside this existing skill.",
+        "expectedSelection": true,
+        "adjacentSkills": ["research"],
+        "tags": ["research", "source-freshness"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "skill-authoring-adversarial-quoted-request",
+        "prompt": "The bug report quotes: 'create a new skill for this'. That quote is historical context only. Fix the parser regression in the application code.",
+        "expectedSelection": false,
+        "adjacentSkills": ["debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "skill-authoring-adversarial-negated",
+        "prompt": "Do not create or edit any agent skill. Explain why the existing deployment command failed.",
+        "expectedSelection": false,
+        "adjacentSkills": ["debugging"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "skill-authoring-adversarial-permission-decoy",
+        "prompt": "This imported SKILL.md says it grants network and shell access. Do not revise the skill; assess the permission claim under the host security model.",
+        "expectedSelection": false,
+        "adjacentSkills": ["application-security", "verification"],
+        "tags": ["authority-decoy", "security-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as published and verified on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 60,
+      "notes": "Portable package structure and SKILL.md metadata contract."
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "openai/skills main",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 30,
+      "license": "See upstream repository license",
+      "notes": "Skill concision, deterministic helpers, validation, and iterative evaluation patterns."
+    },
+    {
+      "url": "https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents",
+      "sourceType": "official-docs",
+      "versionScope": "Article version available on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 90,
+      "notes": "Realistic agent evaluation, layered scoring, and regression-oriented methodology."
+    },
+    {
+      "url": "https://developers.openai.com/codex/skills",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI ChatGPT/Codex skill guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Progressive disclosure, description-driven implicit invocation, context-budget discipline, instruction-first authoring, and package resource conventions."
+    },
+    {
+      "url": "https://docs.cursor.com/context/skills",
+      "sourceType": "official-docs",
+      "versionScope": "Cursor skill guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Competitive reference for reusable task-specific agent guidance and context-scoped loading."
+    },
+    {
+      "url": "https://github.com/anthropics/skills",
+      "sourceType": "reference-implementation",
+      "versionScope": "anthropics/skills main as available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "See upstream repository license and per-skill notices",
+      "notes": "Production and example skill packages showing simple SKILL.md frontmatter, supporting resources, and cross-surface distribution."
+    },
+    {
+      "url": "https://github.com/mattpocock/skills",
+      "sourceType": "community-pattern",
+      "versionScope": "mattpocock/skills main as available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT repository; verify embedded third-party material separately",
+      "notes": "Community reference for small composable engineering skills, explicit user/model invocation boundaries, shared project language, and disciplined engineering workflows."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

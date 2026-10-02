@@ -1,0 +1,82 @@
+{
+  "id": "swift-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Swift actor that checks an account balance, awaits a remote fraud check, then subtracts funds. Actor reentrancy lets two withdrawals both pass the pre-await balance check and overdraw the account. Redesign the state transition/reservation boundary without blocking the actor during network I/O, preserve cancellation/error semantics, and verify concurrent withdrawals, fraud denial, timeout, cancellation, and invariant restoration.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://swift-engineering/actor-reentrancy-balance",
+    "requirements": [
+      "Swift actor with balance state and delayed fraud-check dependency",
+      "two concurrent withdrawals whose sum exceeds starting balance",
+      "fraud denial/timeout/cancellation fixtures",
+      "balance/reservation invariant checks after every terminal path",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "swift-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "swift-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "swift-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "actor-reentrancy-balance scenario evidence",
+    "swift-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "swift-engineering-individual-scenario-1-result",
+    "swift-engineering-individual-scenario-1-verification",
+    "swift-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual swift-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Choose value versus reference semantics intentionally, preserve Sendable and actor isolation, model ownership around ARC, and treat Task cancellation as part of API behavior."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Mutable actor invariants are not assumed to survive an await; authorization/reservation and final commit/rollback form explicit state transitions safe under reentrancy."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run the supported Swift package or Xcode test path, exercise actor isolation and cancellation, and validate on the actual supported Apple platform when platform APIs or UI lifecycles are involved."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not silence concurrency warnings with unchecked annotations, retain cycles through closures, force unwrap routine data, or infer device behavior from host-only tests."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (swift-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

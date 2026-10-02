@@ -1,0 +1,91 @@
+{
+  "id": "rag-retrieval-systems-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply retrieval augmented generation expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is rag-retrieval-systems: Define source authority, document lifecycle, parsing, chunk identity, metadata, access control, retrieval stages, reranking, context assembly, citation mapping, and stale/deleted content behavior. The adjacent agentic-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://rag-retrieval-systems/scenario-1",
+    "requirements": [
+      "versioned corpus with public/team/admin ACLs, duplicate revisions, a revoked document and a missing-ACL fixture",
+      "parser/chunker/embedding/index manifests plus lexical and semantic candidate retrieval and reranking",
+      "source/chunk/revision/locator metadata carried through citation mapping",
+      "query judgments covering exact codes, semantic paraphrases, cross-tenant access, stale/deleted evidence and no-answer cases",
+      "paired same-model skill/no-skill execution",
+      "rag-retrieval-systems parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual rag-retrieval-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=llm-application-engineering; near-neighbor=agentic-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define source authority, document lifecycle, parsing, chunk identity, metadata, access control, retrieval stages, reranking, context assembly, citation mapping, and stale/deleted content behavior."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use question sets with known source evidence to measure retrieval recall, answer groundedness, citation correctness, abstention on missing evidence, authorization filtering, freshness, and latency across corpus/index/model revisions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not optimize chunk size from intuition alone, cite documents the model did not actually use, return inaccessible content through retrieval, or treat vector similarity as sufficient relevance."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Corpus/source/revision, parser/chunker, embedding/index and retrieval-configuration identity; Authorization/filtering plus stale/deleted/missing-content behavior; Candidate/fusion/reranking and source-to-chunk-to-citation lineage; Versioned retrieval query judgments with Recall/Precision/MRR/NDCG and latency evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "rag-retrieval-systems-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Corpus/source/revision, parser/chunker, embedding/index and retrieval-configuration identity",
+        "Authorization/filtering plus stale/deleted/missing-content behavior",
+        "Candidate/fusion/reranking and source-to-chunk-to-citation lineage",
+        "Versioned retrieval query judgments with Recall/Precision/MRR/NDCG and latency evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "rag-retrieval-systems-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Corpus/source/revision, parser/chunker, embedding/index and retrieval-configuration identity",
+    "Authorization/filtering plus stale/deleted/missing-content behavior",
+    "Candidate/fusion/reranking and source-to-chunk-to-citation lineage",
+    "Versioned retrieval query judgments with Recall/Precision/MRR/NDCG and latency evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "rag-retrieval-systems-individual-scenario-1-result",
+    "rag-retrieval-systems-individual-scenario-1-verification",
+    "rag-retrieval-systems-individual-scenario-1-paired-evaluation"
+  ]
+}

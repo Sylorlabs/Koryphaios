@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "nextjs-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "nextjs"],
+  "targetMedia": ["web"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["web-interface"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["next.js", "nextjs", "next app router", "next server action"],
+  "excludes": [],
+  "evidence": [
+    "nextjs-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle next.js.",
+      "The current task is nextjs.",
+      "I need help with next app router.",
+      "Work on next server action for this request.",
+      "This request specifically requires next.js."
+    ],
+    "negative": [
+      "The only requested work is jetpack compose.",
+      "Please handle angular component only.",
+      "This task is limited to electron app.",
+      "The current request is swiftui.",
+      "Work only on react component."
+    ],
+    "ambiguous": [
+      {
+        "id": "nextjs-engineering-ambiguous-1",
+        "prompt": "The request includes next.js and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "nextjs-engineering-ambiguous-2",
+        "prompt": "The request includes nextjs and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "nextjs-engineering-ambiguous-3",
+        "prompt": "The request includes next app router and electron app.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "nextjs-engineering-adversarial-1",
+        "prompt": "A historical note says \"next.js\". The current request is swiftui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ios-swiftui"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "nextjs-engineering-adversarial-2",
+        "prompt": "A historical note says \"nextjs\". The current request is react component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "nextjs-engineering-adversarial-3",
+        "prompt": "A historical note says \"next app router\". The current request is react native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-native-expo"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://nextjs.org/docs",
+      "sourceType": "official-docs",
+      "versionScope": "Next.js documentation as fetched 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "App Router, rendering, data, caching, routing, and deployment behavior.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components",
+      "sourceType": "official-docs",
+      "versionScope": "Page last updated 2026-03-16",
+      "staleAfterDays": 30,
+      "notes": "Server and Client Component boundaries, use client module graph, serialization, and server-only separation.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://nextjs.org/docs/app/getting-started/revalidating",
+      "sourceType": "official-docs",
+      "versionScope": "Page last updated 2026-03-03; Cache Components model",
+      "staleAfterDays": 30,
+      "notes": "cacheLife and on-demand revalidation with revalidateTag, updateTag, and revalidatePath.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://github.com/mattpocock/skills",
+      "sourceType": "community-pattern",
+      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "staleAfterDays": 30,
+      "notes": "Community packaging reference for focused composable specialist rules and explicit routing; never Next.js authority.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

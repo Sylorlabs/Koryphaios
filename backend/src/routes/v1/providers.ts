@@ -28,7 +28,12 @@ import {
 import { detectAgentClis } from '../../providers/cli-detection';
 import { scanAwsCredentialSources } from '../../providers/aws-credential-scan';
 import { cliResearchBoundary } from '../../providers/cli-research';
+import { promptCacheDiagnostics } from '../../providers/cache-fabric';
+import { promptCacheMaintenance } from '../../providers/cache-maintenance';
+import { crossAgentEvidenceCache } from '../../cache/evidence-cache';
+import { getPromptCacheUsageSummary } from '../../credit-accountant';
 import { getManagedCodexAppServer } from '../../providers/codex-app-server';
+import { getCatalogRefreshScheduler } from '../../providers/catalog-refresh';
 import { discoverCliAccounts, getDiscoveredCliAccount } from '../../providers/cli-accounts';
 import {
   clearKimiCodeAuthState,
@@ -72,7 +77,27 @@ const providerConfigBody = t.Object({
   awsSessionToken: t.Optional(t.String()),
   selectedModels: t.Optional(t.Array(t.String())),
   hideModelSelector: t.Optional(t.Boolean()),
+  /**
+   * Explicit intent from "Run safe check" / an explicit connect: re-probe the
+   * stored credentials even though no credential field changed, and close the
+   * catalog-vs-inference gap with one real minimal generation.
+   *
+   * Kept out of the credential set on purpose — it selects verification
+   * strictness, not connection material, so it must not count as a
+   * connection change and must never be persisted into koryphaios.json.
+   */
+  fullCheck: t.Optional(t.Boolean()),
 });
+
+/** Split the verification intent out of the persisted credential payload. */
+function splitFullCheck(body: unknown): {
+  credentials: Record<string, unknown>;
+  fullCheck: boolean;
+} {
+  const record = (body ?? {}) as Record<string, unknown>;
+  const { fullCheck, ...credentials } = record;
+  return { credentials, fullCheck: fullCheck === true };
+}
 
 function readStoredMetadata(credential: UserCredential): StoredAccountMetadata {
   if (credential.metadata && typeof credential.metadata === 'object') {
@@ -234,6 +259,69 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       data: providers.getStatus(),
     };
   })
+  .get('/catalog-refresh-status', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const scheduler = getCatalogRefreshScheduler();
+    return {
+      ok: true,
+      data: scheduler
+        ? scheduler.getStatus()
+        : { running: false, providers: [] },
+    };
+  })
+  .get('/cache-diagnostics', ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    let durableCache;
+    try {
+      durableCache = getPromptCacheUsageSummary();
+    } catch {
+      durableCache = {
+        requests: 0,
+        inputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        hitRate: 0,
+        savingsUsd: 0,
+        averageTtftMs: null,
+        averageLatencyMs: null,
+        byProvider: [],
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        prompt: promptCacheDiagnostics.getStats(),
+        recent: promptCacheDiagnostics.getRecent(25),
+        evidence: crossAgentEvidenceCache.getStats(),
+        maintenance: promptCacheMaintenance.getStats(),
+        durable: durableCache,
+      },
+    };
+  })
+  .post(
+    '/cache-prewarm',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      return {
+        ok: true,
+        data: await kory.prewarmSessionCache(
+          body.sessionId,
+          body.model,
+          body.reasoningLevel,
+          body.interactionMode,
+        ),
+      };
+    },
+    {
+      body: t.Object({
+        sessionId: t.String({ minLength: 1, maxLength: 256 }),
+        model: t.String({ minLength: 1, maxLength: 512 }),
+        reasoningLevel: t.String({ maxLength: 64 }),
+        interactionMode: t.Union([t.Literal('act'), t.Literal('plan')]),
+      }),
+    },
+  )
   .get('/cli-accounts', ({ request, set }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const accounts = discoverCliAccounts();
@@ -317,8 +405,11 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     };
   })
   // ─── Custom (bring-your-own) providers ──────────────────────────────────
-  // Add an OpenAI-compatible (or Anthropic/Gemini-compatible) endpoint with a base URL,
-  // optional API key, optional explicit model list, and optional custom headers.
+  // Add a bring-your-own endpoint with a base URL, optional API key, optional
+  // explicit model list, and optional custom headers. The wire format
+  // (OpenAI/Anthropic/Gemini-compatible, or a wire adapter for dialects the
+  // SDKs cannot speak) is auto-detected from the endpoint's catalog
+  // responses; callers may still pin `kind` or `adapter` explicitly.
   .post(
     '/custom',
     async ({ request, body, set }) => {
@@ -340,15 +431,18 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
           error: `A custom provider named "${label}" already exists. Open its card to update it.`,
         };
       }
-      const kind = body.kind ?? 'openai';
       const manualModels = [...new Set(body.models?.map((m) => m.trim()).filter(Boolean) ?? [])];
       const probe = await probeCustomProvider({
-        kind,
+        // No kind from the form: the probe auto-detects the wire format.
+        kind: body.kind,
+        adapter: body.adapter,
         baseUrl,
         apiKey: body.apiKey?.trim() || undefined,
         authToken: body.authToken?.trim() || undefined,
         headers: body.headers,
       });
+      const kind = probe.detectedKind ?? body.kind ?? 'openai';
+      const adapter = probe.detectedAdapter ?? body.adapter;
       const saveUnverified = body.allowUnverified === true;
       if (!probe.success) {
         if (!saveUnverified || !probe.canSaveUnverified) {
@@ -377,6 +471,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         id,
         label,
         kind,
+        adapter,
         baseUrl: probe.normalizedBaseUrl ?? baseUrl,
         apiKey: body.apiKey?.trim() || undefined,
         authToken: body.authToken?.trim() || undefined,
@@ -389,7 +484,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
       }
       syncProviderConfigsSafely(providers);
       serverLog.info(
-        { provider: id, kind, catalogDetected: probe.success },
+        { provider: id, kind, adapter, catalogDetected: probe.success },
         'Custom provider added',
       );
       return {
@@ -398,6 +493,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
           id,
           label,
           kind,
+          adapter,
           catalogDetected: probe.success,
           normalizedBaseUrl: probe.normalizedBaseUrl ?? baseUrl,
           models,
@@ -410,6 +506,7 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
         kind: t.Optional(
           t.Union([t.Literal('openai'), t.Literal('anthropic'), t.Literal('gemini')]),
         ),
+        adapter: t.Optional(t.String()),
         baseUrl: t.String(),
         apiKey: t.Optional(t.String()),
         authToken: t.Optional(t.String()),
@@ -550,8 +647,11 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
 
     const result = await startBrowserAuth(name);
     if (!result.ok) {
-      serverLog.warn({ provider: name, error: result.error }, 'Browser auth start request failed');
-      set.status = 400;
+      // A start failure is always an internal one (every strategy's success
+      // path returns ok:true), so it is a server fault rather than a bad
+      // request.
+      serverLog.error({ provider: name, error: result.error }, 'Browser auth start request failed');
+      set.status = 500;
       return { ok: false, error: result.error ?? 'Failed to start auth flow' };
     }
 
@@ -566,11 +666,25 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
 
     const result = await completeBrowserAuth(name);
     if (!result.ok) {
-      serverLog.warn(
+      // An unapproved browser/device login is a normal waiting state, not a
+      // malformed request. Answering 400 here logged a browser console error on
+      // every "I Finished Sign-In" click made before approval landed.
+      if (result.pending) {
+        serverLog.info(
+          { provider: name, error: result.error },
+          'Browser auth completion is still pending',
+        );
+        return {
+          ok: false,
+          pending: true,
+          error: result.error ?? 'Sign-in is not complete yet',
+        };
+      }
+      serverLog.error(
         { provider: name, error: result.error },
         'Browser auth completion request failed',
       );
-      set.status = 400;
+      set.status = 500;
       return { ok: false, error: result.error ?? 'Failed to complete auth flow' };
     }
 
@@ -618,7 +732,10 @@ export const providerRoutes = new Elysia({ prefix: '/api/providers' })
     async ({ request, params: { name }, body, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
       const { providers } = getContext();
-      const result = await providers.setCredentials(name as ProviderName, body);
+      const { credentials, fullCheck } = splitFullCheck(body);
+      const result = await providers.setCredentials(name as ProviderName, credentials, {
+        fullCheck,
+      });
       if (result.success) {
         syncProviderConfigsSafely(providers);
         return { ok: true };

@@ -14,6 +14,25 @@ const emptySnapshot: SpendWindowSnapshot = {
 };
 
 describe('enforced spend-cap contract', () => {
+  it('enforces nothing until the user opts in', () => {
+    expect(DEFAULT_ENFORCED_CAPS.enabled).toBe(false);
+    expect(DEFAULT_ENFORCED_CAPS.action).toBe('continue');
+    // A 0 window means "no limit", so a fresh install cannot stop work on
+    // spend it never agreed to bound.
+    expect(
+      findSpendCapViolation(
+        DEFAULT_ENFORCED_CAPS,
+        {
+          sessionHourCents: 10_000_000,
+          sessionDayCents: 10_000_000,
+          globalHourCents: 10_000_000,
+          globalDayCents: 10_000_000,
+        },
+        10_000_000,
+      ),
+    ).toBeNull();
+  });
+
   it('stops the next request when recorded session-hour spend reaches its cap', () => {
     const caps = {
       ...DEFAULT_ENFORCED_CAPS,

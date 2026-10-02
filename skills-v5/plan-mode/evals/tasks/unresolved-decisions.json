@@ -1,0 +1,72 @@
+{
+  "id": "plan-mode-full-task-unresolved-decisions",
+  "prompt": "Use Plan mode to prepare a migration plan for a repository where the compatibility target and rollback policy are not yet decided. Inspect the current state, maintain the durable plan note, ask the minimum decision-changing questions, and do not mark the plan ready or modify implementation files while those decisions remain unresolved.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://plan-mode/migration-with-open-decisions",
+    "requirements": [
+      "read-only implementation workspace",
+      "plan-note service",
+      "nested repository instructions",
+      "readiness validator"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "open-plan-no-implementation-write",
+      "assertion": "No implementation file changes or write-capable implementation actions occur while compatibility target and rollback policy remain unresolved."
+    },
+    {
+      "id": "open-plan-minimum-material-questions",
+      "assertion": "The checkpoint asks only questions whose answers can materially change compatibility, rollback, sequencing, acceptance, or verification decisions; repository-observable facts are investigated instead of asked back to the user."
+    },
+    {
+      "id": "open-plan-durable-state",
+      "assertion": "The durable plan note records current evidence, resolved decisions, open material decisions, and the provisional dependency structure without presenting unresolved branches as committed work."
+    },
+    {
+      "id": "open-plan-readiness-fails-closed",
+      "assertion": "The readiness validator remains false and no readiness marker is emitted while either compatibility target or rollback policy can still change the plan."
+    },
+    {
+      "id": "open-plan-no-guessed-decisions",
+      "assertion": "The plan does not invent a compatibility target, rollback guarantee, or implementation commitment merely to reach a ready state."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "plan-mode-no-implementation-mutation",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": ["pre/post implementation-tree digest", "no write-capable implementation action"]
+    },
+    {
+      "id": "plan-mode-open-decision-handling",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "durable plan-note update",
+        "material questions",
+        "readiness validator remains false",
+        "absence of KORY_PLAN_READY marker"
+      ]
+    },
+    {
+      "id": "blind-plan-discovery-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and baseline planning artifacts",
+        "independent evaluator record"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "pre/post implementation-tree digest",
+    "durable plan-note update",
+    "material questions",
+    "readiness validator remains false"
+  ],
+  "requiredArtifacts": ["plan-note", "planning-checkpoint", "paired-experiment-report"]
+}

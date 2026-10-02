@@ -1,0 +1,68 @@
+{
+  "id": "reliability-verification-full-task-2",
+  "maturity": "individual",
+  "prompt": "A request service treats a recommendation backend as noncritical and promises to return core results within 800 ms even when recommendations are unavailable. Verify fault recovery in the isolated environment under a fixed 120 requests/second workload. Establish a steady-state baseline, then make the recommendation backend accept connections without responding for 30 seconds. During the disturbance verify core-result correctness, bounded request latency, the documented degraded response marker, retry/backoff behavior that does not amplify downstream attempts beyond the specified cap, and stable resource use. Restore the backend and measure time until recommendation success, latency, retries, and health signals return to steady state without manual intervention. Then run a 45-minute soak with the backend healthy to cross cache expiry and periodic cleanup, checking memory, open connections, and error/backlog drift.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://reliability-verification/noncritical-backend-blackhole",
+    "requirements": [
+      "the isolated load fixture can sustain a fixed 120 requests per second with deterministic core-result inputs",
+      "the recommendation dependency can be switched between healthy and accept-without-response behavior",
+      "the declared degraded contract is core results within 800 ms plus an explicit recommendation-unavailable marker",
+      "the retry-attempt cap, connection count, memory, latency, errors, and health signals are observable",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "reliability-degraded-service",
+      "assertion": "While the optional backend blackholes, core results remain correct, responses satisfy the 800 ms degraded contract, and the documented degraded marker is present."
+    },
+    {
+      "id": "reliability-retry-resource-bound",
+      "assertion": "Downstream attempts remain within the specified retry cap and the service avoids unbounded growth in in-flight work, connections, memory, or error backlog during the 30-second disturbance."
+    },
+    {
+      "id": "reliability-recovery-soak",
+      "assertion": "After dependency restoration, recommendation success, latency, retries, and health return to steady state without manual repair, and the 45-minute healthy soak shows no monotonic memory, connection, or backlog leak across cache expiry and cleanup cycles."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "reliability-verification-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Disturbance and invariant matrix",
+        "degraded-service latency/correctness evidence",
+        "retry/resource telemetry",
+        "recovery timeline and sustained-run artifacts"
+      ]
+    },
+    {
+      "id": "reliability-verification-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "noncritical dependency failure is tested as a realistic hang rather than only an immediate error",
+        "recovery is measured after the disturbance is removed",
+        "the soak crosses meaningful periodic boundaries and checks correctness alongside resources"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Disturbance and invariant matrix",
+    "steady/degraded/recovered metrics",
+    "retry and resource telemetry",
+    "45-minute sustained-run artifacts",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "reliability-verification-scenario-2-disturbance-matrix",
+    "reliability-verification-scenario-2-recovery-and-soak",
+    "reliability-verification-scenario-2-verdict",
+    "reliability-verification-scenario-2-paired-evaluation"
+  ]
+}

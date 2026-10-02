@@ -25,16 +25,50 @@ tauri-plugin-notification = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"], default-features = false }
-tokio = { version = "1", features = ["time"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"], default-features = false }
+tokio = { version = "1", features = ["time", "fs", "io-util"] }
 ignore = "0.4.25"
 regex = "1.12.3"
 flate2 = "1"
+base64 = "0.22"
+whisper-rs = "0.16.0"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-updater = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# ONNX Runtime for speech-to-text exports the user brings in ONNX form. The
+# prebuilt runtime is fetched at build time and linked statically, the same way
+# whisper.cpp is compiled.
+#
+# Windows is excluded on purpose. Only execution-provider builds of ONNX Runtime
+# are published for it, and picking one here would add an unverified 31 MB
+# dependency to the Windows shell; `whisper_onnx` falls back to a stub there that
+# says so instead. ggml and PyTorch voice models work on Windows as before.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+ort = { version = "2.0.0-rc.13", default-features = false, features = [
+  "std",
+  "ndarray",
+  "download-binaries",
+  "copy-dylibs",
+  "tls-rustls",
+] }
+rustfft = "6.4"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSResponder",
+  "NSScreen",
+  "NSWindow",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSGeometry",
+  "NSThread",
+] }

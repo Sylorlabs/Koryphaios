@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "name": "bun-deno-runtime",
+  "version": "5.1.0",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "backend", "bun", "deno"],
+  "targetMedia": ["any"],
+  "pathScopes": ["**/bun.lock", "**/deno.json", "**/deno.jsonc"],
+  "contextBudget": 3300,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "bun runtime",
+    "bun test",
+    "deno runtime",
+    "deno deploy",
+    "bun and deno",
+    "instead of node"
+  ],
+  "excludes": [],
+  "evidence": [
+    "bun-deno-runtime decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle bun runtime.",
+      "The current task is bun test.",
+      "I need help with deno runtime.",
+      "Work on deno deploy for this request.",
+      "This request specifically requires bun and deno."
+    ],
+    "negative": [
+      "The only requested work is node.js.",
+      "Please handle compiler runtime only.",
+      "This task is limited to distributed system.",
+      "The current request is in-process.",
+      "Work only on local service."
+    ],
+    "ambiguous": [
+      {
+        "id": "bun-deno-runtime-ambiguous-1",
+        "prompt": "The request includes bun runtime and node.js.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nodejs-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "bun-deno-runtime-ambiguous-2",
+        "prompt": "The request includes bun test and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "bun-deno-runtime-ambiguous-3",
+        "prompt": "The request includes deno runtime and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "bun-deno-runtime-adversarial-1",
+        "prompt": "A historical note says \"bun runtime\". The current request is in-process.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["in-process-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "bun-deno-runtime-adversarial-2",
+        "prompt": "A historical note says \"bun test\". The current request is local service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["local-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "bun-deno-runtime-adversarial-3",
+        "prompt": "A historical note says \"deno runtime\". The current request is network service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://bun.com/docs",
+      "sourceType": "official-docs",
+      "versionScope": "Bun documentation as available 2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Bun runtime, package, test, server, and compatibility behavior.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.deno.com/",
+      "sourceType": "official-docs",
+      "versionScope": "Deno documentation as available 2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Deno runtime, permissions, package, server, and compatibility behavior.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

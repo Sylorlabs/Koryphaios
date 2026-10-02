@@ -135,6 +135,52 @@ describe('feed response variant truth', () => {
     expect(response?.metadata?.activeVariantId).toBeNull();
   });
 
+  it('hides the superseded answer of a regeneration instead of stacking a duplicate', async () => {
+    const sessionId = 'regenerated-duplicate';
+    state.activeSessionId = sessionId;
+    state.boundary = {
+      activeMessageId: 'v1',
+      conversationRevision: 2,
+      providerConversationRevision: 1,
+      authoritative: true,
+    };
+    feedStore.activateSessionFeed(sessionId);
+    // The live tail still holds the first answer, streamed before the
+    // regeneration replaced it as the active branch. Only one variant may be
+    // rendered, so this row must be absorbed by the history refresh instead of
+    // reappearing as a second Kory answer.
+    feedStore.addFeedEntry({
+      timestamp: 120,
+      type: 'content',
+      agentId: 'kory-manager',
+      agentName: 'Kory',
+      glowClass: 'glow-kory',
+      text: 'first answer',
+    });
+
+    await feedStore.loadSessionMessages(sessionId, [
+      message('prompt', 'user', 'question'),
+      message('v0', 'assistant', 'first answer', {
+        variantGroupId: 'group-1',
+        variantIndex: 0,
+      }),
+      message('v1', 'assistant', 'second answer', {
+        variantGroupId: 'group-1',
+        variantIndex: 1,
+        isActive: true,
+      }),
+    ]);
+
+    const answers = feedStore.feed.filter((entry) => entry.type === 'content');
+    expect(answers.map((entry) => entry.text)).toEqual(['second answer']);
+    // The first answer stays reachable only through the variant switcher.
+    expect(
+      (answers[0]?.metadata?.responseVariants as Array<{ content: string }>).map(
+        (variant) => variant.content,
+      ),
+    ).toEqual(['first answer', 'second answer']);
+  });
+
   it('keeps a persisted row visible after a failed delete request', async () => {
     const sessionId = 'failed-delete';
     state.activeSessionId = sessionId;

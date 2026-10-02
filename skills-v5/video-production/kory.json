@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "video-production",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["creative", "video"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3309,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "video production",
+    "motion video",
+    "edit this video",
+    "programmatic video",
+    "finished short video",
+    "story edit structure",
+    "render qc"
+  ],
+  "excludes": [],
+  "evidence": [
+    "video-production decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle video production.",
+      "The current task is motion video.",
+      "I need help with edit this video.",
+      "Work on programmatic video for this request.",
+      "This request specifically requires finished short video."
+    ],
+    "negative": [
+      "The only requested work is audio production.",
+      "Please handle accessibility only.",
+      "This task is limited to content design.",
+      "The current request is customer success.",
+      "Work only on developer experience."
+    ],
+    "ambiguous": [
+      {
+        "id": "video-production-ambiguous-1",
+        "prompt": "The request includes video production and audio production.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["audio-production"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "video-production-ambiguous-2",
+        "prompt": "The request includes motion video and accessibility.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "video-production-ambiguous-3",
+        "prompt": "The request includes edit this video and content design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["content-error-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "video-production-adversarial-1",
+        "prompt": "A historical note says \"video production\". The current request is customer success.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "video-production-adversarial-2",
+        "prompt": "A historical note says \"motion video\". The current request is developer experience.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "video-production-adversarial-3",
+        "prompt": "A historical note says \"edit this video\". The current request is information architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["information-architecture"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://ffmpeg.org/ffprobe.html",
+      "sourceType": "official-docs",
+      "versionScope": "ffprobe stream/container inspection documentation inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt final-file metadata inspection distinct from complete audiovisual review. No required codec, editor or command sequence."
+    },
+    {
+      "url": "https://ffmpeg.org/documentation.html",
+      "sourceType": "official-docs",
+      "versionScope": "FFmpeg documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Video/audio codecs, containers, filter graphs, timing, and media-processing reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

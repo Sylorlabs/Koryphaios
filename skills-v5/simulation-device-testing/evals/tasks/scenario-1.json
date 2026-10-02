@@ -1,0 +1,76 @@
+{
+  "id": "simulation-device-testing-full-task-1",
+  "maturity": "individual",
+  "prompt": "Qualify the supplied Zephyr 4.4.0 sensor-monitor firmware across two evidence levels: Renode 1.16.1 using the fixture's STM32F4 Discovery platform description, and the supplied physical STM32F4 Discovery (`stm32f4_disco`) board. The fixture provides a deterministic UART sensor-peer trace containing 20 valid frames, one CRC-corrupt frame, a 2.0-second silence interval, then 10 valid recovery frames. Before running, record the firmware image SHA-256, board/revision identity, Renode version and platform-description checksum, harness version, serial configuration, and input-trace hash. Define a validity matrix for CPU/peripheral/UART/timing/reset/power properties and predeclare the state-machine oracle. Execute the same logical trace in Renode and on the physical board. The corrupt frame must not commit a measurement; the silence interval must enter the fixture-declared degraded state within its declared timeout; recovery must occur only after the fixture-declared valid-frame criterion. Compare state and event traces across levels and preserve any divergence. Do not claim that Renode proves analog UART electrical behavior, physical clock tolerance, brownout, or board power behavior, and do not claim physical qualification unless physical-board artifacts were actually captured.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://simulation-device-testing/zephyr-stm32f4-sensor-fault-ladder",
+    "requirements": [
+      "Zephyr v4.4.0 source checkout and prebuilt sensor-monitor firmware fixture with stable image hash",
+      "Renode v1.16.1 STM32F4 Discovery platform fixture with pinned platform-description checksum",
+      "physical STM32F4 Discovery board with recorded board/revision and fixture slot identity",
+      "host-controlled UART sensor peer capable of exact trace replay to emulator and physical board",
+      "fixture manifest defining degraded-state timeout and valid-frame recovery criterion",
+      "machine-readable Renode and physical serial/state traces plus reset-to-known-state procedure",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "simulation-device-testing-s1-identity",
+      "assertion": "Both runs record the same firmware image hash and logical input-trace hash, plus distinct Renode platform identity and physical board/revision identity; a run with missing identity cannot satisfy qualification."
+    },
+    {
+      "id": "simulation-device-testing-s1-fault-oracle",
+      "assertion": "At both evidence levels the CRC-corrupt frame does not commit a measurement, the 2.0-second silence causes the fixture-declared degraded state within its declared timeout, and recovery occurs only after the fixture-declared valid-frame criterion."
+    },
+    {
+      "id": "simulation-device-testing-s1-cross-level",
+      "assertion": "Comparable state/event outputs from Renode and the physical board are diffed against a predeclared tolerance; any unexplained mismatch is retained as a failed or unresolved qualification result rather than averaged away."
+    },
+    {
+      "id": "simulation-device-testing-s1-proof-boundary",
+      "assertion": "The result labels emulator and physical evidence separately and does not use the Renode pass to assert analog UART, power/brownout, physical clock-tolerance, or other unmodeled board behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "simulation-device-testing-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "firmware/input hashes plus Renode platform and physical-board identities",
+        "predeclared validity matrix and fixture oracle",
+        "machine-readable corrupt-frame, dropout, degraded-state, and recovery events from both levels",
+        "cross-level state/event diff with declared tolerance",
+        "explicit emulator-versus-physical claim labels"
+      ]
+    },
+    {
+      "id": "simulation-device-testing-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent review of validity-matrix quality, divergence handling, and claim calibration"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Claim-to-validity matrix by evidence level",
+    "Exact simulator, firmware, device, fixture, and runtime identity",
+    "Predeclared stimulus, oracle, tolerance, and reset state",
+    "Fault safe-state and recovery trace",
+    "Explicit simulated, emulated, HIL, or physical proof boundary",
+    "Renode and physical-board trace comparison with unresolved divergence preserved",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "simulation-device-testing-scenario-1-manifest",
+    "simulation-device-testing-scenario-1-renode-trace",
+    "simulation-device-testing-scenario-1-physical-trace",
+    "simulation-device-testing-scenario-1-cross-level-diff",
+    "simulation-device-testing-scenario-1-paired-evaluation"
+  ]
+}

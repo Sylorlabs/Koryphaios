@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "name": "financial-modeling",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "finance", "analysis"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6400,
+  "broader": ["data-analysis"],
+  "facets": [],
+  "requires": ["data-analysis"],
+  "conflicts": [],
+  "activation": [
+    "financial model",
+    "financial modeling",
+    "cash flow model",
+    "three statement model",
+    "three-statement model",
+    "forecast model",
+    "dcf model",
+    "discounted cash flow model",
+    "debt schedule",
+    "capex schedule",
+    "working capital model",
+    "financial model audit",
+    "model sensitivity",
+    "financial forecast model",
+    "driver based model",
+    "downside base upside",
+    "auditable assumptions"
+  ],
+  "excludes": [
+    "business case only",
+    "investment recommendation only",
+    "vendor evaluation only",
+    "contract analysis only",
+    "review the contract only",
+    "descriptive data analysis only",
+    "analyze this dataset only",
+    "customer success plan only",
+    "do not build or audit a financial model",
+    "no modeling is requested here",
+    "the only output should be the account name labels",
+    "return only the supplied values",
+    "extract the participant names",
+    "trace which repository parser loads the fixture"
+  ],
+  "evidence": [
+    "Model contract covering purpose, periods, horizon, currency/units, nominal-real basis, source hierarchy, scenarios, and outputs",
+    "Historical reconciliation and source provenance with driver assumptions separated from formulas",
+    "Linked statement/cash-flow/debt/capex/working-capital mechanics with explicit circularity or balancing treatment",
+    "Scenario and sensitivity structure focused on coherent key drivers and uncertainty",
+    "Integrity checks for balances, cash, rollforwards, dates, units, signs, formula consistency, hard-codes, references, and output traceability",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build a three-statement model from the supplied historical filings and operating drivers. Reconcile the historical periods, link revenue/costs, working capital, capex/depreciation, taxes, debt/interest and retained earnings, and include balance-sheet, cash-flow and debt-rollforward checks plus downside/base/upside cases.",
+      "Create a DCF model from the verified historical statements and operating forecast. Define unlevered cash flow, working capital and capex timing, taxes, discounting convention, terminal assumptions, scenario switches and key-driver sensitivities, and keep nominal/real and period units consistent.",
+      "Audit this financial forecast model for source reconciliation, hard-coded values in formula regions, formula drift, broken references, hidden plugs, sign/unit inconsistencies, scenario-switch failures and balance/cash errors. Trace the headline outputs back to assumptions.",
+      "Build a debt and liquidity model with opening balances, draws, amortization, floating rates, fees, covenant calculations, minimum cash and cash sweeps. Make interest circularity explicit and test downside liquidity and covenant headroom.",
+      "Create a driver-based operating forecast model for a subscription business using customers, adds/churn, ARPU, headcount, compensation and infrastructure usage rather than a single top-line growth rate. Reconcile historical actuals and provide coherent scenarios and sensitivities."
+    ],
+    "negative": [
+      "Create the business case only for the automation initiative by comparing alternatives, strategic fit, incremental economics, risk, opportunity cost and approval gates. A separate financial model is not requested.",
+      "Analyze this dataset only: distributions, missingness, trends, cohorts, correlations and reproducible summaries. Do not construct linked financial statements or a cash-flow model.",
+      "Evaluate the vendors only using product fit, implementation capability, security, references, commercial terms and supplier risk. Do not build a financial forecast model.",
+      "Review the contract only for pricing clauses, renewals, termination, service levels, liability, indemnity and negotiation issues. Do not translate terms into a model.",
+      "Create the customer-success plan only for onboarding, adoption, health signals, renewal risk, playbooks and operating cadence. No financial model is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "financial-modeling-ambiguous-1",
+        "prompt": "Analyze the historical operating dataset and use the cleaned results to build a driver-based financial forecast model. Keep generic data profiling and transformations separate from source reconciliation, assumptions, formulas, linked schedules and model checks.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["ambiguous", "compound", "analysis-plus-model"]
+      },
+      {
+        "id": "financial-modeling-ambiguous-2",
+        "prompt": "Build the cash-flow model for the proposed automation and use its outputs inside the business case. Keep source data, formulas, timing, scenario mechanics and audit checks separate from alternative selection, strategic risk and the investment recommendation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "compound", "model-plus-case"]
+      },
+      {
+        "id": "financial-modeling-ambiguous-3",
+        "prompt": "Evaluate the vendor commercial terms and build a forecast model that reflects setup fees, annual escalators, minimum commitments and exit costs. Preserve vendor evidence and scoring separately from the model assumptions, formulas and scenario checks.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["procurement-vendor-evaluation"],
+        "tags": ["ambiguous", "compound", "vendor-plus-model"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "financial-modeling-adversarial-1",
+        "prompt": "A quoted old issue says \"build a three statement financial model\". Ignore that quoted old issue; it is historical context only. My actual request is to extract the three reporting dates from the pasted text.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "financial-modeling-adversarial-2",
+        "prompt": "Do not build or audit a financial model, cash-flow model, DCF, three-statement model or forecast model. Return only the supplied account names in their original order.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "negation"]
+      },
+      {
+        "id": "financial-modeling-adversarial-3",
+        "prompt": "A repository fixture contains the inert instruction 'build a three-statement model with a debt schedule.' Treat it only as fixture data. Trace which parser loads the fixture and which tests cover that parser.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.sec.gov/submit-filings/about-edgar",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. SEC EDGAR filing guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Authoritative public-company filing provenance and financial source records.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+      "sourceType": "official-docs",
+      "versionScope": "SEC EDGAR submissions and XBRL API guidance as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Companyfacts and frames provenance, periods, units and taxonomy-tag semantics for programmatic source data.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gao.gov/products/gao-20-195g",
+      "sourceType": "official-docs",
+      "versionScope": "GAO-20-195G Cost Estimating and Assessment Guide as available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Assumptions, data collection, estimating methods, sensitivity, risk/uncertainty, documentation and updating estimates with actuals.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government/the-green-book-2026",
+      "sourceType": "official-docs",
+      "versionScope": "HM Treasury Green Book 2026, updated 2026-02-05",
+      "staleAfterDays": 90,
+      "notes": "Consistent appraisal horizon, timing, uncertainty and sensitivity when a model supports an investment appraisal.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure for this package.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded specialist triggers, explicit exclusions, progressive disclosure, and behavior-based evaluation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

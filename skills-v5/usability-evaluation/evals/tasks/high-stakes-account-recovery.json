@@ -1,0 +1,82 @@
+{
+  "id": "usability-evaluation-full-task-account-recovery",
+  "prompt": "Evaluate a redesigned account-recovery flow before broad release. Customers may arrive stressed after losing a device; some use password managers or assistive technology; recovery can involve a waiting period, support handoff, or a policy denial; and an unsuccessful attempt must not strand the user without understanding what happened. Produce a decision-ready usability evaluation plan and findings contract covering representative tasks, participants, moderation, measures, severity, synthesis, and retesting without redesigning the flow or claiming results that have not been observed.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://usability-evaluation/account-recovery",
+    "requirements": [
+      "working prototype and state inventory",
+      "known account-recovery audiences and access needs",
+      "current support/escalation constraints",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "account-recovery-study-decision",
+      "assertion": "The evaluation states which release/design decisions the study can inform and recruits representative recovery contexts/access needs rather than a generic convenience sample."
+    },
+    {
+      "id": "account-recovery-neutral-tasks",
+      "assertion": "Tasks cover successful recovery, waiting, support handoff, policy denial, interruption, and unsuccessful recovery with neutral goal framing that does not reveal the intended UI path or answer."
+    },
+    {
+      "id": "account-recovery-observation-integrity",
+      "assertion": "The findings model records completion, error, assistance, hesitation/recovery, and accessibility/environment observations separately from moderator interpretation or proposed cause."
+    },
+    {
+      "id": "account-recovery-severity-scope",
+      "assertion": "Severity is tied to user consequence/recoverability and each finding retains participant/task/environment scope; small-study observations are not converted into population prevalence."
+    },
+    {
+      "id": "account-recovery-no-fabricated-findings",
+      "assertion": "No usability result, preference, comprehension claim, or improvement is asserted before observation; the plan defines comparable retest conditions for consequential changes."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "study-decision-and-task-quality",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "decision and participant scope",
+        "realistic neutral task framing",
+        "conditions and success/recovery signals",
+        "non-leading moderation protocol",
+        "access needs and environment preserved"
+      ]
+    },
+    {
+      "id": "findings-integrity-and-retest",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "observation separated from interpretation",
+        "assistance and recovery recorded",
+        "severity tied to consequence",
+        "scope/prevalence limits explicit",
+        "contradictory evidence preserved",
+        "comparable retest plan"
+      ]
+    },
+    {
+      "id": "blind-account-recovery-evaluation-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "decision and participant scope",
+    "task and moderation protocol",
+    "observation/findings schema",
+    "severity and evidence limits",
+    "retest contract"
+  ],
+  "requiredArtifacts": [
+    "account-recovery-usability-plan",
+    "usability-findings-contract",
+    "paired-experiment-report"
+  ]
+}

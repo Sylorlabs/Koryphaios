@@ -1,0 +1,87 @@
+{
+  "id": "startup-operations-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply startup operations expertise to this task\". The evidence packet contains conflicting stakeholder pressure, incomplete evidence, capacity or cost constraints, and an attractive option whose reversibility and opportunity cost differ from alternatives. The acceptance boundary is startup-operations: Tie operating cadence to current stage and constraint: product learning, growth, delivery, hiring, cash, or reliability. The adjacent business-case-analysis discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://startup-operations/runway-hiring-trigger",
+    "requirements": [
+      "opening cash, monthly fixed/variable spend, hiring cost/timing, committed revenue, and pipeline ranges",
+      "base/downside/upside assumptions with uncertain fundraising timing",
+      "minimum cash/runway threshold agreed by founders",
+      "monthly operating dashboard and hire/hold trigger outputs",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "startup-operations parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "startup-operations-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "startup-operations decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "startup-operations-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "startup-operations decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "startup-operations-individual-scenario-1-result",
+    "startup-operations-individual-scenario-1-verification",
+    "startup-operations-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual startup-operations boundary and relevant environment before acting, preserve the hierarchy relationship (broader=planning; near-neighbor=business-case-analysis), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Tie operating cadence to current stage and constraint: product learning, growth, delivery, hiring, cash, or reliability."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Review whether each recurring process changes decisions or outcomes, track ownership/completion, reconcile cash/runway and capacity, and remove rituals whose information is unused."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not import big-company process for status theater, optimize headcount as the goal, hide cash implications, or make founders the permanent routing layer for every decision."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (startup-operations decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

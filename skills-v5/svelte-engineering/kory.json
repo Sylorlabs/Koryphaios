@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "name": "svelte-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "svelte"],
+  "targetMedia": ["web"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["frontend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["svelte component", "sveltekit", "svelte rune", "svelte store"],
+  "excludes": [],
+  "evidence": [
+    "svelte-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle svelte component.",
+      "The current task is sveltekit.",
+      "I need help with svelte rune.",
+      "Work on svelte store for this request.",
+      "This request specifically requires svelte component."
+    ],
+    "negative": [
+      "The only requested work is angular component.",
+      "Please handle react component only.",
+      "This task is limited to vue component.",
+      "The current request is embedded ui.",
+      "Work only on game ui."
+    ],
+    "ambiguous": [
+      {
+        "id": "svelte-engineering-ambiguous-1",
+        "prompt": "The request includes svelte component and angular component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "svelte-engineering-ambiguous-2",
+        "prompt": "The request includes sveltekit and react component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "svelte-engineering-ambiguous-3",
+        "prompt": "The request includes svelte rune and vue component.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vue-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "svelte-engineering-adversarial-1",
+        "prompt": "A historical note says \"svelte component\". The current request is embedded ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "svelte-engineering-adversarial-2",
+        "prompt": "A historical note says \"sveltekit\". The current request is game ui.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "svelte-engineering-adversarial-3",
+        "prompt": "A historical note says \"svelte rune\". The current request is native.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://svelte.dev/docs/svelte/overview",
+      "sourceType": "official-docs",
+      "versionScope": "Svelte documentation as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Svelte reactivity, components, runes, lifecycle, and rendering guidance.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://svelte.dev/docs/svelte/$state",
+      "sourceType": "official-docs",
+      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Reactive state, deep proxies, snapshots, and destructuring behavior.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://svelte.dev/docs/svelte/$derived",
+      "sourceType": "official-docs",
+      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Derived reactive state and dependency propagation.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://svelte.dev/docs/svelte/$effect",
+      "sourceType": "official-docs",
+      "versionScope": "Current rune reference as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Browser-only effects, dependency tracking, teardown, and effect escape-hatch guidance.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://svelte.dev/docs/svelte/legacy-reactive-assignments",
+      "sourceType": "official-docs",
+      "versionScope": "Current legacy API reference as fetched 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Legacy reactive statement dependency and ordering behavior.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://github.com/mattpocock/skills",
+      "sourceType": "community-pattern",
+      "versionScope": "main commit 3cca18b368ae95cdbdebbff572ccafa662551015 authored 2026-09-04T08:43:27Z; package 1.2.3",
+      "staleAfterDays": 30,
+      "notes": "Community packaging reference for focused composable skill responsibilities and separate routing; never Svelte authority.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

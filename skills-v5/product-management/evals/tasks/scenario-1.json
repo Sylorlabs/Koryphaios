@@ -1,0 +1,94 @@
+{
+  "id": "product-management-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply product management expertise to this task\". The evidence packet contains conflicting stakeholder pressure, incomplete evidence, capacity or cost constraints, and an attractive option whose reversibility and opportunity cost differ from alternatives. The acceptance boundary is product-management: Frame the user/customer problem, affected segments, current behavior, strategic fit, constraints, alternatives, expected outcome, and leading/lagging measures before specifying features. The adjacent architecture-planning discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://product-management/roadmap-capacity",
+    "requirements": [
+      "five candidate opportunities with only two units of roadmap capacity",
+      "user research, product usage, support, revenue/strategy, and engineering feasibility evidence with different confidence levels",
+      "one executive-sponsored opportunity with weak user evidence and one high-usage opportunity with weak monetization impact",
+      "one reversible experiment and one costly or irreversible platform commitment",
+      "at least one explicit contradiction or missing-evidence boundary",
+      "paired same-model skill/no-skill execution",
+      "product-management parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual product-management boundary and relevant environment before acting, preserve the hierarchy relationship (broader=planning; near-neighbor=architecture-planning), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Frame the user/customer problem, affected segments, current behavior, strategic fit, constraints, alternatives, expected outcome, and leading/lagging measures before specifying features."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use research, usage data, feasibility evidence, prototypes or experiments as appropriate; define launch/observation criteria and compare outcomes to the original hypothesis after release."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not convert solution requests directly into requirements, use story-point totals as value, maintain roadmaps detached from evidence, or declare success from shipping alone."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Decision frame with target users, problem, baseline, strategic context, constraints, and time horizon; Evidence ledger distinguishing observed facts, assumptions, confidence, contradictions, and missing evidence; Prioritization tradeoffs including capacity, opportunity cost, reversibility, dependencies, and rejected alternatives; Outcome and guardrail metrics with baseline, decision threshold, and learning criteria), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "product-management-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Decision frame with target users, problem, baseline, strategic context, constraints, and time horizon",
+        "Evidence ledger distinguishing observed facts, assumptions, confidence, contradictions, and missing evidence",
+        "Prioritization tradeoffs including capacity, opportunity cost, reversibility, dependencies, and rejected alternatives",
+        "Outcome and guardrail metrics with baseline, decision threshold, and learning criteria",
+        "Rollout, iterate, stop, or rollback criteria plus unresolved decisions",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "product-management-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Decision frame with target users, problem, baseline, strategic context, constraints, and time horizon",
+    "Evidence ledger distinguishing observed facts, assumptions, confidence, contradictions, and missing evidence",
+    "Prioritization tradeoffs including capacity, opportunity cost, reversibility, dependencies, and rejected alternatives",
+    "Outcome and guardrail metrics with baseline, decision threshold, and learning criteria",
+    "Rollout, iterate, stop, or rollback criteria plus unresolved decisions",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "product-management-individual-scenario-1-result",
+    "product-management-individual-scenario-1-verification",
+    "product-management-individual-scenario-1-paired-evaluation"
+  ]
+}

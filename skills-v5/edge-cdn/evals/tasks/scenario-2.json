@@ -1,0 +1,91 @@
+{
+  "id": "edge-cdn-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply cdn cache expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is edge-cdn: Define cacheability, key dimensions, TTL/stale behavior, invalidation, variants, cookies/auth, compression, redirects, origin shielding, rate limits, and geographic routing. The adjacent realtime-systems discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://edge-cdn/scenario-2",
+    "requirements": [
+      "lower/upper-tier and multi-POP cache traces with config revisions",
+      "cache key/TTL/validator/stale policy and custom-key purge fixtures",
+      "origin request counts plus timeout/5xx/recovery and edge-origin TLS evidence",
+      "old/new edge configuration and rollback snapshots",
+      "paired same-model skill/no-skill execution",
+      "edge-cdn parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual edge-cdn boundary and relevant environment before acting, preserve the hierarchy relationship (broader=network-service-backend; near-neighbor=realtime-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define cacheability, key dimensions, TTL/stale behavior, invalidation, variants, cookies/auth, compression, redirects, origin shielding, rate limits, and geographic routing."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Inspect headers and cache behavior across miss/hit/stale/purge, authenticated and anonymous variants, representative regions if material, origin failure, compression, and deployment propagation."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not cache Set-Cookie/private responses accidentally, vary on unbounded headers, purge everything as a normal deployment strategy, or infer global propagation from one POP."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Provider/property/config revision plus cacheability and exact cache-key/variant contract; MISS/HIT/revalidation/stale/age behavior across anonymous/authenticated variants and representative POPs; Targeted purge/key semantics, tier/origin-shield traffic and edge/origin TLS/failure evidence; Global rollout/propagation, origin-load, privacy/correctness regressions and rollback artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "edge-cdn-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Provider/property/config revision plus cacheability and exact cache-key/variant contract",
+        "MISS/HIT/revalidation/stale/age behavior across anonymous/authenticated variants and representative POPs",
+        "Targeted purge/key semantics, tier/origin-shield traffic and edge/origin TLS/failure evidence",
+        "Global rollout/propagation, origin-load, privacy/correctness regressions and rollback artifacts",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "edge-cdn-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Provider/property/config revision plus cacheability and exact cache-key/variant contract",
+    "MISS/HIT/revalidation/stale/age behavior across anonymous/authenticated variants and representative POPs",
+    "Targeted purge/key semantics, tier/origin-shield traffic and edge/origin TLS/failure evidence",
+    "Global rollout/propagation, origin-load, privacy/correctness regressions and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "edge-cdn-individual-scenario-2-result",
+    "edge-cdn-individual-scenario-2-verification",
+    "edge-cdn-individual-scenario-2-paired-evaluation"
+  ]
+}

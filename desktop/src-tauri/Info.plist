@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>Koryphaios records audio only when you press the microphone button so it can transcribe your prompt.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Koryphaios uses speech recognition only when you press the microphone button to dictate a prompt.</string>
 </dict>
 </plist>

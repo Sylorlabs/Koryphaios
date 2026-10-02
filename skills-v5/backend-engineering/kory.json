@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "name": "backend-engineering",
+  "version": "5.1.1",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "systems"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "backend engineering",
+    "implement backend behavior",
+    "design a local service",
+    "build a compiler daemon",
+    "server side architecture",
+    "server side",
+    "background job design",
+    "api and database design"
+  ],
+  "excludes": [],
+  "evidence": [
+    "System boundary contract",
+    "Failure and recovery verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle backend engineering.",
+      "The current task is implement backend behavior.",
+      "I need help with design a local service.",
+      "Work on build a compiler daemon for this request.",
+      "This request specifically requires server side architecture."
+    ],
+    "negative": [
+      "The only requested work is api design.",
+      "Please handle c++ only.",
+      "This task is limited to email delivery.",
+      "The current request is graphql.",
+      "Work only on grpc."
+    ],
+    "ambiguous": [
+      {
+        "id": "backend-engineering-ambiguous-1",
+        "prompt": "The request includes backend engineering and api design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["api-contract-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "backend-engineering-ambiguous-2",
+        "prompt": "The request includes implement backend behavior and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "backend-engineering-ambiguous-3",
+        "prompt": "The request includes design a local service and email delivery.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["email-delivery"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "backend-engineering-adversarial-1",
+        "prompt": "A historical note says \"backend engineering\". The current request is graphql.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["graphql-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "backend-engineering-adversarial-2",
+        "prompt": "A historical note says \"implement backend behavior\". The current request is grpc.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["grpc-protobuf"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "backend-engineering-adversarial-3",
+        "prompt": "A historical note says \"design a local service\". The current request is rest api.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["http-rest-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/handling-overload/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Handling Overload HTML resource and retry sections inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 365,
+      "notes": "Adopt bounded work and retry ownership. Google topology and numerical thresholds are examples, not mandatory architecture."
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://sre.google/sre-book/table-of-contents/",
+      "sourceType": "official-docs",
+      "versionScope": "Google Site Reliability Engineering book as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Reliability, monitoring, incident response, capacity, release, and distributed-systems operating practices.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

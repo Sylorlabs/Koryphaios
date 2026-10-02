@@ -1,0 +1,91 @@
+{
+  "id": "llm-evaluation-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply llm eval expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is llm-evaluation: Define the decision the evaluation supports, task distribution, slices, baseline, success rubric, grader independence, contamination controls, and statistical uncertainty. The adjacent computer-vision discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://llm-evaluation/scenario-1",
+    "requirements": [
+      "baseline and candidate model/prompt configurations plus normalized runtime/tool/retrieval settings",
+      "development and held-out datasets with case IDs, provenance, slices and a planted contamination overlap",
+      "blind expert labels spanning clear pass/fail and hard semantic-boundary examples",
+      "deterministic graders, a semantic model judge, repeated-run outputs and injected provider/infrastructure failures",
+      "paired same-model skill/no-skill execution",
+      "llm-evaluation parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual llm-evaluation boundary and relevant environment before acting, preserve the hierarchy relationship (broader=data-analysis,testing-engineering; near-neighbor=computer-vision), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define the decision the evaluation supports, task distribution, slices, baseline, success rubric, grader independence, contamination controls, and statistical uncertainty."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run candidate and baseline on the same held-out cases, inspect disagreement and failure slices, calibrate automated graders against blind human review when consequential, and persist raw artifacts and revision identities."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not report one aggregate score without slices, let the author grade its own intended answer, change prompts and test cases together without a holdout, or hide invalid/incomplete runs."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Versioned task population, immutable holdout, provenance/slices and contamination controls; Comparable candidate/baseline model, prompt, tool, retrieval, environment and retry configuration; Deterministic outcome checks plus calibrated independent semantic graders with disagreement evidence; Repeated-trial raw artifacts, uncertainty, invalid-run accounting, slice results and regression ledger), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "llm-evaluation-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Versioned task population, immutable holdout, provenance/slices and contamination controls",
+        "Comparable candidate/baseline model, prompt, tool, retrieval, environment and retry configuration",
+        "Deterministic outcome checks plus calibrated independent semantic graders with disagreement evidence",
+        "Repeated-trial raw artifacts, uncertainty, invalid-run accounting, slice results and regression ledger",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "llm-evaluation-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Versioned task population, immutable holdout, provenance/slices and contamination controls",
+    "Comparable candidate/baseline model, prompt, tool, retrieval, environment and retry configuration",
+    "Deterministic outcome checks plus calibrated independent semantic graders with disagreement evidence",
+    "Repeated-trial raw artifacts, uncertainty, invalid-run accounting, slice results and regression ledger",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "llm-evaluation-individual-scenario-1-result",
+    "llm-evaluation-individual-scenario-1-verification",
+    "llm-evaluation-individual-scenario-1-paired-evaluation"
+  ]
+}

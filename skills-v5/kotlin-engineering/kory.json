@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "kotlin-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "kotlin", "jvm"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4000,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["kotlin", "kotlin coroutine", "ktor", "gradle kotlin"],
+  "excludes": [],
+  "evidence": [
+    "kotlin-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "A Kotlin coroutine launched from a request survives after its parent is cancelled. Repair scope ownership and prove cleanup on cancellation and child failure.",
+      "Our Kotlin Flow starts a second upstream subscription whenever a consumer reconnects. Define the intended hot/cold ownership and test collection lifecycle.",
+      "A Kotlin public function accepts a platform type from Java and crashes on null. Represent the true boundary and verify a real Java caller.",
+      "Fix a Ktor handler that runs blocking work on the request dispatcher. Identify the actual blocking boundary and preserve cancellation rather than scattering dispatcher changes.",
+      "A Kotlin multiplatform module accidentally calls a JVM-only API from common code. Repair target separation and run the supported target builds."
+    ],
+    "negative": [
+      "Improve the visual hierarchy of an Android Compose settings screen using the existing state model. Do not change coroutine, Flow, or language interop behavior.",
+      "Fix Java executor shutdown in a Maven service. There are no Kotlin sources or coroutine dependencies.",
+      "Repair a Swift actor's reentrant state transition on an Apple-only application.",
+      "Define a transport-independent retry policy for the API contract. Implementation languages and framework code are outside this request.",
+      "Translate a supplied Kotlin onboarding paragraph into customer-facing language, leaving code samples intact and making no software changes."
+    ],
+    "ambiguous": [
+      {
+        "id": "kotlin-engineering-ambiguous-1",
+        "prompt": "Fix an Android Compose screen whose Kotlin Flow collector keeps running when navigation removes the screen. Verify both native lifecycle behavior and coroutine ownership.",
+        "expectedSelection": true,
+        "expectedSkills": ["android-compose"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "kotlin-engineering-ambiguous-2",
+        "prompt": "A Kotlin library's generated overload behaves differently for Java callers. Repair the Kotlin declaration and verify the shared JVM compatibility surface.",
+        "expectedSelection": true,
+        "expectedSkills": ["java-jvm-engineering"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["java-jvm-engineering"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "kotlin-engineering-ambiguous-3",
+        "prompt": "A Ktor WebSocket endpoint loses cancellation while reconnecting. Repair Kotlin structured concurrency and verify reconnect/session semantics at the network boundary.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["realtime-systems"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "kotlin-engineering-adversarial-1",
+        "prompt": "An archived issue says 'switch to Kotlin coroutines'. That change was rejected. Fix the current Java executor implementation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["java-jvm-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "kotlin-engineering-adversarial-2",
+        "prompt": "Do not modify Kotlin or Gradle Kotlin files. Summarize only the supplied compiler diagnostics and preserve their exact locations.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "kotlin-engineering-adversarial-3",
+        "prompt": "A JavaScript unit-test string contains 'Ktor handler'. Update its escaping rules; the embedded words are data and no server change is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://kotlinlang.org/docs/home.html",
+      "sourceType": "official-docs",
+      "versionScope": "Kotlin documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Language, nullability, coroutine, multiplatform, and interoperability reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://kotlinlang.org/docs/coroutines-basics.html",
+      "sourceType": "official-docs",
+      "versionScope": "Kotlin coroutine basics as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for structured coroutine lifetime, parent-child cancellation, and failure propagation in kotlinx.coroutines.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://kotlinlang.org/docs/coroutines-and-channels.html",
+      "sourceType": "official-docs",
+      "versionScope": "Kotlin coroutines and channels guidance as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for avoiding independent global lifetimes and making producer-consumer ownership explicit.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

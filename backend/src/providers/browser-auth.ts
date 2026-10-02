@@ -48,6 +48,13 @@ export interface AuthResult {
   ok: boolean;
   data?: Record<string, unknown>;
   error?: string;
+  /**
+   * The request was well-formed and the flow is simply not finished yet (the
+   * user has not approved the browser/device login, or the CLI has not written
+   * its login material). This is a normal waiting state, not a failure, so the
+   * route answers `200 { ok: false, pending: true }` instead of an HTTP error.
+   */
+  pending?: boolean;
 }
 
 /**
@@ -71,7 +78,7 @@ async function activateManagedCodexAuth(): Promise<AuthResult> {
   const { providers } = getContext();
   const account = await getManagedCodexAppServer().account(true);
   if (account.account?.type !== 'chatgpt') {
-    return { ok: false, error: 'ChatGPT sign-in is not complete yet.' };
+    return { ok: false, pending: true, error: 'ChatGPT sign-in is not complete yet.' };
   }
   // This is an activation marker only, never an OAuth access or refresh token.
   const result = await providers.setCredentials('codex-auth', {
@@ -159,7 +166,7 @@ function cliLoginStrategy(opts: {
     async complete(): Promise<AuthResult> {
       if (provider === 'claude') clearCachedToken('claude-login');
       if (!detect()) {
-        return { ok: false, error: completeNotLoggedInError };
+        return { ok: false, pending: true, error: completeNotLoggedInError };
       }
       const { providers } = getContext();
       const result = await providers.setCredentials(provider, { authToken: marker() });
@@ -189,7 +196,11 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
       return { ok: true, data: { provider: 'copilot', ...result } };
     },
     async complete(): Promise<AuthResult> {
-      return { ok: false, error: 'copilot auth completes automatically after browser approval' };
+      return {
+        ok: false,
+        pending: true,
+        error: 'copilot auth completes automatically after browser approval',
+      };
     },
   },
 
@@ -262,7 +273,11 @@ const BROWSER_AUTH_STRATEGIES: Record<BrowserAuthProvider, BrowserAuthStrategy> 
       return { ok: true, data: { provider: 'kimicode', ...result } };
     },
     async complete(): Promise<AuthResult> {
-      return { ok: false, error: 'kimicode auth completes automatically after browser approval' };
+      return {
+        ok: false,
+        pending: true,
+        error: 'kimicode auth completes automatically after browser approval',
+      };
     },
   },
 

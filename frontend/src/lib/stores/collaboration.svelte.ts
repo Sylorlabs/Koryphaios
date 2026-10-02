@@ -69,7 +69,8 @@ function parseJoinedSession(value: unknown): JoinedTeamSession | null {
   const inviteUrl = typeof input.inviteUrl === 'string' ? input.inviteUrl.trim() : '';
   const tierId = typeof input.tierId === 'string' ? input.tierId.trim() : '';
   const joinedAt = typeof input.joinedAt === 'number' ? input.joinedAt : 0;
-  if (!sessionId || !sessionName || !inviteUrl || !tierId || !Number.isFinite(joinedAt)) return null;
+  if (!sessionId || !sessionName || !inviteUrl || !tierId || !Number.isFinite(joinedAt))
+    return null;
   try {
     const protocol = new URL(inviteUrl).protocol;
     if (protocol !== 'https:' && protocol !== 'http:') return null;
@@ -235,7 +236,9 @@ export const collaborationStore = {
         const res = await apiFetch(
           apiUrl(`/api/collab/active?baseSessionId=${encodeURIComponent(sessionId)}`),
         );
-        const data = await parseJsonResponse<{ ok?: boolean; data?: CollaborationSession | null }>(res);
+        const data = await parseJsonResponse<{ ok?: boolean; data?: CollaborationSession | null }>(
+          res,
+        );
         if (data.ok && data.data) {
           activeCollab = data.data;
           startPollingPending(data.data.id);
@@ -316,7 +319,7 @@ export const collaborationStore = {
   copyInviteLink(role: keyof InviteLinks) {
     const link = activeCollab?.inviteLinks?.[role];
     if (!link) {
-      toastStore.error('No invite link — relay not configured');
+      toastStore.error('No invite link. Relay is not configured');
       return;
     }
     copyText(link).then(() => {

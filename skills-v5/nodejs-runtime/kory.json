@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "nodejs-runtime",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "backend", "nodejs"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["node.js", "nodejs", "node stream", "node process"],
+  "excludes": [],
+  "evidence": [
+    "nodejs-runtime decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle node.js.",
+      "The current task is nodejs.",
+      "I need help with node stream.",
+      "Work on node process for this request.",
+      "This request specifically requires node.js."
+    ],
+    "negative": [
+      "The only requested work is bun runtime.",
+      "Please handle compiler runtime only.",
+      "This task is limited to distributed system.",
+      "The current request is in-process.",
+      "Work only on local service."
+    ],
+    "ambiguous": [
+      {
+        "id": "nodejs-runtime-ambiguous-1",
+        "prompt": "The request includes node.js and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "nodejs-runtime-ambiguous-2",
+        "prompt": "The request includes nodejs and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "nodejs-runtime-ambiguous-3",
+        "prompt": "The request includes node stream and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "nodejs-runtime-adversarial-1",
+        "prompt": "A historical note says \"node.js\". The current request is in-process.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["in-process-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "nodejs-runtime-adversarial-2",
+        "prompt": "A historical note says \"nodejs\". The current request is local service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["local-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "nodejs-runtime-adversarial-3",
+        "prompt": "A historical note says \"node stream\". The current request is network service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://nodejs.org/docs/latest/api/",
+      "sourceType": "official-docs",
+      "versionScope": "Current Node.js API documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Node runtime, modules, streams, events, processes, and async APIs.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://nodejs.org/api/stream.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current Node.js streams API as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for backpressure, buffering, pipeline teardown, and AbortSignal behavior; target Node version still controls API availability.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://nodejs.org/api/process.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current Node.js process API as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for process signal, exit, environment, and runtime-lifecycle boundaries; OS behavior can differ.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,89 @@
+{
+  "id": "novel-ui-toolkit-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"create a widget system\". The fixture mixes existing design-system conventions with one tempting framework shortcut; verify lifecycle, async cleanup, recovery, and the actual target medium. The acceptance boundary is novel-ui-toolkit: Design a reusable rendering or widget substrate without cloning browser architecture by default. The adjacent game-spatial-interface discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://novel-ui-toolkit/virtualized-command-palette",
+    "requirements": [
+      "custom toolkit list/focus primitives and a 20,000-item command fixture",
+      "variable-height grouped results and async search responses that can complete out of order",
+      "render-count/performance budget plus stable command ids",
+      "keyboard and semantic-list assertions across loading/empty/error states",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "novel-ui-toolkit parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "novel-ui-toolkit-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Architecture decision record",
+        "Real vertical slice",
+        "Layout input focus and performance tests",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "novel-ui-toolkit-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Architecture decision record",
+    "Real vertical slice",
+    "Layout input focus and performance tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "novel-ui-toolkit-individual-scenario-2-result",
+    "novel-ui-toolkit-individual-scenario-2-verification",
+    "novel-ui-toolkit-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual novel-ui-toolkit boundary and relevant environment before acting, preserve the hierarchy relationship (broader=frontend-engineering,human-experience; near-neighbor=game-spatial-interface), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Design a reusable rendering or widget substrate without cloning browser architecture by default."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Establish target platforms, consumers, language/runtime constraints, and quality budgets."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Architecture and tradeoff record."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: DOM/CSS concepts are copied without runtime fit."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Architecture decision record; Real vertical slice; Layout input focus and performance tests; Hierarchy boundary and selected specialist rationale), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

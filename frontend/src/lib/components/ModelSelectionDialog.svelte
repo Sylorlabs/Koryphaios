@@ -162,8 +162,13 @@
     <div class="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
       <div class="space-y-1">
         {#if (availableModels || []).length === 0}
-          <p class="px-3 py-8 text-center text-xs flex flex-col items-center gap-2" style="color: var(--color-text-muted);">
-            <span class="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"></span>
+          <p
+            class="px-3 py-8 text-center text-xs flex flex-col items-center gap-2"
+            style="color: var(--color-text-muted);"
+          >
+            <span
+              class="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"
+            ></span>
             Loading models...
           </p>
         {:else if filteredModels.length === 0}
@@ -201,6 +206,29 @@
                     {model.name}
                   </span>
                   <span class="text-[10px] opacity-40">{model.id}</span>
+                  {#if model.supportsFastMode || (model.reasoningLevels?.length ?? 0) > 0}
+                    <!-- Capability chips mirror what Hoplite's own picker exposes:
+                         a fast tier only where the model actually has one, and the
+                         real reasoning ladder the provider reports. -->
+                    <div class="mt-1 flex flex-wrap items-center gap-1 text-left">
+                      {#if model.supportsFastMode}
+                        <span
+                          class="rounded-full border px-1.5 py-px text-[9px] font-bold uppercase tracking-wider"
+                          style="border-color: var(--color-warning); color: var(--color-warning);"
+                          title="Supports the fast tier. Lower latency at the same reasoning effort."
+                          >Fast</span
+                        >
+                      {/if}
+                      {#if (model.reasoningLevels?.length ?? 0) > 0}
+                        <span
+                          class="rounded-full border px-1.5 py-px text-[9px] font-medium leading-tight tracking-wide"
+                          style="border-color: var(--color-border-bright); color: var(--color-text-muted);"
+                          title="Reasoning effort levels: {model.reasoningLevels?.join(', ')}"
+                          >Reasoning · {model.reasoningLevels?.join(' / ')}</span
+                        >
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               </div>
             </button>

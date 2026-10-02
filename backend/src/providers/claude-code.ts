@@ -36,7 +36,11 @@ import {
   type CliCommand,
 } from './types';
 import { detectClaudeCodeLogin } from './auth-utils';
-import { wrapCommand, buildSoftJail } from '../collaboration/sandbox-runner';
+import {
+  wrapCommand,
+  buildSoftJail,
+  inferenceSandboxPolicy,
+} from '../collaboration/sandbox-runner';
 import { providerLog } from '../logger';
 import { recordClaudeCodeRateLimit } from '../credit-accountant';
 import { createKoryBridgeGrantLease } from './bridge-grant';
@@ -978,7 +982,9 @@ export class ClaudeCodeProvider implements Provider {
             systemPromptArtifact.directory,
             ...attachmentScope.artifacts.map((artifact) => artifact.directory),
           ],
-          policy: sandbox,
+          // The CLI child is the inference transport — it must reach the
+          // model endpoint. See inferenceSandboxPolicy.
+          policy: inferenceSandboxPolicy(sandbox),
         })
       : { command: 'claude', args, isolated: false, mechanism: 'none' as const };
     assertPrivateValuesAbsentFromArgv(spawnArgs, [prompt, systemPrompt, request.systemPrompt]);

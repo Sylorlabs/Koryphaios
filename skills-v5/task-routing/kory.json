@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "name": "task-routing",
+  "version": "5.1.0",
+  "skillKind": "router",
+  "selectionMode": "universal",
+  "domains": ["all", "routing"],
+  "targetMedia": ["any"],
+  "contextBudget": 2800,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["task routing", "implement a feature", "answer this question"],
+  "excludes": [],
+  "evidence": [
+    "Task classification and selected-skill reasons",
+    "Resolved exclusions, collisions, and hierarchy",
+    "Evidence-supported target medium, topology, language, toolkit, and domain",
+    "Context cost and omitted guidance when budget pressure applies",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Fix a reproducible TypeScript parser failure in this repository and keep the change narrowly scoped.",
+      "Build an accessible browser interface and verify keyboard behavior.",
+      "Design an HTTP API protected by OAuth authorization and define the verification boundary.",
+      "Investigate a slow PostgreSQL query plan and repair the performance regression.",
+      "Plan and implement a Kubernetes production rollout with recovery evidence."
+    ],
+    "negative": [
+      "Write release notes without pulling in implementation or interface guidance.",
+      "Explain a local variable without activating mutation-oriented skills.",
+      "Summarize a commercial agreement without importing backend engineering guidance.",
+      "Analyze a conversion funnel without treating product metrics as infrastructure work.",
+      "Generate a standalone image without loading browser or backend implementation skills."
+    ],
+    "ambiguous": [
+      {
+        "id": "task-routing-ambiguous-refactor-ui-boundary",
+        "prompt": "Refactor a React component for performance while preserving its existing visual design.",
+        "expectedSelection": true,
+        "expectedSkills": ["react-engineering", "refactor-implementation"],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "react-engineering",
+          "refactor-implementation",
+          "visual-interface-design"
+        ],
+        "tags": ["compound", "refactor", "ui-boundary"]
+      },
+      {
+        "id": "task-routing-ambiguous-research-auth-boundary",
+        "prompt": "Research current OAuth behavior for a design decision, but do not implement authentication yet.",
+        "expectedSelection": true,
+        "expectedSkills": ["research", "oauth-oidc"],
+        "forbiddenSkills": ["implementation"],
+        "adjacentSkills": ["research", "oauth-oidc", "implementation"],
+        "tags": ["research", "security", "scope-boundary"]
+      },
+      {
+        "id": "task-routing-ambiguous-terminal-kubernetes",
+        "prompt": "Design a command-line workflow for Kubernetes operators; there is no browser UI.",
+        "expectedSelection": true,
+        "expectedSkills": ["terminal-interface", "kubernetes-operations"],
+        "forbiddenSkills": ["web-interface"],
+        "adjacentSkills": ["terminal-interface", "kubernetes-operations", "web-interface"],
+        "tags": ["compound", "medium-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "task-routing-adversarial-quoted-web-decoy",
+        "prompt": "A historical quoted request says 'make this a website'. That quote is not the task; diagnose the current service crash.",
+        "expectedSelection": true,
+        "expectedSkills": ["debugging"],
+        "forbiddenSkills": ["web-interface"],
+        "adjacentSkills": ["debugging", "web-interface"],
+        "tags": ["quoted-decoy", "historical-context"]
+      },
+      {
+        "id": "task-routing-adversarial-negated-react",
+        "prompt": "React is explicitly excluded. Implement the requested UI in Svelte instead.",
+        "expectedSelection": true,
+        "expectedSkills": ["svelte-engineering"],
+        "forbiddenSkills": ["react-engineering"],
+        "adjacentSkills": ["svelte-engineering", "react-engineering"],
+        "tags": ["negation", "framework-boundary"]
+      },
+      {
+        "id": "task-routing-adversarial-database-decoy",
+        "prompt": "No database work is in scope. Diagnose the latency regression in the network service.",
+        "expectedSelection": true,
+        "expectedSkills": ["performance-debugging", "network-service-backend"],
+        "forbiddenSkills": ["database-performance"],
+        "adjacentSkills": [
+          "performance-debugging",
+          "network-service-backend",
+          "database-performance"
+        ],
+        "tags": ["negation", "domain-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as published and verified on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 60,
+      "notes": "Portable metadata, progressive disclosure, and package structure."
+    },
+    {
+      "url": "https://agentskills.io/skill-creation/optimizing-descriptions",
+      "sourceType": "official-docs",
+      "versionScope": "Agent Skills description-optimization guidance available on 2026-09-01",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 60,
+      "notes": "Trigger precision and the cost of under- and over-activation."
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "openai/skills main",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 30,
+      "license": "See upstream repository license",
+      "notes": "Concise discovery metadata, progressive disclosure, and task-specific skill boundaries."
+    },
+    {
+      "url": "https://github.com/openai/plugins/blob/main/plugins/life-science-research/skills/research-router-skill/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "openai/plugins main",
+      "revision": "1e285826e604f66f7208f7ac4dba0fe8341d1f57",
+      "verifiedAt": "2026-09-01",
+      "staleAfterDays": 30,
+      "license": "See upstream repository license",
+      "notes": "Concrete router pattern: normalize the request, select the minimum useful downstream capabilities, and keep narrow requests out of broad routing."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

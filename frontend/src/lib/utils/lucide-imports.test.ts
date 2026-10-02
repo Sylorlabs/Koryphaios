@@ -14,7 +14,11 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe('Lucide imports', () => {
-  it('uses finite icon subpaths instead of the package barrel', () => {
+  // This assertion reads every .js/.svelte/.ts file under src/, so its cost
+  // scales with the size of the codebase rather than with the assertion itself.
+  // The 5s default is tight enough that ordinary full-suite parallelism starves
+  // it into a bogus timeout (it runs in well under a second in isolation).
+  it('uses finite icon subpaths instead of the package barrel', { timeout: 30_000 }, () => {
     const barrelImport = new RegExp(`from\\s+['"]lucide-${'svelte'}['"]`, 'g');
     const finiteImport = new RegExp(`from\\s+['"]lucide-${'svelte'}/icons/`, 'g');
     const violations: string[] = [];

@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "name": "desktop-electron-tauri",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "desktop"],
+  "targetMedia": ["native"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["native-interface"],
+  "facets": ["application-security"],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "electron app",
+    "tauri app",
+    "desktop webview",
+    "electron ipc",
+    "tauri rust",
+    "native file open",
+    "ipc lifecycle"
+  ],
+  "excludes": [],
+  "evidence": [
+    "desktop-electron-tauri decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle electron app.",
+      "The current task is tauri app.",
+      "I need help with desktop webview.",
+      "Work on electron ipc for this request.",
+      "This request specifically requires tauri rust."
+    ],
+    "negative": [
+      "The only requested work is jetpack compose.",
+      "Please handle swiftui only.",
+      "This task is limited to react native.",
+      "The current request is angular component.",
+      "Work only on next.js."
+    ],
+    "ambiguous": [
+      {
+        "id": "desktop-electron-tauri-ambiguous-1",
+        "prompt": "The request includes electron app and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "desktop-electron-tauri-ambiguous-2",
+        "prompt": "The request includes tauri app and swiftui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ios-swiftui"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "desktop-electron-tauri-ambiguous-3",
+        "prompt": "The request includes desktop webview and react native.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-native-expo"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "desktop-electron-tauri-adversarial-1",
+        "prompt": "A historical note says \"electron app\". The current request is angular component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "desktop-electron-tauri-adversarial-2",
+        "prompt": "A historical note says \"tauri app\". The current request is next.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nextjs-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "desktop-electron-tauri-adversarial-3",
+        "prompt": "A historical note says \"desktop webview\". The current request is react component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.electronjs.org/docs/latest/",
+      "sourceType": "official-docs",
+      "versionScope": "Electron documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Electron process, IPC, window, security, and lifecycle reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://v2.tauri.app/",
+      "sourceType": "official-docs",
+      "versionScope": "Tauri v2 documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Tauri app architecture, capabilities, commands, windowing, and security reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.electronjs.org/docs/latest/tutorial/context-isolation",
+      "sourceType": "official-docs",
+      "versionScope": "Electron context isolation guidance as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for narrow preload bridges and isolation of privileged Electron APIs from renderer code.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.electronjs.org/docs/latest/tutorial/security",
+      "sourceType": "official-docs",
+      "versionScope": "Electron security guidance as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted conditionally for sender validation, web security, sandboxing, and remote-content trust boundaries.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://v2.tauri.app/security/permissions/",
+      "sourceType": "official-docs",
+      "versionScope": "Tauri v2 permissions documentation as verified 2026-09-06",
+      "staleAfterDays": 45,
+      "notes": "Adopted for Tauri capability, command privilege, and allow-or-deny resource scopes; not an Electron model.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

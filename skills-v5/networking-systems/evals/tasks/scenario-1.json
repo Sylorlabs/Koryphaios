@@ -1,0 +1,91 @@
+{
+  "id": "networking-systems-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply network routing expertise to this task\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is networking-systems: Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership. The adjacent edge-cdn discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://networking-systems/scenario-1",
+    "requirements": [
+      "healthy/failing source vantage and resolver/cache records",
+      "A/AAAA/CNAME/TTL plus IPv4/IPv6 routes/source-address fixtures",
+      "firewall/NACL/NAT/load-balancer and bidirectional TCP evidence",
+      "TLS SNI/certificate/ALPN probes plus staged DNS/LB/network rollback controls",
+      "paired same-model skill/no-skill execution",
+      "networking-systems parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual networking-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=network-service-backend; near-neighbor=edge-cdn), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Establish source/destination identity, address family, DNS resolution path, route, NAT, firewall, proxy/LB, transport, TLS/SNI, application protocol, timeout, and retry ownership."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Capture representative resolution/connectivity/handshake evidence from the actual source environment, test failure/timeouts/retries, validate firewall/LB health and certificate chains, and compare both directions when relevant."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not equate ping failure with service failure, flush global caches reflexively, disable TLS verification, or add retries before locating the timeout/loss boundary."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Exact failing source/destination/address-family/DNS and selected route/source-address identity; Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior; Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification; Source-specific before/after connectivity plus staged network change, propagation and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "networking-systems-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Exact failing source/destination/address-family/DNS and selected route/source-address identity",
+        "Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior",
+        "Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification",
+        "Source-specific before/after connectivity plus staged network change, propagation and rollback evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "networking-systems-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Exact failing source/destination/address-family/DNS and selected route/source-address identity",
+    "Transport packet/flow evidence including TCP/UDP state, NAT/firewall return path, MTU/PMTUD and loss/retransmission behavior",
+    "Load-balancer/proxy/backend and TLS/SNI/certificate/ALPN evidence without disabled verification",
+    "Source-specific before/after connectivity plus staged network change, propagation and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "networking-systems-individual-scenario-1-result",
+    "networking-systems-individual-scenario-1-verification",
+    "networking-systems-individual-scenario-1-paired-evaluation"
+  ]
+}

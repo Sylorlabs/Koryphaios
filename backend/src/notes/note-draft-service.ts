@@ -10,6 +10,7 @@ import {
   ValidationError,
 } from '../errors/types';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { resolveProjectIdentity } from '../runtime/request-project';
 import { loadNotesSettings, NOTES_HARD_MAX_BYTES } from './notes-settings';
 import { getLocalNotesPrincipalId } from './notes-principal';
 
@@ -166,7 +167,10 @@ function normalizeProjectRoot(value: string): string {
   if (!trimmed || !isAbsolute(trimmed)) {
     throw new ValidationError('Draft project scope must be an absolute path');
   }
-  return resolve(trimmed);
+  // Match note rows and request admission across macOS /private aliases and
+  // symlinked launch paths. Preserve the resolved path for offline legacy
+  // scopes, but canonicalize existing projects so visibility checks agree.
+  return resolveProjectIdentity(trimmed);
 }
 
 function validateIdentifier(value: string, label: string): string {

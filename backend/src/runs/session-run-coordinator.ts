@@ -308,24 +308,27 @@ export class SessionRunCoordinator {
     for (const snapshot of this.store.listActive()) {
       if (!snapshot.runId) continue;
       try {
-        await this.fail(
-          snapshot.sessionId,
-          snapshot.runId,
-          snapshot.revision,
-          'backend_restarted_during_active_run',
-        );
+        // Recovery must apply the listed revision, including when another
+        // owner has since cancelled it. The public terminal helper is
+        // deliberately idempotent and would hide that conflict.
+        const result = this.store.transition(snapshot.sessionId, {
+          kind: 'fail',
+          expectedRunId: snapshot.runId,
+          expectedRevision: snapshot.revision,
+          reason: 'backend_restarted_during_active_run',
+        });
+        await this.publishStored(result.payload, result.publishRequired);
         // `run.state` owns lifecycle truth, but spawned worker cards have
         // their own durable event history. Close every exact agent identity
         // carried by the interrupted aggregate so a fresh renderer cannot
         // replay an old thinking/streaming card indefinitely.
         await this.publishInterruptedAgentTerminals(
-          snapshot.sessionId,
+          result.payload.snapshot,
           snapshot.activeAgentIds.length > 0 ? snapshot.activeAgentIds : ['kory-manager'],
         );
         recovered++;
       } catch (error) {
-        if (!(error instanceof SessionRunTransitionError && error.code === 'STALE_RUN'))
-          throw error;
+        if (!this.isStaleRecoverySnapshot(error)) throw error;
       }
     }
     return recovered;
@@ -336,9 +339,13 @@ export class SessionRunCoordinator {
     let recovered = 0;
     for (const snapshot of this.store.listWaiting()) {
       if (this.store.isWaitingContinuationValid(snapshot)) continue;
-      const result = this.store.terminalizeOrphanedWait(snapshot, `orphaned_${snapshot.phase}`);
-      await this.publishStored(result.payload, result.publishRequired);
-      recovered++;
+      try {
+        const result = this.store.terminalizeOrphanedWait(snapshot, `orphaned_${snapshot.phase}`);
+        await this.publishStored(result.payload, result.publishRequired);
+        recovered++;
+      } catch (error) {
+        if (!this.isStaleRecoverySnapshot(error)) throw error;
+      }
     }
     return recovered;
   }
@@ -399,16 +406,38 @@ export class SessionRunCoordinator {
     return result.payload.snapshot;
   }
 
+  private isStaleRecoverySnapshot(error: unknown): boolean {
+    // Publication yields between sessions. Another owner may advance or replace
+    // a listed run; recovery must neither overwrite it nor skip later sessions.
+    return (
+      error instanceof SessionRunTransitionError &&
+      (error.code === 'STALE_RUN' || error.code === 'STALE_REVISION')
+    );
+  }
+
   /**
    * These are compatibility projections, never recovery work. The durable
    * SessionRun has already transitioned to error before we publish them, so a
    * failed websocket publication cannot revive or rerun provider work.
    */
   private async publishInterruptedAgentTerminals(
-    sessionId: string,
+    recovered: SessionRunSnapshot,
     agentIds: readonly string[],
   ): Promise<void> {
+    const sessionId = recovered.sessionId;
     for (const agentId of [...new Set(agentIds.filter(Boolean))].sort()) {
+      // Every publication can yield, including run.state above and a failed
+      // compatibility broadcast. Never apply an old terminal to reused agent
+      // identities after another owner has advanced this session.
+      const current = this.store.get(sessionId);
+      if (
+        !current ||
+        current.runId !== recovered.runId ||
+        current.revision !== recovered.revision ||
+        current.status !== 'terminal' ||
+        current.phase !== 'error'
+      )
+        return;
       try {
         await this.publish(sessionId, {
           type: 'agent.status',

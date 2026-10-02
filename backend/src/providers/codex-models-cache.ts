@@ -10,8 +10,8 @@
 // response deliberately omits it.
 //
 // Mirrors the grok-build pattern (`readGrokCliModelsCache`) so each model's
-// context window is stamped onto the discovered ModelDef as
-// `contextWindow: <n>` and `contextVerified: true`.
+// CLI-enforced effective context window is stamped onto the discovered
+// ModelDef as `contextWindow: <n>` and `contextVerified: true`.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,7 +24,9 @@ export interface CodexCliModelMeta {
   slug: string;
   /** Display name from the CLI's own cache. */
   displayName?: string;
-  /** Effective context window in tokens. Already validated (>= 1024). */
+  /** CLI-enforced effective context window in tokens (compaction boundary,
+   *  derived from auto_compact_token_limit / effective_context_window_percent
+   *  when the cache reports them). Already validated (>= 1024). */
   contextWindow?: number;
   /** CLI-reported max output tokens. */
   maxOutputTokens?: number;
@@ -47,6 +49,8 @@ interface CodexModelsCacheFile {
     visibility?: unknown;
     supported_reasoning_levels?: Array<{ effort?: unknown }> | null;
     default_reasoning_level?: unknown;
+    auto_compact_token_limit?: unknown;
+    effective_context_window_percent?: unknown;
   }>;
 }
 
@@ -58,6 +62,37 @@ function asPositiveInt(value: unknown): number | undefined {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asPercent(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (value <= 0 || value > 100) return undefined;
+  return value;
+}
+
+/**
+ * The CLI enforces compaction BEFORE the raw window fills, and Koryphaios
+ * paces + displays against that same enforced boundary — not the raw max.
+ * Native models carry `effective_context_window_percent` (95); bridge/web
+ * models carry an explicit `auto_compact_token_limit` (285000) alongside a
+ * percent (85). The explicit limit wins when sane; otherwise the percent of
+ * the raw window; otherwise the raw window itself.
+ */
+function effectiveContextWindow(
+  rawWindow: number | undefined,
+  compactLimit: number | undefined,
+  percent: number | undefined,
+): number | undefined {
+  if (rawWindow === undefined) return undefined;
+  // The explicit compaction trigger is the exact enforced boundary.
+  if (compactLimit !== undefined && compactLimit >= 1024) {
+    return Math.min(rawWindow, compactLimit);
+  }
+  if (percent !== undefined) {
+    const derived = Math.floor((rawWindow * percent) / 100);
+    if (derived >= 1024) return Math.min(rawWindow, derived);
+  }
+  return rawWindow;
 }
 
 /** Parse the raw JSON of `<profileDir>/models_cache.json`. Pure / synchronous. */
@@ -90,9 +125,14 @@ export function parseCodexCliModelsCache(raw: string): Map<string, CodexCliModel
       slug,
       displayName: asString(entry?.display_name),
       // `context_window` is the canonical limit; `max_context_window` is the
-      // CLI's hard ceiling and only wins if `context_window` is absent.
-      contextWindow:
+      // CLI's hard ceiling and only wins if `context_window` is absent. The
+      // stamped value is the CLI-enforced effective boundary (compaction
+      // trigger), never larger than the raw window.
+      contextWindow: effectiveContextWindow(
         asPositiveInt(entry?.context_window) ?? asPositiveInt(entry?.max_context_window),
+        asPositiveInt(entry?.auto_compact_token_limit),
+        asPercent(entry?.effective_context_window_percent),
+      ),
       maxOutputTokens: asPositiveInt(entry?.max_output_tokens),
       visible,
       ...(reasoningLevels && reasoningLevels.length > 0 ? { reasoningLevels } : {}),
@@ -103,7 +143,6 @@ export function parseCodexCliModelsCache(raw: string): Map<string, CodexCliModel
   }
   return out;
 }
-
 
 /** Read `<profileDir>/models_cache.json` and return a slug → meta map.
  *  Returns null when the file is missing or unreadable. */
@@ -175,4 +214,3 @@ export function enrichCodexModelsWithCliCache(
     return next;
   });
 }
-

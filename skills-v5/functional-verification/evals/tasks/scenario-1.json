@@ -1,0 +1,68 @@
+{
+  "id": "functional-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "The completed CLI import feature now supports `--dry-run`. Perform functional verification through the supported command. The fixture contains three valid rows and one invalid-row sibling file. For dry-run, the command must report exactly which rows would be created, exit successfully for the valid file, create no database rows or output files, and leave the import sequence counter unchanged. The invalid file must be rejected with the documented diagnostic and still produce no mutation. Finally run one normal import to prove dry-run did not poison later state. Inspect the database and output directory independently from the CLI success text and give a claim-by-claim verdict.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://functional-verification/import-dry-run",
+    "requirements": [
+      "the fixture database starts with zero imported rows and sequence value 17",
+      "the valid CSV contains three accepted rows and the sibling CSV contains one malformed required field",
+      "the supported CLI exposes dry-run and normal import through the same public entry point",
+      "database rows, sequence state, and output-directory contents can be inspected independently of command output",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "functional-dry-run-nonmutation",
+      "assertion": "After valid and invalid dry-runs, the database row count remains zero, the sequence remains 17, and the output directory remains unchanged while the preview/diagnostic matches the fixture."
+    },
+    {
+      "id": "functional-dry-run-normal-followup",
+      "assertion": "A subsequent normal import creates exactly the three valid rows once and advances state according to the documented contract."
+    },
+    {
+      "id": "functional-dry-run-independent-oracle",
+      "assertion": "Mutation and non-mutation verdicts are based on independently read persisted state rather than the CLI success message alone."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "functional-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Acceptance claim matrix",
+        "exact CLI exit/stdout/stderr results",
+        "independent database and filesystem observations",
+        "normal-import follow-up result"
+      ]
+    },
+    {
+      "id": "functional-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the verdict distinguishes command response from durable side effects",
+        "invalid and non-mutation paths are material rather than decorative",
+        "claims remain no broader than observed behavior"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Acceptance claim matrix",
+    "dry-run command results",
+    "independent persisted-state observations",
+    "normal import follow-up",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "functional-verification-scenario-1-acceptance-matrix",
+    "functional-verification-scenario-1-state-evidence",
+    "functional-verification-scenario-1-verdict",
+    "functional-verification-scenario-1-paired-evaluation"
+  ]
+}

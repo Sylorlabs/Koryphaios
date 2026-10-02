@@ -315,7 +315,6 @@
   function createState(doc: ProseMirrorNode, mode: SkillVisualRenderer) {
     const shortcutCommands: Record<string, Command> = {
       'Mod-z': undo,
-      'Shift-Mod-z': redo,
       'Mod-y': redo,
     };
     if (mode !== 'plain') {

@@ -1,0 +1,82 @@
+{
+  "id": "ios-swiftui-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A SwiftUI multiwindow app stores an editor draft in a global singleton, so two scenes overwrite each other and reopening one scene restores the other document. Move state to the correct scene/document ownership, preserve autosave and undo behavior, and test two simultaneous scenes, scene discard/reopen, process termination/restoration, failed save, and keyboard focus. Keep durable document data separate from ephemeral view presentation state.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://ios-swiftui/scene-state-draft-restoration",
+    "requirements": [
+      "two-window SwiftUI scene fixture editing different document ids",
+      "autosave/undo store with process restoration data",
+      "save-failure injection and reopen sequence for each scene",
+      "focus/restoration assertions that expose global-state leakage",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "ios-swiftui-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "ios-swiftui decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "ios-swiftui-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "scene-state-draft-restoration scenario evidence",
+    "ios-swiftui decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "ios-swiftui-individual-scenario-2-result",
+    "ios-swiftui-individual-scenario-2-verification",
+    "ios-swiftui-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual ios-swiftui boundary and relevant environment before acting, preserve the hierarchy relationship (broader=native-interface; near-neighbor=desktop-electron-tauri), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Model source-of-truth state, environment dependencies, navigation identity, scene lifecycle, task cancellation, persistence, and UIKit bridges explicitly."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Document/draft state is keyed to its owning scene/document and survives only according to declared persistence semantics; concurrent scenes cannot share mutable draft identity accidentally."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Test representative devices or faithful simulators across lifecycle interruption, navigation restoration, keyboard/focus, Dynamic Type, VoiceOver-sensitive semantics, permissions, offline state, and background/foreground transitions."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not key views by unstable identity, start unbounded tasks from body evaluation, assume simulator success proves device integrations, or override platform behavior for purely visual reasons."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (ios-swiftui decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

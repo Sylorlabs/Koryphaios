@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "name": "operational-data-analysis",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "operations"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3500,
+  "broader": ["data-analysis"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "operational analysis",
+    "production metrics",
+    "incident data",
+    "process monitoring",
+    "service metric analysis",
+    "service metrics",
+    "incident timeline analysis",
+    "latency spike analysis"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Metric lineage",
+    "Baseline rationale",
+    "Decision-linked findings",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle operational analysis.",
+      "The current task is production metrics.",
+      "I need help with incident data.",
+      "Work on process monitoring for this request.",
+      "This request specifically requires service metric analysis."
+    ],
+    "negative": [
+      "The only requested work is analytics engineering.",
+      "Please handle etl pipeline only.",
+      "This task is limited to data visualization.",
+      "The current request is experiment design.",
+      "Work only on exploratory analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "operational-data-analysis-ambiguous-1",
+        "prompt": "The request includes operational analysis and analytics engineering.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "operational-data-analysis-ambiguous-2",
+        "prompt": "The request includes production metrics and etl pipeline.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-pipeline-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "operational-data-analysis-ambiguous-3",
+        "prompt": "The request includes incident data and data visualization.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "operational-data-analysis-adversarial-1",
+        "prompt": "A historical note says \"operational analysis\". The current request is experiment design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimental-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "operational-data-analysis-adversarial-2",
+        "prompt": "A historical note says \"production metrics\". The current request is exploratory analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["exploratory-data-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "operational-data-analysis-adversarial-3",
+        "prompt": "A historical note says \"incident data\". The current request is model evaluation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ml-evaluation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://prometheus.io/docs/practices/histograms/",
+      "sourceType": "official-docs",
+      "versionScope": "Prometheus Histograms and summaries guidance inspected 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adapt histogram versus precomputed-quantile aggregation semantics across telemetry stacks; reject averaging instance percentiles into a fleet percentile.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.itl.nist.gov/div898/handbook/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST/SEMATECH statistical methods handbook as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Statistical-method reference discovery; a relevant chapter is needed for specific inferential guidance.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://sre.google/sre-book/table-of-contents/",
+      "sourceType": "official-docs",
+      "versionScope": "Google Site Reliability Engineering book as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Operational reference discovery; a table of contents does not establish metric meaning or aggregation validity.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

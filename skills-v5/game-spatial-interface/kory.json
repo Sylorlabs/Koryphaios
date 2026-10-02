@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "name": "game-spatial-interface",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ui", "game", "spatial"],
+  "targetMedia": ["game", "spatial"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "game ui",
+    "game hud",
+    "spatial interface",
+    "vr interface",
+    "ar interface",
+    "hud aiming reticle",
+    "world space prompts",
+    "controller focus"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Situated interaction contract",
+    "Engine/device runtime verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle game ui.",
+      "The current task is game hud.",
+      "I need help with spatial interface.",
+      "Work on vr interface for this request.",
+      "This request specifically requires ar interface."
+    ],
+    "negative": [
+      "The only requested work is embedded ui.",
+      "Please handle native only.",
+      "This task is limited to ui toolkit.",
+      "The current request is terminal.",
+      "Work only on visual verification."
+    ],
+    "ambiguous": [
+      {
+        "id": "game-spatial-interface-ambiguous-1",
+        "prompt": "The request includes game ui and embedded ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-spatial-interface-ambiguous-2",
+        "prompt": "The request includes game hud and native.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-spatial-interface-ambiguous-3",
+        "prompt": "The request includes spatial interface and ui toolkit.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["novel-ui-toolkit"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "game-spatial-interface-adversarial-1",
+        "prompt": "A historical note says \"game ui\". The current request is terminal.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-spatial-interface-adversarial-2",
+        "prompt": "A historical note says \"game hud\". The current request is visual verification.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-spatial-interface-adversarial-3",
+        "prompt": "A historical note says \"spatial interface\". The current request is web.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["web-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/TR/xaur/",
+      "sourceType": "official-docs",
+      "versionScope": "XR Accessibility User Requirements input/output and personalization needs inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt alternative interactions and redundant feedback. A user-requirements note is not a blanket certification standard or engine mandate."
+    },
+    {
+      "url": "https://registry.khronos.org/OpenXR/specs/1.1/html/xrspec.html",
+      "sourceType": "spec",
+      "versionScope": "Khronos OpenXR 1.1 specification",
+      "staleAfterDays": 365,
+      "notes": "Spatial runtime, interaction, action, view, and lifecycle semantics.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

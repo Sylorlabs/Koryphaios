@@ -1,0 +1,75 @@
+{
+  "id": "authorization-security-full-task-1",
+  "maturity": "individual",
+  "prompt": "Design the authorization security model for a multi-tenant document API. The fixture has tenants Acme and Bravo; roles are member, editor, tenant-admin, and suspended; documents have owner/editor/viewer relationships; a background export worker currently calls the document service with a broad service credential. Define a subject-resource-action-and-field matrix for read, edit, delete, share, member-management, and export. Enforce decisions in the trusted service/data layer, not route visibility. Prevent same-role cross-tenant access and field overposting, preserve the originating user's permissions through the export worker, define immediate behavior for suspension/member removal plus any bounded token/cache staleness, and specify denied-path non-effects and audit events. Produce concrete implementation requirements and verification cases, but leave execution of the finished control proof to security-verification.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://authorization-security/scenario-1",
+    "requirements": [
+      "two tenants with overlapping role names and distinct document/resource IDs",
+      "owner/editor/viewer relationships plus tenant-admin and suspended states",
+      "API, service/data layer, and export-worker trust boundaries",
+      "self-contained session token plus revocable membership state fixture",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "authorization-security-matrix-1",
+      "assertion": "The result contains explicit allow/deny rules for every supplied role/action plus object- and field-level constraints, including same-role cross-tenant cases, suspended users, and unknown/unmatched cases."
+    },
+    {
+      "id": "authorization-security-enforcement-1",
+      "assertion": "The design places authorization at a trusted service/data boundary before protected reads or mutations and does not treat hidden UI controls, route guards, or opaque IDs as enforcement."
+    },
+    {
+      "id": "authorization-security-originating-subject-1",
+      "assertion": "The export path retains sufficient originating-user/delegation context so the worker's broader service identity cannot authorize an export the user could not perform directly."
+    },
+    {
+      "id": "authorization-security-revocation-1",
+      "assertion": "Suspension or membership removal has an explicit effective-time contract, including any bounded token/cache stale window, high-risk exceptions, and fail-closed behavior when trustworthy policy state is unavailable."
+    },
+    {
+      "id": "authorization-security-non-effect-1",
+      "assertion": "Denied write/share/export/member-management cases explicitly require no durable mutation, message, file, or downstream privileged side effect, with security-relevant auditing that does not disclose protected data."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "authorization-security-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "subject-resource-action-field matrix",
+        "trusted enforcement map",
+        "originating-subject delegation design",
+        "revocation and denied-side-effect contract"
+      ]
+    },
+    {
+      "id": "authorization-security-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "authorization matrix and policy assumptions",
+    "trusted enforcement and data-flow map",
+    "worker/delegation subject propagation",
+    "revocation/staleness contract",
+    "negative and denied-non-effect cases",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "authorization-security-scenario-1-result",
+    "authorization-security-scenario-1-verification",
+    "authorization-security-scenario-1-paired-evaluation"
+  ]
+}

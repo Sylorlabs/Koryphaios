@@ -11,10 +11,10 @@
 	import BackendDownOverlay from '$lib/components/BackendDownOverlay.svelte';
 	import UpdateDialog from '$lib/components/UpdateDialog.svelte';
 	import WindowResizeHandles from '$lib/components/WindowResizeHandles.svelte';
+	import GlobalTooltip from '$lib/components/GlobalTooltip.svelte';
 
 	let { children } = $props();
 	let showInitialLoad = $state(true);
-	let isOffline = $state(false);
 	let loadError = $state<string | null>(null);
 	let appReady = $state(false);
 	let retrying = $state(false);
@@ -35,6 +35,13 @@
 
 		import('$lib/utils/error-monitor').then((m) => m.initErrorMonitoring()).catch((err: unknown) => {
 			console.warn('Error monitor init failed:', err instanceof Error ? err.message : String(err));
+		});
+
+		// Renderer stall monitor: rAF-gap + longtask tracking that reports
+		// main-thread freezes through the error monitor above, so a UI freeze
+		// leaves backend log + diagnostics evidence instead of no trace.
+		import('$lib/utils/error-monitor').then((m) => m.initStallMonitoring()).catch((err: unknown) => {
+			console.warn('Stall monitor init failed:', err instanceof Error ? err.message : String(err));
 		});
 
 		// Demo builds have no backend at all: skip the health sentinel (its
@@ -82,12 +89,6 @@
 				loadError = error instanceof Error ? error.message : 'Koryphaios could not initialize.';
 				showInitialLoad = true;
 			});
-
-		isOffline = !navigator.onLine;
-		const goOffline = () => { isOffline = true; };
-		const goOnline = () => { isOffline = false; };
-		window.addEventListener('offline', goOffline);
-		window.addEventListener('online', goOnline);
 
 		// Global link interceptor to open external links in default browser when in Tauri
 		const handleExternalLinks = async (e: MouseEvent) => {
@@ -140,8 +141,6 @@
 		document.addEventListener('copy', handleCopy);
 
 		return () => {
-			window.removeEventListener('offline', goOffline);
-			window.removeEventListener('online', goOnline);
 			window.removeEventListener('click', handleExternalLinks);
 			document.removeEventListener('copy', handleCopy);
 		};
@@ -170,12 +169,8 @@
 
 <div class="layout-root">
 	<WindowResizeHandles />
+	<GlobalTooltip />
 	<a href="#main-content" class="skip-link">Skip to main content</a>
-	{#if isOffline}
-		<div class="offline-banner" role="alert" data-tauri-drag-region>
-			You are offline. Changes may not be saved.
-		</div>
-	{/if}
 	{#if showInitialLoad || !appReady}
 		<div class="initial-load" aria-live="polite" data-tauri-drag-region>
 			{#if loadError}
@@ -191,7 +186,33 @@
 		</div>
 	{/if}
 	<main id="main-content">
-		{#if appReady}{@render children()}{/if}
+		<!-- Last-resort error boundary. Without one, an exception thrown inside an
+		     `$effect` is rethrown out of Svelte's reactive flush, the remaining
+		     queued effects never run, and the whole UI freezes with every control
+		     dead — the window frame, overlays and recovery UI must outlive the app
+		     content so the user is never trapped. A boundary also routes the error
+		     through SvelteKit's `handleError` hook instead of straight to
+		     `window.onerror`. -->
+		<svelte:boundary>
+			{#if appReady}{@render children()}{/if}
+
+			{#snippet failed(error, reset)}
+				<div class="app-crash" role="alert">
+					<strong>Koryphaios hit an unexpected error</strong>
+					<span class="app-crash-detail"
+						>{error instanceof Error ? error.message : String(error)}</span
+					>
+					<div class="app-crash-actions">
+						<button type="button" onclick={reset}>Try again</button>
+						<button
+							type="button"
+							class="app-crash-reload"
+							onclick={() => window.location.reload()}>Reload Koryphaios</button
+						>
+					</div>
+				</div>
+			{/snippet}
+		</svelte:boundary>
 	</main>
 
 	<!-- Backend unavailable / version-skew overlay. Mounted only when the
@@ -233,20 +254,41 @@
 	.startup-error span { color: var(--color-text-secondary); font-size: var(--text-sm); }
 	.startup-error button { padding: var(--space-sm) var(--space-lg); border: 1px solid var(--color-accent); border-radius: var(--radius-md); background: var(--color-accent); color: var(--color-surface-0); cursor: pointer; }
 	.startup-error button:disabled { opacity: 0.6; cursor: wait; }
+	.app-crash {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-md);
+		min-height: 100vh;
+		max-width: 36rem;
+		margin: 0 auto;
+		padding: var(--space-xl);
+		text-align: center;
+	}
+	.app-crash strong { color: var(--color-text-primary); font-size: var(--text-lg); }
+	.app-crash-detail {
+		color: var(--color-text-secondary);
+		font-size: var(--text-sm);
+		font-family: var(--font-mono, monospace);
+		overflow-wrap: anywhere;
+	}
+	.app-crash-actions { display: flex; flex-wrap: wrap; gap: var(--space-md); justify-content: center; }
+	.app-crash-actions button {
+		padding: var(--space-sm) var(--space-lg);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-surface-2);
+		color: var(--color-text-primary);
+		cursor: pointer;
+	}
+	.app-crash-actions .app-crash-reload {
+		border-color: var(--color-accent);
+		background: var(--color-accent);
+		color: var(--color-on-accent);
+	}
 	@keyframes pulse {
 		0%, 100% { opacity: 1; }
 		50% { opacity: 0.4; }
-	}
-	.offline-banner {
-		position: sticky;
-		top: 0;
-		z-index: 9999;
-		padding: var(--space-2) var(--space-lg);
-		text-align: center;
-		font-size: var(--text-sm);
-		font-weight: var(--font-medium);
-		background: var(--color-warning);
-		color: #000;
-		-webkit-app-region: drag;
 	}
 </style>

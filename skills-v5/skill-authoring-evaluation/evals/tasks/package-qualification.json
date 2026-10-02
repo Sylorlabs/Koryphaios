@@ -1,0 +1,64 @@
+{
+  "id": "skill-authoring-full-task-package-qualification",
+  "prompt": "Given an existing broad agent skill, split or rewrite it only if evidence justifies the change, create a portable package with current source provenance, and produce promotion evidence against a same-model no-skill baseline.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://skills/broad-unqualified-skill",
+    "requirements": ["isolated writable checkout", "skill validator", "evaluation ledger"]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "skill-package-change-justification",
+      "assertion": "A broad skill is split or rewritten only when routing, task-quality, context-efficiency, source-freshness, or boundary evidence demonstrates a concrete problem; taxonomy neatness alone is not sufficient."
+    },
+    {
+      "id": "skill-package-portability-provenance",
+      "assertion": "The candidate package is portable, validates structurally, contains current source/version provenance where facts can drift, and keeps detailed references outside the core instructions when progressive disclosure is appropriate."
+    },
+    {
+      "id": "skill-package-heldout-routing",
+      "assertion": "Held-out positive, negative, ambiguous, adversarial, and adjacent-skill routing cases remain unseen by the candidate instructions and meet the configured precision/recall gate."
+    },
+    {
+      "id": "skill-package-paired-uplift",
+      "assertion": "The same model/provider/runtime performs matched skill and no-skill tasks from the same starting state/budget, and promotion requires non-negative task-quality deltas plus measurable value rather than skill presence alone."
+    },
+    {
+      "id": "skill-package-regression-integrity",
+      "assertion": "Observed failures are preserved as regression evidence, infrastructure failures remain separate, and evaluator/scorer revisions cannot silently overwrite or mix incompatible evidence."
+    },
+    {
+      "id": "skill-package-agent-behavior",
+      "assertion": "The candidate preserves the requested scope and repository decisions, honors existing authorization, makes a failed requested mechanism visible instead of silently substituting a fallback, limits irrelevant context, and continues authorized work through observable evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "portable-package-validation",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": ["portable-package-validation", "source-freshness-validation"]
+    },
+    {
+      "id": "routing-and-baseline-validation",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": ["held-out-routing-results", "paired-baseline-results", "regression-ledger"]
+    },
+    {
+      "id": "blind-professional-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "portable-package-validation",
+    "source-freshness-validation",
+    "held-out-routing-results",
+    "paired-baseline-results",
+    "regression-ledger"
+  ],
+  "requiredArtifacts": ["candidate-package", "routing-report", "paired-experiment-report"]
+}

@@ -15,7 +15,11 @@ import type {
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import type { StreamRequest, ProviderEvent } from '../types';
 import { providerLog } from '../../logger';
-import { safeProviderDiagnostic, safeProviderFailureMessage } from '../provider-diagnostics';
+import {
+  providerStreamFailure,
+  safeProviderDiagnostic,
+  safeProviderFailureMessage,
+} from '../provider-diagnostics';
 import { appendBoundedProviderFrames } from '../bounded-provider-stream';
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -263,17 +267,24 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
 
       if (!response.ok) {
         await response.body?.cancel().catch(() => undefined);
-        const diagnostic = safeProviderDiagnostic(this.name, 'http', { status: response.status });
-        providerLog.warn(diagnostic, 'OpenAI-compatible provider request failed');
-        yield {
-          type: 'error',
-          error: safeProviderFailureMessage(this.name, diagnostic),
-        };
+        // The body carries the gateway's own reason; classify from the status
+        // so a 5xx/429 retry is flagged even when the body is empty.
+        const failure = providerStreamFailure(this.name, 'http', response.statusText, {
+          status: response.status,
+        });
+        providerLog.warn(failure.diagnostic, 'OpenAI-compatible provider request failed');
+        yield failure.event;
         return;
       }
 
       if (!response.body) {
-        yield { type: 'error', error: 'No response body' };
+        // A 200 with no body is a server-side hiccup, not a bad request: repeat
+        // the same turn rather than failing it on the first empty response.
+        yield {
+          type: 'error',
+          error: `${this.name} returned an empty response body.`,
+          errorTransient: true,
+        };
         return;
       }
 
@@ -317,9 +328,9 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
       if ((error as Error).name === 'AbortError') {
         yield { type: 'error', error: 'Request aborted' };
       } else {
-        const diagnostic = safeProviderDiagnostic(this.name, 'http', error);
-        providerLog.warn(diagnostic, 'OpenAI-compatible provider stream failed');
-        yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
+        const failure = providerStreamFailure(this.name, 'http', error);
+        providerLog.warn(failure.diagnostic, 'OpenAI-compatible provider stream failed');
+        yield failure.event;
       }
     }
   }

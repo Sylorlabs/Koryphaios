@@ -1,0 +1,59 @@
+{
+  "id": "skill-authoring-full-task-routing-repair",
+  "prompt": "Repair a skill whose easy trigger tests pass but which confuses with two adjacent skills. Preserve prior failures, add realistic held-out cases, and prove the candidate improves routing without degrading end-task quality.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://skills/confused-routing-skill",
+    "requirements": ["isolated writable checkout", "routing harness", "evaluation ledger"]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "routing-repair-real-confusions",
+      "assertion": "The repair suite includes realistic held-out neighbor/confusion cases for both adjacent skills and does not rely on only obvious trigger phrases or copied activation examples."
+    },
+    {
+      "id": "routing-repair-pairwise-metrics",
+      "assertion": "Pairwise confusion, precision, and recall are computed from observed routing decisions with explicit false-positive and false-negative accounting."
+    },
+    {
+      "id": "routing-repair-preserve-failures",
+      "assertion": "Previously observed routing/task failures remain represented as regressions and cannot disappear merely because the public trigger examples changed."
+    },
+    {
+      "id": "routing-repair-end-task-quality",
+      "assertion": "Routing gains are paired with same-model skill-vs-no-skill full-task evidence so a narrower trigger that routes correctly but degrades downstream task quality cannot qualify."
+    },
+    {
+      "id": "routing-repair-boundary-not-overfit",
+      "assertion": "The repair states the distinction from each adjacent skill in terms of ownership/task boundary and passes paraphrased/adversarial cases without a brittle keyword blacklist or universal trigger."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "pairwise-routing-quality",
+      "kind": "deterministic",
+      "weight": 0.45,
+      "evidence": ["pairwise-confusion-matrix", "precision-recall-results"]
+    },
+    {
+      "id": "regression-and-uplift",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": ["preserved-regression-cases", "skill-vs-no-skill-task-results"]
+    },
+    {
+      "id": "blind-routing-boundary-review",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": ["randomized routing artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "pairwise-confusion-matrix",
+    "precision-recall-results",
+    "preserved-regression-cases",
+    "skill-vs-no-skill-task-results"
+  ],
+  "requiredArtifacts": ["routing-report", "regression-suite", "paired-experiment-report"]
+}

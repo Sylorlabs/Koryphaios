@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "php-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "php"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["php", "composer package", "phpstan", "laravel php"],
+  "excludes": [],
+  "evidence": [
+    "php-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle php.",
+      "The current task is composer package.",
+      "I need help with phpstan.",
+      "Work on laravel php for this request.",
+      "This request specifically requires php."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is game development.",
+      "Work only on golang."
+    ],
+    "ambiguous": [
+      {
+        "id": "php-engineering-ambiguous-1",
+        "prompt": "The request includes php and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "php-engineering-ambiguous-2",
+        "prompt": "The request includes composer package and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "php-engineering-ambiguous-3",
+        "prompt": "The request includes phpstan and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "php-engineering-adversarial-1",
+        "prompt": "A historical note says \"php\". The current request is game development.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-development"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "php-engineering-adversarial-2",
+        "prompt": "A historical note says \"composer package\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "php-engineering-adversarial-3",
+        "prompt": "A historical note says \"phpstan\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.php.net/manual/en/function.exit.php",
+      "sourceType": "official-docs",
+      "versionScope": "PHP exit documentation inspected 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "exit bypasses finally blocks; distinguish explicit termination from normal return and exception unwinding when validating cleanup.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.php.net/manual/en/",
+      "sourceType": "official-docs",
+      "versionScope": "PHP manual as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "PHP language/runtime, type, request, and library reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.php.net/manual/en/language.types.declarations.php",
+      "sourceType": "official-docs",
+      "versionScope": "PHP type declarations documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for caller-controlled strict_types scalar coercion and type-boundary diagnosis.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.php.net/manual/en/language.exceptions.php",
+      "sourceType": "official-docs",
+      "versionScope": "PHP exception documentation as verified 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopted for exception propagation and finally control-flow behavior; transaction semantics remain framework-specific.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

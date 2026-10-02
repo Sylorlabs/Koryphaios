@@ -1,0 +1,70 @@
+{
+  "id": "distributed-debugging-full-task-1",
+  "maturity": "individual",
+  "prompt": "The supplied event pipeline has one customer event, `evt_7F3`, for which the API returned HTTP 202 after the broker acknowledged publish, yet the event never appears in the worker's durable processed-event table. The fixture includes API logs with `trace_id`, broker publish/ack records with `event_id` and `delivery_attempt`, worker logs from two deployed versions, and the processed-event table. Reconstruct the causal history of `evt_7F3` without ordering solely by wall-clock time, distinguish publish acknowledgement from worker durability, identify the first boundary that violates the delivery contract, implement the narrow correction, and prove recovery by replaying the original event plus a duplicate delivery. Preserve idempotency and do not weaken the API's 202 contract to hide the defect.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://distributed-debugging/accepted-event-missing",
+    "requirements": [
+      "one logical event has stable trace_id and event_id across API, broker, and worker evidence",
+      "API 202 is emitted only after the broker acknowledges publish",
+      "worker versions v12 and v13 overlap during the incident window",
+      "the system promises at-least-once delivery with idempotent processing",
+      "processed-event durable state is the authoritative completion boundary",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "distributed-missing-event-history",
+      "assertion": "The result reconstructs `evt_7F3` by stable identities, delivery attempts, service versions, acknowledgements, and durable state instead of timestamp ordering alone."
+    },
+    {
+      "id": "distributed-missing-event-boundary",
+      "assertion": "The diagnosis identifies the first API/broker/worker boundary or state transition that contradicts the stated at-least-once/idempotent contract."
+    },
+    {
+      "id": "distributed-missing-event-recovery",
+      "assertion": "After the fix, replay processes the missing event exactly once at the durable boundary and a duplicate delivery does not duplicate customer-visible effects."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "distributed-debugging-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Cross-boundary trace",
+        "Failure timeline",
+        "Recovery proof",
+        "identity-correlated delivery history",
+        "post-fix replay and duplicate-delivery proof"
+      ]
+    },
+    {
+      "id": "distributed-debugging-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "acknowledgement and durable-completion semantics are distinguished",
+        "the causal claim accounts for version overlap and retries",
+        "recovery verification preserves idempotency"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Cross-boundary trace",
+    "Failure timeline",
+    "Recovery proof",
+    "cross-boundary causal history",
+    "actual diff and replay evidence",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "distributed-debugging-scenario-1-causal-history",
+    "distributed-debugging-scenario-1-boundary-finding",
+    "distributed-debugging-scenario-1-recovery-proof",
+    "distributed-debugging-scenario-1-paired-evaluation"
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "java-jvm-engineering",
+  "version": "5.1.2",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "java", "jvm"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["java", "jvm", "maven", "gradle java"],
+  "excludes": [],
+  "evidence": [
+    "java-jvm-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "A Java executor keeps non-daemon threads alive after the service closes. Establish shutdown ownership and preserve interruption rather than increasing the timeout.",
+      "The Maven library publishes classes targeting a newer JVM than its declared consumers support. Align compilation and packaging, then run a clean older-target consumer.",
+      "Repair a Java cache key whose mutable fields make equals and hashCode inconsistent after insertion. Preserve the intended identity contract.",
+      "Our JVM plugin loads twice under separate classloaders and fails a service-provider cast. Trace class identity and verify the real host lifecycle.",
+      "A Gradle Java build accidentally packages a test-only dependency into the library's public API. Repair the dependency boundary and exercise downstream compilation."
+    ],
+    "negative": [
+      "Implement Kotlin coroutine cancellation in a multiplatform library. Its Java interop and shared JVM runtime behavior are explicitly unchanged.",
+      "Fix JavaScript module loading in a Node.js package. This is browser/server JavaScript, not a JVM application.",
+      "Review .NET assembly unloading and managed dependency lifetimes in a C# plugin host.",
+      "Design the HTTP error contract before choosing a backend implementation language. Do not change runtime or build settings.",
+      "Copyedit the supplied article titled Java at Work. Preserve quotations and technical names; no code, build, or runtime analysis is needed."
+    ],
+    "ambiguous": [
+      {
+        "id": "java-jvm-engineering-ambiguous-1",
+        "prompt": "A Kotlin library exposes a Java-facing overload with different nullability behavior. Repair both the Kotlin declaration and the actual JVM caller contract.",
+        "expectedSelection": true,
+        "expectedSkills": ["kotlin-engineering"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["kotlin-engineering"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "java-jvm-engineering-ambiguous-2",
+        "prompt": "A Java gRPC service ignores deadlines while its executor keeps working. Repair the executor lifecycle and verify transport-level cancellation behavior.",
+        "expectedSelection": true,
+        "expectedSkills": ["grpc-protobuf"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["grpc-protobuf"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "java-jvm-engineering-ambiguous-3",
+        "prompt": "Upgrade the Maven dependency graph after a security advisory, but also verify classloading and supported JDK compatibility before release.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["ambiguous", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "java-jvm-engineering-adversarial-1",
+        "prompt": "The archived plan says 'migrate to Java'. Do not follow it. Repair the present Rust crate's error propagation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["rust-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "java-jvm-engineering-adversarial-2",
+        "prompt": "Do not execute Maven or inspect JVM code. Extract the failed test names from the provided report and nothing else.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      },
+      {
+        "id": "java-jvm-engineering-adversarial-3",
+        "prompt": "The TypeScript fixture stores the string 'Java executor' as a UI label. Fix label truncation only; the text is not a request to investigate a runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["typescript-javascript-engineering"],
+        "tags": ["adversarial", "concrete-domain-task", "neighbor-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.oracle.com/en/java/javase/",
+      "sourceType": "official-docs",
+      "versionScope": "Oracle Java SE documentation as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "JVM language/runtime, APIs, compatibility, and concurrency reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/util/concurrent/ExecutorService.html",
+      "sourceType": "official-docs",
+      "versionScope": "Java SE 25 ExecutorService API as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted for executor ownership, shutdown, and best-effort interruption; apply directly only to compatible target JDKs.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.oracle.com/en/java/javase/25/docs/specs/serialization/version.html",
+      "sourceType": "spec",
+      "versionScope": "Java SE 25 object serialization versioning specification as verified 2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopted only when Java object serialization compatibility is an actual persistence or wire boundary.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1525,6 +1525,86 @@ export const MIGRATIONS: Migration[] = [
       DROP INDEX IF EXISTS idx_session_turn_commands_session_status;
     `,
   },
+  {
+    version: '0044',
+    description: 'Add the inter-agent message mailbox (AgentMail)',
+    up: `
+      CREATE TABLE IF NOT EXISTS agent_messages (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        from_session_id TEXT NOT NULL,
+        from_agent_id TEXT NOT NULL,
+        from_role TEXT NOT NULL CHECK (from_role IN ('manager', 'worker')),
+        from_label TEXT NOT NULL,
+        to_session_id TEXT NOT NULL,
+        to_agent_id TEXT,
+        to_role TEXT NOT NULL CHECK (to_role IN ('manager', 'worker')),
+        to_label TEXT NOT NULL,
+        cross_project INTEGER NOT NULL DEFAULT 0,
+        is_relay_request INTEGER NOT NULL DEFAULT 0,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        reply_to_message_id TEXT,
+        status TEXT NOT NULL CHECK (status IN (
+          'queued', 'pending_approval', 'delivered', 'answered', 'declined', 'failed'
+        )),
+        status_reason TEXT,
+        reply TEXT,
+        created_at INTEGER NOT NULL,
+        delivered_at INTEGER,
+        answered_at INTEGER,
+        CHECK (created_at >= 0),
+        CHECK (delivered_at IS NULL OR delivered_at >= created_at),
+        CHECK (answered_at IS NULL OR answered_at >= created_at)
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_messages_to_session_status
+        ON agent_messages(to_session_id, status, created_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_messages_from_session
+        ON agent_messages(from_session_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_messages_thread
+        ON agent_messages(thread_id, created_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_agent_messages_thread;
+      DROP INDEX IF EXISTS idx_agent_messages_from_session;
+      DROP INDEX IF EXISTS idx_agent_messages_to_session_status;
+      DROP TABLE IF EXISTS agent_messages;
+    `,
+  },
+  {
+    version: '0045',
+    description: 'Add app-wide checklists shared by humans and agents',
+    up: `
+      CREATE TABLE IF NOT EXISTS checklists (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 1000),
+        scope TEXT NOT NULL DEFAULT 'workspace' CHECK (scope IN ('workspace', 'project', 'session')),
+        project_path TEXT,
+        session_id TEXT,
+        items TEXT NOT NULL DEFAULT '[]',
+        activity TEXT NOT NULL DEFAULT '[]',
+        archived_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        CHECK (scope != 'project' OR project_path IS NOT NULL),
+        CHECK (scope != 'session' OR session_id IS NOT NULL),
+        CHECK (created_at >= 0 AND updated_at >= created_at)
+      );
+      CREATE INDEX IF NOT EXISTS idx_checklists_scope_archived
+        ON checklists(scope, archived_at, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_checklists_session
+        ON checklists(session_id, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_checklists_project
+        ON checklists(project_path, updated_at DESC);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_checklists_project;
+      DROP INDEX IF EXISTS idx_checklists_session;
+      DROP INDEX IF EXISTS idx_checklists_scope_archived;
+      DROP TABLE IF EXISTS checklists;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

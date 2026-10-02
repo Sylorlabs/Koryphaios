@@ -3,6 +3,10 @@ import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { KoryManager } from '../manager';
+import {
+  resetSessionAgentOverridesCache,
+  setSessionAgentOverrides,
+} from '../../stores/session-agent-overrides';
 import { ProviderRegistry } from '../../providers';
 import { registerLiveModelResolver } from '../../providers/models';
 import {
@@ -96,6 +100,7 @@ describe('KoryManager Orchestration', () => {
   let manager: KoryManager;
 
   beforeEach(() => {
+    resetSessionAgentOverridesCache();
     manager = new KoryManager(
       mockProviderRegistry,
       mockToolRegistry,
@@ -230,7 +235,9 @@ describe('KoryManager Orchestration', () => {
   test('runWorkerPipeline fails when worktree reconcile fails', async () => {
     const autoCommit = mock(async () => {});
 
-    manager.setYoloMode(true);
+    // YOLO is per chat, so the unsandboxed worker path is enabled by giving
+    // this session its own approval preset rather than a process-wide flag.
+    setSessionAgentOverrides('session-2', { permissionMode: 'yolo' });
     manager['workerPipeline']['prepareRecoveryBaseline'] = mock(async () => ({ ok: true }));
     manager['resolveIndependentRouting'] = mock(() => ({
       model: 'independent-worker',
@@ -244,6 +251,7 @@ describe('KoryManager Orchestration', () => {
     manager['handleAutoCommit'] = autoCommit;
     manager['workerPipeline']['workspaceManager'] = {
       spawn: () => ({ path: join(testWorkDir, 'worktree-2') }),
+      validateWorktree: async () => join(testWorkDir, 'worktree-2'),
       reconcile: () => ({ success: false, message: 'merge conflict' }),
       cleanup: mock(() => ({ success: true, message: 'cleaned' })),
     } as any;
@@ -390,6 +398,43 @@ describe('KoryManager Orchestration', () => {
     expect(compiled.manifest.taskContractHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  test('manager assigned skills are pinned into worker and critic delivery evidence', () => {
+    const taskContract = createTaskContract('Explain the current module boundary', {
+      skillAssignment: {
+        worker: ['verification'],
+        critic: ['testing-engineering'],
+      },
+    });
+    const worker = compilePrompt({
+      role: 'worker',
+      mode: 'advanced',
+      provider: 'openai',
+      workingDirectory: testWorkDir,
+      taskContract,
+    });
+    expect(worker.manifest.skills.map((skill) => skill.name)).toContain('verification');
+    expect(worker.skillDelivery.requiredSkills).toEqual(['verification']);
+    expect(
+      worker.skillDelivery.skills.find((skill) => skill.name === 'verification')?.assigned,
+    ).toBe(true);
+    expect(worker.skillDelivery.hash).toMatch(/^[a-f0-9]{64}$/);
+
+    const critic = compilePrompt({
+      role: 'critic',
+      mode: 'advanced',
+      provider: 'openai',
+      workingDirectory: testWorkDir,
+      taskContract,
+    });
+    const criticSkills = critic.manifest.skills.map((skill) => skill.name);
+    expect(criticSkills).toContain('verification');
+    expect(criticSkills).toContain('testing-engineering');
+    expect(critic.skillDelivery.requiredSkills).toEqual(['testing-engineering']);
+    expect(
+      critic.skillDelivery.skills.find((skill) => skill.name === 'testing-engineering')?.assigned,
+    ).toBe(true);
+  });
+
   test('adaptive discovery is conservative and always exposes an immediate stop', () => {
     expect(
       buildIntentDiscoveryBatch(
@@ -405,6 +450,14 @@ describe('KoryManager Orchestration', () => {
       questions.every((question) => question.options.at(-1) === 'Stop asking and implement now'),
     ).toBe(true);
     expect(questions[0]!.options[0]).toContain('(Recommended)');
+  });
+
+  test('adaptive discovery bypasses bare continuation intents instead of parking', () => {
+    for (const intent of ['continue', 'go', 'retry']) {
+      expect(buildIntentDiscoveryBatch(intent, 'feature', 'adaptive')).toEqual([]);
+      expect(buildIntentDiscoveryBatch(intent, 'ui', 'deep')).toEqual([]);
+      expect(buildIntentDiscoveryBatch(intent, 'question', 'adaptive')).toEqual([]);
+    }
   });
 
   test('core workflow suite contains six scenarios for all eight task classes', () => {

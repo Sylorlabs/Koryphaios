@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "name": "event-driven-architecture",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "events", "distributed"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["distributed-backend"],
+  "facets": [],
+  "requires": ["verification", "reliability-verification"],
+  "conflicts": [],
+  "activation": [
+    "event driven architecture",
+    "domain event",
+    "message broker architecture",
+    "event bus",
+    "event contracts",
+    "event idempotency",
+    "replay semantics"
+  ],
+  "excludes": [],
+  "evidence": [
+    "event-driven-architecture decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle event driven architecture.",
+      "The current task is domain event.",
+      "I need help with message broker architecture.",
+      "Work on event bus for this request.",
+      "This request specifically requires event contracts."
+    ],
+    "negative": [
+      "The only requested work is stream processing.",
+      "Please handle websocket only.",
+      "This task is limited to api design.",
+      "The current request is bun runtime.",
+      "Work only on compiler runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "event-driven-architecture-ambiguous-1",
+        "prompt": "The request includes event driven architecture and stream processing.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["stream-processing"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "event-driven-architecture-ambiguous-2",
+        "prompt": "The request includes domain event and websocket.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["realtime-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "event-driven-architecture-ambiguous-3",
+        "prompt": "The request includes message broker architecture and api design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["api-contract-design"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "event-driven-architecture-adversarial-1",
+        "prompt": "A historical note says \"event driven architecture\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "event-driven-architecture-adversarial-2",
+        "prompt": "A historical note says \"domain event\". The current request is compiler runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "event-driven-architecture-adversarial-3",
+        "prompt": "A historical note says \"message broker architecture\". The current request is distributed failure.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.asyncapi.com/docs/reference/specification/latest",
+      "sourceType": "spec",
+      "versionScope": "Current AsyncAPI specification as available 2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Event/message channel contracts and asynchronous API description reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://kafka.apache.org/documentation/",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Kafka documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Streams, partitions, delivery, ordering, replication, and operational behavior.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.asyncapi.com/docs/reference/specification/v3.1.0",
+      "sourceType": "spec",
+      "versionScope": "AsyncAPI Specification 3.1.0",
+      "staleAfterDays": 90,
+      "notes": "Message, channel, operation, schema, and correlation semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://kafka.apache.org/40/design/design/",
+      "sourceType": "official-docs",
+      "versionScope": "Apache Kafka 4.0 design documentation",
+      "staleAfterDays": 60,
+      "notes": "Conditional offset, redelivery, transaction, and delivery-semantics reference.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

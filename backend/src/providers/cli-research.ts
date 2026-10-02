@@ -57,12 +57,6 @@ export function cliResearchBoundary(provider: ProviderName | string): CliResearc
         nativeTools: [],
         reason: 'Cursor exposes no exact native tool visibility allowlist',
       };
-    case 'cline':
-      return {
-        eligible: false,
-        nativeTools: [],
-        reason: 'Cline exposes no exact native tool visibility allowlist',
-      };
     default:
       return {
         eligible: false,

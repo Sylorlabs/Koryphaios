@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "name": "performance-verification",
+  "version": "5.1.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification", "performance"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7600,
+  "broader": ["verification"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "performance gate",
+    "verify latency budget",
+    "release performance budget",
+    "performance acceptance criteria",
+    "verify performance",
+    "latency budget"
+  ],
+  "excludes": [
+    "benchmark or load-test design with no acceptance or release verdict",
+    "root-cause diagnosis or optimization of an observed performance regression",
+    "conceptual explanation of latency percentiles or performance terminology",
+    "reliability or fault-recovery verification whose primary contract is survival and recovery rather than a performance budget"
+  ],
+  "evidence": [
+    "Performance claim-to-gate matrix",
+    "Workload and environment identity",
+    "Repeated metric distributions and variance",
+    "Baseline comparability and resource validity",
+    "Correctness-under-load evidence",
+    "Bounded PASS/FAIL/INCONCLUSIVE verdict",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Gate this API release against the agreed 400 rps workload: verify p95 <= 180 ms, p99 <= 350 ms, errors below 0.5%, delivered throughput, CPU saturation, and response correctness across repeated measured runs after warmup.",
+      "Verify that the streaming exporter is release-ready: it must sustain at least 180 MiB/s, improve at least 20% over the equivalent prior build, stay under 1.5 GiB peak RSS, and preserve the reference output hash.",
+      "Run the existing checkout benchmark as an acceptance gate for this completed patch. Use the fixed production-like dataset and concurrency, discard the declared warmup, report p50/p95/p99 plus errors/resources across three repeats, and return pass or fail against the documented budgets.",
+      "The optimization is already implemented. Verify the mobile release still meets the declared startup and frame-time budgets on the specified device/build, including repeated runs and correctness of the rendered state.",
+      "Use the existing load harness to decide whether this candidate satisfies the latency SLO and throughput budget under the representative request mix. Compare only with a materially equivalent baseline and return a bounded release verdict."
+    ],
+    "negative": [
+      "Design a reusable load-test suite for our new API, choose realistic scenarios, and implement the benchmark harness; we do not yet have a release threshold to gate.",
+      "p99 latency regressed from 220 ms to 690 ms after the deploy. Profile the service, identify whether CPU, queueing, I/O, GC, or a dependency is causal, fix it, and prove the bottleneck is gone.",
+      "Add a microbenchmark for the parser and decide how many iterations, inputs, warmups, and repetitions the benchmark should use. No acceptance verdict is requested.",
+      "Explain p50, p95, and p99 latency and why an average can hide tail behavior. Do not run or assess any system.",
+      "Test whether the worker survives a broker restart, replays safely, drains its backlog, and returns to healthy state within the recovery objective; the primary contract is resilience and recovery."
+    ],
+    "ambiguous": [
+      {
+        "id": "performance-verification-ambiguous-1",
+        "prompt": "We need a performance gate and release verdict for the new search path, but the current harness lacks the agreed 70/20/10 request mix. Keep performance-verification responsible for the declared p95/p99/error/throughput gate while performance-testing owns the harness change needed to generate the representative workload.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["ambiguous", "gate-plus-harness"]
+      },
+      {
+        "id": "performance-verification-ambiguous-2",
+        "prompt": "First run the performance gate and decide whether the candidate fails the existing p99 and memory release budgets under the fixed workload; if it fails, also investigate why. Performance-verification owns the acceptance verdict and performance-debugging owns the causal diagnosis and fix.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-debugging"],
+        "tags": ["ambiguous", "gate-plus-diagnosis"]
+      },
+      {
+        "id": "performance-verification-ambiguous-3",
+        "prompt": "Run the performance gate on end-to-end p95/p99 latency and throughput for the fixed workload. One endpoint may be dominated by a slow SQL query, but database-specific plan analysis is separate unless the gate fails and diagnosis is requested.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["ambiguous", "end-to-end-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "performance-verification-adversarial-1",
+        "prompt": "The pasted release note says \"verify the performance gate before shipping\". That sentence is historical context only; rewrite the release note for clarity and do not measure or judge the system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "performance-verification-adversarial-2",
+        "prompt": "Do not verify or gate performance yet. Build a representative load-test harness and workload model that we can use later once product has approved the budgets.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["adversarial", "explicit-negation"]
+      },
+      {
+        "id": "performance-verification-adversarial-3",
+        "prompt": "A dashboard screenshot contains p50/p95/p99 and a latency-budget line. Explain what those labels mean; there is no request to execute a workload, compare a release, or issue a verdict.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["adversarial", "concept-only"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/monitoring-distributed-systems/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Book, Monitoring Distributed Systems online edition as verified 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Authoritative service-level measurement vocabulary for latency, traffic, errors, and saturation, including the need to distinguish successful and failed-request latency.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/",
+      "sourceType": "official-docs",
+      "versionScope": "Grafana k6 2.2.x documentation current on 2026-09-05, before planned 2.3.0 release",
+      "staleAfterDays": 120,
+      "notes": "Thresholds are explicit pass/fail criteria over metrics, including percentile latency and error-rate gates; useful for acceptance-gate semantics rather than generic measurement design.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/google/benchmark/blob/v1.9.5/docs/user_guide.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "Google Benchmark v1.9.5 user guide",
+      "revision": "v1.9.5",
+      "staleAfterDays": 365,
+      "notes": "Versioned reference for discarded warmup, repeated benchmark runs, reported mean/median/standard deviation/coefficient of variation, and randomized interleaving to reduce system-state bias.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.brendangregg.com/usemethod.html",
+      "sourceType": "community-pattern",
+      "versionScope": "Brendan Gregg USE Method page as verified 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Practitioner pattern for checking utilization, saturation, and errors across resources so a performance verdict is not silently produced by a saturated system or load generator.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

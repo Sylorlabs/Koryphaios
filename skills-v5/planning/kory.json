@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "name": "planning",
+  "version": "5.1.0",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["planning"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3200,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "planning",
+    "plan and implement a feature",
+    "implementation plan",
+    "plan before editing",
+    "dependency ordered plan"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Acceptance criteria",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle planning.",
+      "The current task is plan and implement a feature.",
+      "I need help with implementation plan.",
+      "Work on plan before editing for this request.",
+      "This request specifically requires dependency ordered plan."
+    ],
+    "negative": [
+      "What does lexical scope mean? Give a concise conceptual answer only.",
+      "Explain immutability in general terms. No changes or execution are requested.",
+      "What is tail recursion? Answer conceptually and keep the response explanatory.",
+      "Explain referential transparency as a programming-language concept only.",
+      "What is the difference between a stack and a heap in general terms? Give an explanatory answer only."
+    ],
+    "ambiguous": [
+      {
+        "id": "planning-ambiguous-1",
+        "prompt": "The request includes planning and accessibility.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-practice"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "planning-ambiguous-2",
+        "prompt": "The request includes plan and implement a feature and accessibility audit.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "planning-ambiguous-3",
+        "prompt": "The request includes implementation plan and ai agent.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "planning-adversarial-1",
+        "prompt": "A historical note says \"planning\". The current request is ai safety evaluation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ai-safety-evaluation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "planning-adversarial-2",
+        "prompt": "A historical note says \"plan and implement a feature\". The current request is analytics engineering.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "planning-adversarial-3",
+        "prompt": "A historical note says \"implementation plan\". The current request is jetpack compose.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.gov.uk/service-manual/agile-delivery/planning-agile",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Planning in agile guidance inspected 2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt checkable objectives and revisable near-term detail; no fixed objective count, meeting routine, or delivery framework is required.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software-engineering reference discovery and lifecycle background, not a mandatory planning template.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.pmi.org/pmbok-guide-standards/foundational/pmbok",
+      "sourceType": "official-docs",
+      "versionScope": "PMI foundational standards as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Project-management reference discovery; the landing page does not substantiate detailed scheduling or risk methods.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

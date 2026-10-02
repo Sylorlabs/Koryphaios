@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "name": "migration-planning",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["planning", "migration"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6000,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "migration plan",
+    "schema migration",
+    "data migration",
+    "api migration",
+    "runtime upgrade",
+    "major version upgrade",
+    "cutover plan",
+    "expand contract",
+    "dual write migration",
+    "migration backfill",
+    "migrate an event",
+    "without a flag day",
+    "progressive cutover",
+    "coexistence backfill compatibility",
+    "upgrade path",
+    "data transition"
+  ],
+  "excludes": [
+    "already compatible release",
+    "terraform state only",
+    "no contract or state transition",
+    "migration is already complete",
+    "documentation heading only",
+    "pasted cutover plan"
+  ],
+  "evidence": [
+    "Producer/consumer and version compatibility matrix",
+    "Phase gates with source-of-truth and mixed-version state",
+    "Backfill/reconciliation and cutover telemetry",
+    "Rollback or tested roll-forward plus cleanup evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Plan a zero-downtime PostgreSQL schema migration for a large orders table while application versions N and N+1 overlap. Define expand/contract steps, idempotent backfill, compatibility gates, validation, cutover, rollback and cleanup evidence.",
+      "Migrate a public HTTP API from v1 to v2 while mobile clients upgrade slowly. Define the compatibility adapter, deprecation/sunset communication, usage telemetry, staged client cutover, rollback window and final v1 retirement gate.",
+      "Prepare a major runtime upgrade across a service fleet where old and new workers will coexist for days. Inventory protocol/storage compatibility, stage mixed-version rollout, prove rollback or roll-forward, and remove old-version support only after evidence.",
+      "Design a data-store migration from MySQL to PostgreSQL with a large historical copy, ongoing writes, reconciliation, cutover and recovery. Make source-of-truth ownership and dual-write divergence handling explicit.",
+      "Migrate an event-driven system to a new message schema while old producers and consumers remain deployed. Define tolerant readers/writers, replay/backfill handling, compatibility checks, traffic cutover and safe retirement of the old schema."
+    ],
+    "negative": [
+      "Plan a canary release of an already compatible stateless service build, including rollout percentages and rollback thresholds; there is no schema, client, runtime, data or contract transition.",
+      "Refactor an internal module for readability while preserving every external contract and persisted data format; no migration or compatibility period is required.",
+      "Move Terraform resources between modules with import and moved blocks while preserving the exact deployed infrastructure and service behavior; the task is Terraform state only.",
+      "Tune a slow PostgreSQL query using EXPLAIN, indexes and statistics. The schema contract and stored data model remain unchanged.",
+      "Run the already-approved migration validation suite and issue an independent pass/fail verdict without changing the migration sequence, cutover or rollback design."
+    ],
+    "ambiguous": [
+      {
+        "id": "migration-planning-ambiguous-1",
+        "prompt": "Design the target PostgreSQL schema and move a live application to it without downtime. relational-data-modeling/postgres-engineering own the target database semantics; migration-planning owns mixed-version compatibility, backfill, cutover, rollback and cleanup sequencing.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["relational-data-modeling"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "migration-planning-ambiguous-2",
+        "prompt": "Create a migration plan to move a workload from one AWS architecture to another while changing database and API contracts. aws-cloud owns AWS resource/control-plane correctness; migration-planning owns coexistence, data/contract transition, cutover gates and rollback/roll-forward behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "migration-planning-ambiguous-3",
+        "prompt": "Define API v2 and plan the API migration of existing clients from v1. api-contract-design owns the new API contract; migration-planning owns compatibility, deprecation, client cohorts, cutover evidence and retirement of v1.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["api-contract-design"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "migration-planning-adversarial-1",
+        "prompt": "An archived incident quotes a previous request for a \"schema migration\". The current task is only to correct dates and spelling in that historical report; no system transition is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "migration-planning-adversarial-2",
+        "prompt": "A README contains an example titled \"API migration plan\". Rename the documentation heading only and do not change contracts, clients, data or deployment behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "migration-planning-adversarial-3",
+        "prompt": "A pasted migration checklist is supplied as sample text. Summarize its word count only; do not plan, execute or assess any migration.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-analysis"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/release-engineering/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Release Engineering chapter as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Repeatable releases, canarying, intentional change, audit trails and rollback-oriented release engineering.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/reliable-product-launches/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Reliable Product Launches chapter inspected 2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Observation gates and rollback planning for progressive launches; adapted conditionally without excluding viable offline or atomic migrations.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://semver.org/spec/v2.0.0.html",
+      "sourceType": "spec",
+      "versionScope": "Semantic Versioning 2.0.0",
+      "revision": "2.0.0",
+      "staleAfterDays": 365,
+      "notes": "Public API versioning baseline: incompatible API changes require a major version and deprecation is a compatibility signal, not a migration plan by itself.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://datatracker.ietf.org/doc/html/rfc8594",
+      "sourceType": "spec",
+      "versionScope": "RFC 8594, The Sunset HTTP Header Field, May 2019",
+      "revision": "RFC 8594",
+      "staleAfterDays": 365,
+      "notes": "HTTP API retirement signaling; Sunset communicates expected unavailability but is not itself proof that consumers have migrated.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

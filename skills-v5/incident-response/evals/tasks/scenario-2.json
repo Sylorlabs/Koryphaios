@@ -1,0 +1,80 @@
+{
+  "id": "incident-response-full-task-2",
+  "maturity": "individual",
+  "prompt": "A multi-region queue service has an active service outage: one region's consumers are stuck, backlog is rising, retries are increasing downstream writes, and failover is available but may replay messages that were processed before acknowledgement. Coordinate incident response using the supplied operations controls and telemetry. Establish command and a timestamped decision record, quantify affected regions/tenants and backlog age, stop duplicate independent actions, assign one operations owner to the reversible traffic/failover mitigation, preserve queue offsets/deduplication and downstream-state evidence, communicate impact and uncertainty, and verify recovery by useful-work rate, error rate, backlog drain, duplicate-side-effect count, and cross-region state. Do not declare resolution until an observation window covers replay/retry behavior; record any replay reconciliation and temporary routing configuration for handoff. The reliability team can reproduce the fault later—do not turn the live outage into an experiment.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://incident-response/scenario-2",
+    "requirements": [
+      "active multi-region queue outage with inspectable backlog/offset/dedup state",
+      "reversible regional traffic/failover controls with audit history",
+      "downstream side-effect store for independent duplicate detection",
+      "incident communication and timeline fixtures",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "incident-response-impact-2",
+      "assertion": "The incident record quantifies affected region/tenant scope plus current backlog age/useful-work impact and updates the scope when evidence changes."
+    },
+    {
+      "id": "incident-response-replay-evidence-2",
+      "assertion": "Before failover/restart, queue offset/acknowledgement, deduplication, and downstream-effect evidence needed to assess replay is preserved."
+    },
+    {
+      "id": "incident-response-controlled-mitigation-2",
+      "assertion": "Only the assigned operations owner performs the chosen traffic/failover mutation, with a documented rollback path and one timestamped outcome before a second mutation is considered."
+    },
+    {
+      "id": "incident-response-duplicate-safety-2",
+      "assertion": "Recovery verification includes an independent duplicate-side-effect count and cross-region state reconciliation, not merely a falling backlog graph."
+    },
+    {
+      "id": "incident-response-observation-window-2",
+      "assertion": "The incident remains in monitoring/recovery until the stated observation window covers retry/replay recurrence and useful-work/error/backlog indicators remain acceptable."
+    },
+    {
+      "id": "incident-response-handoff-2",
+      "assertion": "Any replay reconciliation, temporary traffic routing, follow-up reliability experiment, and unresolved hypothesis has a named owner and explicit post-incident handoff."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "incident-response-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "impact scope and timeline",
+        "pre-mitigation replay evidence",
+        "single-owner failover decision",
+        "duplicate/state/backlog recovery evidence"
+      ]
+    },
+    {
+      "id": "incident-response-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "affected-scope and user-impact record",
+    "queue/ack/dedup/downstream pre-mitigation state",
+    "controlled failover/rollback decision log",
+    "factual communications",
+    "backlog/useful-work/duplicate/cross-region recovery evidence",
+    "temporary-state and follow-up handoff",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "incident-response-scenario-2-result",
+    "incident-response-scenario-2-verification",
+    "incident-response-scenario-2-paired-evaluation"
+  ]
+}

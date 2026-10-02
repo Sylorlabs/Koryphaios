@@ -12,6 +12,7 @@ export {
 export { GoogleProvider } from './google';
 export { CopilotProvider } from './copilot';
 export { ChatbaseProvider } from './chatbase';
+export { NotionProvider, NOTION_BASE_URL, NOTION_API_VERSION } from './notion';
 
 export { withTimeoutSignal } from './utils';
 export * from './types';

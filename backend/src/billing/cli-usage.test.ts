@@ -96,7 +96,6 @@ describe('CLI_API_PROVIDER_MAP', () => {
     expect(CLI_API_PROVIDER_MAP['antigravity']).toBe('google');
     expect(CLI_API_PROVIDER_MAP['cursor']).toBe('openai');
     expect(CLI_API_PROVIDER_MAP['devin']).toBe('devin');
-    expect(CLI_API_PROVIDER_MAP['cline']).toBe('cline');
     expect(CLI_API_PROVIDER_MAP['kimicode']).toBe('kimicode');
     expect(CLI_API_PROVIDER_MAP['kilocode']).toBe('kilocode');
     expect(CLI_API_PROVIDER_MAP['freebuff']).toBe('openrouter');

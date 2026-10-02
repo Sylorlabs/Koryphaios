@@ -1,0 +1,70 @@
+{
+  "id": "integration-fault-testing-full-task-1",
+  "maturity": "individual",
+  "prompt": "A document-import service writes an import header and child rows in one PostgreSQL transaction. The repository includes a disposable PostgreSQL fixture reachable through Toxiproxy. Add and run an integration fault test that resets the database connection after the first child insert but before COMMIT. Prove the failed attempt leaves no header or child rows, remove the toxic, wait for the database to be ready, rerun the same import, and prove exactly one complete import is durable. Keep the experiment at the service/PostgreSQL boundary; do not turn it into a system reliability soak or a rewrite of the import implementation.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://integration-fault-testing/scenario-1",
+    "requirements": [
+      "real disposable PostgreSQL fixture with recorded server/runtime identity",
+      "Toxiproxy-controlled service-to-database connection",
+      "empty isolated import tables before the test",
+      "independent SQL inspection path for committed state",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "integration-fault-testing-rollback-1",
+      "assertion": "The fault is injected after at least one statement has executed but before COMMIT, and the failed attempt leaves zero durable header rows and zero durable child rows for the import key."
+    },
+    {
+      "id": "integration-fault-testing-client-result-1",
+      "assertion": "The caller observes the repository's documented dependency-failure result; the test does not treat a timeout/reset as success or infer rollback solely from the exception."
+    },
+    {
+      "id": "integration-fault-testing-recovery-1",
+      "assertion": "After removing the toxic and confirming database readiness, the next import succeeds without recreating the fixture or leaking a poisoned connection/transaction."
+    },
+    {
+      "id": "integration-fault-testing-durable-success-1",
+      "assertion": "Independent SQL inspection after recovery finds exactly one complete header and the expected child-row count, with no rows attributable to the failed attempt."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "integration-fault-testing-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "fault timing evidence",
+        "caller-visible failure result",
+        "independent rollback query",
+        "post-recovery success query"
+      ]
+    },
+    {
+      "id": "integration-fault-testing-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "PostgreSQL and fault-proxy runtime identities",
+    "exact fault placement and reset configuration",
+    "independent failed-attempt database state",
+    "independent recovered-run database state",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "integration-fault-testing-scenario-1-result",
+    "integration-fault-testing-scenario-1-verification",
+    "integration-fault-testing-scenario-1-paired-evaluation"
+  ]
+}

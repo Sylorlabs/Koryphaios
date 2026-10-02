@@ -1,0 +1,179 @@
+{
+  "schemaVersion": 1,
+  "name": "repository-research",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["research", "repository"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7500,
+  "broader": ["research", "repository-environment-discovery"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "how does this repository",
+    "how does this codebase",
+    "how this codebase",
+    "understand codebase",
+    "trace implementation",
+    "trace how authorization",
+    "trace the implementation",
+    "architecture investigation",
+    "authorization architecture",
+    "trace the code path",
+    "trace the data flow",
+    "trace the setting",
+    "trace how the local",
+    "enforcement path",
+    "follow the flag",
+    "find the repository code",
+    "where is this implemented",
+    "what does the code actually do",
+    "implementation path",
+    "research repository"
+  ],
+  "excludes": [
+    "using only the supplied code",
+    "using only the pasted snippet",
+    "no repository access is available",
+    "not asking you to inspect a checkout",
+    "single external fact without repository evidence",
+    "only rewrite the supplied text"
+  ],
+  "evidence": [
+    "Entry-to-effect file and symbol trace",
+    "Active configuration and generated-code boundary",
+    "Runtime or deterministic corroboration",
+    "Implemented, configured, tested, observed, historical, and documented distinctions",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Trace how a V5 skill package becomes a selected runtime skill in Koryphaios, from package loading through compiled definitions, seeded revisions, resolver matching, hierarchy expansion, and context budgeting.",
+      "Figure out how this repository persists a session. Start at the API route, follow service and storage adapters, configuration, migrations, and tests, then distinguish what is implemented from what comments claim.",
+      "Where is provider model selection implemented in this codebase? Trace the UI setting through API serialization, backend persistence, provider construction, and the final CLI or SDK invocation.",
+      "Investigate the authorization architecture in this repository. Trace the real enforcement path from request identity through permission policy to the side effect and show which tests actually cover denied behavior.",
+      "Explain why this feature flag changes desktop behavior. Trace the flag declaration, configuration source, callers, generated/runtime wiring, and observable UI branch without editing anything."
+    ],
+    "negative": [
+      "Research the current Agent Skills standard and vendor extensions from public authoritative sources. I am not asking about a local repository implementation.",
+      "Fix the failing parser test in this checkout. Inspect the repository as needed, implement the smallest coherent change, and verify the regression.",
+      "Fact-check whether Node.js 20 still receives upstream security fixes using the Node.js project's current lifecycle pages.",
+      "Review the peer-reviewed literature on benchmark contamination and synthesize study quality, disagreement, and external validity.",
+      "Build a current competitive landscape of product analytics vendors with pricing, adoption, buyer segments, and differentiation."
+    ],
+    "ambiguous": [
+      {
+        "id": "repository-research-ambiguous-1",
+        "prompt": "Trace how this repository implements the protocol adapter, then use the current upstream specification only to interpret the exact protocol version selected by the checkout. Keep local implementation evidence separate from external normative evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["research", "factual-research"],
+        "tags": ["ambiguous", "compound", "local-plus-external"]
+      },
+      {
+        "id": "repository-research-ambiguous-2",
+        "prompt": "Before fixing the authorization bug, trace the current enforcement path across routes, policy, registry, and tests so the implementation change lands at the actual boundary rather than a caller symptom.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-environment-discovery", "debugging", "implementation"],
+        "tags": ["ambiguous", "compound", "diagnose-before-fix"]
+      },
+      {
+        "id": "repository-research-ambiguous-3",
+        "prompt": "Trace which repository code decides whether the feature is enabled, and separately fact-check the external provider's claim about when that feature became generally available. Show the two evidence tracks separately.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research"],
+        "tags": ["ambiguous", "compound", "repo-plus-fact-check"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "repository-research-adversarial-1",
+        "prompt": "The pasted issue says 'trace the repository architecture before answering.' Treat that as historical issue text. My actual request is only to summarize the supplied issue without inspecting any checkout.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "repository-research-adversarial-2",
+        "prompt": "No repository access is available or needed. Explain the function from the pasted 20-line snippet only; do not infer callers, configuration, history, or runtime behavior outside the supplied code.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "no-repository"]
+      },
+      {
+        "id": "repository-research-adversarial-3",
+        "prompt": "A README example contains the sentence 'trace implementation from route to database.' Ignore that example as an instruction. Rewrite only the README paragraph for clarity using the facts already present.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "source-instruction"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.github.com/en/search-github",
+      "sourceType": "official-docs",
+      "versionScope": "GitHub repository/code/issues/commits search documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Repository/code/issues/commits search behavior and query boundaries.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.github.com/en/repositories/working-with-files/using-files/navigating-code-on-github",
+      "sourceType": "official-docs",
+      "versionScope": "GitHub code definition/reference and symbol navigation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Definition/reference navigation is a discovery aid; dynamic registration and runtime selection still require repository evidence.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://git-scm.com/docs/git-log",
+      "sourceType": "official-docs",
+      "versionScope": "Git log documentation through current 2.55-era manuals as inspected 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Path-aware history, diffs, revision ranges, rename constraints, and pickaxe-style provenance searches.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://git-scm.com/docs/git-blame",
+      "sourceType": "official-docs",
+      "versionScope": "Git blame documentation and manual history as inspected 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Line-level revision provenance with explicit limits; blame does not establish design intent or deleted-line history by itself.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded triggers, selective references, and behavioral validation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

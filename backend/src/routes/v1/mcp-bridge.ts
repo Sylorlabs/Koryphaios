@@ -21,7 +21,7 @@ import { localAuth } from '../../auth/local-auth';
 import { getContext } from '../../context';
 import { providerLog, serverLog } from '../../logger';
 import type { ToolContext } from '../../tools/registry';
-import { loadAgentSettings } from '../../agent-settings';
+import { loadAgentSettingsForSession } from '../../agent-settings';
 import {
   decideToolPermission,
   resolveToolPermissionPolicy,
@@ -231,9 +231,11 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
             (goal.status === 'queued' || goal.status === 'planning' || goal.status === 'running'),
         );
         const activeGoalItem = activeGoal?.checklist.find((item) => item.status === 'running');
-        // The authenticated session owns the workspace and its saved policy.
+        // The authenticated session owns the workspace and its saved policy —
+        // including its own approval preset, so a CLI driving a YOLO chat does
+        // not inherit another chat's guarded posture (or the reverse).
         const root = session.workingDirectory || workingDirectory || process.cwd();
-        const mcpSettings = loadAgentSettings(root);
+        const mcpSettings = loadAgentSettingsForSession(root, sessionId);
         const permissionPolicy = resolveToolPermissionPolicy(
           mcpSettings,
           normalizedRole === 'critic' ? 'plan' : 'act',
@@ -264,6 +266,7 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
         const ctx: ToolContext = {
           sessionId,
           agentId: `mcp-bridge:${normalizedRole}`,
+          callerRole: normalizedRole,
           ...(activeGoal ? { goalId: activeGoal.id } : {}),
           ...(activeGoalItem ? { goalItemId: activeGoalItem.id } : {}),
           workingDirectory: root,

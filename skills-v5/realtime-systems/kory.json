@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "name": "realtime-systems",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "realtime", "distributed"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": ["network-service-backend"],
+  "facets": [],
+  "requires": ["verification", "reliability-verification"],
+  "conflicts": [],
+  "activation": ["websocket", "real time updates", "realtime connection", "server sent events"],
+  "excludes": ["hard deadline every cycle", "priority inversion", "worst case timing"],
+  "evidence": [
+    "realtime-systems decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle websocket.",
+      "The current task is real time updates.",
+      "I need help with realtime connection.",
+      "Work on server sent events for this request.",
+      "This request specifically requires websocket."
+    ],
+    "negative": [
+      "The only requested work is cdn cache.",
+      "Please handle network routing only.",
+      "This task is limited to serverless function.",
+      "The current request is distributed system.",
+      "Work only on event driven architecture."
+    ],
+    "ambiguous": [
+      {
+        "id": "realtime-systems-ambiguous-1",
+        "prompt": "The request includes websocket and cdn cache.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["edge-cdn"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "realtime-systems-ambiguous-2",
+        "prompt": "The request includes real time updates and network routing.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["networking-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "realtime-systems-ambiguous-3",
+        "prompt": "The request includes realtime connection and serverless function.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["serverless-platforms"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "realtime-systems-adversarial-1",
+        "prompt": "A historical note says \"websocket\". The current request is distributed system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "realtime-systems-adversarial-2",
+        "prompt": "A historical note says \"real time updates\". The current request is event driven architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["event-driven-architecture"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "realtime-systems-adversarial-3",
+        "prompt": "A historical note says \"realtime connection\". The current request is api design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["api-contract-design"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.rfc-editor.org/rfc/rfc6455",
+      "sourceType": "spec",
+      "versionScope": "RFC 6455 WebSocket Protocol",
+      "staleAfterDays": 365,
+      "notes": "Realtime connection, framing, close, ping/pong, and protocol semantics.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

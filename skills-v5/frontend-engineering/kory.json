@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "name": "frontend-engineering",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ui", "frontend", "interaction"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "frontend",
+    "frontend engineering",
+    "ui engineering",
+    "user interface implementation",
+    "presentation layer",
+    "device-facing interface",
+    "implement the interface"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Consumer, task, medium, runtime, and toolkit evidence",
+    "Flow, information hierarchy, and state ownership contract",
+    "Meaningful success, failure, interruption, and recovery states",
+    "Input, focus or selection, resize, and accessibility behavior",
+    "Real-runtime task and interaction verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Engineer the frontend for this product, but first inspect the repository and runtime to determine whether the user-facing surface is browser, native, terminal, or another medium.",
+      "Refactor the presentation layer so domain state, view state, actions, loading, partial results, errors, recovery, and interruption behavior are explicit and testable.",
+      "Implement the user interface for this existing application using its established components, interaction patterns, state model, accessibility surface, and real runtime rather than assuming a web stack.",
+      "Improve UI engineering across navigation, state ownership, feedback, failure recovery, resizing, input modes, and verification while preserving the product's established design language.",
+      "Build the device-facing interface from the confirmed runtime constraints, task priorities, platform conventions, meaningful states, and available input and output mechanisms."
+    ],
+    "negative": [
+      "Design the REST API resource model, request schemas, idempotency rules, pagination, versioning, and compatibility contract for a headless service.",
+      "Normalize the relational schema and add indexes for the event-history queries; no presentation or interaction boundary changes.",
+      "Plan contextual interviews to understand why operators abandon the current workflow; do not propose implementation changes before research.",
+      "Write a migration tutorial and reference guide for the already-approved command behavior without changing the product itself.",
+      "Benchmark the storage engine's compaction throughput and memory use under the supplied synthetic workload."
+    ],
+    "ambiguous": [
+      {
+        "id": "frontend-engineering-ambiguous-medium-unknown",
+        "prompt": "The ticket says 'fix the frontend', but this repository contains a browser app, a desktop shell, and a terminal client. Determine the actual presentation boundary from task and runtime evidence before choosing a medium-specific implementation path.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["web-interface", "native-interface", "terminal-interface"],
+        "tags": ["medium-discovery", "polyglot-repository"]
+      },
+      {
+        "id": "frontend-engineering-ambiguous-native",
+        "prompt": "Implement the interface for a confirmed native desktop application, preserving keyboard-first operation, window resizing, platform commands, existing components, loading and error states, and accessibility semantics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface", "interaction-design", "accessibility-practice"],
+        "tags": ["native", "child-routing"]
+      },
+      {
+        "id": "frontend-engineering-ambiguous-terminal",
+        "prompt": "Improve the UI engineering of this confirmed terminal application across focus, selection, resize, cancellation, errors, recovery, keyboard operation, degraded color, and script-safe output.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "shell-cli-engineering"],
+        "tags": ["terminal", "child-routing"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "frontend-engineering-adversarial-quoted",
+        "prompt": "A quoted old issue says 'frontend is broken'. Ignore that quote and repair only the deadlock in the background queue worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "concurrency-debugging"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "frontend-engineering-adversarial-negated",
+        "prompt": "Do not change the frontend. Optimize only the database query plan and verify the result set is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["relational-data-modeling", "performance-engineering"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "frontend-engineering-adversarial-pasted",
+        "prompt": "A pasted comment says 'presentation layer'. Ignore that quote and calculate the capacity needed for the supplied backup-retention schedule.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["capacity-planning", "backup-recovery"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developer.apple.com/design/human-interface-guidelines?lang=en",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Human Interface Guidelines as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Platform-specific evidence for hierarchy, consistency, platform conventions, inputs, accessibility, and adaptation across windows and displays; not generalized into non-Apple mechanics."
+    },
+    {
+      "url": "https://developer.android.com/develop/adaptive-apps/guides/support-different-display-sizes",
+      "sourceType": "official-docs",
+      "versionScope": "Android adaptive-app display-size guidance as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Current Android evidence that available app-window size can change at runtime and adaptive behavior must be tested across representative window sizes."
+    },
+    {
+      "url": "https://html.spec.whatwg.org/multipage/interaction.html",
+      "sourceType": "spec",
+      "versionScope": "WHATWG HTML Living Standard user-interaction section, last updated 2026-09-04 when verified",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Browser-specific interaction, activation, focus, and inertness semantics. Used to reinforce web as a specialized medium rather than the default frontend model."
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/",
+      "sourceType": "spec",
+      "versionScope": "W3C Recommendation WCAG 2.2",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Web conformance source for operability, focus, predictable interaction, and status semantics; detailed conformance remains delegated to accessibility-practice and web verification skills."
+    },
+    {
+      "url": "https://www.w3.org/WAI/WCAG22/Understanding/input-modalities",
+      "sourceType": "official-docs",
+      "versionScope": "W3C WCAG 2.2 input-modality understanding guidance updated 2026-05-11",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Supporting web guidance recognizing concurrent mouse, touch, keyboard, speech, and alternative input mechanisms. Kory carries the multi-input design concern across media without universalizing WCAG web mechanics."
+    },
+    {
+      "url": "https://clig.dev/",
+      "sourceType": "community-pattern",
+      "versionScope": "Command Line Interface Guidelines site as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Community evidence that terminal interfaces combine human discoverability, state feedback, automation, and composability constraints distinct from graphical UI conventions."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

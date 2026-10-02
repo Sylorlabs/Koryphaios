@@ -1,0 +1,68 @@
+{
+  "id": "architecture-planning-full-task-2",
+  "maturity": "individual",
+  "prompt": "Create a system design for the supplied webhook-ingestion product. Customers POST signed events; events can be duplicated and delivered out of order; normal load is 50 events/s with 10-minute bursts to 2,000/s; accepted events must not be lost after the API returns success; per-customer processing order is required but global order is not; downstream enrichment can be unavailable for 20 minutes; p95 API acknowledgement must stay below 250 ms; the product needs replay for 7 days. Compare a synchronous processing design with a durable-ingest-plus-queue/worker design. Define trust and idempotency boundaries, durable state ownership, partition/order key, backpressure, retry/dead-letter/replay behavior, observability, failure isolation, and capacity assumptions. State the chosen architecture, rejected alternative, quality scenarios, tradeoffs, and which load/failure tests must validate the design before launch. Do not select named cloud services unless the supplied constraints require a specific provider.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://architecture-planning/webhook-ingestion-system",
+    "requirements": [
+      "signed customer webhook API with duplicate and out-of-order delivery",
+      "50 events/s normal and 2,000 events/s burst profile",
+      "acknowledged events cannot be lost and p95 acknowledgement target is 250 ms",
+      "per-customer ordering and seven-day replay are required",
+      "downstream enrichment may be unavailable for twenty minutes"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "architecture-webhook-durability",
+      "assertion": "The acknowledgement boundary is tied to a durable state transition that makes the no-loss claim testable."
+    },
+    {
+      "id": "architecture-webhook-ordering",
+      "assertion": "The design specifies how per-customer ordering, duplicates, retries, and replay interact without imposing unnecessary global ordering."
+    },
+    {
+      "id": "architecture-webhook-capacity",
+      "assertion": "The plan states capacity/backpressure assumptions and concrete load/failure tests for the 2,000 events/s burst and 20-minute downstream outage."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "architecture-planning-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Boundary model",
+        "Tradeoffs",
+        "Quality scenarios",
+        "durability and ordering model",
+        "capacity and failure-validation plan"
+      ]
+    },
+    {
+      "id": "architecture-planning-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "requirements drive the topology rather than vendor fashion",
+        "failure and recovery behavior is explicit",
+        "unverified capacity claims are converted into planned evidence"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Boundary model",
+    "Tradeoffs",
+    "Quality scenarios",
+    "durability/order/backpressure model",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "architecture-planning-scenario-2-boundary-model",
+    "architecture-planning-scenario-2-tradeoff-matrix",
+    "architecture-planning-scenario-2-quality-scenarios",
+    "architecture-planning-scenario-2-paired-evaluation"
+  ]
+}

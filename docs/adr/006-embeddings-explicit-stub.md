@@ -1,38 +1,86 @@
-# ADR-006: Explicit stub marking for embeddings instead of fake vectors
+# ADR-006: Opt-in authenticated embeddings and active semantic retrieval
 
 ## Status
 
-Accepted
-
-## Context
-
-The now-retired `MemoryManagerService` had a `generateEmbedding()` method that returned random vectors (`Math.random() - 0.5`) as a "placeholder" for real embeddings. The `embedding-worker` generated deterministic but meaningless hash-based vectors.
-
-Both were used for "semantic search" — cosine similarity was computed on these vectors, and the results were presented as relevance-ranked memory entries. The results were **completely meaningless** — random vectors have no semantic relationship to the content.
-
-This was worse than having no embeddings at all, because:
-
-- The UI showed "semantic search results" that looked real
-- Developers assumed the feature was working
-- Debugging memory retrieval issues was impossible (the "similarity" was noise)
+Accepted. Supersedes the explicit-unavailable implementation; fake vectors remain prohibited.
 
 ## Decision
 
-1. **Disable semantic-vector claims**: the legacy `MemoryManagerService` was removed; the remaining embedding worker stays explicitly unavailable until an authenticated embedding runtime is wired.
-2. **Return no vector**: `processEmbeddingJob()` returns `success: false`, `isStub: true`, and a bounded error. Queue completion records that unavailable result; it does not mean an embedding was produced.
-3. **Report readiness honestly**: `isEmbeddingServiceReady()` always returns `false` while the stub is active. Redis or queue availability alone is not embedding readiness.
-4. **Keep only explicit integration seams**: the queue, worker lifecycle, status, and pure cosine-similarity helper remain, but no vector-storage or semantic-search capability is claimed.
-5. **Document the activation boundary**: a future change must wire an authenticated provider, return and validate real vectors, connect them to the active memory runtime, add provider-specific regression proof, and only then change readiness.
+The embedding worker and active Notes search share an authenticated OpenAI-compatible
+embedding client. `search_notes`, query-based `recall_notes`, and the existing Notes
+search route reach `searchNotes()`; when explicitly enabled it ranks scoped current
+note chunks with validated real embeddings. `searchMemory()` in unified memory
+also searches current enabled session/project/universal documents. Existing
+synchronous prompt assembly and mandatory rules are unchanged.
 
-## Consequences
+No embedding requests occur by default. An ordinary chat provider credential alone
+does not enable embeddings. Operators must explicitly configure all of:
 
-- **Positive**: No more fake semantic search results. The feature is visibly absent instead of silently broken.
-- **Positive**: Developers can see from logs that embeddings are not configured.
-- **Positive**: The queue lifecycle and cosine-similarity utility remain as explicit integration seams for a future real provider.
-- **Negative**: Users lose semantic memory search until a real provider is wired in. This is acceptable — the prior behavior was worse (fake results).
+```dotenv
+KORY_EMBEDDINGS_ENABLED=1
+KORY_EMBEDDING_ENDPOINT=https://your-provider.example/v1/embeddings
+KORY_EMBEDDING_MODEL=your-embedding-model
+KORY_EMBEDDING_DIMENSIONS=1536
+# Choose a dedicated credential OR explicitly reference an existing environment key:
+KORY_EMBEDDING_API_KEY_ENV=OPENAI_API_KEY
+# KORY_EMBEDDING_API_KEY=<secret supplied by your environment>
+KORY_EMBEDDING_TIMEOUT_MS=15000
+```
 
-## Alternatives considered
+The endpoint is the complete embeddings URL. No provider endpoint, credential, or
+model is inferred. Dimensions are the expected model output size, not a request to
+resize vectors. The request uses `model`, `input`, and `encoding_format: float` with
+Bearer authentication. A dedicated key overrides a named environment key. Keys
+are not persisted by this module. HTTPS is required except for explicit loopback
+HTTP endpoints. URL credentials, query strings, fragments, and redirects are
+rejected; private text is never redirected to another endpoint.
 
-- **Remove all embedding code**: Loses the queue and worker integration seams that would be useful for a real implementation.
-- **Wire in OpenAI embeddings now**: Requires an API key and adds a network dependency. Should be a separate decision.
-- **Keep the stub but log a warning**: Still produces fake results. The warning would be ignored in practice.
+Enabling this configuration authorizes transmission of queried scoped memory/Notes
+text and queries to that endpoint. Notes require an explicit project, enabled Notes,
+and automatically allowed search/read permissions. Project/trash visibility is
+applied before building provider inputs. Blocked and approval-required permissions
+retain local FTS behavior. Final Notes results are rechecked for visibility and
+concurrent edits/deletions after the asynchronous request.
+
+## Validation, fallback, and operational bounds
+
+- Vectors must contain finite numbers, have the configured length (1–16,384), and
+  have nonzero norm. Missing, duplicate, out-of-range, or malformed result indexes
+  fail the whole batch. Cosine similarity normalizes vectors and avoids overflow.
+- Response bodies are streamed with an **8 MiB byte limit before JSON parsing**,
+  including responses without Content-Length. Oversized bodies are canceled.
+- Individual requests default to 15 seconds and accept an AbortSignal. Retrieval
+  has **one shared deadline of at most 15 seconds** for all document batches plus
+  the query; a lower configured/requested timeout shortens it. Cancellation reaches
+  transport and body reads. The deadline does not include local project sync/DB
+  work. The Notes agent tool and HTTP search route forward their cancellation signals and discard canceled results. Callers without a signal still have the deadline.
+- Retrieval examines at most 256 chunks of 2,000 characters, batches up to 64
+  chunks, and returns up to 51 hits (the extra hit supports the HTTP pagination sentinel). Notes considers the first 256 visible notes
+  ordered by pinned/recent/id. This is bounded retrieval, not exhaustive vault
+  indexing; large documents/vaults can have unsearched content.
+- Cache entries contain only hashes and validated vectors, in process memory.
+  Keys cover project/session scope, content, endpoint, model, dimensions, and a
+  cryptographic digest of the credential. Edits, credential rotation, model changes,
+  and scope changes miss the cache; deleted documents are never candidates. The
+  cache is capped at 2,048 entries and 1,048,576 numeric components. No persistent
+  vector database, background indexing, or additional dependency is introduced.
+- Disabled/invalid configuration and transport, timeout, cancellation, or validation
+  failure preserve local retrieval. Notes retains its established FTS fallback;
+  `searchMemory()` reports lexical mode and an unavailable/disabled reason.
+  No fallback creates a vector or claims semantic relevance.
+- The worker returns `success: true` only with validated embeddings. Disabled
+  jobs return `success: false, isStub: true`; configured failures return a sanitized
+  error and `success: false, isStub: false`. These are bounded completed results,
+  not automatic provider retries. Readiness means configuration is valid, not that
+  remote authentication, billing, or availability has been verified.
+- Provider bodies, raw transport errors, input text, and keys are never logged by
+  the embedding client/retrieval path. Cache identities expose only a digest.
+
+## Evidence and limitations
+
+Tests use mock transports and the isolated backend environment/database preload.
+They cover authentication, opt-out, semantic ordering, project/trash/permission
+filtering, FTS fallback, invalid vectors, timeout/abort, total deadline, response
+byte limits, edits/deletions, and model/scope/credential cache invalidation.
+No paid or live provider calls were made. No claim is made about remote account
+availability or production semantic quality without explicit live verification.

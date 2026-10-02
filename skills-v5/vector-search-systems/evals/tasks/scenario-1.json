@@ -1,0 +1,91 @@
+{
+  "id": "vector-search-systems-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply vector database expertise to this task\". The evidence packet contains missingness, duplicates, unit ambiguity, and an attractive aggregate that can change the unit of analysis. The acceptance boundary is vector-search-systems: Define the retrieval unit, embedding version, metric, normalization, metadata filters, top-k behavior, ANN index parameters, update/delete lifecycle, and reranking contract. The adjacent search-indexing discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://vector-search-systems/scenario-1",
+    "requirements": [
+      "fixed vector snapshot with dimension/normalization plus exact neighbor reference outputs",
+      "tenant/category metadata and workloads spanning selective/broad/no filters",
+      "HNSW build/query parameter candidates, query plans and latency/build-resource traces",
+      "concurrent upsert/delete/freshness fixtures plus old/new index shadow and rollback controls",
+      "paired same-model skill/no-skill execution",
+      "vector-search-systems parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual vector-search-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; near-neighbor=search-indexing), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define the retrieval unit, embedding version, metric, normalization, metadata filters, top-k behavior, ANN index parameters, update/delete lifecycle, and reranking contract."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Use labeled relevance cases to measure recall/precision or ranking quality across embedding/index revisions, filters, stale data, multilingual inputs, and latency/memory budgets."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not treat cosine similarity as semantic truth, mix embeddings from incompatible models silently, ignore filter selectivity, or tune top-k without downstream evaluation."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Vector type/dimension/distance operator plus exact reference query contract; ANN recall@k versus exact with index/search parameters, filters, tenant isolation and latency distributions; Build/storage/memory, concurrency, update/upsert/delete freshness and maintenance evidence; Quantization/capacity/sharding or partitioning plus shadow migration and rollback evidence), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "vector-search-systems-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Vector type/dimension/distance operator plus exact reference query contract",
+        "ANN recall@k versus exact with index/search parameters, filters, tenant isolation and latency distributions",
+        "Build/storage/memory, concurrency, update/upsert/delete freshness and maintenance evidence",
+        "Quantization/capacity/sharding or partitioning plus shadow migration and rollback evidence",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "vector-search-systems-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Vector type/dimension/distance operator plus exact reference query contract",
+    "ANN recall@k versus exact with index/search parameters, filters, tenant isolation and latency distributions",
+    "Build/storage/memory, concurrency, update/upsert/delete freshness and maintenance evidence",
+    "Quantization/capacity/sharding or partitioning plus shadow migration and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "vector-search-systems-individual-scenario-1-result",
+    "vector-search-systems-individual-scenario-1-verification",
+    "vector-search-systems-individual-scenario-1-paired-evaluation"
+  ]
+}

@@ -310,7 +310,7 @@
       if (!componentMounted) return;
       generationJobId = jobId;
       generating = true;
-      generationStatusMessage = 'Connection interrupted; checking image generation again…';
+      generationStatusMessage = 'Connection interrupted. Checking image generation again…';
       scheduleGenerationStatusPoll(jobId);
     }
   }
@@ -369,7 +369,7 @@
           scheduleGenerationStatusPoll(jobId);
         }
       } else {
-        generationStatusMessage = 'Connection interrupted; checking image generation again…';
+        generationStatusMessage = 'Connection interrupted. Checking image generation again…';
         if (componentMounted) scheduleGenerationStatusPoll(jobId);
         toastStore.warning('Connection interrupted. Image generation may still complete.');
       }
@@ -394,15 +394,19 @@
     explicitlyCancellingJobId = jobId;
     controller?.abort(new DOMException('Image generation cancelled', 'AbortError'));
     try {
-      const response = await apiFetch(apiUrl(`/api/images/jobs/${encodeURIComponent(jobId)}/cancel`), {
-        method: 'POST',
-      });
+      const response = await apiFetch(
+        apiUrl(`/api/images/jobs/${encodeURIComponent(jobId)}/cancel`),
+        {
+          method: 'POST',
+        },
+      );
       const result = (await response.json()) as {
         ok?: boolean;
         error?: string;
         data?: { cancelled?: boolean };
       };
-      if (!response.ok || !result.ok) throw new Error(result.error || 'Could not cancel image generation');
+      if (!response.ok || !result.ok)
+        throw new Error(result.error || 'Could not cancel image generation');
       if (result.data?.cancelled) {
         finishTrackedGeneration(jobId);
         toastStore.info('Image generation cancelled');
@@ -421,7 +425,7 @@
       if (componentMounted) {
         generationJobId = jobId;
         generating = true;
-        generationStatusMessage = 'Could not confirm cancellation; checking status again…';
+        generationStatusMessage = 'Could not confirm cancellation. Checking status again…';
         scheduleGenerationStatusPoll(jobId);
       }
     } finally {

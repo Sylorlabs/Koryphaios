@@ -1,0 +1,70 @@
+{
+  "id": "distributed-debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "During a partial cache/replica outage, a permission update for entity `acct_42` commits as version 118 in region A, but reads routed to region B can return version 117 for up to four minutes even after the API reports success. The fixture includes trace IDs, entity versions in API and cache logs, replica-health transitions, fallback decisions, and a deterministic outage simulator. Reconstruct one stale-read history, determine whether the contract requires read-your-write or only eventual convergence, identify the first fallback/version check that permits an invalid response under the documented contract, implement the narrow correction, and prove behavior during outage, recovery, and one delayed duplicate invalidation. Do not assume synchronized clocks or globally consistent caches.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://distributed-debugging/stale-permission-partial-outage",
+    "requirements": [
+      "entity versions 117 and 118 are visible across API, cache, and replica evidence",
+      "region B cache/replica health can be deterministically degraded and restored",
+      "the documented permission API specifies the consistency guarantee after a successful update",
+      "duplicate/delayed invalidation is a supported delivery condition",
+      "wall clocks may be skewed and cannot alone establish causal order",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "distributed-stale-read-contract",
+      "assertion": "The result states the documented consistency guarantee and evaluates version 117 versus 118 against that contract rather than assuming linearizability."
+    },
+    {
+      "id": "distributed-stale-read-causality",
+      "assertion": "The stale history is reconstructed from trace/entity versions, health state, and fallback decisions without relying on wall-clock order alone."
+    },
+    {
+      "id": "distributed-stale-read-recovery",
+      "assertion": "The post-fix simulation covers degraded region B, recovery, and a delayed duplicate invalidation without serving a version forbidden by the contract."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "distributed-debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Cross-boundary trace",
+        "Failure timeline",
+        "Recovery proof",
+        "versioned cross-region history",
+        "outage/recovery simulation evidence"
+      ]
+    },
+    {
+      "id": "distributed-debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the diagnosis respects the actual consistency contract",
+        "causality is version/identity based rather than clock based",
+        "the recovery proof includes delayed/duplicate invalidation"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Cross-boundary trace",
+    "Failure timeline",
+    "Recovery proof",
+    "cross-region version history",
+    "actual diff and outage/recovery proof",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "distributed-debugging-scenario-2-causal-history",
+    "distributed-debugging-scenario-2-contract-finding",
+    "distributed-debugging-scenario-2-recovery-proof",
+    "distributed-debugging-scenario-2-paired-evaluation"
+  ]
+}

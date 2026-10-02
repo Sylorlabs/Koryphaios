@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "secrets-key-management",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "keys", "secrets"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5300,
+  "broader": ["infrastructure-security"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "secret management",
+    "key management",
+    "kms key",
+    "credential rotation",
+    "hsm custody",
+    "long lived app secrets",
+    "key secret lifecycle",
+    "rotation revocation audit"
+  ],
+  "excludes": [
+    "cryptographic primitive, nonce, signature, KDF, or envelope-format composition as the primary task",
+    "broader cloud account/resource IAM posture without key/secret lifecycle work",
+    "end-user password/passkey/MFA lifecycle as the primary task"
+  ],
+  "evidence": [
+    "Secret/key inventory and hierarchy",
+    "Access/rotation/revocation lifecycle",
+    "Recovery/destruction and audit evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design key management for a multi-tenant envelope-encryption system: KMS wrapping keys, per-object data keys, key versions, least-privileged decrypt grants, rotation versus rewrap, compromise response, backup, and deletion safety.",
+      "Fix secret management for services that currently keep database passwords and vendor API keys in CI variables and long-lived environment variables. Move to workload identity or managed secret delivery, rotate safely, and prove old credentials are retired.",
+      "Review this KMS key lifecycle: key administrators and decrypting workloads share the same broad role, aliases hide which historical version encrypted data, rotation is enabled but old ciphertext is never rewrapped, and deletion can be scheduled without dependency checks.",
+      "Plan credential rotation for a database cluster with application replicas. Use staged dual-valid credentials or another supported cutover, track every consumer, verify new use before revoking the old credential, and preserve rollback without leaving both active indefinitely.",
+      "Design custody for offline release-signing keys in an HSM, including generation, non-exportability, operator quorum/approval, signing access, audit, rotation, emergency revocation, backup/recovery policy, and destruction."
+    ],
+    "negative": [
+      "Choose the AEAD mode, nonce allocation, associated data, KDF, signature algorithm, canonical serialization, and migration format for an encrypted/signed protocol; KMS custody is already settled.",
+      "Audit cloud organization IAM, public resource policies, workload roles, network exposure, and centralized cloud logging; the KMS key lifecycle is already correct.",
+      "Design passkey/password/MFA enrollment, recovery, authenticator replacement, throttling, and fresh-authentication assurance for end users.",
+      "Verify artifact provenance, SBOMs, builder identity, dependency locks, and signature policy in CI; signing-key custody itself is already compliant.",
+      "Execute the existing key/secret rotation, revocation, access, backup, and audit test plan and issue the final security verdict; lifecycle design is already complete."
+    ],
+    "ambiguous": [
+      {
+        "id": "secrets-key-management-ambiguous-1",
+        "prompt": "The application needs encrypted records and KMS key management. Applied-cryptography owns AEAD, nonce, associated-data, and envelope semantics; secrets-key-management owns wrapping-key custody, grants, versions, rotation, compromise response, and destruction.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["applied-cryptography"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "secrets-key-management-ambiguous-2",
+        "prompt": "Cloud KMS is part of the design. Cloud-security owns organization/account IAM and provider-resource posture; secrets-key-management owns the KMS key hierarchy, key-use/admin separation, versioning, rotation, backup, and deletion lifecycle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cloud-security"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "secrets-key-management-ambiguous-3",
+        "prompt": "The release pipeline verifies provenance and also uses an HSM signing key. Supply-chain-security owns provenance/attestation policy; secrets-key-management owns signing-key custody, operator access, rotation, revocation, recovery, and destruction.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "secrets-key-management-adversarial-1",
+        "prompt": "A historical encryption document mentions key storage. The current request is only to reformat that document; do not assess or change key lifecycle behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["applied-cryptography"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "secrets-key-management-adversarial-2",
+        "prompt": "An old cloud incident references a managed key. Extract its dates and owners only; no current cloud or key-management work is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cloud-security"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "secrets-key-management-adversarial-3",
+        "prompt": "A build README includes a signing-key example. Rename one documentation heading only and leave all signing and build behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["supply-chain-security"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-57 Part 1 Rev. 5, May 2020",
+      "staleAfterDays": 365,
+      "notes": "General cryptographic key-management lifecycle, protection requirements, cryptoperiods, compromise, backup/recovery, and destruction concepts.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html",
+      "sourceType": "official-docs",
+      "versionScope": "AWS KMS best practices available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "KMS access control, key policy/grant hygiene, rotation/deletion, least privilege, and operational practices for managed keys.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cloud.google.com/kms/docs/key-management-service",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud KMS documentation available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Key/key-version hierarchy, primary versions, rotation, IAM, HSM-backed keys, import/destruction, and managed-key operational model.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Secrets Management guidance available 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Secret lifecycle, centralization, rotation, revocation, least privilege, dynamic credentials, auditing, and common delivery/storage failure patterns.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -71,8 +71,8 @@ backend state and appending its WebSocket event.
     lock. Malformed outbox rows are dead-lettered individually and published
     history is retained for a bounded period.
 11. `sessions.workflow_state`, heartbeats, legacy `agent.status`, and the client
-   watchdog remain compatibility projections only. New code must not consult
-   them to decide whether a run is active.
+    watchdog remain compatibility projections only. New code must not consult
+    them to decide whether a run is active.
 
 ## Invariants
 
@@ -113,8 +113,16 @@ backend state and appending its WebSocket event.
 
 ## Follow-up boundary
 
-The aggregate does not make `KoryManager` acceptably small. The next extraction
-is a `TurnRuntime` application service that owns provider streaming, tool-loop
-execution, and the SessionRun lease. After that, provider capability interfaces
-and generated HTTP contracts can be split without reintroducing lifecycle
-ambiguity.
+The aggregate does not make `KoryManager` acceptably small. Provider streaming
+now lives in `services/TurnRuntime.ts`, with explicit provider, archive, process,
+and lifecycle capabilities. It borrows the exact run handle and cannot acquire
+a replacement lease. Native tool reports remain observations; executable tool
+requests require complete, bounded JSON objects and unique call identities.
+Provider failures and deadlines remain errors; only an aborted caller signal
+permits salvaging a stopped response.
+
+Admission, durable waits, compaction, and tool-loop scheduling still belong to
+their existing owners. Further extraction should move cohesive responsibilities
+behind narrow interfaces rather than passing the entire manager as a host.
+Provider capability interfaces and generated HTTP contracts remain follow-up
+work; the streaming extraction is not a claim that the manager is fully modular.

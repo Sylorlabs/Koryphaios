@@ -188,9 +188,6 @@ mock.module('../../../providers/auth-utils', () => ({
   detectDevinCLILogin: () => false,
   createDevinCLIAuthMarker: () => 'devin-cli-session',
   isDevinCLIAuthMarker: (value: string | null | undefined) => value === 'devin-cli-session',
-  detectClineCLILogin: () => false,
-  createClineCLIAuthMarker: () => 'cline-cli-session',
-  isClineCLIAuthMarker: (value: string | null | undefined) => value === 'cline-cli-session',
   detectFreebuffCLILogin: () => false,
   createFreebuffCLIAuthMarker: () => 'cli:freebuff:test',
   isFreebuffCLIAuthMarker: (value: string | null | undefined) => value === 'cli:freebuff:test',
@@ -372,9 +369,20 @@ describe('provider routes', () => {
     expect(body.data).toEqual(providerStatus);
   });
 
+  test('GET /api/providers/catalog-refresh-status reports the adaptive refresh state', async () => {
+    const { response, body } = await request('/api/providers/catalog-refresh-status');
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    // The scheduler is not started in this harness, so the route must report
+    // that honestly rather than inventing per-provider cadence data.
+    expect(body.data).toMatchObject({ running: false, providers: [] });
+  });
+
   test('custom-provider creation rejects an invalid key without persisting it', async () => {
     const previousFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response('{"error":"Invalid token"}', { status: 401 })) as typeof fetch;
+    globalThis.fetch = (async () =>
+      new Response('{"error":"Invalid token"}', { status: 401 })) as typeof fetch;
     try {
       const { response, body } = await request('/api/providers/custom', {
         method: 'POST',
@@ -642,6 +650,39 @@ describe('provider routes', () => {
 
     expect(codexComplete.response.status).toBe(404);
     expect(codexComplete.body.ok).toBe(false);
+  });
+
+  test('an unapproved browser sign-in is reported as pending, not as a bad request', async () => {
+    // The app-server has no ChatGPT account yet, so the user has not finished
+    // approving in the browser. That is a waiting state, so the route must not
+    // answer 400: a non-2xx here made the browser log a console error on every
+    // "I Finished Sign-In" click made before approval landed.
+    codexAccountMock.mockResolvedValueOnce({
+      account: { type: 'api_key' },
+      requiresOpenaiAuth: true,
+    } as Awaited<ReturnType<typeof codexAccountMock>>);
+
+    const complete = await request('/api/providers/codex-auth/auth/complete', { method: 'POST' });
+
+    expect(complete.response.status).toBe(200);
+    expect(complete.body.ok).toBe(false);
+    expect(complete.body.pending).toBe(true);
+    expect(complete.body.error).toBe('ChatGPT sign-in is not complete yet.');
+  });
+
+  test('device-flow providers report their automatic completion as pending', async () => {
+    // Copilot and Kimi Code finish on their own poll, so their complete()
+    // handler can never succeed. It previously answered 400 unconditionally.
+    for (const provider of ['copilot', 'kimicode']) {
+      const complete = await request(`/api/providers/${provider}/auth/complete`, {
+        method: 'POST',
+      });
+
+      expect(complete.response.status).toBe(200);
+      expect(complete.body.ok).toBe(false);
+      expect(complete.body.pending).toBe(true);
+      expect(complete.body.error).toContain('completes automatically');
+    }
   });
 
   test('OpenAI Codex uses the managed ChatGPT device-code flow without accepting an API key', async () => {

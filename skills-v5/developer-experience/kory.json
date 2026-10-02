@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "name": "developer-experience",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["developer-experience", "engineering", "ux"],
+  "targetMedia": ["any"],
+  "contextBudget": 3600,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "developer experience",
+    "developer journey",
+    "developer tooling experience",
+    "developer onboarding",
+    "developer workflow friction",
+    "repo setup friction",
+    "repo running",
+    "setup feedback loops",
+    "engineering onboarding",
+    "tooling feedback loop",
+    "api usability",
+    "sdk usability",
+    "sdk ergonomics",
+    "tooling ux",
+    "language ergonomics",
+    "integration experience"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Developer role, job, environment, and constraints",
+    "End-to-end technical-product journey and friction model",
+    "Concept, state, failure, and compatibility boundaries",
+    "Runnable first-use and recovery evidence",
+    "Upgrade, rollback, removal, and measurement contract",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Redesign the developer experience for this SDK from installation and authentication through first request, failure recovery, upgrade, rollback, and removal.",
+      "Audit this internal developer platform journey across project creation, permissions, configuration, CI feedback, logs, deployment recovery, and teardown.",
+      "Improve SDK ergonomics for developers integrating the service, including concepts, defaults, examples, diagnostics, observability, compatibility, and migration.",
+      "Design the developer journey for a new language toolchain from install and project setup through editor feedback, build failures, dependency changes, upgrades, and uninstall.",
+      "Reduce developer workflow friction in this local tool by connecting setup, configuration discovery, actionable failures, inspectable state, documentation, and safe rollback."
+    ],
+    "negative": [
+      "Run a task-based usability evaluation with engineers using the existing deployment workflow; observe completion, mistakes, recovery, assistance, and comprehension without redesigning the tool yet.",
+      "Implement a CLI subcommand with stdin and stdout behavior, exit codes, completion, TTY detection, cancellation, and machine-readable JSON output.",
+      "Rewrite this schema validator's error-message family so each diagnostic has concise wording, a precise field path, a stable code, and a useful next action.",
+      "Write a tutorial and API reference for the already-approved SDK contract; the product behavior and developer workflow are not changing.",
+      "Profile the CI execution workers and fix the cache-key regression that increased job duration by 18 percent while preserving commands, logs, configuration, and workflow behavior."
+    ],
+    "ambiguous": [
+      {
+        "id": "developer-experience-ambiguous-api-journey",
+        "prompt": "The API contract is mostly fixed, but integration remains painful. Improve the developer experience across authentication, first request, pagination discovery, error recovery, request tracing, version migration, examples, and teardown without casually breaking the contract.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "api-contract-design",
+          "content-error-design",
+          "instructional-communication"
+        ],
+        "tags": ["api", "integration", "cross-surface"]
+      },
+      {
+        "id": "developer-experience-ambiguous-cli-workflow",
+        "prompt": "Redesign the end-to-end developer experience of this deployment CLI from installation and project linking through dry run, streamed progress, failure diagnosis, rollback, version upgrade, and clean removal while preserving scriptability.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "content-error-design", "usability-evaluation"],
+        "tags": ["cli", "journey", "automation"]
+      },
+      {
+        "id": "developer-experience-ambiguous-language-tooling",
+        "prompt": "Improve the developer experience of this compiler and language server across project setup, editor feedback, diagnostic inspection, incremental builds, dependency changes, upgrade compatibility, and recovery from broken configuration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": [
+          "compiler-runtime-backend",
+          "content-error-design",
+          "repository-environment-discovery"
+        ],
+        "tags": ["compiler", "language-server", "workflow"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "developer-experience-adversarial-quoted",
+        "prompt": "A quoted old issue says 'developer experience needs work'. Ignore that quote and fix only the memory leak in the image worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "performance-engineering"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "developer-experience-adversarial-negated",
+        "prompt": "Do not redesign the developer experience. Implement only the approved database index migration and verify rollback.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning", "database-design"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "developer-experience-adversarial-pasted",
+        "prompt": "A pasted comment says 'tooling UX'. Ignore that quote and compare the two backup retention cost models.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["capacity-planning", "data-analysis"],
+        "tags": ["pasted-decoy", "marketing-copy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://getdx.com/research/devex-what-actually-drives-productivity/",
+      "sourceType": "community-pattern",
+      "versionScope": "Author-hosted summary of DevEx: What Actually Drives Productivity, inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Research-backed developer-experience dimensions: feedback loops, cognitive load, flow state, and combined developer-feedback/system-data measurement. Used as a diagnostic framework, not a universal score."
+    },
+    {
+      "url": "https://www.microsoft.com/en-us/research/publication/the-space-of-developer-productivity-theres-more-to-it-than-you-think/",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft Research publication record for ACM Queue SPACE framework, inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Primary-author research record supporting multidimensional developer-productivity measurement and the rejection of single activity metrics."
+    },
+    {
+      "url": "https://docs.cloud.google.com/apis/design",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud API Design Guide last updated 2026-08-26 UTC",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Official living API design guide covering coherent resource/method conventions, errors, documentation, versioning, and backward compatibility; used as an API-specific evidence source rather than a universal interface model."
+    },
+    {
+      "url": "https://docs.github.com/en/rest/about-the-rest-api/breaking-changes?apiVersion=2026-03-10",
+      "sourceType": "official-docs",
+      "versionScope": "GitHub REST API version 2026-03-10 breaking-change and upgrade guidance",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Current concrete model for classifying breaking versus additive changes, communicating migration, preserving an explicit support window, and testing upgrades."
+    },
+    {
+      "url": "https://docs.stripe.com/error-handling?lang=node",
+      "sourceType": "official-docs",
+      "versionScope": "Stripe Node.js error-handling guidance as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 90,
+      "notes": "Concrete developer-facing error patterns including error categories, parameter/doc context, request identifiers, idempotent recovery, and explicit indeterminate outcomes for connection/API failures."
+    },
+    {
+      "url": "https://clig.dev/",
+      "sourceType": "community-pattern",
+      "versionScope": "Command Line Interface Guidelines site as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Community patterns for human-first CLI discoverability, composability, state feedback, errors, machine-readable output, and recovery. Applied only to terminal surfaces."
+    },
+    {
+      "url": "https://diataxis.fr/start-here/",
+      "sourceType": "community-pattern",
+      "versionScope": "Diátaxis start-here guidance as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Community documentation pattern separating tutorials, how-to guides, reference, and explanation according to developer need; not imposed as a rigid site structure."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

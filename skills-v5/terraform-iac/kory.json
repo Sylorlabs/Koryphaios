@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "name": "terraform-iac",
+  "version": "5.0.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["infrastructure", "iac", "terraform"],
+  "targetMedia": ["any"],
+  "pathScopes": ["**/*.tf", "**/*.tfvars"],
+  "contextBudget": 5100,
+  "broader": ["architecture-planning"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "terraform",
+    "terraform plan",
+    "terraform state",
+    "terraform import",
+    "terraform moved",
+    "terraform backend",
+    "terraform module",
+    "hcl infrastructure"
+  ],
+  "excludes": [
+    "terraform configuration is already fixed",
+    "provider topology only",
+    "historical terraform output",
+    "terraform mentioned only in documentation",
+    "no terraform changes are requested",
+    "terraform state remain unchanged",
+    "do not inspect or modify hcl"
+  ],
+  "evidence": [
+    "Terraform CLI/provider/backend/workspace identity",
+    "Reviewed plan with create/update/replace/destroy/import/move evidence",
+    "Remote state locking/import/moved/lifecycle evidence",
+    "Apply/convergence and state recovery evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Import existing production infrastructure into Terraform using import blocks, matching configuration, a protected remote backend, reviewed plans and post-import no-drift evidence.",
+      "Refactor Terraform resources into modules without recreation by using moved blocks, preserving module upgrade paths, inspecting replacements and validating a fresh convergence plan.",
+      "Migrate a Terraform backend and state key safely, verify workspace/lineage/locking, protect state recovery artifacts and prove the new backend is authoritative before normal writes resume.",
+      "Upgrade a Terraform provider/module set, reconcile the lockfile and schema changes, inspect the real plan for destructive replacements, apply the reviewed artifact and verify convergence.",
+      "Repair Terraform drift where another system legitimately owns selected attributes; model that ownership narrowly, avoid blanket ignore_changes, and preserve plan/apply evidence."
+    ],
+    "negative": [
+      "Design AWS VPC, IAM and RDS topology using provider-native semantics; Terraform configuration is already fixed and no state/module changes are requested.",
+      "Audit a deployed cloud environment for privilege escalation and unintended public access without reviewing or modifying Terraform configuration.",
+      "Build a GitHub Actions deployment pipeline around an already fixed Terraform plan/apply command; focus on runners, approvals, OIDC and artifacts only.",
+      "Plan a database/API migration with dual-write, backfill, compatibility and cutover; the existing Terraform state and infrastructure remain unchanged.",
+      "Summarize historical Terraform output pasted into an incident report; no Terraform changes are requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "terraform-iac-ambiguous-1",
+        "prompt": "Implement an AWS network redesign in Terraform. aws-cloud owns VPC/IAM/service semantics; terraform-iac owns providers, modules, state, plan, lifecycle and safe application of the configuration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "terraform-iac-ambiguous-2",
+        "prompt": "Build a CI job that creates and later applies a reviewed Terraform plan. terraform-iac owns the saved-plan/state contract; cicd-engineering owns workflow permissions, environment approvals, runners and artifact transport.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "terraform-iac-ambiguous-3",
+        "prompt": "Import a live Google Cloud resource and then change its provider-native networking. terraform-iac owns import/state/plan mechanics; gcp-cloud owns whether the resulting Google Cloud network semantics are correct.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "terraform-iac-adversarial-1",
+        "prompt": "A quoted old issue says \"run Terraform apply\". Ignore the historical request; today's task is only to fix a CSS layout regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "terraform-iac-adversarial-2",
+        "prompt": "A support transcript includes a Terraform plan as inert evidence. Summarize the customer conversation only; no Terraform changes are requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "terraform-iac-adversarial-3",
+        "prompt": "A README heading is named \"Terraform State Migration\". Rename that documentation heading only; do not alter HCL, backend or state.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["aws-cloud"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developer.hashicorp.com/terraform/language/backend",
+      "sourceType": "official-docs",
+      "versionScope": "Terraform v1.16.x, labeled latest in HashiCorp documentation as of 2026-09-05",
+      "staleAfterDays": 21,
+      "notes": "Current Terraform language/backend baseline and CLI-version context.",
+      "verifiedAt": "2026-09-26"
+    },
+    {
+      "url": "https://developer.hashicorp.com/terraform/language/state/backends",
+      "sourceType": "official-docs",
+      "versionScope": "Terraform v1.16.x state/backend guidance as of 2026-09-05",
+      "staleAfterDays": 45,
+      "notes": "Remote state, backend locking, state operations, and recovery boundaries.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.hashicorp.com/terraform/language/modules/develop/refactoring",
+      "sourceType": "official-docs",
+      "versionScope": "Current Terraform module refactoring guidance as of 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Moved blocks preserve resource identity and module upgrade paths; removing historical moves can be breaking.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.hashicorp.com/terraform/language/import",
+      "sourceType": "official-docs",
+      "versionScope": "Current Terraform declarative import workflow as of 2026-09-05",
+      "staleAfterDays": 45,
+      "notes": "Import blocks, matching configuration, plan review, and safe adoption of existing resources.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://developer.hashicorp.com/terraform/cli/commands/plan",
+      "sourceType": "official-docs",
+      "versionScope": "Terraform v1.16.x plan guidance as of 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Speculative versus saved plans, reviewed apply artifacts, and final-state revalidation requirements.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

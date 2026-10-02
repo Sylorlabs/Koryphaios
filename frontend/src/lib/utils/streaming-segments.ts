@@ -1,30 +1,9 @@
-// Streaming-aware segment scanner for rich fenced blocks.
-//
-// During streaming, marked.parse can't reliably render partial markdown —
-// unclosed fences produce broken output. Instead of waiting for the stream
-// to complete, this scanner walks the streaming text line-by-line and splits
-// it into segments:
-//
-//   - { kind: 'text', text }  → raw text, rendered as plain text content
-//   - { kind: 'block', html } → pre-rendered HTML from a completed fenced block
-//
-// A fenced block is "complete" when both the opening ```lang and closing ```
-// are present. Incomplete fences (still being streamed) are treated as raw
-// text — the user sees the fence as-is until the closing ``` arrives, at
-// which point the block renders immediately, mid-stream.
-//
-// Only rich block languages (chart, color, html) are rendered during
-// streaming. Other fenced code blocks (python, typescript, etc.) are left as
-// raw text and rendered by marked's syntax highlighter after streaming
-// completes.
-//
-// Security: raw text segments are rendered as text content (not HTML) in the
-// template, so there's no XSS risk. Block HTML is safe by construction —
-// the renderers escape all agent-controlled input, and HTML sandbox iframes
-// use sandbox="" + CSP + escaped srcdoc. No DOMPurify is needed during
-// streaming because no agent-generated HTML is injected into the parent DOM
-// (iframe content lives in srcdoc, which is a separate document).
+// Streaming-aware scanner: completed rich fences keep stable DOM identities.
+// All prose, including untrusted partial Markdown, crosses the same sanitizer
+// as final chat messages. Never trust model output as executable HTML.
 
+import { createChatMarkdown, renderChatMarkdown } from './chat-markdown';
+const streamMarkdown = createChatMarkdown(false);
 import { renderKoryChart } from './chart-renderer';
 import { renderKoryColors } from './color-renderer';
 import { htmlSandboxPlaceholder, expandHtmlSandboxes } from './html-sandbox';
@@ -37,9 +16,13 @@ export interface StreamingSegment {
 }
 
 const RICH_LANGS = new Set([
-  'chart', 'kory-chart',
-  'color', 'kory-color',
-  'html', 'kory-html', 'html-sandbox',
+  'chart',
+  'kory-chart',
+  'color',
+  'kory-color',
+  'html',
+  'kory-html',
+  'html-sandbox',
 ]);
 
 // Opening fence: ```lang (optional whitespace after lang)
@@ -67,23 +50,105 @@ function renderBlock(lang: string, content: string): string | null {
   }
 }
 
-/**
- * Split streaming text into segments: completed rich blocks (rendered to
- * HTML) and raw text (everything else, including incomplete fences).
- */
 export function computeStreamingSegments(text: string): StreamingSegment[] {
-  if (!text) return [];
+  return scanSegments(text, 0).segments;
+}
+
+/**
+ * Incremental memoizer for per-token streaming renders. The full scan above
+ * is O(n) in the response length (line scan + marked parse), so re-running it
+ * on every token gets linearly slower as the response grows.
+ *
+ * Completed rich blocks are immutable: once a closing fence has streamed in,
+ * that block's HTML never changes no matter what is appended after it. The
+ * snapshot therefore remembers `stableLength` — the char offset just past the
+ * last completed block — and on a pure append only the unstable tail
+ * (trailing text + any still-open fence) is rescanned. Completed block DOM
+ * nodes keep stable ids, so keyed `{#each}` blocks don't remount them.
+ *
+ * Limitations: with no completed block yet (plain-text-only streams) there is
+ * no stable prefix and the text is fully re-parsed — marked output for
+ * already-streamed prose can change as new syntax arrives, so reusing stale
+ * HTML would be incorrect. Any non-append edit (rewind/regeneration) also
+ * falls back to a full scan.
+ */
+export interface StreamingSegmentsSnapshot {
+  text: string;
+  segments: StreamingSegment[];
+  /** Char offset just past the last completed block (0 = no stable prefix). */
+  stableLength: number;
+  /** Exclusive char end offset of each segment's raw source span (internal). */
+  ends: number[];
+}
+
+export function computeStreamingSegmentsIncremental(
+  prev: StreamingSegmentsSnapshot | null | undefined,
+  text: string,
+): StreamingSegmentsSnapshot {
+  if (
+    prev &&
+    prev.stableLength > 0 &&
+    prev.stableLength <= text.length &&
+    text.startsWith(prev.text)
+  ) {
+    const kept: StreamingSegment[] = [];
+    const keptEnds: number[] = [];
+    for (let i = 0; i < prev.segments.length; i++) {
+      if (prev.ends[i] <= prev.stableLength) {
+        kept.push(prev.segments[i]);
+        keptEnds.push(prev.ends[i]);
+      }
+    }
+    const tail = scanSegments(text.slice(prev.stableLength), kept.length);
+    return {
+      text,
+      segments: [...kept, ...tail.segments],
+      ends: [...keptEnds, ...tail.ends.map((e) => e + prev.stableLength)],
+      stableLength:
+        tail.stableLength > 0 ? prev.stableLength + tail.stableLength : prev.stableLength,
+    };
+  }
+  const full = scanSegments(text, 0);
+  return { text, segments: full.segments, ends: full.ends, stableLength: full.stableLength };
+}
+
+interface ScanResult {
+  segments: StreamingSegment[];
+  /** Exclusive char end offset of each segment's raw source span. */
+  ends: number[];
+  /** Char offset just past the last completed block (line-aligned). */
+  stableLength: number;
+}
+
+function scanSegments(text: string, idBase: number): ScanResult {
+  if (!text) return { segments: [], ends: [], stableLength: 0 };
   const lines = text.split('\n');
+  // Char offset where each line starts, so segment raw spans can be recorded
+  // as char ranges and completed blocks get a line-aligned stable boundary.
+  const starts: number[] = new Array(lines.length);
+  let pos = 0;
+  for (let n = 0; n < lines.length; n++) {
+    starts[n] = pos;
+    pos += lines[n].length + 1;
+  }
   const segments: StreamingSegment[] = [];
-  let segId = 0;
+  const ends: number[] = [];
+  let segId = idBase;
+  let stableLength = 0;
   let i = 0;
+  // Line index where the current textBuffer starts (for raw end offsets).
+  let textStart = 0;
   let textBuffer: string[] = [];
 
-  const flushText = () => {
+  const flushText = (endLine: number) => {
     if (textBuffer.length) {
-      segments.push({ id: segId++, kind: 'text', text: textBuffer.join('\n') });
+      const raw = textBuffer.join('\n');
+      const html = renderChatMarkdown(raw, streamMarkdown);
+      segments.push({ id: segId++, kind: 'text', html });
+      ends.push(starts[textStart] + raw.length);
       textBuffer = [];
     }
+    textStart = endLine;
   };
 
   while (i < lines.length) {
@@ -108,11 +173,17 @@ export function computeStreamingSegments(text: string): StreamingSegment[] {
         }
         if (foundClose) {
           // Complete rich block — flush buffered text, then render.
-          flushText();
+          flushText(i);
           const content = contentLines.join('\n');
           const html = renderBlock(lang, content);
           if (html) {
             segments.push({ id: segId++, kind: 'block', html });
+            const raw = lines.slice(i, j + 1).join('\n');
+            ends.push(starts[i] + raw.length);
+            // Line-aligned boundary just past the closing fence: everything
+            // before it is immutable under future appends.
+            stableLength = j + 1 < lines.length ? starts[j + 1] : text.length;
+            textStart = j + 1;
           } else {
             // Renderer returned null (malformed input) — treat the whole
             // block as raw text, including the fences.
@@ -128,6 +199,6 @@ export function computeStreamingSegments(text: string): StreamingSegment[] {
     textBuffer.push(line);
     i++;
   }
-  flushText();
-  return segments;
+  flushText(lines.length);
+  return { segments, ends, stableLength };
 }

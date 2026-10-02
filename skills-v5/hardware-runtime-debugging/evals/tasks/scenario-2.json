@@ -1,0 +1,71 @@
+{
+  "id": "hardware-runtime-debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "A Vulkan renderer intermittently returns VK_ERROR_DEVICE_LOST during one compute-to-graphics workload on an NVIDIA GPU after a driver update. Diagnose the GPU crash using the exact GPU model, PCIe topology, OS/kernel, driver, Vulkan loader/runtime, application build, workload seed, validation-layer version, and kernel Xid logs. Reproduce the same submission first without changing the driver; enable Khronos validation/synchronization or GPU-assisted diagnostics as appropriate, preserve any VUIDs and Xids, minimize the command sequence, and use a driver-version or second-GPU control only after the application-level evidence is captured. Determine the narrowest supported layer—invalid application usage, driver/runtime, transport/platform, or physical device—and verify the fix or mitigation against the original workload without claiming a hardware defect from Xid/device-loss alone.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://hardware-runtime-debugging/scenario-2",
+    "requirements": [
+      "recorded NVIDIA GPU and PCIe/topology identity",
+      "recorded OS/kernel, NVIDIA driver, Vulkan loader/API, validation-layer, and app-build versions",
+      "fixed workload seed and reproducible command/submission capture",
+      "kernel/event log containing any Xid messages and application device-loss result",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "hardware-runtime-debugging-env-identity-2",
+      "assertion": "The reproduction records GPU, topology, kernel/OS, driver, Vulkan runtime/API, validation-layer, app build, and workload identity before changing any layer."
+    },
+    {
+      "id": "hardware-runtime-debugging-validation-2",
+      "assertion": "Application valid-usage evidence is collected with the appropriate Khronos validation features, preserving VUIDs/debug output while acknowledging that validation instrumentation can perturb timing/performance."
+    },
+    {
+      "id": "hardware-runtime-debugging-xid-scope-2",
+      "assertion": "Any NVIDIA Xid and VK_ERROR_DEVICE_LOST evidence is treated as diagnostic evidence rather than automatic proof of defective hardware, and competing app/driver/platform hypotheses are tested."
+    },
+    {
+      "id": "hardware-runtime-debugging-minimized-proof-2",
+      "assertion": "A minimized failing submission or other layer-discriminating reproducer is preserved, and the proposed fix/mitigation is rerun against both that reproducer and the original workload on a stated real GPU/driver configuration."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "hardware-runtime-debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "environment identity",
+        "Vulkan validation diagnostics",
+        "Xid/device-loss log interpretation",
+        "minimized and original-workload reproduction"
+      ]
+    },
+    {
+      "id": "hardware-runtime-debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "GPU/driver/runtime/application/workload identity",
+    "device-loss and vendor diagnostic logs",
+    "validation-layer evidence",
+    "minimized failing or discriminating workload",
+    "real-GPU fix/mitigation rerun",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "hardware-runtime-debugging-scenario-2-result",
+    "hardware-runtime-debugging-scenario-2-verification",
+    "hardware-runtime-debugging-scenario-2-paired-evaluation"
+  ]
+}

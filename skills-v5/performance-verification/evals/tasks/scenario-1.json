@@ -1,0 +1,87 @@
+{
+  "id": "performance-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A completed search-cache patch is waiting on its release performance gate. Use the fixture's existing load harness; do not redesign it or change product code. The contract is a fixed 1,000,000-record dataset with a 70% search / 20% detail / 10% facet request mix, 400 requests/sec at concurrency 40, a 2-minute warmup excluded from measurement, then three independent 5-minute measured runs. The candidate must satisfy p95 <= 180 ms, p99 <= 350 ms, HTTP/application error rate < 0.5%, delivered throughput >= 395 requests/sec, application CPU <= 80% of its declared limit without sustained queue saturation, and response correctness under load. Compare with the supplied prior-release baseline only after proving build, host limits, runtime, dataset, cache preparation, request mix, and concurrency are materially equivalent. The fixture is designed so candidate p95/throughput/errors/correctness pass while measured candidate p99 is above 350 ms in every repeat. Return the workload/environment identity, warmup versus measured evidence, per-run p50/p95/p99/throughput/errors/resources, repeat variance, baseline-comparability check, correctness evidence, and a bounded release verdict. Do not diagnose or fix the tail-latency cause.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-verification/api-release-gate",
+    "requirements": [
+      "the fixture exposes immutable candidate and prior-release build identities plus runtime and host-limit metadata",
+      "the load harness records warmup separately from three measured runs and exposes raw per-run summaries",
+      "the fixed dataset and 70/20/10 operation mix are seeded before the run and concurrency is fixed at 40",
+      "the harness records p50/p95/p99 latency, delivered throughput, errors, application CPU/queue saturation, and load-generator utilization",
+      "the fixture includes an independent response-correctness oracle exercised during load",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-verification-api-identity",
+      "assertion": "The verdict names the candidate and baseline identities and establishes material equivalence of host limits, runtime/build mode, dataset/cache preparation, request mix, rate, and concurrency before using the baseline comparison."
+    },
+    {
+      "id": "performance-verification-api-warmup",
+      "assertion": "The 2-minute warmup is identified separately and none of its samples are included in the three 5-minute steady-state gate distributions."
+    },
+    {
+      "id": "performance-verification-api-tail-metrics",
+      "assertion": "All three measured runs report p50, p95, and p99 latency and the candidate is marked failing because p99 exceeds the declared 350 ms threshold even though p95 remains within 180 ms."
+    },
+    {
+      "id": "performance-verification-api-throughput-errors",
+      "assertion": "Delivered throughput and HTTP/application error rate are checked independently against >=395 requests/sec and <0.5% for every measured run rather than inferred from latency."
+    },
+    {
+      "id": "performance-verification-api-resources",
+      "assertion": "Application CPU/queue saturation and load-generator capacity are inspected so the result is not accepted from a saturated generator or an environment outside the declared resource envelope."
+    },
+    {
+      "id": "performance-verification-api-correctness",
+      "assertion": "The independent response oracle passes under load; any correctness failure would fail the release regardless of timing metrics."
+    },
+    {
+      "id": "performance-verification-api-variance-verdict",
+      "assertion": "The result reports per-run values plus an explicit repeat-run variance summary and returns FAIL for the release gate because a required p99 budget fails, without averaging the breach away or diagnosing its cause."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "workload/environment/baseline identity matrix",
+        "warmup exclusion and three measured run summaries",
+        "p50/p95/p99, throughput, errors, and resource evidence",
+        "correctness-under-load oracle results",
+        "repeat variance and explicit FAIL gate reasoning"
+      ]
+    },
+    {
+      "id": "performance-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the verdict follows independent declared budgets rather than a single aggregate score",
+        "the baseline is used only after comparability is established",
+        "the answer stays in acceptance verification and does not drift into bottleneck diagnosis"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Performance claim-to-gate matrix",
+    "candidate/baseline workload and environment identity",
+    "warmup and measured-state separation",
+    "three repeated p50/p95/p99/throughput/error/resource summaries with variance",
+    "correctness-under-load result",
+    "bounded release verdict",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "performance-verification-scenario-1-result",
+    "performance-verification-scenario-1-verification",
+    "performance-verification-scenario-1-paired-evaluation"
+  ]
+}

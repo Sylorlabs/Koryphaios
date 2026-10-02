@@ -1,0 +1,75 @@
+{
+  "id": "cloud-security-full-task-2",
+  "maturity": "individual",
+  "prompt": "Review cloud posture for a GCP organization where CI runs outside Google Cloud, deploys to Cloud Run, and writes to a storage bucket and BigQuery dataset. CI currently uses a downloaded service-account key; the runtime service account has Editor on the project; the bucket is publicly readable for convenience; audit logs are not centralized; and organization policy is mostly unset. Replace long-lived CI credentials with Workload Identity Federation, give CI and runtime separate least-privileged identities, constrain resource access, remove unintended public exposure, define organization/project policy guardrails and centralized audit evidence, and verify intended/denied access. Keep application tenant authorization and container internals separate.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://cloud-security/scenario-2",
+    "requirements": [
+      "GCP org/project/IAM fixture",
+      "external CI identity provider and service-account key state",
+      "Cloud Run/Storage/BigQuery resource access",
+      "organization policy and audit-log destinations",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "cloud-security-federation-2",
+      "assertion": "External CI no longer depends on a downloaded long-lived service-account key and instead uses a constrained federated workload identity with explicit trust mapping and short-lived credentials."
+    },
+    {
+      "id": "cloud-security-least-privilege-2",
+      "assertion": "CI deployment identity and runtime service identity are separate and each has resource-scoped permissions rather than project-wide Editor or an equivalent broad basic role."
+    },
+    {
+      "id": "cloud-security-public-exposure-2",
+      "assertion": "The storage/reporting resources have an explicit public-access requirement; unintended public principals are removed and a representative anonymous access attempt is denied."
+    },
+    {
+      "id": "cloud-security-org-policy-2",
+      "assertion": "Organization/project guardrails cover the supplied high-risk defaults such as unmanaged public exposure, service-account key creation, and required logging where supported, with named exceptions."
+    },
+    {
+      "id": "cloud-security-audit-2",
+      "assertion": "Relevant admin/IAM/resource changes are exported/centralized to a protected audit destination and the review identifies who can alter that destination or its retention."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "cloud-security-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "federated CI trust",
+        "CI/runtime role scopes",
+        "public-access test",
+        "organization guardrails and audit path"
+      ]
+    },
+    {
+      "id": "cloud-security-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "WIF/identity mapping",
+    "least-privilege role/resource matrix",
+    "public-access evidence",
+    "organization policy",
+    "central audit path",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "cloud-security-scenario-2-result",
+    "cloud-security-scenario-2-verification",
+    "cloud-security-scenario-2-paired-evaluation"
+  ]
+}

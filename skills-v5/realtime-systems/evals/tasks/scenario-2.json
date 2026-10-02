@@ -1,0 +1,82 @@
+{
+  "id": "realtime-systems-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Harden an SSE notification client/server flow where access tokens can expire mid-stream. The client currently reconnects immediately with the same expired token, creating a retry storm, and can lose Last-Event-ID across refresh. Define refresh/reconnect ownership, bounded jittered backoff, Last-Event-ID persistence, terminal authorization behavior, and tests for token expiry, refresh failure/success, proxy idle close, browser refresh, and duplicate event replay.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://realtime-systems/sse-auth-expiry-backoff",
+    "requirements": [
+      "SSE endpoint/client with Last-Event-ID and controllable token expiry",
+      "auth refresh adapter that can succeed, fail transiently, or reject permanently",
+      "proxy idle-close and network reconnect fixtures",
+      "event-id corpus proving resume/dedup across browser refresh",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "realtime-systems-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "realtime-systems decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "realtime-systems-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "sse-auth-expiry-backoff scenario evidence",
+    "realtime-systems decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "realtime-systems-individual-scenario-2-result",
+    "realtime-systems-individual-scenario-2-verification",
+    "realtime-systems-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual realtime-systems boundary and relevant environment before acting, preserve the hierarchy relationship (broader=network-service-backend; near-neighbor=networking-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define connection identity, authentication refresh, subscription ownership, ordering scope, message IDs, acknowledgement, fan-out, presence semantics, heartbeat, backpressure, reconnect/resume, and authoritative state reconciliation."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Reconnect preserves stream position but never loops indefinitely on invalid authority; authentication recovery and transport backoff have distinct bounded state transitions."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise disconnect/reconnect, duplicate/missed/reordered messages, slow clients, auth expiry, multi-device sessions, server restart, scale-out routing, and catch-up from authoritative state."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not assume persistent ordered connections, keep unbounded per-client queues, trust stale connection identity after token expiry, or make presence a strongly consistent fact without that infrastructure."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (realtime-systems decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

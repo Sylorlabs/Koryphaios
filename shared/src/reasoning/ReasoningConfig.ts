@@ -19,7 +19,7 @@ export const STANDARD_REASONING_OPTIONS: Record<string, ReasoningOption> = {
   low: { value: 'low', label: 'Low', description: 'Minimal reasoning effort for speed' },
   medium: { value: 'medium', label: 'Medium', description: 'Balanced depth and speed' },
   high: { value: 'high', label: 'High', description: 'Standard deep reasoning' },
-  xhigh: { value: 'xhigh', label: 'X-High', description: 'Extended reasoning depth' },
+  xhigh: { value: 'xhigh', label: 'Xhigh', description: 'Extended reasoning depth' },
   max: { value: 'max', label: 'Max', description: 'Absolute maximum reasoning capability' },
   auto: {
     value: 'auto',
@@ -80,4 +80,17 @@ export function buildReasoningConfigFromLevels(
   const defaultValue = levels.includes('medium') ? 'medium' : levels[Math.floor(levels.length / 2)];
 
   return { parameter, options, defaultValue };
+}
+
+/**
+ * Resolve the composer's reasoning level against a model's live-reported
+ * option values. A current level that is still offered is kept. When it is
+ * not offered and exactly one option exists, that sole level is returned so
+ * the UI auto-selects instead of asking the user to pick from a list of
+ * one. Otherwise '' (no valid selection — the user must choose).
+ */
+export function resolveReasoningLevel(current: string, options: string[]): string {
+  if (current && options.includes(current)) return current;
+  if (options.length === 1) return options[0];
+  return '';
 }

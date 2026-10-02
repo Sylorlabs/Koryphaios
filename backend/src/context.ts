@@ -5,6 +5,7 @@ import { SessionStore } from './stores/session-store';
 import { MessageStore } from './stores/message-store';
 import { TaskStore } from './stores/task-store';
 import { GoalStore } from './stores/goal-store';
+import { ChecklistStore } from './stores/checklist-store';
 import { WSManager } from './ws/ws-manager';
 import { MCPManager } from './mcp/client';
 import { TimeTravelService } from './services/timetravel';
@@ -21,6 +22,7 @@ export interface AppContext {
   messages: MessageStore;
   tasks: TaskStore;
   goals: GoalStore;
+  checklists: ChecklistStore;
   goalDriver: GoalDriveService;
   kory: KoryManager;
   wsManager: WSManager;

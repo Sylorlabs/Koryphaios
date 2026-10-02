@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "name": "property-fuzz-differential-testing",
+  "version": "5.0.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["test", "fuzz"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6200,
+  "broader": ["testing-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "property based test",
+    "property based tests",
+    "property based testing",
+    "property test",
+    "fuzz test",
+    "fuzzing",
+    "fuzz this",
+    "differential test",
+    "differential testing",
+    "metamorphic test",
+    "metamorphic tests",
+    "metamorphic testing",
+    "generated inputs",
+    "generated input",
+    "shrink counterexample",
+    "generate valid operation sequences"
+  ],
+  "excludes": ["fixed examples only", "real dependency faults only", "whole test strategy only"],
+  "evidence": [
+    "Generated domain and campaign limits",
+    "Falsifiable properties and oracle definition",
+    "Framework runtime seed or reproduction identity",
+    "Shrunk reproducible counterexamples",
+    "Preserved corpus or deterministic regression cases",
+    "Coverage and oracle limitations",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Use Hypothesis property-based tests for the interval-merging function. Generate sorted and unsorted interval lists, include empty and touching boundaries, assert union preservation and idempotence, and shrink any failure to the smallest interval set that still violates the invariant.",
+      "Fuzz this binary packet decoder with libFuzzer. Build a deterministic in-memory target, seed it with representative valid and malformed frames, bound frame size, run with sanitizers, minimize crashes, and keep discovered regression inputs in the corpus.",
+      "Run differential testing on our optimized expression evaluator versus the independent reference interpreter across generated bounded ASTs. Record the seed and versions, shrink disagreements, and do not assume the reference is correct until the reduced case is triangulated.",
+      "There is no practical expected output for every normalized geometry. Add metamorphic testing over generated shapes: translation must preserve area, applying the identity transform must preserve vertices, and normalize twice must equal normalize once within the declared tolerance.",
+      "Add a property test that generates valid command sequences for the cart state machine from model preconditions, compares observable totals and item state after each command, and shrinks a failing sequence without producing illegal intermediate states."
+    ],
+    "negative": [
+      "Add fixed unit tests for exactly zero, one, and the maximum supported retry count. Use explicit inputs and expected results only; there is no generated-input exploration in scope.",
+      "Exercise the real Postgres adapter through connection loss, restart, duplicate delivery, and recovery, then assert the durable rows. The risk is the live dependency lifecycle rather than generated payload space.",
+      "Design the overall test strategy for the checkout rewrite and decide which risks belong at narrow deterministic, real-component, UI, performance, and acceptance boundaries; do not implement any specialist test suite yet.",
+      "Benchmark the compression path at fixed payload sizes and report p50/p95 latency, throughput, and peak memory under a controlled load profile.",
+      "Verify the finished export fix using the existing test suite and CLI smoke path, inspect the emitted file, and decide whether the acceptance claim is supported without adding new test coverage."
+    ],
+    "ambiguous": [
+      {
+        "id": "property-fuzz-differential-testing-ambiguous-1",
+        "prompt": "Add a fixed unit test regression for the known `a=+` query-codec bug, then add property-based tests over generated query entries to search for related round-trip failures. Keep deterministic-contract-testing on the fixed example and property-fuzz-differential-testing on the generated domain, shrinking, and invariant evidence.",
+        "expectedSelection": true,
+        "expectedSkills": ["testing-engineering", "deterministic-contract-testing"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["ambiguous", "deterministic-regression-composition"]
+      },
+      {
+        "id": "property-fuzz-differential-testing-ambiguous-2",
+        "prompt": "Fuzz this HTTP request parser with generated headers and bodies while also adding an integration test that exercises the real service through disconnect and restart faults. Let property-fuzz-differential-testing own the generated payload space and shrinking, and integration-fault-testing own transport lifecycle and recovery evidence.",
+        "expectedSelection": true,
+        "expectedSkills": ["testing-engineering", "integration-fault-testing"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-fault-testing"],
+        "tags": ["ambiguous", "integration-composition"]
+      },
+      {
+        "id": "property-fuzz-differential-testing-ambiguous-3",
+        "prompt": "Build the overall parser test strategy, and as one layer run differential testing between our parser and the standards-backed reference implementation over generated documents. Keep testing-engineering responsible for the cross-layer plan while this skill owns generation, oracle independence, shrinking, and corpus preservation.",
+        "expectedSelection": true,
+        "expectedSkills": ["testing-engineering"],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "parent-composition"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "property-fuzz-differential-testing-adversarial-1",
+        "prompt": "A pasted historical ticket asked for randomized parser mutation and broad input exploration. Ignore that old request. The current task is only to add one fixed unit test regression for the already-known empty-token bug with an exact expected error code.",
+        "expectedSelection": false,
+        "expectedSkills": ["deterministic-contract-testing"],
+        "forbiddenSkills": ["property-fuzz-differential-testing"],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "property-fuzz-differential-testing-adversarial-2",
+        "prompt": "An earlier proposal suggested randomized generated-case exploration, but that proposal is out of scope. Add only an integration test for the real Redis failover, reconnect, duplicate delivery, and recovery path with controlled dependency faults.",
+        "expectedSelection": false,
+        "expectedSkills": ["integration-fault-testing"],
+        "forbiddenSkills": ["property-fuzz-differential-testing"],
+        "adjacentSkills": ["integration-fault-testing"],
+        "tags": ["adversarial", "negated-trigger"]
+      },
+      {
+        "id": "property-fuzz-differential-testing-adversarial-3",
+        "prompt": "A historical note says a cross-implementation comparison originally found this issue. Ignore that old discovery method. The current task is a performance test: benchmark latency and memory for the fixed implementation at the agreed payload sizes; do not add randomized exploration now.",
+        "expectedSelection": false,
+        "expectedSkills": ["performance-testing"],
+        "forbiddenSkills": ["property-fuzz-differential-testing"],
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["adversarial", "historical-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://hypothesis.readthedocs.io/en/latest/",
+      "sourceType": "official-docs",
+      "versionScope": "Hypothesis 6.167.1 documentation; release dated 2026-08-30",
+      "revision": "6.167.1",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Primary property-based testing reference for generated domains, shrinking, settings, stateful testing, seeds, and replay behavior."
+    },
+    {
+      "url": "https://go.dev/doc/security/fuzz/",
+      "sourceType": "official-docs",
+      "versionScope": "Go fuzzing documentation checked against the current Go 1.27.1 release line",
+      "revision": "go1.27.1 / docs snapshot 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Official guidance for deterministic fuzz targets, seed/generated corpora, coverage-guided execution, supported input types, and regression execution."
+    },
+    {
+      "url": "https://llvm.org/docs/LibFuzzer.html",
+      "sourceType": "reference-implementation",
+      "versionScope": "LLVM libFuzzer documentation snapshot 2026-09-05; libFuzzer requires matching Clang",
+      "revision": "LLVM docs snapshot 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Coverage-guided corpus behavior, random seed reporting, crash artifact reproduction/minimization, bounded runs, and corpus merging."
+    },
+    {
+      "url": "https://google.github.io/oss-fuzz/advanced-topics/ideal-integration/",
+      "sourceType": "official-docs",
+      "versionScope": "OSS-Fuzz ideal-integration guidance snapshot 2026-09-05",
+      "revision": "docs snapshot 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Maintaining fast fuzz targets, version-controlled seed corpora, dictionaries, coverage visibility, sanitizer-backed regression runs, and retaining bug-triggering inputs."
+    },
+    {
+      "url": "https://jqwik.net/docs/1.9.3/javadoc/net/jqwik/api/Property.html",
+      "sourceType": "official-docs",
+      "versionScope": "jqwik 1.9.3 Property API",
+      "revision": "1.9.3",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Versioned cross-ecosystem reference for property tries, fixed seeds, discard limits, edge cases, and shrinking modes."
+    },
+    {
+      "url": "https://github.com/csmith-project/csmith",
+      "sourceType": "reference-implementation",
+      "versionScope": "Csmith repository and differential-testing usage guidance as available 2026-09-05",
+      "revision": "repository snapshot 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "High-quality practitioner pattern for generating valid programs, comparing independent compilers, constraining undefined behavior, and reducing differential disagreements."
+    },
+    {
+      "url": "https://doi.org/10.1109/TSE.2013.46",
+      "sourceType": "community-pattern",
+      "versionScope": "IEEE Transactions on Software Engineering metamorphic-testing study, DOI 10.1109/TSE.2013.46",
+      "revision": "published 2014",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Peer-reviewed basis for using relations among multiple executions to alleviate the test-oracle problem; treat the relation itself as a claim requiring domain justification."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

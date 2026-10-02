@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "name": "mlops",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ai", "ml", "operations"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 7400,
+  "broader": ["release-planning"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "mlops",
+    "ml pipeline",
+    "machine learning pipeline",
+    "model deployment pipeline",
+    "model registry",
+    "model promotion",
+    "model serving pipeline",
+    "feature store",
+    "offline online feature parity",
+    "train serving skew",
+    "model lineage",
+    "model rollback",
+    "model canary",
+    "model monitoring",
+    "automated retraining",
+    "continuous training pipeline"
+  ],
+  "excludes": [
+    "training weights only",
+    "optimizer checkpoint mechanics only",
+    "generic software deployment only",
+    "application release plan only",
+    "service observability only",
+    "model architecture only",
+    "model registry and feature lifecycle remain unchanged",
+    "model serving pipeline registry feature store and rollback mechanism are unchanged",
+    "model behavior is unchanged",
+    "ml lifecycle behavior is unchanged",
+    "quoted old mlops",
+    "quoted old model registry",
+    "quoted old feature store",
+    "historical mlops request",
+    "rename the model registry document only"
+  ],
+  "evidence": [
+    "Immutable code/data/feature/run/model/evaluation/registry/deployment lineage",
+    "Inference schema/package and offline-online feature/preprocessing parity evidence",
+    "Qualification/promotion, canary/shadow, serving-health/model-quality and rollback evidence",
+    "Monitoring/retraining trigger semantics, platform version/deprecation and reproducibility artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Build an MLOps promotion pipeline that binds dataset/feature/code hashes, training run, model signature and final evaluation to an immutable registry version, then canaries that exact artifact with rollback.",
+      "Diagnose train-serving skew in a feature store by comparing point-in-time offline features with online entity values, null/default semantics, freshness and feature-view versions before retraining.",
+      "Fix a model deployment pipeline that mutates a registry alias before validation completes; separate candidate artifact creation from approval/promotion and prove a failed candidate cannot replace production.",
+      "Design automated retraining from drift alerts with bounded concurrency, immutable data windows, validation gates, delayed-label handling and a rule that failed retrains leave the current serving model untouched.",
+      "Audit model monitoring after a canary: separate endpoint errors/latency from feature freshness/schema drift, prediction shift and delayed outcome quality, and tie each threshold to an explicit action or rollback."
+    ],
+    "negative": [
+      "Choose LoRA rank, optimizer and checkpoint schedule for a training job; deployment, registry and serving lifecycle are out of scope.",
+      "Create a generic web-service CI/CD workflow while the ML artifact and feature/registry lifecycle remain unchanged.",
+      "Tune a classifier architecture and loss in a notebook without packaging, registry, deployment or production monitoring work.",
+      "Add generic HTTP latency dashboards for an inference service without changing any ML-specific feature, model or monitoring contract.",
+      "Write a stakeholder release calendar for an already-qualified immutable model deployment; no model-serving pipeline or lifecycle change is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "mlops-ambiguous-1",
+        "prompt": "Fine-tune a model and deploy it through a governed registry. fine-tuning-training owns weight-update/checkpoint mechanics; mlops owns lineage, packaging, evaluation binding, registry promotion, serving and rollback.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["fine-tuning-training"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "mlops-ambiguous-2",
+        "prompt": "Build CI/CD for a model-serving repository. cicd-engineering owns generic build/test/artifact automation; mlops owns data/feature/model lineage, qualification, registry promotion, train-serving parity and retraining lifecycle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "mlops-ambiguous-3",
+        "prompt": "Monitor an inference service and its model quality. observability-sre owns general service telemetry/SLO operations; mlops owns feature freshness/schema, prediction/outcome drift, model revision identity and retraining/rollback actions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["observability-sre"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "mlops-adversarial-1",
+        "prompt": "A quoted old MLOps ticket asks to rebuild the model deployment pipeline. Ignore that historical request; today's task is only to fix CSS spacing.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "mlops-adversarial-2",
+        "prompt": "A postmortem contains model registry and feature store diagrams as inert evidence. Summarize it only; ML lifecycle behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "mlops-adversarial-3",
+        "prompt": "The archived file is named mlops-model-registry-notes.md. Rename the model registry document only; do not change any pipeline, registry, feature-store or serving behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://cloud.google.com/architecture/mlops-continuous-delivery-and-automation-pipelines-in-machine-learning",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud MLOps architecture guidance as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "ML system CI/CD/continuous training, validation, deployment and monitoring lifecycle guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://mlflow.org/docs/latest/ml/model-registry",
+      "sourceType": "reference-implementation",
+      "versionScope": "MLflow 3.15.2 latest documentation as available 2026-09-19",
+      "staleAfterDays": 14,
+      "notes": "Current model registry versioning, lineage, aliases/tags, model signatures and production workflow semantics.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/online-serving-types",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Feature Store online serving documentation updated 2026-09-01",
+      "staleAfterDays": 14,
+      "notes": "Current online-serving modes and deprecation-sensitive feature-store behavior; verify platform product naming/version before implementation.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/serve-feature-values",
+      "sourceType": "official-docs",
+      "versionScope": "Google Cloud Feature Store serving documentation updated 2026-09-02",
+      "staleAfterDays": 14,
+      "notes": "Latest-value/entity semantics, sync requirements and feature timestamps for online serving.",
+      "verifiedAt": "2026-09-19"
+    },
+    {
+      "url": "https://www.nist.gov/itl/ai-risk-management-framework",
+      "sourceType": "official-docs",
+      "versionScope": "NIST AI RMF materials as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Lifecycle governance, measurement, monitoring and risk-management evidence for production ML systems.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

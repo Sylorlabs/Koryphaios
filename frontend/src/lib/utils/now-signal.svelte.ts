@@ -50,3 +50,44 @@ export function useNow(): { now: number; unsubscribe: () => void } {
 export function getNow(): number {
   return now;
 }
+
+// ─── Second-resolution clock ────────────────────────────────────────────────
+// Goal Mode shows how long a goal has been going down to the second, which the
+// 30s clock above is far too coarse for. This is a separate ref-counted 1s
+// interval so only components that genuinely display seconds pay for it.
+
+let secondNow = $state(Date.now());
+let secondSubscribers = 0;
+let secondTimer: ReturnType<typeof setInterval> | undefined;
+
+function startSeconds(): void {
+  if (secondTimer !== undefined) return;
+  secondNow = Date.now();
+  secondTimer = setInterval(() => (secondNow = Date.now()), 1_000);
+}
+
+function stopSeconds(): void {
+  if (secondTimer === undefined) return;
+  clearInterval(secondTimer);
+  secondTimer = undefined;
+}
+
+/** Subscribe to the shared 1s clock. The timer runs only while subscribed. */
+export function useSecondClock(): { now: number; unsubscribe: () => void } {
+  if (browser) {
+    secondSubscribers++;
+    startSeconds();
+  }
+  return {
+    get now() {
+      return secondNow;
+    },
+    unsubscribe: () => {
+      secondSubscribers--;
+      if (secondSubscribers <= 0) {
+        secondSubscribers = 0;
+        stopSeconds();
+      }
+    },
+  };
+}

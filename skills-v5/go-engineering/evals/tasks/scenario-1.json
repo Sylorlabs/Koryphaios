@@ -1,0 +1,82 @@
+{
+  "id": "go-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Go HTTP batch endpoint that launches one goroutine per downstream request but leaks goroutines when the client cancels and one downstream call never returns. Preserve bounded concurrency and partial-result semantics, propagate context cancellation, close channels exactly once, and verify cancellation, timeout, one slow dependency, all-success, and race-detector/goroutine-count stability.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://go-engineering/context-goroutine-leak",
+    "requirements": [
+      "Go HTTP handler with injectable downstream clients including one that blocks until context cancellation",
+      "bounded concurrency requirement and partial-result response contract",
+      "race detector plus goroutine-count/leak test across repeated cancelled requests",
+      "existing public response fields and timeout behavior that must remain compatible",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "go-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "go-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "go-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "context-goroutine-leak scenario evidence",
+    "go-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "go-engineering-individual-scenario-1-result",
+    "go-engineering-individual-scenario-1-verification",
+    "go-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual go-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Keep interfaces consumer-owned and small."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Every goroutine has a bounded owner and cancellation path; request completion/cancellation cannot leave blocked workers or double-close shared coordination channels."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run go test across affected packages, race detection for concurrent changes when feasible, and representative cancellation or shutdown tests."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not launch orphan goroutines, close channels from receivers, discard context, compare wrapped errors by string, or create interfaces solely for mocking."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (go-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

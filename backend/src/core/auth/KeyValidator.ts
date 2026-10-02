@@ -44,6 +44,14 @@ const ENDPOINTS: Record<string, { url: string; auth: 'x-api-key' | 'bearer' | 'q
     url: 'https://openrouter.ai/api/v1/models',
     auth: 'bearer',
   },
+  unorouter: {
+    url: 'https://api.unorouter.com/v1/models',
+    auth: 'bearer',
+  },
+  experientiallabs: {
+    url: 'https://api.experientiallabs.ai/v1/models',
+    auth: 'bearer',
+  },
   xai: {
     url: 'https://api.x.ai/v1/models',
     auth: 'bearer',

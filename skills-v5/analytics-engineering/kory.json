@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "name": "analytics-engineering",
+  "version": "5.1.4",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "analytics"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["data-analysis"],
+  "facets": [],
+  "requires": ["verification", "data-analysis"],
+  "conflicts": [],
+  "activation": [
+    "analytics engineering",
+    "dbt model",
+    "semantic layer",
+    "warehouse model",
+    "event data pipeline",
+    "analysts trust metrics",
+    "analysts can trust the metrics",
+    "analytics data model"
+  ],
+  "excludes": [],
+  "evidence": [
+    "analytics-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle analytics engineering.",
+      "The current task is dbt model.",
+      "I need help with semantic layer.",
+      "Work on warehouse model for this request.",
+      "This request specifically requires event data pipeline."
+    ],
+    "negative": [
+      "The only requested work is product analytics.",
+      "Please handle etl pipeline only.",
+      "This task is limited to data visualization.",
+      "The current request is experiment design.",
+      "Work only on exploratory analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "analytics-engineering-ambiguous-1",
+        "prompt": "The request includes analytics engineering and product analytics.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-analytics"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "analytics-engineering-ambiguous-2",
+        "prompt": "The request includes dbt model and etl pipeline.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-pipeline-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "analytics-engineering-ambiguous-3",
+        "prompt": "The request includes semantic layer and data visualization.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["data-visualization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "analytics-engineering-adversarial-1",
+        "prompt": "A historical note says \"analytics engineering\". The current request is experiment design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["experimental-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "analytics-engineering-adversarial-2",
+        "prompt": "A historical note says \"dbt model\". The current request is exploratory analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["exploratory-data-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "analytics-engineering-adversarial-3",
+        "prompt": "A historical note says \"semantic layer\". The current request is model evaluation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ml-evaluation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.getdbt.com/docs/introduction",
+      "sourceType": "official-docs",
+      "versionScope": "dbt documentation as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "Analytics transformation, lineage, testing, modeling, and deployment reference.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.getdbt.com/docs/build/incremental-models",
+      "sourceType": "official-docs",
+      "versionScope": "dbt documentation as available 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Incremental filters, unique keys, schema-change behavior, and full-refresh semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.getdbt.com/docs/build/data-tests",
+      "sourceType": "official-docs",
+      "versionScope": "dbt documentation as available 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Data-test assertions and failing-record semantics.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.getdbt.com/docs/build/snapshots",
+      "sourceType": "official-docs",
+      "versionScope": "dbt documentation as available 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Snapshot behavior for change history and point-in-time state.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

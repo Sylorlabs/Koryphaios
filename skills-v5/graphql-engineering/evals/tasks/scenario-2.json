@@ -1,0 +1,82 @@
+{
+  "id": "graphql-engineering-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "A GraphQL orders query makes hundreds of customer lookups and an attempted global DataLoader cache leaks customer objects between authenticated requests. Fix batching/cache lifetime at the GraphQL request boundary, preserve per-request authorization context, and verify query count, duplicate keys, partial backend errors, two simultaneous users, and subscription/request lifecycle separation. Do not disable batching entirely.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://graphql-engineering/n-plus-one-loader-scope",
+    "requirements": [
+      "orders/customer schema and resolver fixture with instrumented backend lookup counts",
+      "two authenticated request contexts with overlapping customer ids but different visibility",
+      "DataLoader implementation currently scoped globally",
+      "tests for batching, cache isolation, error propagation, and request teardown",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "graphql-engineering-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "graphql-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "graphql-engineering-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "n-plus-one-loader-scope scenario evidence",
+    "graphql-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "graphql-engineering-individual-scenario-2-result",
+    "graphql-engineering-individual-scenario-2-verification",
+    "graphql-engineering-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual graphql-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=http-rest-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Design schema types from durable domain semantics and client composition needs."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Batch/cache state is request-scoped and authorization-aware; optimization can reduce duplicate loads without allowing data or errors to cross caller boundaries."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Test representative queries/mutations, N+1/batching, partial errors, null propagation, pagination, authorization bypass attempts, schema compatibility, and query-cost controls."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not expose arbitrary database graphs, make every field nullable to avoid schema decisions, put authorization only in top-level resolvers, or break clients by changing nullability/enums casually."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (graphql-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

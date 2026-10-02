@@ -1,0 +1,77 @@
+{
+  "id": "repo-discovery-full-task-wrong-checkout-runtime",
+  "prompt": "Implement a small UI change when the starting directory has a similarly named sibling checkout and the task does not state the framework. Resolve the exact repository, read the instructions governing the target files, identify the installed native toolkit/version, and verify the change in the representative project path.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://repository-discovery/sibling-checkouts-native-ui",
+    "requirements": [
+      "two similarly named checkouts",
+      "nested AGENTS.md",
+      "native project metadata",
+      "representative verification command"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "sibling-checkout-identity",
+      "assertion": "The target repository root is established from task/repository evidence and the similarly named sibling checkout receives no writes."
+    },
+    {
+      "id": "sibling-checkout-instruction-chain",
+      "assertion": "All instruction files governing the target UI files are discovered and their applicable constraints are reflected in the implementation."
+    },
+    {
+      "id": "sibling-checkout-toolkit-version",
+      "assertion": "The native toolkit/framework and installed version are derived from project metadata/runtime evidence before selecting APIs or component patterns."
+    },
+    {
+      "id": "sibling-checkout-existing-pattern",
+      "assertion": "The small UI change follows an existing implementation pattern in the target project unless a specific divergence is justified by the request or platform contract."
+    },
+    {
+      "id": "sibling-checkout-representative-proof",
+      "assertion": "Verification runs through the representative target project/toolchain and demonstrates the requested UI behavior; success in the sibling checkout or an unrelated generic build cannot satisfy the task."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "repository-and-instruction-identity",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "resolved repository root",
+        "applicable instruction chain",
+        "no writes to sibling checkout"
+      ]
+    },
+    {
+      "id": "runtime-and-verification-identity",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "toolkit/version evidence",
+        "existing implementation pattern",
+        "representative verification result"
+      ]
+    },
+    {
+      "id": "blind-environment-correctness",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "resolved repository root",
+    "applicable instruction chain",
+    "toolkit/version evidence",
+    "representative verification result"
+  ],
+  "requiredArtifacts": [
+    "discovery-report",
+    "task-diff",
+    "verification-report",
+    "paired-experiment-report"
+  ]
+}

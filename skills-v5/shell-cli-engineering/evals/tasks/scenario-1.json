@@ -1,0 +1,82 @@
+{
+  "id": "shell-cli-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Harden a shell CLI that batch-renames files from a CSV mapping. Current code word-splits paths, overwrites existing destinations, and leaves half the directory renamed when one move fails. Preserve dry-run and exit-code behavior, handle spaces/newlines as far as the documented format permits, preflight collisions/cycles, perform recoverable ordering, and verify partial failure, interrupt, duplicate destination, symlink, and dry-run with no mutation.",
+  "environment": {
+    "kind": "cli",
+    "startingState": "fixture://shell-cli-engineering/safe-batch-rename-cli",
+    "requirements": [
+      "temporary filesystem corpus with spaces, symlinks, rename cycles, and destination collision",
+      "CSV mapping grammar and existing dry-run/output/exit-code contract",
+      "fault injection on one move plus signal interruption sequence",
+      "before/after tree manifest proving no silent overwrite/data loss",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "shell-cli-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "shell-cli-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "shell-cli-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "safe-batch-rename-cli scenario evidence",
+    "shell-cli-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "shell-cli-engineering-individual-scenario-1-result",
+    "shell-cli-engineering-individual-scenario-1-verification",
+    "shell-cli-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual shell-cli-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=terminal-interface; near-neighbor=agentic-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Treat quoting, word splitting, globbing, environment inheritance, signals, stdin/stdout/stderr, working directories, and exit codes as interfaces."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Path handling never depends on unsafe word splitting/globbing, and mutations are preflighted/ordered so failure cannot silently overwrite or orphan user files."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise paths with spaces and special characters, missing inputs, failed child commands, interrupted execution, non-interactive use, and the supported shell/runtime."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not eval untrusted text, parse human-formatted output when a stable interface exists, overwrite broad paths through unresolved variables, or make success depend on interactive shell configuration."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (shell-cli-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

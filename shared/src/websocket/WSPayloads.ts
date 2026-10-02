@@ -1,11 +1,7 @@
 // WebSocket Message Payloads
 // Domain: Payload structures for all WebSocket event types
 
-import type {
-  ProviderName,
-  ModelDef,
-  CustomProviderIconConfig,
-} from '../providers/ModelDefs';
+import type { ProviderName, ModelDef, CustomProviderIconConfig } from '../providers/ModelDefs';
 import type { AgentRole, AgentStatus, WorkerDomain } from '../types/AgentTypes';
 
 // Re-export these types to avoid circular dependency
@@ -28,6 +24,13 @@ export type ContextBreakdown = {
   tools: number;
   /** Conversation only: what the user typed + what the agent typed back. */
   chat: number;
+  /** Injected skill guidance chars/4. Skill promptText ships inside the
+   *  compiled system prompt; the backend carves it out at dispatch so the
+   *  bar shows Skills instead of inflating System. */
+  skills: number;
+  /** Generated output tokens from the provider usage report, patched in
+   *  post-dispatch when usageKnown. 0 at dispatch (unknown yet). */
+  output: number;
 };
 
 export type StreamUsage = {
@@ -38,9 +41,23 @@ export type StreamUsage = {
   tokensOut: number;
   tokensUsed: number;
   usageKnown: boolean;
+  /** True when tokensIn/tokensUsed is an estimate rather than an exact
+   *  provider-reported occupancy — e.g. an agentic CLI harness whose
+   *  turn-level total is cumulative across its internal requests (Codex), or
+   *  a value clamped down to the trusted window because the raw total was
+   *  impossibly large. Estimated occupancy must never trigger auto-compact. */
+  estimated?: boolean;
   /** Provider-reported cached input already included in tokensIn. This
    *  explains billing/prompt reuse without double-counting context. */
   cachedInputTokens?: number;
+  /** Provider-reported input tokens written into prompt cache this turn. */
+  cacheWriteInputTokens?: number;
+  /** Estimated turn cost using the resolved provider/model pricing table. */
+  estimatedCostUsd?: number;
+  /** Estimated delta versus pricing the same input entirely as fresh input.
+   * Positive means prompt caching reduced cost; negative means cache-write
+   * premiums outweighed cache-read savings for this turn. */
+  cacheSavingsUsd?: number;
   contextWindow?: number;
   contextKnown: boolean;
   /** Where the context limit came from. Live provider/CLI data is preferred;
@@ -67,6 +84,8 @@ export interface AgentStatusPayload {
   agentId: string;
   status: AgentStatus;
   detail?: string;
+  /** True when a turn-cap exit still has pending work and a followup is queued. */
+  continuationNeeded?: boolean;
 }
 
 /** agent.heartbeat — periodic "the run is still alive" signal emitted by the
@@ -88,6 +107,11 @@ export interface AgentThreadMessagePayload {
     content: string;
     createdAt: number;
   };
+}
+
+/** Payload for the `agent.message` event (inter-agent mailbox updates). */
+export interface AgentMessageEventPayload {
+  message: import('../types/MessagingTypes').AgentMessage;
 }
 
 export interface ThinkingPayload {
@@ -405,7 +429,7 @@ export interface RateLimitPayload {
  * with the provider's display name so the user can see the harness's reply.
  */
 export interface NativeCommandPayload {
-  /** Koryphaios provider id (claude, codex, devin, grok, cursor, cline, antigravity, kimicode). */
+  /** Koryphaios provider id (claude, codex, devin, grok, cursor, antigravity, kimicode). */
   provider: string;
   /** Display name of the provider harness (e.g. "Claude Code"). */
   providerLabel: string;

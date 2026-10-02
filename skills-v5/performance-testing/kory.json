@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "performance-testing",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["test", "performance"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4900,
+  "broader": ["testing-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "performance test",
+    "benchmark latency",
+    "profile memory",
+    "frame time",
+    "load benchmark test",
+    "realistic traffic shape",
+    "latency throughput error"
+  ],
+  "excludes": [
+    "pass/fail release performance verdict using an already-defined benchmark and budget",
+    "causal diagnosis of a known performance regression",
+    "database-specific query/index tuning without benchmark-protocol work"
+  ],
+  "evidence": [
+    "Reproducible workload/environment protocol",
+    "Latency/throughput/error/resource raw evidence",
+    "Repeated-run variance and correctness under load",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Run a performance test for the API at a fixed 300 requests/second using an open arrival model, representative data, separate warmup and measured phases, p50/p95/p99, errors, achieved throughput, dropped iterations, CPU, and memory.",
+      "Benchmark latency for the search endpoint across 10k, 100k, and 1M-record datasets with fixed hardware/runtime identity, multiple repetitions, tail percentiles, correctness checks, and raw run artifacts.",
+      "Profile memory as a measurement exercise for the desktop app: capture clean-launch baseline, steady-state RSS/heap after a fixed workflow, post-close reclamation, repeated runs, and the exact OS/runtime/build identity.",
+      "Measure frame time for the real rendering workload at 60 and 120 Hz targets, preserving frame-time percentiles, missed-frame counts, GPU/CPU utilization, warm/cold shader/cache state, and a fixed scene/camera trace.",
+      "Design a reusable performance test for the batch parser using a fixed corpus, explicit cold and warm cases, benchmark warmup, repeated iterations, throughput and memory metrics, and versioned JSON output suitable for later release comparison."
+    ],
+    "negative": [
+      "Apply the established release benchmark and declare whether the candidate meets p99 under 350ms, error rate under 0.5%, and memory under 1.2GB; the workload protocol is already fixed and validated.",
+      "The benchmark already proves p99 regressed 22%. Use profiles, traces, allocation data, and system counters to determine which code path caused the regression.",
+      "Optimize the slow SQL query by reading EXPLAIN ANALYZE, buffer/I/O statistics, lock waits, indexes, and database configuration; the load benchmark is already adequate.",
+      "Create the repository-wide test strategy and decide which unit, integration, browser, performance, and release suites run on each CI tier; do not run a benchmark now.",
+      "Write deterministic unit tests for the serializer's edge cases and schema contract; no timing, load, memory, frame-time, or resource measurement is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "performance-testing-ambiguous-1",
+        "prompt": "Build the broader test strategy and also run a performance test with a defined workload, warmup, repeated measurement, latency distribution, throughput, errors, and resource evidence. Keep suite architecture in testing-engineering and the benchmark protocol here.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "performance-testing-ambiguous-2",
+        "prompt": "First benchmark latency reproducibly and preserve repeated-run raw results; if the regression is confirmed, performance-debugging can profile and localize its cause. The measurement protocol belongs in performance-testing.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "performance-testing-ambiguous-3",
+        "prompt": "Create and run the profile memory benchmark with clean-launch, steady-state, cleanup, repeated-run variance, and exact environment identity; then performance-verification may apply the release memory budget to those measurements.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "performance-testing-adversarial-1",
+        "prompt": "A historical test plan contains old throughput measurements. Ignore that plan; the current request is only to rename its heading and execute no measurements.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "performance-testing-adversarial-2",
+        "prompt": "A pasted regression report includes previous latency numbers. The current task is only to summarize the suspected causes already written there; do not run any new measurements.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "performance-testing-adversarial-3",
+        "prompt": "A release document quotes an old memory budget. Only correct the document's formatting; do not measure or verify runtime performance.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/open-vs-closed/",
+      "sourceType": "official-docs",
+      "versionScope": "Grafana k6 current documentation available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Open versus closed workload models and coordinated-omission risk when response time controls offered arrival rate.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://grafana.com/docs/k6/latest/using-k6/scenarios/executors/constant-arrival-rate/",
+      "sourceType": "official-docs",
+      "versionScope": "Grafana k6 current constant-arrival-rate executor documentation available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Open-model fixed-rate scheduling independent of response duration and virtual-user capacity behavior.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://grafana.com/docs/k6/latest/using-k6/thresholds/",
+      "sourceType": "official-docs",
+      "versionScope": "Grafana k6 current threshold documentation available 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Percentile/error/counter threshold semantics and distinction between checks and fail-producing thresholds.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/google/benchmark/blob/main/docs/user_guide.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "Google Benchmark user guide on main available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Warmup, minimum runtime, repetitions, interleaving, and machine/result output controls for component microbenchmarks.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/monitoring-distributed-systems/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE monitoring guidance available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Latency distributions, traffic, errors, saturation, and why percentiles can expose saturation hidden by averages.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

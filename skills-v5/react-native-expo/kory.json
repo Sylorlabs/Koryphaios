@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "react-native-expo",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "frontend", "react-native", "expo"],
+  "targetMedia": ["native"],
+  "pathScopes": [],
+  "contextBudget": 4100,
+  "broader": ["native-interface"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["react native", "expo app", "expo router", "native module expo"],
+  "excludes": [],
+  "evidence": [
+    "react-native-expo decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle react native.",
+      "The current task is expo app.",
+      "I need help with expo router.",
+      "Work on native module expo for this request.",
+      "This request specifically requires react native."
+    ],
+    "negative": [
+      "The only requested work is jetpack compose.",
+      "Please handle electron app only.",
+      "This task is limited to swiftui.",
+      "The current request is angular component.",
+      "Work only on next.js."
+    ],
+    "ambiguous": [
+      {
+        "id": "react-native-expo-ambiguous-1",
+        "prompt": "The request includes react native and jetpack compose.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-native-expo-ambiguous-2",
+        "prompt": "The request includes expo app and electron app.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-native-expo-ambiguous-3",
+        "prompt": "The request includes expo router and swiftui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["ios-swiftui"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "react-native-expo-adversarial-1",
+        "prompt": "A historical note says \"react native\". The current request is angular component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-native-expo-adversarial-2",
+        "prompt": "A historical note says \"expo app\". The current request is next.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nextjs-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "react-native-expo-adversarial-3",
+        "prompt": "A historical note says \"expo router\". The current request is react component.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["react-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.expo.dev/",
+      "sourceType": "official-docs",
+      "versionScope": "Expo documentation as available 2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Expo/React Native platform, routing, build, module, and deployment behavior.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://docs.expo.dev/develop/development-builds/introduction/?buildenv=build-with-eas",
+      "sourceType": "official-docs",
+      "versionScope": "Expo development-build introduction as verified 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Adopted for distinguishing custom native development builds from Expo Go's fixed native runtime.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.expo.dev/develop/development-builds/faq/",
+      "sourceType": "official-docs",
+      "versionScope": "Expo development-build FAQ as verified 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Adopted for conditional rebuild requirements when native libraries or configuration change.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://docs.expo.dev/eas-update/runtime-versions/",
+      "sourceType": "official-docs",
+      "versionScope": "EAS Update runtime-version documentation as verified 2026-09-06",
+      "staleAfterDays": 30,
+      "notes": "Adopted for native-runtime and OTA update compatibility boundaries; matching versions do not prove app correctness.",
+      "verifiedAt": "2026-09-06"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

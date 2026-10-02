@@ -156,11 +156,14 @@ describe('tool and command audit confidentiality', () => {
     expect(Buffer.byteLength(output)).toBeLessThan(24_000);
   });
 
-  test('manager registration path uses the content-free audit helper', () => {
-    const manager = readFileSync(resolve(import.meta.dir, '../../kory/manager.ts'), 'utf8');
-    const registrationSection = manager.slice(
-      manager.indexOf('const bgMatch ='),
-      manager.indexOf('const agenticArchiveId ='),
+  test('turn runtime registration path uses the content-free audit helper', () => {
+    const runtime = readFileSync(
+      resolve(import.meta.dir, '../../kory/services/TurnRuntime.ts'),
+      'utf8',
+    );
+    const registrationSection = runtime.slice(
+      runtime.indexOf('const bgMatch ='),
+      runtime.indexOf('const agenticArchiveId ='),
     );
 
     expect(registrationSection).toContain('logBackgroundRegistrationFailure({');

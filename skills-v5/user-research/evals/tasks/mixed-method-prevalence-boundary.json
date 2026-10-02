@@ -1,0 +1,80 @@
+{
+  "id": "user-research-full-task-mixed-method-prevalence-boundary",
+  "prompt": "The product team has six interviews suggesting operators bypass an alert and wants to announce that most operators do it. Produce a next-step research design that preserves the qualitative finding, investigates why the behavior occurs, and specifies the sampling, questionnaire, or behavioral evidence needed before making a prevalence claim. The fixture includes interview notes, a draft leading survey, and incomplete telemetry.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://user-research/mixed-method-prevalence",
+    "requirements": [
+      "qualitative interview notes",
+      "draft survey",
+      "partial behavioral telemetry",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "mixed-method-no-prevalence-from-interviews",
+      "assertion": "Six qualitative interviews may support an observed behavior/theme but are explicitly insufficient to claim that most operators bypass the alert."
+    },
+    {
+      "id": "mixed-method-why-versus-how-many",
+      "assertion": "The design separates qualitative investigation of why/when bypass occurs from quantitative estimation of how common it is and assigns evidence appropriate to each claim."
+    },
+    {
+      "id": "mixed-method-survey-bias",
+      "assertion": "The supplied leading survey item is identified and replaced with neutral, interpretable measurement tied to a defined target population and behavior/time frame."
+    },
+    {
+      "id": "mixed-method-sampling-telemetry",
+      "assertion": "Any prevalence estimate specifies target population, sample/construction or behavioral denominator, known telemetry missingness/coverage, and uncertainty rather than treating incomplete telemetry as representative by default."
+    },
+    {
+      "id": "mixed-method-claim-evidence-boundary",
+      "assertion": "The final claim/evidence matrix preserves the qualitative finding and states exactly what additional evidence is required before a population prevalence statement is supportable."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "qualitative-quantitative-boundary",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "no prevalence inference from six interviews",
+        "separate why from how-many questions",
+        "representative evidence requirement",
+        "telemetry limitations"
+      ]
+    },
+    {
+      "id": "survey-and-evidence-rigor",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "leading-question repair",
+        "target population",
+        "sample construction",
+        "uncertainty and reporting plan"
+      ]
+    },
+    {
+      "id": "blind-mixed-method-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "claim-to-method map",
+    "survey bias review",
+    "sampling boundary",
+    "telemetry limitations",
+    "uncertainty statement"
+  ],
+  "requiredArtifacts": [
+    "mixed-method-plan",
+    "survey-review",
+    "claim-evidence-matrix",
+    "paired-experiment-report"
+  ]
+}

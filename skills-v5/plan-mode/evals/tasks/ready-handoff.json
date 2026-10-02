@@ -1,0 +1,76 @@
+{
+  "id": "plan-mode-full-task-ready-handoff",
+  "prompt": "Continue Plan mode after all decision-changing questions have been answered. Reconcile the repository evidence and confirmed decisions into the final dependency-ordered plan, keep implementation files unchanged, synchronize the durable plan note, and emit the readiness marker only if the host validator accepts the complete plan.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://plan-mode/decisions-resolved-ready-for-plan",
+    "requirements": [
+      "read-only implementation workspace",
+      "plan-note service",
+      "resolved question decisions",
+      "readiness validator"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "ready-plan-no-implementation-write",
+      "assertion": "The implementation workspace digest remains unchanged while the final plan and durable plan note are produced."
+    },
+    {
+      "id": "ready-plan-complete-actionable-structure",
+      "assertion": "The final plan contains the required decision summary, current-state evidence, dependency-ordered implementation steps, user/failure states where material, risks/alternatives, acceptance criteria, verification, and remaining assumptions with actionable file/system ownership."
+    },
+    {
+      "id": "ready-plan-decision-reconciliation",
+      "assertion": "All previously resolved decision-changing questions are reflected consistently in the plan; the plan does not silently reopen, contradict, or replace confirmed decisions."
+    },
+    {
+      "id": "ready-plan-durable-sync",
+      "assertion": "The durable plan note is synchronized to the final plan/confirmed decisions and remains a usable handoff artifact rather than a stale discovery checkpoint."
+    },
+    {
+      "id": "ready-plan-marker-gate",
+      "assertion": "The readiness marker appears exactly once and only after the host readiness validator accepts the complete plan."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "plan-mode-readiness-contract",
+      "kind": "deterministic",
+      "weight": 0.45,
+      "evidence": [
+        "required plan sections",
+        "actionable implementation steps",
+        "validator success",
+        "single KORY_PLAN_READY marker"
+      ]
+    },
+    {
+      "id": "plan-mode-durable-handoff",
+      "kind": "deterministic",
+      "weight": 0.3,
+      "evidence": [
+        "plan-note synchronized",
+        "confirmed decisions preserved",
+        "implementation tree unchanged"
+      ]
+    },
+    {
+      "id": "blind-plan-actionability",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and baseline final-plan artifacts",
+        "independent evaluator record"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "required plan sections",
+    "validator success",
+    "plan-note synchronized",
+    "implementation tree unchanged"
+  ],
+  "requiredArtifacts": ["final-plan", "plan-note", "readiness-report", "paired-experiment-report"]
+}

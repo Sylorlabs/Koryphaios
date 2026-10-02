@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "name": "embedded-interface",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ui", "embedded", "safety"],
+  "targetMedia": ["embedded"],
+  "pathScopes": [],
+  "contextBudget": 4400,
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "content-error-design", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "embedded ui",
+    "device interface",
+    "appliance display",
+    "industrial panel",
+    "button driven display",
+    "device display",
+    "small device screen",
+    "physical button navigation"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Human-device safety contract",
+    "Hardware or faithful simulation evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle embedded ui.",
+      "The current task is device interface.",
+      "I need help with appliance display.",
+      "Work on industrial panel for this request.",
+      "This request specifically requires button driven display."
+    ],
+    "negative": [
+      "The only requested work is game ui.",
+      "Please handle native only.",
+      "This task is limited to ui toolkit.",
+      "The current request is terminal.",
+      "Work only on visual verification."
+    ],
+    "ambiguous": [
+      {
+        "id": "embedded-interface-ambiguous-1",
+        "prompt": "The request includes embedded ui and game ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-interface-ambiguous-2",
+        "prompt": "The request includes device interface and native.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-interface-ambiguous-3",
+        "prompt": "The request includes appliance display and ui toolkit.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["novel-ui-toolkit"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "embedded-interface-adversarial-1",
+        "prompt": "A historical note says \"embedded ui\". The current request is terminal.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-interface-adversarial-2",
+        "prompt": "A historical note says \"device interface\". The current request is visual verification.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "embedded-interface-adversarial-3",
+        "prompt": "A historical note says \"appliance display\". The current request is web.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["web-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.fda.gov/regulatory-information/search-fda-guidance-documents/applying-human-factors-and-usability-engineering-medical-devices",
+      "sourceType": "official-docs",
+      "versionScope": "FDA human-factors/usability engineering guidance as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Safety-critical human-device interaction, use-related hazards, validation, and representative-use conditions.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

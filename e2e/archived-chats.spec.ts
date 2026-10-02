@@ -1,3 +1,4 @@
+import { type Locator, type Page } from '@playwright/test';
 import { test, expect } from './helpers/fixture';
 
 interface LifecycleSession {
@@ -18,6 +19,18 @@ function escaped(value: string): string {
 
 function openSessionName(title: string): RegExp {
   return new RegExp(`^Open session ${escaped(title)}(?:, currently open)?$`);
+}
+
+/** Archiving now warns that the session's agent tree is stopped, so click through it. */
+async function archiveSessionRow(page: Page, row: Locator): Promise<void> {
+  await row.getByRole('button', { name: 'Archive chat' }).click();
+
+  const warning = page.getByRole('alertdialog');
+  await expect(warning).toContainText(
+    'Archiving this session will stop the current agent and all of its sub-agents',
+  );
+  await warning.getByRole('button', { name: 'Archive Session' }).click();
+  await expect(warning).toHaveCount(0);
 }
 
 test('archives a chat and manages its complete lifecycle from Settings', async ({
@@ -79,7 +92,18 @@ test('archives a chat and manages its complete lifecycle from Settings', async (
     );
   expect(lifecycleActions).toEqual(['Rename session', 'Archive chat', 'Delete session']);
 
-  await sessionRow.getByRole('button', { name: 'Archive chat' }).click();
+  // Deleting carries the equivalent warning, verb-swapped, and can be backed out.
+  await sessionRow.getByRole('button', { name: 'Delete session' }).click();
+  const deleteWarning = page.getByRole('alertdialog');
+  await expect(deleteWarning).toContainText(
+    'Deleting this session will stop the current agent and all of its sub-agents',
+  );
+  await expect(deleteWarning.getByRole('button', { name: "Don't show again" })).toBeVisible();
+  await deleteWarning.getByRole('button', { name: 'Cancel' }).click();
+  await expect(deleteWarning).toHaveCount(0);
+  await expect(sessionButton).toHaveCount(1);
+
+  await archiveSessionRow(page, sessionRow);
   await expect(sessionButton).toHaveCount(0);
 
   await expect
@@ -106,9 +130,9 @@ test('archives a chat and manages its complete lifecycle from Settings', async (
     content: 'This message must not be persisted while archived.',
   });
   expect(rejectedMessage.status()).toBe(409);
-  expect((await api.getMessages(sessionId)).data.messages).toEqual([]);
+  expect(await api.getMessages(sessionId)).toMatchObject({ ok: true, data: { messages: [] } });
 
-  await page.keyboard.press('Control+,');
+  await page.keyboard.press('ControlOrMeta+,');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
   await settingsDialog.getByRole('button', { name: /Archived chats/ }).click();
@@ -154,10 +178,10 @@ test('archives a chat and manages its complete lifecycle from Settings', async (
   await expect(restoredButton).toBeVisible();
   const restoredRow = restoredButton.locator('..');
   await restoredRow.hover();
-  await restoredRow.getByRole('button', { name: 'Archive chat' }).click();
+  await archiveSessionRow(page, restoredRow);
   await expect(restoredButton).toHaveCount(0);
 
-  await page.keyboard.press('Control+,');
+  await page.keyboard.press('ControlOrMeta+,');
   await expect(settingsDialog).toBeVisible();
   await settingsDialog.getByRole('button', { name: /Archived chats/ }).click();
   archivedCard = settingsDialog.getByRole('article', { name: renamedTitle });

@@ -32,7 +32,7 @@
 
   let { onOpenNote }: Props = $props();
   let draftName = $state('');
-  let draftDefinition = $state<NoteBaseDefinition>(structuredClone(DEFAULT_NOTE_BASE_DEFINITION));
+  let draftDefinition = $state<NoteBaseDefinition>($state.snapshot(DEFAULT_NOTE_BASE_DEFINITION));
   let dirty = $state(false);
   let lastActiveId: string | null = null;
 
@@ -91,7 +91,10 @@
     lastActiveId = active?.id ?? null;
     if (active) {
       draftName = active.name;
-      draftDefinition = structuredClone(active.definition);
+      // `$state.snapshot` unwraps reactive proxies. `structuredClone` alone
+      // throws DataCloneError on a proxy, which aborted the reactive flush and
+      // left this view stuck on its loading state.
+      draftDefinition = $state.snapshot(active.definition) as NoteBaseDefinition;
       dirty = false;
     }
   });
@@ -116,7 +119,10 @@
     if (value === 'none') return null;
     const [source, key, type] = value.split(':');
     if (source === 'system' && key) {
-      return { source: 'system', field: key as Extract<NoteBaseField, { source: 'system' }>['field'] };
+      return {
+        source: 'system',
+        field: key as Extract<NoteBaseField, { source: 'system' }>['field'],
+      };
     }
     if (source === 'property' && key && type) {
       return { source: 'property', key, type: type as NotePropertyType };
@@ -149,11 +155,7 @@
       ];
     }
     if (type === 'checkbox') {
-      return [
-        { value: 'eq', label: 'Is' },
-        { value: 'neq', label: 'Is not' },
-        ...empty,
-      ];
+      return [{ value: 'eq', label: 'Is' }, { value: 'neq', label: 'Is not' }, ...empty];
     }
     return [
       { value: 'eq', label: 'Equals' },
@@ -234,7 +236,9 @@
   }
 
   function ensureViewField(field: NoteBaseField): void {
-    if (draftDefinition.view.fields.some((candidate) => encodeField(candidate) === encodeField(field))) {
+    if (
+      draftDefinition.view.fields.some((candidate) => encodeField(candidate) === encodeField(field))
+    ) {
       return;
     }
     draftDefinition = {
@@ -254,6 +258,14 @@
     await noteBasesStore.create(name);
   }
 
+  /** Always-available escape hatch: reload the Base list and re-run the active
+   *  view's query, so a failed or superseded load can never trap the panel. */
+  async function reloadBases(): Promise<void> {
+    await noteBasesStore.refresh();
+    const active = noteBasesStore.active;
+    if (active) await noteBasesStore.query(active.id);
+  }
+
   async function saveBase(): Promise<void> {
     const active = noteBasesStore.active;
     if (!active) return;
@@ -265,9 +277,10 @@
   }
 
   async function removeBase(base: NoteBase): Promise<void> {
-    const unsavedWarning = dirty && noteBasesStore.active?.id === base.id
-      ? ' Unsaved view edits will be discarded.'
-      : '';
+    const unsavedWarning =
+      dirty && noteBasesStore.active?.id === base.id
+        ? ' Unsaved view edits will be discarded.'
+        : '';
     if (
       !confirm(
         `Move the Base "${base.name}" to Trash? Its history remains recoverable.${unsavedWarning}`,
@@ -278,7 +291,7 @@
     if (await noteBasesStore.trash(base)) {
       lastActiveId = null;
       draftName = '';
-      draftDefinition = structuredClone(DEFAULT_NOTE_BASE_DEFINITION);
+      draftDefinition = $state.snapshot(DEFAULT_NOTE_BASE_DEFINITION);
       dirty = false;
     }
   }
@@ -289,7 +302,9 @@
 
   function fieldLabel(field: NoteBaseField): string {
     if (field.source === 'property') {
-      return noteBasesStore.schemas.find((schema) => schema.key === field.key)?.displayName ?? field.key;
+      return (
+        noteBasesStore.schemas.find((schema) => schema.key === field.key)?.displayName ?? field.key
+      );
     }
     return systemFields.find(([key]) => key === field.field)?.[1] ?? field.field;
   }
@@ -297,7 +312,11 @@
   function cellValue(row: NoteBaseQueryRow, field: NoteBaseField): string {
     if (field.source === 'property') {
       const value = row.properties[normalizedNoteBasePropertyKey(field.key)];
-      return Array.isArray(value) ? value.join(', ') : value === undefined ? '—' : String(value);
+      return Array.isArray(value)
+        ? value.join(', ')
+        : value === undefined
+          ? 'Not available'
+          : String(value);
     }
     switch (field.field) {
       case 'title':
@@ -321,23 +340,42 @@
 </script>
 
 <div class="grid h-full min-h-0 grid-cols-[220px_minmax(0,1fr)] bg-[var(--color-surface-1)]">
-  <aside class="flex min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)]">
+  <aside
+    class="flex min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-0)]"
+  >
     <div class="flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-3">
       <Database size={14} class="text-[var(--color-accent)]" />
-      <span class="text-xs font-semibold text-[var(--color-text-primary)]" title="Saved filter views — query notes by properties, tags, or status">Saved Bases</span>
+      <span
+        class="text-xs font-semibold text-[var(--color-text-primary)]"
+        title="Saved filter views. Query notes by properties, tags, or status">Saved Bases</span
+      >
       <button
         type="button"
-        class="ml-auto rounded-lg bg-[var(--color-surface-3)] p-1.5 text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-black"
+        class="ml-auto rounded-lg bg-[var(--color-surface-3)] p-1.5 text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-black disabled:opacity-40"
+        aria-label="Reload Bases"
+        title="Reload Bases and re-run this view's query"
+        disabled={noteBasesStore.saving}
+        onclick={() => void reloadBases()}><RefreshCw size={13} /></button
+      >
+      <button
+        type="button"
+        class="rounded-lg bg-[var(--color-surface-3)] p-1.5 text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-black disabled:opacity-40"
         aria-label="Create Base"
         title="Create a new Base = saved filter view"
+        disabled={noteBasesStore.saving}
         onclick={() => void createBase()}><Plus size={13} /></button
       >
     </div>
     <div class="min-h-0 flex-1 overflow-y-auto p-2">
       {#if noteBasesStore.bases.length === 0 && !noteBasesStore.loading}
         <div class="px-2 py-8 text-center">
-          <p class="text-xs font-semibold text-[var(--color-text-primary)]">Bases are filtered views of your notes</p>
-          <p class="mt-1.5 text-xs leading-5 text-[var(--color-text-muted)]">Create a saved query — e.g. “all open tasks sorted by due date” or “notes tagged #project”. Updates live as notes change.</p>
+          <p class="text-xs font-semibold text-[var(--color-text-primary)]">
+            Bases are filtered views of your notes
+          </p>
+          <p class="mt-1.5 text-xs leading-5 text-[var(--color-text-muted)]">
+            Create a saved query. For example, “all open tasks sorted by due date” or “notes tagged
+            #project”. Updates live as notes change.
+          </p>
           <button
             type="button"
             class="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-bold text-black shadow-md hover:brightness-110"
@@ -366,7 +404,9 @@
         class="max-h-44 shrink-0 overflow-y-auto border-t border-[var(--color-border)] p-2"
         aria-label="Trashed Bases"
       >
-        <p class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        <p
+          class="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]"
+        >
           Trash
         </p>
         {#each noteBasesStore.trashed as base (base.id)}
@@ -505,9 +545,12 @@
           class="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-error-bg)] px-4 py-2 text-xs text-[var(--color-error)]"
           role="alert"
         >
-          <AlertTriangle size={13} /> {noteBasesStore.error}
-          <button type="button" class="ml-auto underline" onclick={() => void noteBasesStore.refresh()}
-            >Retry</button
+          <AlertTriangle size={13} />
+          {noteBasesStore.error}
+          <button
+            type="button"
+            class="ml-auto underline"
+            onclick={() => void noteBasesStore.refresh()}>Retry</button
           >
         </div>
       {/if}
@@ -516,8 +559,9 @@
           class="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-warning-bg)] px-4 py-2 text-xs text-[var(--color-warning)]"
           role="status"
         >
-          <AlertTriangle size={13} /> {noteBasesStore.result.invalidDocumentCount} note{noteBasesStore
-            .result.invalidDocumentCount === 1
+          <AlertTriangle size={13} />
+          {noteBasesStore.result.invalidDocumentCount} note{noteBasesStore.result
+            .invalidDocumentCount === 1
             ? ' has'
             : 's have'} unsupported or malformed frontmatter. System fields remain queryable.
         </div>
@@ -525,13 +569,17 @@
 
       <div class="min-h-0 flex-1 overflow-auto p-4">
         {#if noteBasesStore.loading && !noteBasesStore.result}
-          <div class="flex h-full items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <div
+            class="flex h-full items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]"
+          >
             <RefreshCw size={13} class="animate-spin" /> Indexing and querying this Base…
           </div>
         {:else if !noteBasesStore.result || noteBasesStore.result.rows.length === 0}
           <div class="flex h-full flex-col items-center justify-center text-center">
             <Database size={28} class="text-[var(--color-text-muted)]" />
-            <p class="mt-3 text-sm font-medium text-[var(--color-text-primary)]">No matching notes</p>
+            <p class="mt-3 text-sm font-medium text-[var(--color-text-primary)]">
+              No matching notes
+            </p>
             <p class="mt-1 text-xs text-[var(--color-text-muted)]">
               Adjust the typed filter and save the view.
             </p>
@@ -546,7 +594,9 @@
                   <span class="sr-only">Open note</span>
                 </th>
                 {#each draftDefinition.view.fields as field (encodeField(field))}
-                  <th class="border-b border-[var(--color-border)] px-3 py-2 font-semibold text-[var(--color-text-muted)]">
+                  <th
+                    class="border-b border-[var(--color-border)] px-3 py-2 font-semibold text-[var(--color-text-muted)]"
+                  >
                     {fieldLabel(field)}
                   </th>
                 {/each}
@@ -564,7 +614,9 @@
                     >
                   </td>
                   {#each draftDefinition.view.fields as field (encodeField(field))}
-                    <td class="max-w-80 truncate border-b border-[var(--color-border)]/60 px-3 py-2.5 text-[var(--color-text-secondary)]">
+                    <td
+                      class="max-w-80 truncate border-b border-[var(--color-border)]/60 px-3 py-2.5 text-[var(--color-text-secondary)]"
+                    >
                       {cellValue(row, field)}
                     </td>
                   {/each}
@@ -580,8 +632,12 @@
                 class="flex w-full items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2.5 text-left hover:border-[var(--color-accent)]/50"
                 onclick={() => onOpenNote(row.id)}
               >
-                <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]">{row.title}</span>
-                <span class="truncate text-xs text-[var(--color-text-muted)]">{row.folderPath}</span>
+                <span
+                  class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-text-primary)]"
+                  >{row.title}</span
+                >
+                <span class="truncate text-xs text-[var(--color-text-muted)]">{row.folderPath}</span
+                >
               </button>
             {/each}
           </div>
@@ -593,12 +649,19 @@
                 class="min-h-28 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 text-left hover:border-[var(--color-accent)]/50 hover:bg-[var(--color-surface-3)]"
                 onclick={() => onOpenNote(row.id)}
               >
-                <span class="block truncate text-sm font-semibold text-[var(--color-text-primary)]">{row.title}</span>
-                <span class="mt-1 block truncate text-xs text-[var(--color-text-muted)]">{row.folderPath}</span>
+                <span class="block truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                  >{row.title}</span
+                >
+                <span class="mt-1 block truncate text-xs text-[var(--color-text-muted)]"
+                  >{row.folderPath}</span
+                >
                 <span class="mt-4 block truncate text-xs text-[var(--color-text-secondary)]">
                   {Object.entries(row.properties)
                     .slice(0, 3)
-                    .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`)
+                    .map(
+                      ([key, value]) =>
+                        `${key}: ${Array.isArray(value) ? value.join(', ') : value}`,
+                    )
                     .join(' · ') || 'No typed properties'}
                 </span>
               </button>
@@ -608,9 +671,11 @@
       </div>
 
       {#if noteBasesStore.result}
-        <div class="flex shrink-0 items-center justify-between border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-muted)]">
+        <div
+          class="flex shrink-0 items-center justify-between border-t border-[var(--color-border)] px-4 py-2 text-xs text-[var(--color-text-muted)]"
+        >
           <span>
-            {noteBasesStore.result.rows.length === 0 ? 0 : noteBasesStore.result.offset + 1}–{noteBasesStore
+            {noteBasesStore.result.rows.length === 0 ? 0 : noteBasesStore.result.offset + 1} to {noteBasesStore
               .result.rows.length === 0
               ? 0
               : noteBasesStore.result.offset + noteBasesStore.result.rows.length}
@@ -644,8 +709,13 @@
     {:else if !noteBasesStore.loading}
       <div class="flex h-full flex-col items-center justify-center px-8 text-center">
         <Database size={30} class="text-[var(--color-text-muted)]" />
-        <p class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">Choose or create a Base</p>
-        <p class="mt-1.5 max-w-md text-xs leading-5 text-[var(--color-text-muted)]">A Base is a saved filter &amp; sort over all notes in this project — like a smart folder or database view. Pick one on the left or create a new one.</p>
+        <p class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
+          Choose or create a Base
+        </p>
+        <p class="mt-1.5 max-w-md text-xs leading-5 text-[var(--color-text-muted)]">
+          A Base is a saved filter &amp; sort over all notes in this project, like a smart folder or
+          database view. Pick one on the left or create a new one.
+        </p>
         <button
           type="button"
           class="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-xs font-bold text-black shadow-md hover:brightness-110"

@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "name": "information-architecture",
+  "version": "5.0.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["ux", "information-architecture"],
+  "targetMedia": ["any"],
+  "contextBudget": 3400,
+  "broader": ["human-experience"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "information architecture",
+    "navigation structure",
+    "taxonomy",
+    "findability",
+    "organize settings",
+    "content hierarchy",
+    "navigation model",
+    "labeling system"
+  ],
+  "excludes": [],
+  "evidence": [
+    "Concept, content, action, and relationship inventory",
+    "Organization and labeling rationale tied to user/domain evidence",
+    "Navigation, alternate-path, orientation, and growth model",
+    "Representative findability-task results and unresolved confusion",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design the information architecture for this operations portal so incidents, assets, teams, policies, and reports have clear relationships and findable destinations.",
+      "Rework the navigation structure for the developer docs so concept guides, task guides, API reference, examples, and troubleshooting have predictable homes and cross-links.",
+      "Create a taxonomy for the knowledge base using the actual article corpus and support language, including naming rules, cross-topic relationships, and change governance.",
+      "Improve findability in this enterprise admin console: users currently cannot predict where billing, access, integrations, audit history, and workspace controls live.",
+      "Organize settings for a desktop editor whose preferences span account, project, workspace, files, appearance, automation, and extensions."
+    ],
+    "negative": [
+      "Define the state transitions, cancellation rules, progress feedback, and undo behavior for the already-organized import flow.",
+      "Set the typography scale, spacing, color palette, icon treatment, and visual hierarchy for this approved sitemap.",
+      "Plan interviews and field observation to understand how dispatchers currently coordinate work before proposing a new structure.",
+      "Normalize the relational database schema and indexes that store categories; keep every user-facing grouping and label unchanged.",
+      "Audit the existing page for keyboard focus, semantic headings, and color contrast without changing its navigation model or labels."
+    ],
+    "ambiguous": [
+      {
+        "id": "information-architecture-ambiguous-settings-permissions",
+        "prompt": "Reorganize a multi-tenant settings product where some controls are account-wide, some workspace-scoped, some project-scoped, and visibility changes by role; preserve deep links and make each scope legible.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["interaction-design", "authorization-security"],
+        "tags": ["settings", "permissions", "deep-links"]
+      },
+      {
+        "id": "information-architecture-ambiguous-docs-api",
+        "prompt": "Design the navigation model and content hierarchy for an SDK site that mixes conceptual docs, recipes, generated API reference, migration notes, and troubleshooting across several languages.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["developer-experience", "instructional-communication"],
+        "tags": ["documentation", "api", "cross-entry"]
+      },
+      {
+        "id": "information-architecture-ambiguous-terminal",
+        "prompt": "Restructure a CLI command hierarchy and help taxonomy so users can predict where account, environment, deploy, logs, secrets, and rollback operations live without changing command execution behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "developer-experience"],
+        "tags": ["terminal", "command-hierarchy"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "information-architecture-adversarial-quoted",
+        "prompt": "A quoted old issue says 'the taxonomy is a mess'. Ignore that quote and fix only the current checksum regression in the export worker.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging", "testing-engineering"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "information-architecture-adversarial-negated",
+        "prompt": "Do not change the navigation structure, labels, taxonomy, or findability behavior. Optimize only the search-index refresh job.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["background-job-processing", "performance-engineering"],
+        "tags": ["negation"]
+      },
+      {
+        "id": "information-architecture-adversarial-pasted",
+        "prompt": "A pasted comment says 'organize settings by user mental model'. Ignore that quote; choose a type scale and spacing rhythm for the current approved settings screen.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-interface-design"],
+        "tags": ["pasted-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.w3.org/WAI/tutorials/page-structure/",
+      "sourceType": "official-docs",
+      "versionScope": "W3C WAI Page Structure Tutorial as available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 120,
+      "notes": "Authoritative guidance that structural regions and meaningful organization support navigation, orientation, and finding content."
+    },
+    {
+      "url": "https://www.w3.org/TR/WCAG22/#navigable",
+      "sourceType": "spec",
+      "versionScope": "WCAG 2.2 Recommendation, Guideline 2.4 and Success Criterion 3.2.3",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Multiple Ways and Headings and Labels are AA; Location is AAA; Consistent Navigation is AA under 3.2.3. Apply actual scope, conformance level, and exceptions."
+    },
+    {
+      "url": "https://www.gov.uk/government/publications/govuk-topic-taxonomy-principles/govuk-taxonomy-principles",
+      "sourceType": "official-docs",
+      "versionScope": "GOV.UK Taxonomy principles as published and available 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 120,
+      "notes": "Operational evidence for domain-bounded taxonomies, distinguishable plain-language labels, user-language inputs, governance, and testing hierarchy strength. Numeric child-count guidance is GOV.UK-specific, not universal."
+    },
+    {
+      "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/information-architecture/SKILL.md",
+      "sourceType": "community-pattern",
+      "versionScope": "rampstackco/claude-skills main as inspected 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "license": "MIT",
+      "notes": "Community workflow patterns for inventories, labeling, hierarchy/faceting, and findability evaluation. Fixed navigation or taxonomy counts are treated only as contextual heuristics."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

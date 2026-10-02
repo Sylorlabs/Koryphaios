@@ -1,0 +1,82 @@
+{
+  "id": "grpc-protobuf-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Fix a bidirectional gRPC stream where the server keeps producing updates after the client cancels, queues unbounded messages for a slow reader, and occasionally reports OK after a downstream error. Establish context/cancellation ownership, bounded backpressure, status-code mapping, and stream shutdown order; verify slow client, cancellation, downstream failure, half-close, deadline, and no goroutine/resource leak.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://grpc-protobuf/stream-cancellation-backpressure",
+    "requirements": [
+      "bidirectional streaming service and client harness with controllable read speed",
+      "downstream producer that can block, error, or respect cancellation",
+      "bounded queue/memory measurement and deadline fixtures",
+      "status assertions distinguishing cancelled, deadline, unavailable, and internal outcomes",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "grpc-protobuf-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "grpc-protobuf decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "grpc-protobuf-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "stream-cancellation-backpressure scenario evidence",
+    "grpc-protobuf decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "grpc-protobuf-individual-scenario-2-result",
+    "grpc-protobuf-individual-scenario-2-verification",
+    "grpc-protobuf-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual grpc-protobuf boundary and relevant environment before acting, preserve the hierarchy relationship (broader=api-contract-design; near-neighbor=http-rest-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Treat field numbers and wire types as durable compatibility."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Stream lifetime follows RPC context and bounded flow control; once terminal status is chosen, producers/resources terminate and no later message can convert failure into success."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run cross-version compatibility tests, deadline/cancel behavior, streaming half-close/backpressure, retryable/non-retryable statuses, malformed/unknown fields, and representative generated clients."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not reuse removed field numbers, depend on enum unknown-value behavior accidentally, ignore deadlines, or enable retries without idempotency analysis."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (grpc-protobuf decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

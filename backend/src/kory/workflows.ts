@@ -56,7 +56,43 @@ export interface WorkflowRun {
   updatedAt: number;
 }
 
+export const DEFAULT_WORKFLOW_ID = 'task-workflow';
+
 const DEFINITIONS: WorkflowDefinition[] = [
+  {
+    id: DEFAULT_WORKFLOW_ID,
+    name: 'Workflow',
+    description:
+      'A general evidence-backed workflow for carrying out and verifying a concrete task.',
+    autoStartSafe: true,
+    stages: [
+      {
+        id: 'understand',
+        label: 'Understand',
+        description:
+          'Inspect the relevant context, constraints, and current state before changing anything.',
+        requiresEvidence: true,
+      },
+      {
+        id: 'execute',
+        label: 'Execute',
+        description: 'Carry out the requested work and record the concrete result or progress.',
+        requiresEvidence: true,
+      },
+      {
+        id: 'verify',
+        label: 'Verify',
+        description:
+          'Check the result against the request and record what passed, failed, or remains blocked.',
+        requiresEvidence: true,
+      },
+    ],
+  },
+];
+
+// Kept only so an already-running workflow created by older builds can finish.
+// It is intentionally excluded from the new-workflow catalog and UI.
+const LEGACY_DEFINITIONS: WorkflowDefinition[] = [
   {
     id: 'design-quality',
     name: 'Design Quality Loop',
@@ -267,7 +303,8 @@ export const listWorkflowDefinitions = (root?: string): WorkflowDefinition[] => 
   );
 };
 export const getWorkflowDefinition = (id: string, root?: string) =>
-  listWorkflowDefinitions(root).find((item) => item.id === id);
+  listWorkflowDefinitions(root).find((item) => item.id === id) ??
+  LEGACY_DEFINITIONS.find((item) => item.id === id);
 export const listWorkflowDrafts = (root: string): WorkflowDraft[] =>
   readArray(draftPath(root), validDraft).sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -364,10 +401,13 @@ export const listWorkflowRuns = (root: string, sessionId?: string): WorkflowRun[
 
 export function startWorkflow(
   root: string,
-  input: Pick<WorkflowRun, 'workflowId' | 'sessionId' | 'task' | 'requestedBy'> &
-    Pick<WorkflowRun, 'goalId' | 'goalItemId'>,
+  input: Pick<WorkflowRun, 'sessionId' | 'task' | 'requestedBy'> & { workflowId?: string } & Pick<
+      WorkflowRun,
+      'goalId' | 'goalItemId'
+    >,
 ): WorkflowRun {
-  if (!getWorkflowDefinition(input.workflowId, root)) throw new Error('Unknown workflow');
+  const workflowId = boundedId(input.workflowId, 'Workflow identity') ?? DEFAULT_WORKFLOW_ID;
+  if (!getWorkflowDefinition(workflowId, root)) throw new Error('Unknown workflow');
   const task = boundedText(input.task, 'Workflow task', 4_000);
   const sessionId = boundedId(input.sessionId, 'Workflow session identity');
   const goalId = boundedId(input.goalId, 'Workflow Goal identity');
@@ -376,7 +416,7 @@ export function startWorkflow(
   const now = Date.now();
   const run: WorkflowRun = {
     id: crypto.randomUUID(),
-    workflowId: input.workflowId,
+    workflowId,
     sessionId,
     goalId,
     goalItemId,

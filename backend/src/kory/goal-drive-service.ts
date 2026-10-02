@@ -346,14 +346,39 @@ export class GoalDriveService {
     if (this.erasingSessions.has(sessionId)) return null;
     this.erasingSessions.add(sessionId);
     let settled = false;
+    // Timers observed for this chat, so the post-commit tombstone can clear any
+    // that a late schedule() re-armed after the final idle observation.
+    const erasingGoalIds = new Set<string>();
+    const relatedGoals = async () =>
+      (await this.goals.list()).filter(
+        (goal) => goal.sessionId === sessionId || goal.execution?.sessionId === sessionId,
+      );
     return {
       waitForIdle: async (timeoutMs = 10_000) => {
         const deadline = Date.now() + timeoutMs;
+        // Erasure installs the tombstone above before any pause, so a goal
+        // paused here cannot be resumed, re-scheduled, or published against this
+        // chat. Pausing first is what makes deleting a chat mid-Goal graceful:
+        // it cancels the in-flight turn and clears its checkpoint timer instead
+        // of leaving this operation to time out against a producer it is
+        // already tearing down.
+        for (const goal of await relatedGoals()) {
+          if (!ACTIVE_STATUSES.has(goal.status)) continue;
+          try {
+            await this.pause(goal.id, 'Paused because its chat was deleted');
+          } catch (error) {
+            koryLog.warn(
+              { goalId: goal.id, error },
+              'Failed to pause goal while erasing its chat; continuing to settle',
+            );
+          }
+        }
         while (true) {
-          const related = (await this.goals.list()).filter(
-            (goal) => goal.sessionId === sessionId || goal.execution?.sessionId === sessionId,
-          );
-          for (const goal of related) this.stopCheckpointTimer(goal.id);
+          const related = await relatedGoals();
+          for (const goal of related) {
+            erasingGoalIds.add(goal.id);
+            this.stopCheckpointTimer(goal.id);
+          }
           const inFlight = related.some(
             (goal) => this.goalTurnInFlight.has(goal.id) || this.checkpointInFlight.has(goal.id),
           );
@@ -367,6 +392,9 @@ export class GoalDriveService {
       complete: () => {
         if (settled) return;
         settled = true;
+        // The rows behind these timers are gone or scrubbed after the commit, so
+        // no interval may outlive the tombstone to fire against a dead chat.
+        for (const goalId of erasingGoalIds) this.stopCheckpointTimer(goalId);
         // Keep the process-lifetime tombstone. Session IDs are unique and a
         // late Goal callback must never publish or persist against this chat.
         this.erasingSessions.add(sessionId);

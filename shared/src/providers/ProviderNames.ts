@@ -11,16 +11,22 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs with implementations)
   OpenRouter: 'openrouter',
+  UnoRouter: 'unorouter',
   TokenRouter: 'tokenrouter',
+  ExperientialLabs: 'experientiallabs',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',
+  CommandCode: 'commandcode',
   Chatbase: 'chatbase',
+  Notion: 'notion',
+
+  // Hosted API-key providers
+  Cline: 'cline',
 
   // Auth-only providers (OAuth/CLI based)
   Claude: 'claude',
   Antigravity: 'antigravity',
   Copilot: 'copilot',
-  Cline: 'cline',
   Codex: 'codex',
   CodexAuth: 'codex-auth',
   Cursor: 'cursor',
@@ -29,6 +35,7 @@ export const ProviderName = {
   Codebuff: 'codebuff',
   Grok: 'grok',
   Jules: 'jules',
+  Hoplite: 'hoplite',
   KiloCode: 'kilocode',
 
   // Curated coding models
@@ -43,6 +50,7 @@ export const ProviderName = {
   // Local/Custom endpoints (OpenAI-compatible)
   Local: 'local',
   Ollama: 'ollama',
+  AutoClaw: 'autoclaw',
 
   // OpenCode parity and additional providers
   '302AI': '302ai',
@@ -76,6 +84,7 @@ export const ProviderName = {
   ZAI: 'zai',
   ZenMux: 'zenmux',
   Poe: 'poe',
+  WorkBuddy: 'workbuddy',
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;

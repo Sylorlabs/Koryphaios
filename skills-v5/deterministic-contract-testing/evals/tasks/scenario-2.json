@@ -1,0 +1,74 @@
+{
+  "id": "deterministic-contract-testing-full-task-2",
+  "maturity": "individual",
+  "prompt": "The fixture contains a Draft 2020-12 JSON Schema and a local reducer for job-command envelopes. The compatibility promise is that the pinned legacy v1 `cancel` example remains accepted by the current decoder; current envelopes require a non-empty `jobId`, reject unknown `command` values and extra top-level properties, and normalize those failures to stable error categories rather than validator-specific message text. The reducer permits Queued→Running, Queued→Cancelled, and Running→Succeeded or Cancelled; Succeeded and Cancelled are terminal, and repeating Cancelled→Cancelled is an idempotent no-op. Add deterministic schema/contract/state-machine tests for the valid legacy/current examples, missing/empty jobId, unknown command, extra property, every listed legal transition, terminal illegal transitions, and duplicate cancellation. Pin the schema dialect in the oracle. Use the supplied controlled schema mutation that removes the extra-property restriction to prove the strictness case can fail, restore it, and rerun the focused suite. Do not replace this with fuzzing or a live broker/database test.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://deterministic-contract-testing/job-command-schema-state-machine",
+    "requirements": [
+      "the schema declares JSON Schema Draft 2020-12 and ships pinned v1 and current valid envelope examples",
+      "the decoder exposes stable application error categories separately from validator implementation text",
+      "the reducer exposes next state and emitted local effects for each transition without a broker or database",
+      "the fixture can apply and restore a controlled mutation removing the extra-property restriction",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "job-schema-compatibility",
+      "assertion": "The pinned legacy v1 and current valid envelopes are accepted under Draft 2020-12, while missing/empty jobId, unknown command, and an extra top-level property are rejected with the expected stable application categories."
+    },
+    {
+      "id": "job-state-transition-table",
+      "assertion": "Every declared legal transition produces the expected next state/effects, terminal illegal transitions are rejected without effects, and duplicate cancellation is an idempotent no-op."
+    },
+    {
+      "id": "job-schema-mutation-proof",
+      "assertion": "Removing the extra-property restriction causes the dedicated strictness regression to fail, and restoring the schema returns the suite to green."
+    },
+    {
+      "id": "job-boundary-discipline",
+      "assertion": "The evidence stays at the deterministic local schema/reducer boundary and does not claim generated-input coverage or real broker/database integration behavior."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "deterministic-contract-testing-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "schema dialect and compatibility case matrix",
+        "stable acceptance/rejection categories for valid and invalid examples",
+        "complete declared state-transition table results",
+        "controlled schema mutation red/green evidence"
+      ]
+    },
+    {
+      "id": "deterministic-contract-testing-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "schema assertions are semantic and version-pinned rather than snapshots of validator prose",
+        "compatibility and rejection examples exercise distinct falsifiable partitions",
+        "the answer keeps deterministic local evidence separate from fuzz and real integration claims"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Contract-to-case mapping",
+    "Draft 2020-12 schema identity",
+    "legacy/current acceptance and malformed rejection results",
+    "state-transition table results",
+    "controlled schema mutation failing result and restored passing result",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "deterministic-contract-testing-scenario-2-case-matrix",
+    "deterministic-contract-testing-scenario-2-schema-results",
+    "deterministic-contract-testing-scenario-2-state-results",
+    "deterministic-contract-testing-scenario-2-mutation-proof",
+    "deterministic-contract-testing-scenario-2-paired-evaluation"
+  ]
+}

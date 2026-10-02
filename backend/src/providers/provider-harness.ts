@@ -29,7 +29,6 @@ const NATIVE_PROVIDERS = new Set([
   'jules',
   'cursor',
   'devin',
-  'cline',
   'kimicode',
 ]);
 

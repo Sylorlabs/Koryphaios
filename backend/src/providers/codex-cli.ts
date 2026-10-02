@@ -18,8 +18,8 @@ import {
   type StreamRequest,
 } from './types';
 import { providerLog } from '../logger';
-import { getCliBridge, getKoryphaiosCodexHome } from './cli-bridges';
-import { buildSoftJail, wrapCommand } from '../collaboration/sandbox-runner';
+import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
+import { buildSoftJail } from '../collaboration/sandbox-runner';
 import {
   assertPrivateValuesAbsentFromArgv,
   spawnWithPrivateArtifactCleanup,
@@ -33,15 +33,180 @@ import {
 } from './provider-diagnostics';
 import { writeManagedCliFile } from './managed-cli-storage';
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
+import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
-import {
-  readAllCodexModelsCaches,
-  enrichCodexModelsWithCliCache,
-} from './codex-models-cache';
+import { readAllCodexModelsCaches, enrichCodexModelsWithCliCache } from './codex-models-cache';
 
 const CODEX_TIMEOUT_MS = 300_000;
 const CODEX_MODEL_LIST_TIMEOUT_MS = 15_000;
 const CODEX_MODELS_CACHE_MS = 5 * 60_000;
+
+// ─── Transient Codex failure classification ────────────────────────────────
+// The `codex exec` binary has its own internal retry loop ("Reconnecting...
+// 1/5"). When the ChatGPT side blips ("Something went wrong", stream
+// disconnect), the CLI exhausts that loop and exits nonzero. That is a
+// transient transport failure, not a turn failure — the registry retries it.
+// Shared with codex-auth.ts, which shells the same binary and sees the same
+// stderr shapes. Keep this as the single source of truth; do not duplicate
+// these patterns.
+
+/** Substrings that always mean "fix credentials", never "retry the turn". */
+const CODEX_AUTH_FAILURE_MARKERS = [
+  'invalid api key',
+  'invalid_api_key',
+  'invalid-api-key',
+  'unauthorized',
+  'unauthorised',
+  'unauthenticated',
+  'forbidden',
+  'authentication',
+  'authenticate',
+  'not signed in',
+  'not logged in',
+  'not authenticated',
+  'login required',
+  'login expired',
+  'log in',
+  'signin',
+  'sign in',
+  'sign-in',
+  'codex login',
+  'auth.json',
+  'auth file',
+  'no auth',
+  'missing auth',
+  'credential',
+  'invalid token',
+  'expired token',
+  'token expired',
+  'refresh token',
+];
+
+/**
+ * Substrings of the codex-chatgpt-web turn broker's stale-binding errors.
+ * The broker mints a fresh turn token per turn, so a token that is invalid,
+ * expired, revoked, or already finished is always recoverable by retrying the
+ * turn (fresh process → fresh token) — never by fixing credentials. Shapes:
+ * - `turn token is invalid, expired, or revoked` (broker `claim`, generic)
+ * - `turn token is invalid or expired` (broker owner-path twin)
+ * - `... which has already finished. This Codex Native action can no longer
+ *   run.` (broker `claim`, specific retired-turn twin)
+ * - `... has already finished; this Codex Native action can no longer run.`
+ *   (broker binding-path twin)
+ * Deliberately worded so none contains the fail-closed auth markers
+ * (`invalid token`, `expired token`, `token expired` need the reverse order).
+ */
+const CODEX_TURN_TOKEN_FAILURE_MARKERS = [
+  'turn token is invalid, expired, or revoked',
+  'turn token is invalid or expired',
+  'has already finished',
+];
+
+/** True when the text reports a stale turn-token binding — always retriable
+ *  with a fresh turn, never a credentials problem. */
+export function isCodexTurnTokenFailure(value: unknown): boolean {
+  const text = codexFailureText(value).toLowerCase();
+  if (!text) return false;
+  return CODEX_TURN_TOKEN_FAILURE_MARKERS.some((marker) => text.includes(marker));
+}
+
+/**
+ * Substrings of the CLI's own transient ChatGPT-side blips (stderr text and
+ * the sanitized user messages below). `transient` is deliberately included so
+ * the honest user-facing message this module emits stays machine-recognizable
+ * as retriable when it flows back through the registry retry check.
+ */
+const CODEX_TRANSIENT_FAILURE_MARKERS = [
+  'transient',
+  'stream disconnected',
+  'disconnected before completion',
+  'something went wrong',
+  'reconnecting',
+  'ended the turn',
+  'socket hang up',
+  'socket hangup',
+  'hang up',
+  'hangup',
+  'econnreset',
+  'econnaborted',
+  'etimedout',
+  'connection reset',
+  'connection aborted',
+  'connection refused',
+  'timed out',
+  'timeout',
+  'deadline exceeded',
+  'service unavailable',
+  'temporarily unavailable',
+  'bad gateway',
+  'gateway timeout',
+  'internal server error',
+  'overloaded',
+  'over capacity',
+  'rate limit',
+  'rate_limit',
+  'too many requests',
+  '429',
+  '500',
+  '502',
+  '503',
+  '504',
+  'fetch failed',
+  'failed to fetch',
+  'upstream',
+  'network error',
+  'try again',
+];
+
+function codexFailureText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) {
+    const cause = value.cause instanceof Error ? ` ${value.cause.message}` : '';
+    return `${value.name} ${value.message}${cause}`;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [record.message, record.error, record.type, record.code]
+      .filter((part): part is string => typeof part === 'string')
+      .join(' ');
+  }
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/** True when the text means "fix credentials" — always fail-closed, never retried. */
+export function isCodexAuthFailure(value: unknown): boolean {
+  const text = codexFailureText(value).toLowerCase();
+  if (!text) return false;
+  return CODEX_AUTH_FAILURE_MARKERS.some((marker) => text.includes(marker));
+}
+
+/**
+ * True for the CLI's transient ChatGPT-side blips. Auth-looking text stays
+ * fail-closed even when wrapped in retryable-sounding words. Stale
+ * turn-token bindings are retriable: a fresh turn mints a fresh token.
+ */
+export function isTransientCodexFailure(value: unknown): boolean {
+  const text = codexFailureText(value).toLowerCase();
+  if (!text) return false;
+  if (CODEX_AUTH_FAILURE_MARKERS.some((marker) => text.includes(marker))) return false;
+  if (isCodexTurnTokenFailure(value)) return true;
+  return CODEX_TRANSIENT_FAILURE_MARKERS.some((marker) => text.includes(marker));
+}
+
+/**
+ * Honest user-facing message for a transient ChatGPT disconnect. The raw
+ * stderr stays in server logs via safeProviderDiagnostic; the banner carries
+ * no upstream detail.
+ */
+export function codexTransientFailureMessage(): string {
+  return 'Codex hit a transient ChatGPT disconnect. Nothing was lost — retry the turn.';
+}
+
+/** Same banner with the attempt count, for when registry retries are exhausted. */
+export function codexTransientExhaustedMessage(attempts: number): string {
+  const total = Number.isFinite(attempts) && attempts > 0 ? Math.floor(attempts) : 1;
+  return `Codex hit a transient ChatGPT disconnect after ${total} ${total === 1 ? 'attempt' : 'attempts'}. Nothing was lost — retry the turn.`;
+}
 
 type CodexCliModel = {
   id?: string;
@@ -227,6 +392,99 @@ export function extractKoryToolEnvelope(
   }
 }
 
+/** Tolerant reading of an MCP tool item from Codex's JSONL. Shapes vary by
+ *  CLI version (server_name/tool_name/arguments vs server/tool/input), so
+ *  every field has fallbacks. Returns null when this is not an MCP item. */
+function describeMcpItem(item: Record<string, unknown> | undefined): {
+  name: string;
+  input: string;
+  output: string;
+  isError: boolean;
+} | null {
+  const rawType = typeof item?.type === 'string' ? (item.type as string) : '';
+  if (!/mcp/i.test(rawType)) return null;
+  const record = item as Record<string, unknown>;
+  const server =
+    asText(record.server_name) ?? asText(record.server) ?? asText(record.server_label) ?? 'server';
+  const tool = asText(record.tool_name) ?? asText(record.tool) ?? asText(record.name) ?? 'tool';
+  const name = tool.startsWith('mcp__') ? tool : `mcp__${server}__${tool}`;
+  const inputValue = record.arguments ?? record.input ?? record.parameters;
+  const outputValue = record.result ?? record.output ?? record.response ?? record.error;
+  return {
+    name,
+    input: typeof inputValue === 'string' ? inputValue : JSON.stringify(inputValue ?? {}),
+    output: String(outputValue ?? '').slice(0, 4_000),
+    isError: record.status === 'error' || record.is_error === true || record.error != null,
+  };
+}
+
+function asText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/** Read a Codex reasoning item as displayable thinking. Older CLIs emit
+ *  `{ type: 'reasoning', text }`; newer ones emit
+ *  `{ type: 'reasoning', summary: [{ text }, ...] }` with no top-level text.
+ *  Summary entries each narrate one step, so they join as paragraphs.
+ *  The trailing break is load-bearing: every thinking_delta from Codex is one
+ *  COMPLETED item, and the WS coalescer concatenates consecutive thinking
+ *  payloads verbatim — without it, separate summaries glue mid-word
+ *  ("failureInspected"). Token-streaming providers are untouched; this only
+ *  shapes Codex payloads. Returns null when there is nothing to show. */
+function describeReasoningText(item: Record<string, unknown> | undefined): string | null {
+  if (!item) return null;
+  const parts: string[] = [];
+  const direct =
+    asText(item.text) ??
+    (item.text != null && String(item.text).trim() ? String(item.text) : undefined);
+  if (direct) parts.push(direct);
+  if (Array.isArray(item.summary)) {
+    for (const entry of item.summary) {
+      const text = asText((entry as Record<string, unknown> | null)?.text);
+      if (text) parts.push(text);
+    }
+  }
+  if (parts.length === 0) return null;
+  return `${parts.join('\n\n')}\n\n`;
+}
+
+/** Surface a native Codex tool item the translator has no dedicated branch
+ *  for (file_change, web_search, todo_list, …) as a display-only activity
+ *  row. Shapes vary by CLI version, so every field has fallbacks and output
+ *  is capped. Display-only, like command_execution: the action already ran
+ *  inside the CLI, so this must never become a tool_use the manager would
+ *  execute a second time. */
+function describeNativeToolItem(
+  toolName: string,
+  item: Record<string, unknown>,
+): { toolName: string; toolInput: string; toolOutput: string } {
+  const inputValue =
+    item.command ??
+    item.query ??
+    item.path ??
+    item.file ??
+    item.input ??
+    item.arguments ??
+    item.items ??
+    item.changes ??
+    {};
+  const outputValue =
+    item.aggregated_output ??
+    item.output ??
+    item.result ??
+    item.response ??
+    item.diff ??
+    item.summary ??
+    '';
+  const outputText =
+    typeof outputValue === 'string' ? outputValue : JSON.stringify(outputValue ?? '');
+  return {
+    toolName,
+    toolInput: typeof inputValue === 'string' ? inputValue : JSON.stringify(inputValue ?? {}),
+    toolOutput: String(outputText ?? '').slice(0, 4_000),
+  };
+}
+
 /** Translate the public Codex CLI JSONL protocol into Kory events. Codex does
  * not expose private chain-of-thought; with model_reasoning_summary enabled it
  * emits a safe textual summary as a reasoning item, which we can show. */
@@ -237,8 +495,49 @@ export function codexJsonEvents(
 ): { events: ProviderEvent[]; completed: boolean } {
   const events: ProviderEvent[] = [];
   const item = event.item as Record<string, unknown> | undefined;
+  // MCP tool calls already executed inside the kory bridge server — surface
+  // them display-only (tool_executed), never as tool_use (which the manager
+  // would execute a second time through ToolRegistry).
+  if (event.type === 'item.completed') {
+    const mcp = describeMcpItem(item);
+    if (mcp) {
+      if (isCodexTurnTokenFailure(mcp.output)) {
+        // A Native2 connector call failed on a stale turn-token binding. The
+        // turn cannot make further progress on this token, but a fresh turn
+        // mints a fresh one — surface the retriable banner so the registry
+        // retries instead of presenting a partial tool row as success.
+        providerLog.warn(
+          safeProviderDiagnostic('codex', 'stdout', mcp.output),
+          'Codex MCP tool hit a stale turn-token binding',
+        );
+        events.push({ type: 'error', error: codexTransientFailureMessage() });
+        return { events, completed: false };
+      }
+      events.push({
+        type: 'tool_executed',
+        toolName: mcp.name,
+        toolInput: mcp.input,
+        toolOutput: mcp.output,
+        isError: mcp.isError,
+      });
+      return { events, completed: false };
+    }
+  }
   if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
-    const extracted = extractKoryToolEnvelope(String(item.text), allowedToolNames);
+    const text = String(item.text);
+    if (isCodexTurnTokenFailure(text)) {
+      // The bridge error reached ChatGPT as tool-result text and the model is
+      // narrating it instead of emitting `turn.failed` (e.g. "Step 2 failed —
+      // turn token is invalid..."). End the turn here with the retriable
+      // banner; the registry re-runs it with a fresh token.
+      providerLog.warn(
+        safeProviderDiagnostic('codex', 'stdout', text),
+        'Codex turn hit a stale turn-token binding',
+      );
+      events.push({ type: 'error', error: codexTransientFailureMessage() });
+      return { events, completed: true };
+    }
+    const extracted = extractKoryToolEnvelope(text, allowedToolNames);
     if (extracted.content) events.push({ type: 'content_delta', content: extracted.content });
     if (extracted.tool) {
       const toolCallId = `codex-kory-${randomUUID()}`;
@@ -257,8 +556,9 @@ export function codexJsonEvents(
         toolInput: input,
       });
     }
-  } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
-    events.push({ type: 'thinking_delta', thinking: String(item.text) });
+  } else if (event.type === 'item.completed' && item?.type === 'reasoning') {
+    const thinking = describeReasoningText(item);
+    if (thinking) events.push({ type: 'thinking_delta', thinking });
   } else if (event.type === 'item.completed' && item?.type === 'command_execution') {
     events.push({
       type: 'tool_executed',
@@ -267,19 +567,50 @@ export function codexJsonEvents(
       toolOutput: String(item.aggregated_output ?? item.output ?? '').slice(0, 4_000),
       isError: item.exit_code != null && item.exit_code !== 0,
     });
+  } else if (
+    event.type === 'item.completed' &&
+    (item?.type === 'file_change' ||
+      item?.type === 'web_search' ||
+      item?.type === 'todo_list' ||
+      item?.type === 'exec' ||
+      item?.type === 'view' ||
+      item?.type === 'edit')
+  ) {
+    // Native tool items with no dedicated branch. Previously these were
+    // silently dropped, so the Thought narration described actions that had
+    // no visible tool row — tool calls appeared to render as thinking.
+    const native = describeNativeToolItem(`codex_${item.type}`, item);
+    events.push({
+      type: 'tool_executed',
+      toolName: native.toolName,
+      toolInput: native.toolInput,
+      toolOutput: native.toolOutput,
+      isError: item.exit_code != null && item.exit_code !== 0,
+    });
   } else if (event.type === 'turn.completed') {
     const usage = event.usage as Record<string, unknown> | undefined;
     if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
+      // turn.completed input_tokens is CUMULATIVE across every internal model
+      // request the CLI made during this exec (like the cumulative token_count
+      // records in the on-disk session log — see billing/cli-usage.ts, which
+      // bills from per-request last_token_usage instead). It is billing
+      // evidence, not the final live context occupancy: mapping it 1:1 onto
+      // the meter produces impossible ratios (e.g. 860k used on a 285k
+      // window). Keep the raw totals for billing, flag the occupancy as
+      // estimated, and let the manager clamp it to the trusted window and
+      // withhold it from the auto-compact trigger.
       events.push({
         type: 'usage_update',
         tokensIn: usage.input_tokens as number | undefined,
         tokensOut: usage.output_tokens as number | undefined,
+        estimated: true,
+        usagePrecision: 'provider-reported',
+        billingTokensIn: usage.input_tokens as number | undefined,
+        billingTokensOut: usage.output_tokens as number | undefined,
         // Codex input_tokens already includes this cached prefix. Carry it as
         // explanatory metadata only; consumers must not add it a second time.
         tokensCacheRead:
-          typeof usage.cached_input_tokens === 'number'
-            ? usage.cached_input_tokens
-            : undefined,
+          typeof usage.cached_input_tokens === 'number' ? usage.cached_input_tokens : undefined,
         accountId,
       });
     }
@@ -289,11 +620,29 @@ export function codexJsonEvents(
       (event.error as { message?: string } | undefined)?.message ??
       (event.message as string | undefined) ??
       '';
+    if (isTransientCodexFailure(raw)) {
+      // ChatGPT-side blip inside the CLI's own loop: honest banner, raw
+      // detail stays in server logs only. The registry retries this.
+      providerLog.warn(
+        safeProviderDiagnostic('codex', 'stdout', raw),
+        'Codex CLI hit a transient ChatGPT disconnect',
+      );
+      events.push({ type: 'error', error: codexTransientFailureMessage() });
+      return { events, completed: true };
+    }
     const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
     events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
     return { events, completed: true };
   } else if (event.type === 'error') {
     const raw = (event as { message?: string }).message ?? '';
+    if (isTransientCodexFailure(raw)) {
+      providerLog.warn(
+        safeProviderDiagnostic('codex', 'stdout', raw),
+        'Codex CLI hit a transient ChatGPT disconnect',
+      );
+      events.push({ type: 'error', error: codexTransientFailureMessage() });
+      return { events, completed: false };
+    }
     const diagnostic = safeProviderDiagnostic('codex', 'stdout', raw);
     events.push({ type: 'error', error: safeProviderFailureMessage('codex', diagnostic) });
   }
@@ -366,9 +715,7 @@ export function buildCodexPrompt(
 
 /** Build the official Codex image flags without ever putting image bytes in
  * argv. The paths point to per-turn 0600 private artifacts. */
-export function codexImageArgs(
-  attachments: Pick<CliAttachmentScope, 'artifacts'>,
-): string[] {
+export function codexImageArgs(attachments: Pick<CliAttachmentScope, 'artifacts'>): string[] {
   return attachments.artifacts.flatMap((artifact) => ['--image', artifact.path]);
 }
 
@@ -517,10 +864,14 @@ export class CodexCliProvider implements Provider {
     const sandbox = 'read-only';
 
     // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
-    // Codex has no MCP support, so the <KORY_TOOL_CALL> envelope in the prompt
-    // is the bridge mechanism. But Codex DOES read AGENTS.md as always-on
-    // rules — writing it ensures the CLI follows Kory's session conventions.
+    // Codex reads AGENTS.md as always-on rules — writing it ensures the CLI
+    // follows Kory's session conventions. The <KORY_TOOL_CALL> envelope in
+    // the prompt stays as the fallback transport when MCP is unavailable.
     const codexBridge = getCliBridge('codex');
+    const bridgeGrantLease =
+      !researchOnly && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
     const bridgeCtx = {
       provider: 'codex' as const,
       role: request.harnessRole ?? 'manager',
@@ -529,6 +880,7 @@ export class CodexCliProvider implements Provider {
       sessionId: request.sessionId,
       systemPrompt: request.systemPrompt ?? '',
       tools: request.tools ?? [],
+      bridgeGrantLease,
     };
     if (!researchOnly)
       try {
@@ -545,6 +897,32 @@ export class CodexCliProvider implements Provider {
         );
       }
 
+    const codexHome = getKoryphaiosCodexHome(account.profileDir);
+
+    // ── Mount the kory MCP server through a per-turn profile ────────────────
+    // `codex --profile kory` layers <codexHome>/kory.config.toml on top of the
+    // base config, so the isolated home's own config.toml (bridge route etc.)
+    // is never rewritten. Each turn mints a fresh session-scoped grant; the
+    // envelope protocol remains the fallback when MCP cannot be configured.
+    let mcpProfile = false;
+    if (!researchOnly) {
+      try {
+        const mcpConfigs = codexBridge?.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          writeManagedCliFile(
+            join(codexHome, 'kory.config.toml'),
+            serializeCodexMcpProfile(mcpConfigs),
+          );
+          mcpProfile = true;
+        }
+      } catch (mcpErr) {
+        providerLog.warn(
+          { err: mcpErr, provider: 'codex' },
+          'Failed to write kory MCP profile for Codex; continuing with envelope only',
+        );
+      }
+    }
+
     const researchRoot = researchOnly
       ? mkdtempSync(join(tmpdir(), 'kory-web-research-codex-'))
       : null;
@@ -552,11 +930,15 @@ export class CodexCliProvider implements Provider {
     const args = [
       '--ask-for-approval',
       'never',
-      '--config',
-      'mcp_servers={}',
+      // MCP and the empty-servers override are mutually exclusive: the kory
+      // profile carries the real server list, otherwise keep third-party
+      // servers (and their credentials) out of Koryphaios turns entirely.
+      ...(mcpProfile ? [] : ['--config', 'mcp_servers={}']),
       ...(researchOnly ? ['--search'] : []),
       'exec',
       '--json',
+      // --profile is exec-scoped: it must come after `exec`.
+      ...(mcpProfile ? ['--profile', 'kory'] : []),
       '--ephemeral',
       '--skip-git-repo-check',
       '--color',
@@ -573,7 +955,6 @@ export class CodexCliProvider implements Provider {
       ...codexImageArgs(attachmentScope),
       '-',
     ];
-    const codexHome = getKoryphaiosCodexHome(account.profileDir);
     const baseEnv = buildProviderCliEnv('codex', {
       CODEX_HOME: codexHome,
       HOME: codexHome,
@@ -583,14 +964,14 @@ export class CodexCliProvider implements Provider {
     const jail = request.sandbox
       ? buildSoftJail(baseEnv, [codexHome, ...attachmentDirectories])
       : null;
-    const wrapped = request.sandbox
-      ? wrapCommand(binary, args, {
-          cwd,
-          configDirs: [codexHome],
-          readonlyConfigDirs: attachmentDirectories,
-          policy: request.sandbox,
-        })
-      : { command: binary, args };
+    // Deliberately NO wrapCommand() (Seatbelt/bwrap) here. Codex self-sandboxes
+    // its native tools (see --sandbox read-only below) and OS jails cannot
+    // nest: an outer jail breaks codex's own tool sandbox with
+    // "sandbox-exec: sandbox_apply: Operation not permitted", degrading every
+    // turn that touches files or shell. Soft-jail env isolation (above) plus
+    // codex's own sandbox and approval policy remain in force — the same
+    // containment the standalone CLI has.
+    const wrapped = { command: binary, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
     const child = spawnWithPrivateArtifactCleanup(
       () =>
@@ -602,9 +983,11 @@ export class CodexCliProvider implements Provider {
       [...attachmentScope.artifacts],
       () => {
         jail?.cleanup();
+        bridgeGrantLease?.cleanup();
         if (researchRoot) rmSync(researchRoot, { recursive: true, force: true });
       },
     );
+    bridgeGrantLease?.bindToChild(child);
     writePrivatePromptToStdin(child, prompt);
     let stderr = '';
     let stdoutBuffer = '';
@@ -702,6 +1085,13 @@ export class CodexCliProvider implements Provider {
     if (exitCode !== 0) {
       const diagnostic = safeProviderDiagnostic('codex', 'stderr', stderr, { exitCode });
       providerLog.warn(diagnostic, 'Codex CLI exited unsuccessfully');
+      if (isTransientCodexFailure(stderr)) {
+        // The CLI's own retry loop (e.g. "Reconnecting... 1/5") exhausted on
+        // a ChatGPT-side blip. Honest banner without the raw stderr; the
+        // registry retries this before it ever becomes a terminal error.
+        yield { type: 'error', error: codexTransientFailureMessage() };
+        return;
+      }
       yield {
         type: 'error',
         error: safeProviderFailureMessage('codex', diagnostic, {

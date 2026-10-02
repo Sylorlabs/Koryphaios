@@ -29,6 +29,7 @@ const { voiceRoutes } = await import('../routes/v1/voice');
 const { imageRoutes } = await import('../routes/v1/images');
 const { usageRoutes } = await import('../routes/v1/usage');
 const { feedRoutes } = await import('../routes/v1/feed');
+const { appearanceRoutes } = await import('../routes/v1/appearance');
 const { errorHandler } = await import('../middleware/error-handling');
 
 const app = new Elysia()
@@ -63,7 +64,8 @@ const app = new Elysia()
   .use(processRoutes)
   .use(voiceRoutes)
   .use(imageRoutes)
-  .use(usageRoutes);
+  .use(usageRoutes)
+  .use(appearanceRoutes);
 
 afterAll(() => {
   if (apiSurfaceDatabaseDir) {
@@ -222,6 +224,17 @@ const protectedRoutes: RouteCheck[] = [
     body: { sessionId: 's1', estimatedCostCents: 1 },
   },
   { method: 'GET', path: '/api/billing/credits' },
+  { method: 'GET', path: '/api/appearance' },
+  {
+    method: 'PUT',
+    path: '/api/appearance',
+    body: {
+      preset: 'kintsugi',
+      accent: 'gold',
+      secondaryAccent: 'cyan',
+      font: 'inter',
+    },
+  },
   { method: 'GET', path: '/api/usage?limit=10' },
   { method: 'GET', path: '/api/usage/daily' },
   { method: 'GET', path: '/api/usage/export' },

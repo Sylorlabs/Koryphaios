@@ -1,7 +1,7 @@
 // Session management store — Svelte 5 runes
 // Handles CRUD, rename, search, date grouping, message history
 
-import type { Session } from '@koryphaios/shared';
+import type { Session, SessionAgentOverrides } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { projectStore } from './project.svelte';
 import { resolveSessionSelection } from './session-selection';
@@ -10,6 +10,7 @@ import { friendlyHttpError } from '$lib/utils/http-error';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch } from '$lib/api.svelte';
 import { wsStore } from './websocket.svelte';
+import { notifySessionRemoved } from './session-removal';
 import { loadLastSessionId, saveLastSessionId } from './navigation-preferences';
 import { homeDir } from '@tauri-apps/api/path';
 import {
@@ -545,6 +546,48 @@ async function setInteractionMode(id: string, interactionMode: 'act' | 'plan'): 
   }
 }
 
+/**
+ * Persist a per-chat control (approval preset, agent mode, critic toggle) on
+ * the session itself so it does not leak into the rest of the project. The
+ * update is applied optimistically and rolled back if the PATCH fails, so the
+ * composer never shows a posture the backend is not enforcing.
+ */
+async function setSessionAgentOverrides(
+  id: string,
+  overrides: SessionAgentOverrides,
+): Promise<boolean> {
+  const prior = sessions.find((session) => session.id === id)?.agentOverrides;
+  const merged: SessionAgentOverrides = { ...(prior ?? {}), ...overrides };
+  const previousSessions = sessions;
+  sessions = sessions.map((session) =>
+    session.id === id
+      ? {
+          ...session,
+          agentOverrides: Object.keys(merged).length > 0 ? merged : undefined,
+        }
+      : session,
+  );
+  try {
+    const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentOverrides: merged }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok || !data.data) throw new Error('Agent override update failed');
+    sessions = sessions.map((session) => (session.id === id ? data.data : session));
+    return true;
+  } catch (err: unknown) {
+    console.warn(
+      'Failed to set per-chat agent overrides:',
+      err instanceof Error ? err.message : String(err),
+    );
+    sessions = previousSessions;
+    toastStore.error('Could not update this chat’s controls');
+    return false;
+  }
+}
+
 async function deleteSession(id: string): Promise<boolean> {
   try {
     const res = await apiFetch(apiUrl(`/api/sessions/${id}`), {
@@ -571,6 +614,7 @@ async function deleteSession(id: string): Promise<boolean> {
     archivedSessionIds.delete(id);
     archivedSessions = archivedSessions.filter((session) => session.id !== id);
     removeFromActiveProjection(id);
+    notifySessionRemoved(id);
     toastStore.success('Chat deleted');
     return true;
   } catch (err) {
@@ -599,7 +643,8 @@ async function deleteAllSessions(): Promise<boolean> {
       return false;
     }
 
-    for (const session of [...sessions, ...archivedSessions]) {
+    const erased = [...sessions, ...archivedSessions];
+    for (const session of erased) {
       deletedSessionIds.add(session.id);
       wsStore.unsubscribeFromSession(session.id);
     }
@@ -610,6 +655,7 @@ async function deleteAllSessions(): Promise<boolean> {
     archivedError = null;
     activeSessionId = '';
     saveLastSession('');
+    for (const session of erased) notifySessionRemoved(session.id);
     toastStore.success(
       data.deleted === 1 ? '1 session deleted' : `${data.deleted ?? 0} sessions deleted`,
     );
@@ -708,6 +754,7 @@ function handleSessionDeleted(sessionId: string) {
   archivedSessionIds.delete(sessionId);
   archivedSessions = archivedSessions.filter((session) => session.id !== sessionId);
   removeFromActiveProjection(sessionId);
+  notifySessionRemoved(sessionId);
 }
 
 // ─── Exported Store ─────────────────────────────────────────────────────────
@@ -790,6 +837,7 @@ export const sessionStore = {
   archiveSession,
   restoreSession,
   setInteractionMode,
+  setSessionAgentOverrides,
   deleteSession,
   deleteAllSessions,
   fetchMessages,

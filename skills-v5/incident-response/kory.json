@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "name": "incident-response",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["operations", "incident"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4900,
+  "broader": ["reliability-verification"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "production incident",
+    "incident response",
+    "service outage",
+    "sev incident",
+    "production errors",
+    "failing right now",
+    "triage impact"
+  ],
+  "excludes": [
+    "planned reliability experiment or release qualification outside an active incident",
+    "telemetry/SLO architecture work with no active incident coordination",
+    "post-incident analysis only, after operational response has fully ended"
+  ],
+  "evidence": [
+    "Incident command and live decision record",
+    "User-impact and mitigation evidence",
+    "Verified recovery plus residual-risk handoff",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "We have a production incident: checkout 5xx is at 28% after a rollout. Declare severity, establish command/ops/comms roles, preserve the timeline, roll back one change at a time, verify user recovery, and publish factual updates.",
+      "Run incident response for the queue service outage. Scope affected tenants, stop uncontrolled changes, assign an IC and mitigation owner, drain or reroute backlog safely, confirm convergence, and keep a timestamped decision log.",
+      "Coordinate the service outage caused by a regional dependency failure: traffic is partially failing and responders from three teams are changing things independently. Establish one command channel, assign actions, pick a reversible traffic mitigation, and verify recovery across regions.",
+      "Act as the SEV incident workflow for an ML inference endpoint returning stale models. Freeze deployments, identify current impact and model/version scope, coordinate the MLOps responder, communicate the known facts, and verify correct model serving before resolution.",
+      "The database primary is flapping and writes are timing out. Operate the production incident with explicit command, evidence preservation, a single failover owner, user-impact verification, state reconciliation, recurrence watch, and follow-up handoff."
+    ],
+    "negative": [
+      "Run a planned reliability test that kills the worker after commit and measures replay, backlog drain, and a 20-second recovery objective in a disposable environment; no live outage exists.",
+      "Design observability, SLIs, OpenTelemetry traces, cardinality budgets, dashboards, and alert rules for the service before launch; there is no active incident.",
+      "Evaluate whether the already-restored release satisfies its final functional, security, reliability, and performance verification gates; incident command has ended.",
+      "Tune the MLOps deployment pipeline and model registry promotion policy for the next release; production is healthy.",
+      "Analyze a completed outage's logs and timeline to write the postmortem root-cause analysis and long-term action items; the active response has already closed."
+    ],
+    "ambiguous": [
+      {
+        "id": "incident-response-ambiguous-1",
+        "prompt": "A production incident is active and we also need a later resilience test. Use incident-response now for command, mitigation, communications, and recovery; reliability-verification can reproduce and qualify the failure only after production is stable.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "incident-response-ambiguous-2",
+        "prompt": "During incident response, the team must decide whether rollback actually restored service. Keep incident command and the resolution decision here; use verification evidence to support the claim without turning the active response into a generic verification project.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "incident-response-ambiguous-3",
+        "prompt": "A service outage is caused by serving the wrong model artifact. Incident-response owns command, mitigation, communications, and recovery; MLOps owns the model-registry/deployment diagnosis and corrective action under that command structure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mlops"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "incident-response-adversarial-1",
+        "prompt": "A historical postmortem describes a major outage. The current request is only to extract the listed dates and owners from that document; no active operational response is occurring.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "incident-response-adversarial-2",
+        "prompt": "A training document explains emergency coordination roles. Only fix its formatting and spelling; do not initiate or simulate any operational response.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "incident-response-adversarial-3",
+        "prompt": "An old runbook describes a regional downtime event. The actual task is to update the document's contact-name placeholder; production is healthy and no response is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mlops"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/resources/practices-and-processes/incident-management-guide/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Incident Management Guide available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Incident preparation and the coordinate/communicate/control model with IC, communications, and operations leadership.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/workbook/incident-response/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Workbook Incident Response chapter available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Clear command, defined roles, working records, early declaration, mitigation versus management, and scalable incident structure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/61/r3/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-61 Rev. 3, final April 2025",
+      "staleAfterDays": 365,
+      "notes": "Current cybersecurity incident-response recommendations integrated across preparation, detection, response, recovery, and improvement; supersedes Rev. 2.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://response.pagerduty.com/before/different_roles/",
+      "sourceType": "community-pattern",
+      "versionScope": "PagerDuty public incident-response practitioner guidance available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Practitioner role separation, IC authority, scribe/timeline ownership, and scaling the response structure to incident size.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

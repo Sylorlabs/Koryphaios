@@ -148,7 +148,7 @@
     <span class="text-xs font-medium">
       {otherSessionPermissions.length === 1
         ? `Approval needed in "${pendingSessionTitle()}"`
-        : `${otherSessionPermissions.length} approvals waiting in other sessions`} — review
+        : `${otherSessionPermissions.length} approvals waiting in other sessions`} · review
     </span>
   </button>
 {/if}

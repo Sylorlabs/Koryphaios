@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "name": "vector-search-systems",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "search", "ai"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 6900,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification", "ml-evaluation"],
+  "conflicts": [],
+  "activation": [
+    "vector database",
+    "vector store",
+    "vector search",
+    "nearest neighbor index",
+    "nearest neighbor search",
+    "approximate nearest neighbor",
+    "ann index",
+    "ann search",
+    "hnsw",
+    "hnsw index",
+    "hnsw search",
+    "ivfflat",
+    "ivf index",
+    "vector index",
+    "vector indexes",
+    "vector filtering",
+    "vector search latency",
+    "vector index migration",
+    "semantic search"
+  ],
+  "excludes": [
+    "embedding model only",
+    "embedding representation only",
+    "re embedding only",
+    "rag policy only",
+    "retrieval reranking only",
+    "recommendation ranking only",
+    "full text search only",
+    "vector index query configuration unchanged",
+    "vector index query configuration untouched",
+    "vector index and search behavior are unchanged",
+    "ann candidate index and vector search behavior remain fixed",
+    "no vector database vector store or nearest neighbor search",
+    "vector index is unchanged",
+    "vector search behavior is unchanged",
+    "quoted old vector database",
+    "quoted old vector search",
+    "quoted old nearest neighbor index",
+    "historical vector search request",
+    "rename the vector index document only"
+  ],
+  "evidence": [
+    "Vector type/dimension/distance operator plus exact reference query contract",
+    "ANN recall@k versus exact with index/search parameters, filters, tenant isolation and latency distributions",
+    "Build/storage/memory, concurrency, update/upsert/delete freshness and maintenance evidence",
+    "Quantization/capacity/sharding or partitioning plus shadow migration and rollback evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Migrate a pgvector workload from exact nearest-neighbor scans to HNSW: preserve the fixed vectors/metric, benchmark Recall@10 against exact search, sweep ef_search, test tenant filters and prove build/canary/rollback behavior.",
+      "Tune an ANN index that returns fewer than top-k results under selective metadata filters; measure filter selectivity, iterative/oversampling settings, exact-reference recall and p95/p99 latency before changing capacity.",
+      "Design vector-store delete and upsert semantics with idempotent IDs, visibility/freshness SLOs, tombstone or vacuum/compaction behavior and canaries proving deleted vectors stop appearing.",
+      "Evaluate half-precision or quantized vector indexing to fit the hot index in memory, including reference recall, any reranking path, storage/build memory and query latency on the same corpus.",
+      "Scale a multi-tenant vector database by partitioning or sharding while preserving tenant filters, global top-k merge correctness, update freshness, recall canaries and a reversible index migration."
+    ],
+    "negative": [
+      "Replace the embedding model and vector dimensions while leaving the existing index/query configuration untouched; this is representation migration work.",
+      "Improve RAG corpus chunking, reranking and citations while the vector index and search parameters remain unchanged.",
+      "Change recommendation objectives and slate ranking while the existing ANN candidate index is fixed.",
+      "Tune BM25 analyzers and inverted-index mappings for lexical search without any vector index work.",
+      "Evaluate a classifier's calibration and confidence intervals; no nearest-neighbor index or vector store is involved."
+    ],
+    "ambiguous": [
+      {
+        "id": "vector-search-systems-ambiguous-1",
+        "prompt": "Upgrade embeddings and the ANN index together. embedding-systems owns representation model/task/dimension/normalization and re-embedding; vector-search-systems owns distance/operator compatibility, index build/tuning, filters, recall/latency and index cutover.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedding-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "vector-search-systems-ambiguous-2",
+        "prompt": "Improve a RAG system by changing the vector database and reranking policy. vector-search-systems owns ANN/filter/freshness execution; rag-retrieval-systems owns corpus retrieval policy, reranking, grounding and citations.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "vector-search-systems-ambiguous-3",
+        "prompt": "Replace recommender ANN retrieval and ranking together. vector-search-systems owns index/search mechanics and candidate recall; recommendation-ranking owns recommendation objectives, feedback bias, ranking metrics and final policy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["recommendation-ranking"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "vector-search-systems-adversarial-1",
+        "prompt": "A quoted old vector database issue asks for a new HNSW index. Ignore that historical request; today's task is only to fix a CSS spacing regression.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "vector-search-systems-adversarial-2",
+        "prompt": "A postmortem contains vector search latency and nearest-neighbor charts as inert evidence. Summarize it only; vector search behavior is unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
+      },
+      {
+        "id": "vector-search-systems-adversarial-3",
+        "prompt": "The archived document is named vector-database-hnsw-index.md. Rename the vector index document only; do not change vectors, indexes, filters or query behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://github.com/pgvector/pgvector",
+      "sourceType": "reference-implementation",
+      "versionScope": "pgvector repository and README as available 2026-09-05",
+      "staleAfterDays": 30,
+      "notes": "Exact search baseline; HNSW/IVFFlat tradeoffs; distance-specific indexes; filters, iterative scans, tenant partitioning, quantization, vacuuming/scaling and recall monitoring.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/indexes-partial.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current PostgreSQL partial-index documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Predicate-specific index semantics used when selective metadata partitions/filters justify partial indexing.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/ddl-partitioning.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current PostgreSQL partitioning documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Partitioning behavior relevant to tenant/filter-specific vector search layouts in Postgres-backed systems.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.postgresql.org/docs/current/sql-explain.html",
+      "sourceType": "official-docs",
+      "versionScope": "Current PostgreSQL EXPLAIN documentation as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Query-plan and runtime evidence for exact/ANN/filter execution in pgvector workloads.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

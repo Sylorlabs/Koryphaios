@@ -1,0 +1,87 @@
+{
+  "id": "market-strategy-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply market strategy expertise to this task\". The evidence packet contains one strong headline metric, a material guardrail or dependency problem, uncertain assumptions, and a decision that must remain traceable to evidence rather than confidence theater. The acceptance boundary is market-strategy: Define the decision, target customer/job, alternatives including non-consumption, buying process, willingness to switch, distribution, economics, regulatory constraints, and company capabilities. The adjacent pricing-monetization discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://market-strategy/competitive-positioning-response",
+    "requirements": [
+      "competitor announcement/pricing plus verified product capability notes and unknowns",
+      "customer win/loss reasons and overlap by target segment",
+      "unit-economics/capability constraints for potential response options",
+      "decision matrix covering hold, reposition, targeted offer, and product investment",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "market-strategy parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "market-strategy-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "market-strategy decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "market-strategy-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "market-strategy decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "market-strategy-individual-scenario-2-result",
+    "market-strategy-individual-scenario-2-verification",
+    "market-strategy-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual market-strategy boundary and relevant environment before acting, preserve the hierarchy relationship (broader=market-competitive-research; near-neighbor=pricing-monetization), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define the decision, target customer/job, alternatives including non-consumption, buying process, willingness to switch, distribution, economics, regulatory constraints, and company capabilities."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Triangulate primary customer evidence, authoritative market data, competitor behavior, pricing/distribution evidence, and small tests of the riskiest assumptions before large commitments."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not equate TAM with obtainable revenue, rely on competitor feature grids as strategy, fabricate market-share precision, or assume expressed interest equals purchasing behavior."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (market-strategy decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

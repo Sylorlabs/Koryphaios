@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "procurement-vendor-evaluation",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "procurement", "analysis"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3354,
+  "broader": ["market-competitive-research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "vendor evaluation",
+    "procurement decision",
+    "software vendor selection",
+    "rfp evaluation",
+    "compare these three vendors",
+    "purchase decision",
+    "total cost lock in"
+  ],
+  "excludes": [],
+  "evidence": [
+    "procurement-vendor-evaluation decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle vendor evaluation.",
+      "The current task is procurement decision.",
+      "I need help with software vendor selection.",
+      "Work on rfp evaluation for this request.",
+      "This request specifically requires compare these three vendors."
+    ],
+    "negative": [
+      "The only requested work is market strategy.",
+      "Please handle marketing strategy only.",
+      "This task is limited to pricing strategy.",
+      "The current request is business case.",
+      "Work only on financial model."
+    ],
+    "ambiguous": [
+      {
+        "id": "procurement-vendor-evaluation-ambiguous-1",
+        "prompt": "The request includes vendor evaluation and market strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "procurement-vendor-evaluation-ambiguous-2",
+        "prompt": "The request includes procurement decision and marketing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["marketing-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "procurement-vendor-evaluation-ambiguous-3",
+        "prompt": "The request includes software vendor selection and pricing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "procurement-vendor-evaluation-adversarial-1",
+        "prompt": "A historical note says \"vendor evaluation\". The current request is business case.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "procurement-vendor-evaluation-adversarial-2",
+        "prompt": "A historical note says \"procurement decision\". The current request is financial model.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["financial-modeling"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "procurement-vendor-evaluation-adversarial-3",
+        "prompt": "A historical note says \"software vendor selection\". The current request is contract analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["contract-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/161/r1/upd1/final",
+      "sourceType": "official-docs",
+      "versionScope": "SP 800-161r1 update 1 publication abstract and revision metadata inspected 2026-09-06; no fresh full PDF review",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt supply-chain visibility and risk assessment across acquisition and operation. The abstract does not prove compliance with detailed controls or vendor claims."
+    },
+    {
+      "url": "https://www.cisa.gov/resources-tools/resources/reducing-ict-supply-chain-risk-small-and-medium-sized-businesses-fact-sheet",
+      "sourceType": "official-docs",
+      "versionScope": "CISA ICT SCRM guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Supplier, dependency, acquisition, provenance, resilience, and supply-chain risk guidance.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/manage-your-business",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration operations guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Business operations, finance, marketing/sales, staffing, and compliance reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

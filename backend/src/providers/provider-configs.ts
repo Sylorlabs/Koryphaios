@@ -50,9 +50,36 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['OPENROUTER_API_KEY'],
   },
+  // UnoRouter — open-source OpenRouter alternative; one key for 200+ models.
+  // OpenAI-compatible Chat Completions at /v1 (docs: unorouter.com/en/docs).
+  // Verification probes GET /v1/models with `Authorization: Bearer <key>`.
+  {
+    name: 'unorouter',
+    baseUrl: 'https://api.unorouter.com/v1',
+    authMode: 'api_key',
+    envKeys: ['UNOROUTER_API_KEY'],
+  },
+  // Experiential Labs — open-source AI gateway; one key for hosted/BYOK/local models.
+  // OpenAI-compatible Chat Completions at /v1 (docs: platform.experientiallabs.ai/docs).
+  // Verification probes GET /v1/models with `Authorization: Bearer <key>`.
+  {
+    // Cline's hosted inference API. One key routes ~460 models across
+    // Anthropic/OpenAI/Google/xAI/DeepSeek/Mistral/Qwen with OpenRouter-style
+    // `provider/model` ids over an OpenAI-compatible Chat Completions surface.
+    name: 'cline',
+    baseUrl: 'https://api.cline.bot/api/v1',
+    authMode: 'api_key',
+    envKeys: ['CLINE_API_KEY'],
+  },
+  {
+    name: 'experientiallabs',
+    baseUrl: 'https://api.experientiallabs.ai/v1',
+    authMode: 'api_key',
+    envKeys: ['EXPERIENTIALLABS_API_KEY', 'EXPLABS_API_KEY'],
+  },
   {
     name: 'tokenrouter',
-    baseUrl: 'https://api.tokenrouter.io/v1',
+    baseUrl: 'https://api.tokenrouter.com/v1',
     authMode: 'api_key',
     envKeys: ['TOKENROUTER_API_KEY'],
   },
@@ -67,6 +94,14 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'https://inference.do-ai.run/v1',
     authMode: 'api_key',
     envKeys: ['DIGITALOCEAN_API_KEY'],
+  },
+  // Command Code Provider API — OpenAI- and Anthropic-compatible endpoints on
+  // one key. Claude models dispatch to /messages; see command-code.ts.
+  {
+    name: 'commandcode',
+    baseUrl: 'https://api.commandcode.ai/provider/v1',
+    authMode: 'api_key',
+    envKeys: ['COMMAND_CODE_API_KEY'],
   },
   {
     name: 'copilot',
@@ -101,7 +136,6 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   { name: 'antigravity', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'cursor', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'devin', baseUrl: '', authMode: 'auth_only', envKeys: [] },
-  { name: 'cline', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   { name: 'freebuff', baseUrl: '', authMode: 'auth_only', envKeys: [] },
   {
     name: 'codebuff',
@@ -109,13 +143,28 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['CODEBUFF_API_KEY'],
   },
-  { name: 'kilocode', baseUrl: 'https://api.kilo.ai/api/gateway', authMode: 'api_key', envKeys: ['KILO_API_KEY'] },
+  {
+    name: 'kilocode',
+    baseUrl: 'https://api.kilo.ai/api/gateway',
+    authMode: 'api_key',
+    envKeys: ['KILO_API_KEY'],
+  },
   // Cloud async agent (API key, not a CLI harness)
   {
     name: 'jules',
     baseUrl: 'https://jules.googleapis.com/v1alpha',
     authMode: 'api_key',
     envKeys: ['JULES_API_KEY'],
+  },
+  // Hybrid async agent (Hoplite) — org-scoped API key created in app.hoplite.sh
+  // organization settings. A thread runs in a Hoplite cloud sandbox or on a local
+  // Codex/Claude agent, producing threads/PRs either way; the key verifies
+  // against the project catalog.
+  {
+    name: 'hoplite',
+    baseUrl: 'https://api.hoplite.sh',
+    authMode: 'api_key',
+    envKeys: ['HOPLITE_API_KEY'],
   },
 
   // Enterprise
@@ -160,6 +209,15 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     baseUrl: 'http://localhost:8080',
     authMode: 'base_url_only',
     envKeys: [],
+  },
+  // AutoClaw (Z.ai) — the local OpenClaw/AutoClaw desktop gateway ships an
+  // OpenAI-compatible Chat Completions surface bound to loopback only. Users
+  // paste the gateway bearer token from ~/.openclaw-autoclaw/.gateway-token.
+  {
+    name: 'autoclaw',
+    baseUrl: 'http://127.0.0.1:18789/v1',
+    authMode: 'api_key',
+    envKeys: ['AUTOCLAW_GATEWAY_TOKEN'],
   },
   {
     name: 'ollamacloud',
@@ -542,6 +600,16 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['WANDB_API_KEY'],
   },
   { name: 'poe', baseUrl: 'https://api.poe.com/v1', authMode: 'api_key', envKeys: ['POE_API_KEY'] },
+  // WorkBuddy (workbuddy.ai) — Tencent's full-scenario AI agent desktop product.
+  // Keys are issued by the Tencent TokenHub gateway (OpenAI Chat Completions
+  // compatible); the intl host below is what WorkBuddy's own docs configure,
+  // the China host is https://tokenhub.tencentcloudmaas.com/v1.
+  {
+    name: 'workbuddy',
+    baseUrl: 'https://tokenhub-intl.tencentcloudmaas.com/v1',
+    authMode: 'api_key',
+    envKeys: ['WORKBUDDY_API_KEY'],
+  },
   {
     name: 'github-models',
     baseUrl: 'https://models.github.ai/inference',
@@ -584,6 +652,12 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['CHATBASE_API_KEY'],
   },
+  {
+    name: 'notion',
+    baseUrl: 'https://api.notion.com/v1',
+    authMode: 'api_key',
+    envKeys: ['NOTION_API_KEY'],
+  },
   // Legacy/enterprise providers kept for backward compatibility with existing configs.
   {
     name: 'azurecognitive',
@@ -597,7 +671,11 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     name: 'gitlab',
     baseUrl: 'https://gitlab.com/api/v4',
     authMode: 'api_key',
-    envKeys: ['GITLAB_API_KEY'],
+    // GITLAB_TOKEN is the name models.dev and the Duo docs use; GITLAB_API_KEY
+    // keeps the generic convention. GITLAB_BASE_URL points at a self-managed
+    // instance, with or without the /api/v4 suffix.
+    envKeys: ['GITLAB_API_KEY', 'GITLAB_TOKEN'],
+    envUrlKey: 'GITLAB_BASE_URL',
   },
   // Note: Amazon Nova models are accessed through AWS Bedrock, not a separate API
   // Use 'bedrock' provider with nova models instead

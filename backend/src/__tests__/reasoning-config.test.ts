@@ -13,6 +13,7 @@ import {
   normalizeReasoningLevel,
   getDefaultReasoning,
   buildReasoningConfigFromLevels,
+  resolveReasoningLevel,
 } from '@koryphaios/shared';
 
 describe('buildReasoningConfigFromLevels (data-driven)', () => {
@@ -25,6 +26,11 @@ describe('buildReasoningConfigFromLevels (data-driven)', () => {
     expect(values).toContain('high');
     expect(values).toContain('max');
     expect(config!.defaultValue).toBe('medium');
+  });
+
+  test('labels xhigh as Xhigh', () => {
+    const config = buildReasoningConfigFromLevels(['high', 'xhigh']);
+    expect(config?.options.find((option) => option.value === 'xhigh')?.label).toBe('Xhigh');
   });
 
   test('builds config from budget-token levels', () => {
@@ -62,6 +68,25 @@ describe('buildReasoningConfigFromLevels (data-driven)', () => {
   });
 });
 
+describe('resolveReasoningLevel (single-option auto-select)', () => {
+  test('keeps the current level when it is still offered', () => {
+    expect(resolveReasoningLevel('high', ['low', 'medium', 'high'])).toBe('high');
+  });
+
+  test('auto-selects the sole option when the current level is not offered', () => {
+    expect(resolveReasoningLevel('medium', ['high'])).toBe('high');
+  });
+
+  test('auto-selects the sole option from an empty selection', () => {
+    expect(resolveReasoningLevel('', ['high'])).toBe('high');
+  });
+
+  test('clears the selection when several options remain but none match', () => {
+    expect(resolveReasoningLevel('medium', ['low', 'high'])).toBe('');
+    expect(resolveReasoningLevel('', ['low', 'high'])).toBe('');
+  });
+});
+
 describe('Legacy helpers (no static tables)', () => {
   test('getReasoningConfig always returns null', () => {
     expect(getReasoningConfig('anthropic', 'claude-opus-4-6')).toBeNull();
@@ -92,8 +117,9 @@ describe('normalizeReasoningLevel (pass-through)', () => {
     expect(normalizeReasoningLevel('anthropic', 'claude-haiku-4-5', '0')).toBe('0');
   });
 
-  test('returns undefined for antigravity', () => {
-    expect(normalizeReasoningLevel('antigravity', 'gemini-2.5-pro', 'high')).toBeUndefined();
+  test('passes through levels for providers that map effort onto their own models', () => {
+    expect(normalizeReasoningLevel('antigravity', 'gemini-2.5-pro', 'high')).toBe('high');
+    expect(normalizeReasoningLevel('antigravity', 'gemini-2.5-pro', 'auto')).toBe('auto');
   });
 
   test('returns undefined for adaptive', () => {

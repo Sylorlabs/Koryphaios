@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "startup-operations",
+  "version": "5.1.0",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "operations"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3299,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "startup operations",
+    "company operating cadence",
+    "startup planning",
+    "founder operations",
+    "tiny team",
+    "lightweight cadence",
+    "operational risks"
+  ],
+  "excludes": [],
+  "evidence": [
+    "startup-operations decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle startup operations.",
+      "The current task is company operating cadence.",
+      "I need help with startup planning.",
+      "Work on founder operations for this request.",
+      "This request specifically requires tiny team."
+    ],
+    "negative": [
+      "The only requested work is business case.",
+      "Please handle architecture plan only.",
+      "This task is limited to migration plan.",
+      "The current request is plan mode.",
+      "Work only on product management."
+    ],
+    "ambiguous": [
+      {
+        "id": "startup-operations-ambiguous-1",
+        "prompt": "The request includes startup operations and business case.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "startup-operations-ambiguous-2",
+        "prompt": "The request includes company operating cadence and architecture plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["architecture-planning"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "startup-operations-ambiguous-3",
+        "prompt": "The request includes startup planning and migration plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "startup-operations-adversarial-1",
+        "prompt": "A historical note says \"startup operations\". The current request is plan mode.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["plan-mode"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "startup-operations-adversarial-2",
+        "prompt": "A historical note says \"company operating cadence\". The current request is product management.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["product-management"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "startup-operations-adversarial-3",
+        "prompt": "A historical note says \"startup planning\". The current request is project management.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["project-program-management"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.sba.gov/counseling/plan-your-business/",
+      "sourceType": "official-docs",
+      "versionScope": "Business plan format and startup cost HTML sections inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt decision-fit planning and separation of initial and recurring obligations. No universal template, funding horizon, staffing ratio or company process is imposed."
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/manage-your-business",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration operations guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Business operations, finance, marketing/sales, staffing, and compliance reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

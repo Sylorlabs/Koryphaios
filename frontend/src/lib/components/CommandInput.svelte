@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { useNow } from '$lib/utils/now-signal.svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
+  import { clipboardMarkdown } from '$lib/utils/rich-paste';
   import Send from 'lucide-svelte/icons/send';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
@@ -28,8 +28,15 @@
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
+  import { formatKey } from '$lib/utils/platform';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
-  import { buildReasoningConfigFromLevels, type VoiceSettings, type GoalScope } from '@koryphaios/shared';
+  import {
+    buildReasoningConfigFromLevels,
+    resolveReasoningLevel,
+    type VoiceSettings,
+    type GoalScope,
+    type ContextBreakdown,
+  } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
@@ -54,16 +61,25 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { goalStore } from '$lib/stores/goals.svelte';
   import { goalDisplayStore } from '$lib/stores/goal-display.svelte';
-  import { formatGoalRuntime, isActiveGoal, type GoalActionRequest } from '$lib/utils/goal-actions';
+  import type { GoalActionRequest } from '$lib/utils/goal-actions';
+  import GoalMode from './GoalMode.svelte';
+  import ChecklistPanel from './ChecklistPanel.svelte';
   import {
     clearComposerDraft,
     loadComposerDraft,
+    loadComposerDraftAttachments,
     saveComposerDraft,
     type ComposerDraftAttachment,
   } from '$lib/stores/composer-drafts';
   import { loadComposerPreference, saveComposerPreference } from '$lib/stores/composer-preferences';
+  import type { SessionAgentOverrides } from '@koryphaios/shared';
+  import {
+    loadComposerSessionState,
+    saveComposerSessionState,
+  } from '$lib/stores/composer-session-state';
   import KorySelect from './KorySelect.svelte';
   import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
+  import { estimateCacheBreakImpact, formatCompactTokens } from '$lib/utils/cache-break-impact';
 
   export type Attachment = {
     type: 'image' | 'file';
@@ -90,7 +106,10 @@
     /** What Kory is waiting on, e.g. "background terminal: dev-server". */
     waitingReason?: string;
     onStop?: () => void;
-    onOpenSettings?: (section?: 'advanced' | 'agent', agentSection?: 'permissions') => void;
+    onOpenSettings?: (
+      section?: 'advanced' | 'agent' | 'voice',
+      agentSection?: 'permissions',
+    ) => void;
     onOpenWorkflows?: () => void;
     workflowStatus?: { name: string; stage: string; status: string; task: string };
     inputRef?: HTMLTextAreaElement;
@@ -110,6 +129,8 @@
      *  so the parent can react to provider changes (e.g. to surface that CLI
      *  provider's native /commands in the slash picker). */
     selectedModel?: string;
+    /** Bindable mirror of the current reasoning selection for cache prewarm routing. */
+    selectedReasoningLevel?: string;
     interactionMode?: 'act' | 'plan';
     onInteractionModeChange?: (mode: 'act' | 'plan') => void;
     planReady?: boolean;
@@ -118,6 +139,9 @@
     draftKey?: string;
     /** Parent-side deferred send succeeded; clear the retained composer draft. */
     clearDraftRequest?: number;
+    /** When non-empty (worker tab), the composer is pinned to that worker's
+     *  own model instead of the active chat's selection ("provider:model"). */
+    forcedModel?: string;
   }
 
   let {
@@ -141,12 +165,14 @@
     initialModel = '',
     disableModelPreviewRequests = false,
     selectedModel = $bindable(''),
+    selectedReasoningLevel = $bindable(''),
     interactionMode = 'act',
     onInteractionModeChange,
     planReady = false,
     onApprovePlan,
     draftKey = 'welcome',
     clearDraftRequest = 0,
+    forcedModel = '',
   }: Props = $props();
   let actionPanelRef = $state<HTMLDivElement>();
   let showModelPicker = $state(false);
@@ -162,7 +188,11 @@
   // Bindable selectedModel: seeded from localStorage once, then kept in sync
   // with the parent so the composer's slash picker can surface the active CLI
   // provider's native /commands.
-  if (!selectedModel && _storedModel) selectedModel = _storedModel;
+  // The seed intentionally reads only the *initial* prop values; demo surfaces
+  // seed from initialModel instead of the last-used global model.
+  untrack(() => {
+    if (!selectedModel && !initialModel && _storedModel) selectedModel = _storedModel;
+  });
   let lastContextPreviewKey = $state('');
   let selectedPickerIndex = $state(0);
   let modelSelectionGeneration = 0;
@@ -170,21 +200,21 @@
   let attachments = $state<Attachment[]>([]);
   let hydratedDraftKey = $state<string | null>(null);
   let lastClearDraftRequest = $state<number | undefined>(undefined);
-  let omittedAttachmentNames = $state<string[]>([]);
+  // False while a restored draft's attachment payloads are still being read.
+  let draftPayloadsReady = $state(true);
+  let composerUnmounted = false;
+  onDestroy(() => {
+    composerUnmounted = true;
+  });
 
   function currentDraftKey(): string {
     return draftKey.trim() || 'welcome';
   }
 
-  function sameNames(left: string[], right: string[]): boolean {
-    return left.length === right.length && left.every((value, index) => value === right[index]);
-  }
-
   function clearCurrentDraft() {
     value = '';
     attachments = [];
-    omittedAttachmentNames = [];
-    clearComposerDraft(currentDraftKey());
+    void clearComposerDraft(currentDraftKey());
     resizeToMin();
   }
 
@@ -194,33 +224,85 @@
   $effect(() => {
     const nextKey = currentDraftKey();
     if (hydratedDraftKey === nextKey) return;
-    if (hydratedDraftKey !== null) {
-      saveComposerDraft(
-        hydratedDraftKey,
-        value,
-        attachments as ComposerDraftAttachment[],
-        omittedAttachmentNames,
-      );
+    const previousKey = hydratedDraftKey;
+    hydratedDraftKey = nextKey;
+    if (previousKey !== null) {
+      void saveComposerDraft(previousKey, value, attachments as ComposerDraftAttachment[]);
     }
     const recovered = loadComposerDraft(nextKey);
-    hydratedDraftKey = nextKey;
+    // Text is available immediately; attachment payloads live on disk and are
+    // read back asynchronously. Saving is suspended until they land, so a save
+    // triggered by this restore cannot overwrite the draft with no images.
+    draftPayloadsReady = false;
     value = recovered.text;
     attachments = recovered.attachments as Attachment[];
-    omittedAttachmentNames = recovered.omittedAttachmentNames;
+    void loadComposerDraftAttachments(nextKey).then((stored) => {
+      if (composerUnmounted || hydratedDraftKey !== nextKey) return;
+      if (stored.length > 0) attachments = stored as Attachment[];
+      draftPayloadsReady = true;
+    });
+    // Controls (model, effort, fast mode) are chat-scoped too: restore the
+    // incoming chat's own saved controls instead of keeping the previous
+    // chat's picker. Worker tabs pin the model and restore on unpin.
+    if (!forcedModel) restoreComposerControls(nextKey);
+  });
+
+  // ─── Per-chat composer controls (model, reasoning effort, fast mode) ────────
+  // A model id whose preference restore must be skipped once: chat-scoped
+  // controls win over the model's global defaults right after a restore.
+  let suppressPreferenceRestoreFor = $state('');
+  let lastForcedModel = $state('');
+
+  function restoreComposerControls(scope: string) {
+    const saved = loadComposerSessionState(scope);
+    if (saved.model) {
+      suppressPreferenceRestoreFor = saved.model;
+      if (saved.model !== selectedModel) selectedModel = saved.model;
+    } else {
+      suppressPreferenceRestoreFor = '';
+      // This chat never picked a model: fall back to the last model used
+      // anywhere so the picker isn't empty, matching brand-new chats.
+      try {
+        const lastUsed =
+          typeof localStorage !== 'undefined' ? localStorage.getItem(MODEL_STORAGE_KEY) : null;
+        if (lastUsed && lastUsed !== selectedModel) selectedModel = lastUsed;
+      } catch {}
+    }
+    if (saved.reasoningLevel !== undefined) reasoningLevel = saved.reasoningLevel;
+    if (typeof saved.fastMode === 'boolean') fastMode = saved.fastMode;
+  }
+
+  // A worker tab pins the composer to that worker's own model. Leaving the tab
+  // hands the composer back to the chat, which restores the chat's saved
+  // controls instead of keeping the worker's model.
+  $effect(() => {
+    const next = forcedModel;
+    if (next === lastForcedModel) return;
+    const wasForced = !!lastForcedModel;
+    lastForcedModel = next;
+    if (next) {
+      if (next !== selectedModel) selectedModel = next;
+    } else if (wasForced) {
+      restoreComposerControls(currentDraftKey());
+    }
+  });
+
+  // Persist control changes into the active chat's scope so each chat keeps
+  // its own picker state across switches and reloads. Worker-tab pinning must
+  // never leak the worker's model into the chat's scope.
+  $effect(() => {
+    const scope = currentDraftKey();
+    if (hydratedDraftKey !== scope) return;
+    if (forcedModel || !selectedModel) return;
+    saveComposerSessionState(scope, { model: selectedModel, reasoningLevel, fastMode });
   });
 
   $effect(() => {
     const key = currentDraftKey();
-    if (hydratedDraftKey !== key) return;
-    const persisted = saveComposerDraft(
-      key,
-      value,
-      attachments as ComposerDraftAttachment[],
-      omittedAttachmentNames,
-    );
-    if (!sameNames(omittedAttachmentNames, persisted.omittedAttachmentNames)) {
-      omittedAttachmentNames = persisted.omittedAttachmentNames;
-    }
+    if (hydratedDraftKey !== key || !draftPayloadsReady) return;
+    // A save in flight must not be abandoned on the next keystroke: the draft
+    // is the user's work, so every autosave is allowed to land.
+    void saveComposerDraft(key, value, attachments as ComposerDraftAttachment[]);
   });
 
   $effect(() => {
@@ -269,28 +351,44 @@
     onend: (() => void) | null;
   };
   type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+  type LocalPcmRecorder = {
+    stream: MediaStream;
+    context: AudioContext;
+    source: MediaStreamAudioSourceNode;
+    processor: ScriptProcessorNode;
+    sink: GainNode;
+    chunks: Float32Array[];
+    sampleRate: number;
+    language: string;
+  };
+  type LocalVoiceModelStatus = {
+    installed: boolean;
+    modelId: string;
+  };
 
   let isRecording = $state(false);
   let isTranscribing = $state(false);
+  // True while a push-to-talk key or button is held down.
+  let holdToTalkActive = $state(false);
   let activeRecorder: MediaRecorder | null = null;
+  let activeLocalRecorder: LocalPcmRecorder | null = null;
   let activeSpeechRecognition: BrowserSpeechRecognition | null = null;
   let voiceSettings = $state<VoiceSettings | null>(null);
   let composerMicrophoneEnabled = $derived(voiceSettings?.voiceModeEnabled === true);
+  // Every chord bound to voice mode, so the hint never advertises only the one a
+  // platform might swallow.
+  let voiceShortcutHint = $derived(
+    shortcutStore
+      .chords('voice_mode')
+      .map((chord) => chord.map(formatKey).join('+'))
+      .filter(Boolean)
+      .join(' or '),
+  );
   const pendingAttachmentReads = new Set<Promise<void>>();
   let referenceFileInputRef = $state<HTMLInputElement>();
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
   let showGoalActions = $state(false);
-  let goalClock = $state(Date.now());
-  const nowClock = useNow();
-  $effect(() => {
-    goalClock = nowClock.now;
-  });
-  let activeChatGoal = $derived(
-    goalStore.goals.find(
-      (goal) => isActiveGoal(goal) && goal.execution?.sessionId === sessionStore.activeSessionId,
-    ),
-  );
 
   // ─── Goal composer (lives above the chat, not in the sidebar) ───────────────
   const goalScopeOptions = [
@@ -298,9 +396,11 @@
     { value: 'project', label: 'Project', description: 'Restricted to this project' },
     { value: 'session', label: 'This chat', description: 'Restricted to the active chat' },
   ];
+  const defaultGoalScope = (): GoalScope =>
+    sessionStore.activeSessionId ? 'session' : projectStore.currentPath ? 'project' : 'workspace';
   let showGoalComposer = $state(false);
   let goalObjective = $state('');
-  let goalScope = $state<GoalScope>('workspace');
+  let goalScope = $state<GoalScope>(defaultGoalScope());
   let goalError = $state('');
   let goalDraftHydratedFor = $state<string | null>(null);
   let goalDraftRecovered = $state(false);
@@ -312,16 +412,23 @@
     const nextScope = goalDraftScope;
     if (goalDraftHydratedFor === nextScope) return;
     if (goalDraftHydratedFor !== null) {
-      saveLocalFormDraft('goal-composer', goalDraftHydratedFor, { objective: goalObjective, scope: goalScope });
+      saveLocalFormDraft('goal-composer', goalDraftHydratedFor, {
+        objective: goalObjective,
+        scope: goalScope,
+      });
     }
     const recovered = loadLocalFormDraft('goal-composer', nextScope);
+    const hasRecoveredGoal = Boolean(recovered.objective?.trim());
     goalDraftHydratedFor = nextScope;
     goalObjective = recovered.objective || '';
     goalScope =
-      recovered.scope === 'workspace' || recovered.scope === 'project' || recovered.scope === 'session'
+      hasRecoveredGoal &&
+      (recovered.scope === 'workspace' ||
+        recovered.scope === 'project' ||
+        recovered.scope === 'session')
         ? recovered.scope
-        : 'workspace';
-    goalDraftRecovered = Boolean(recovered.objective);
+        : defaultGoalScope();
+    goalDraftRecovered = hasRecoveredGoal;
   });
   $effect(() => {
     const draftScope = goalDraftScope;
@@ -362,14 +469,15 @@
         objective: goalObjective.trim(),
         scope: goalScope,
         projectPath: goalScope === 'project' ? (projectStore.currentPath ?? undefined) : undefined,
-        sessionId: goalScope === 'session' ? (sessionStore.activeSessionId ?? undefined) : undefined,
+        sessionId:
+          goalScope === 'session' ? (sessionStore.activeSessionId ?? undefined) : undefined,
         planningDepth: agentSettingsStore.settings.goalPlanningDepth ?? 'adaptive',
       });
       goalObjective = '';
       goalDraftRecovered = false;
       showGoalComposer = false;
-      // The created goal previews on the left so it can be revisited from any chat.
-      goalDisplayStore.update({ sidebar: true });
+      // The new goal surfaces in the Goal Mode bubble directly above the chat.
+      goalDisplayStore.update({ composer: true });
       if (agentSettingsStore.settings.automaticGoalDriving) await goalStore.drive(goal.id);
     } catch (err) {
       goalError = err instanceof Error ? err.message : String(err);
@@ -410,6 +518,7 @@
     if (provider === 'aistudio') return 'Google AI Studio';
     if (provider === 'xai') return 'xAI';
     if (provider === 'openrouter') return 'OpenRouter';
+    if (provider === 'unorouter') return 'UnoRouter';
     if (provider === 'vertexai') return 'Vertex AI';
     if (provider === 'copilot') return 'Copilot';
     if (provider === 'kimicode') return 'Kimi Code';
@@ -421,6 +530,10 @@
   let reasoningLevel = $state('medium');
   let showReasoningMenu = $state(false);
   let restoredComposerPreferenceFor = $state('');
+
+  $effect(() => {
+    selectedReasoningLevel = reasoningLevel;
+  });
 
   let fallbackProvider = $derived.by(() => {
     const preferred = wsStore.providers.find(
@@ -453,6 +566,8 @@
         supportsFastMode?: boolean;
         supportsAttachments?: boolean;
         vision?: boolean;
+        costPerMInputTokens?: number;
+        costPerMInputCached?: number;
       }
     | undefined {
     if (!model) return undefined;
@@ -465,10 +580,16 @@
           supportsFastMode?: boolean;
           supportsAttachments?: boolean;
           vision?: boolean;
+          costPerMInputTokens?: number;
+          costPerMInputCached?: number;
           name?: string;
+          /** Superseded ids (e.g. Antigravity's per-effort slugs) that now
+           *  resolve to this model, so a selection saved before a catalog
+           *  collapse still resolves to a real model. */
+          aliases?: string[];
         }>
       | undefined;
-    return catalog?.find((m) => m.id === model);
+    return catalog?.find((m) => m.id === model || m.aliases?.includes(model));
   }
 
   function effectiveReasoningConfig(provider: string, model: string | undefined) {
@@ -489,7 +610,9 @@
     !!selectedModel && !!reasoningConfig && reasoningConfig.options.length > 0,
   );
   let reasoningIsValid = $derived(
-    !!reasoningLevel && !!reasoningConfig && reasoningConfig.options.some((o) => o.value === reasoningLevel),
+    !!reasoningLevel &&
+      !!reasoningConfig &&
+      reasoningConfig.options.some((o) => o.value === reasoningLevel),
   );
 
   // Effort and Fast/Priority are model capabilities, so retain them per exact
@@ -500,6 +623,12 @@
     const model = selectedModel;
     if (!model || model === restoredComposerPreferenceFor) return;
     restoredComposerPreferenceFor = model;
+    // A chat restoring its own saved controls must not be overridden by the
+    // model's global defaults.
+    if (suppressPreferenceRestoreFor === model) {
+      suppressPreferenceRestoreFor = '';
+      return;
+    }
     const saved = loadComposerPreference(model);
     if (saved.reasoningLevel) reasoningLevel = saved.reasoningLevel;
     if (typeof saved.fastMode === 'boolean') fastMode = saved.fastMode;
@@ -507,9 +636,11 @@
 
   $effect(() => {
     if (!reasoningConfig || reasoningConfig.options.length === 0) return;
-    if (reasoningLevel && !reasoningConfig.options.some((o) => o.value === reasoningLevel)) {
-      reasoningLevel = '';
-    }
+    const next = resolveReasoningLevel(
+      reasoningLevel,
+      reasoningConfig.options.map((o) => o.value),
+    );
+    if (next !== reasoningLevel) reasoningLevel = next;
   });
   let fastMode = $state(false);
   let fastModeSupported = $derived(
@@ -522,7 +653,7 @@
   let fastModeHint = $derived(
     currentProvider === 'openai'
       ? 'API Priority processing. Requires Priority access on this OpenAI project.'
-      : '1.5× faster Codex service tier; uses ChatGPT credits at a higher rate.',
+      : '1.5× faster Codex service tier. Uses ChatGPT credits at a higher rate.',
   );
 
   $effect(() => {
@@ -554,14 +685,14 @@
     {
       value: 'guarded',
       label: 'Guarded',
-      description: 'Run all edits and routine tools; ask only before risky actions.',
+      description: 'Run all edits and routine tools. Ask only before risky actions.',
       icon: ShieldCheck,
       tone: 'text-emerald-300',
     },
     {
       value: 'edits',
       label: 'Accept edits',
-      description: 'Apply file edits automatically; ask before other actions.',
+      description: 'Apply file edits automatically. Ask before other actions.',
       icon: Pencil,
       tone: 'text-sky-300',
     },
@@ -583,26 +714,68 @@
 
   type PermissionMode = (typeof PERMISSION_OPTIONS)[number]['value'];
 
+  // ─── Per-chat approval posture (permission preset, agent mode, critic) ─────
+  // These three controls used to be project settings, so switching one chat to
+  // YOLO silently reconfigured every other chat in the workspace. They are now
+  // stored on the session itself, and the project value stays the default for
+  // any chat that never made a choice.
+  let sessionAgentOverrides = $derived(
+    sessionStore.sessions.find((s) => s.id === sessionStore.activeSessionId)?.agentOverrides ?? {},
+  );
+  // Covers the window where the durable row has not caught up yet (and the
+  // welcome panel, which has no session at all). Tagged with its chat so an
+  // in-flight patch can never surface on the chat the user switched to.
+  let pendingAgentOverrides = $state<{
+    scope: string;
+    overrides: SessionAgentOverrides;
+  } | null>(null);
+  let chatAgentOverrides = $derived.by(() => {
+    const scope = currentDraftKey();
+    const pending = pendingAgentOverrides;
+    if (pending && pending.scope === scope) return pending.overrides;
+    return sessionStore.activeSessionId ? sessionAgentOverrides : loadComposerSessionState(scope);
+  });
+
+  function setChatAgentOverrides(patch: SessionAgentOverrides) {
+    const next = { ...chatAgentOverrides, ...patch };
+    const scope = currentDraftKey();
+    pendingAgentOverrides = { scope, overrides: next };
+    saveComposerSessionState(scope, {
+      ...(next.permissionMode ? { permissionMode: next.permissionMode } : {}),
+      ...(next.agentExecutionMode ? { agentExecutionMode: next.agentExecutionMode } : {}),
+      ...(typeof next.criticGateEnabled === 'boolean'
+        ? { criticGateEnabled: next.criticGateEnabled }
+        : {}),
+    });
+    const sessionId = sessionStore.activeSessionId;
+    if (!sessionId) return;
+    void sessionStore.setSessionAgentOverrides(sessionId, patch).then(() => {
+      // Release the optimistic layer either way: on success the session row is
+      // the source of truth, on failure the store has already rolled back.
+      if (pendingAgentOverrides?.overrides === next) pendingAgentOverrides = null;
+    });
+  }
+
   let permissionMode = $derived(
-    (agentSettingsStore.settings.permissionMode === 'plan'
-      ? 'guarded'
-      : (agentSettingsStore.settings.permissionMode ?? 'guarded')) as PermissionMode,
+    (chatAgentOverrides.permissionMode ??
+      (agentSettingsStore.settings.permissionMode === 'plan'
+        ? 'guarded'
+        : (agentSettingsStore.settings.permissionMode ?? 'guarded'))) as PermissionMode,
   );
   let permissionModeMeta = $derived(
     PERMISSION_OPTIONS.find((option) => option.value === permissionMode) ?? PERMISSION_OPTIONS[1],
   );
 
   $effect(() => {
+    // Yolo is a single connection-level flag on wsStore (setYoloMode takes no
+    // session), so derive it purely from the current permission mode.
     wsStore.setYoloMode(permissionMode === 'yolo');
   });
 
   function selectPermissionMode(next: PermissionMode) {
     showPermissionMenu = false;
     if (permissionMode !== next) {
-      void agentSettingsStore.saveSettings(
-        { ...agentSettingsStore.settings, permissionMode: next },
-        { quietSuccess: true },
-      );
+      setChatAgentOverrides({ permissionMode: next });
     }
     if (next === 'custom' && !isGuidedDemo) onOpenSettings?.('agent', 'permissions');
   }
@@ -677,15 +850,23 @@
     return models;
   });
 
-  // The catalog is the authority. A manually chosen model can disappear when
-  // its provider or model is turned off in Settings; do not retain that stale
-  // localStorage value and then offer an impossible Manage Models error.
+  // The catalog is the authority, but provider status arrives incrementally
+  // (refreshModels flights return models:[] / detected / unknown). Only clear
+  // a manual choice once the catalog for that provider is definitively loaded,
+  // otherwise a transient push would irreversibly delete localStorage and the
+  // picker would fall back to "Select model".
   $effect(() => {
     const value = selectedModel;
     const providers = wsStore.providers;
     if (!value || value === 'auto' || providers.length === 0) return;
     const { provider, model } = parseProviderModelSelection(value, providerNames);
-    if (!provider || !model || isEnabledModelSelection(providers, value)) return;
+    if (!provider || !model) return;
+    if (isEnabledModelSelection(providers, value)) return;
+    const target = providers.find((p) => p.name === provider);
+    // Provider list incomplete or catalog still in flight: preserve selection.
+    if (!target) return;
+    if (target.connectionState === 'detected' || target.connectionState === 'unknown') return;
+    if (!Array.isArray(target.models) || target.models.length === 0) return;
     selectedModel = '';
     if (typeof localStorage !== 'undefined') localStorage.removeItem(MODEL_STORAGE_KEY);
   });
@@ -697,7 +878,8 @@
     const query = modelSearchQuery.trim().toLowerCase();
     if (!query) return candidates;
     return candidates.filter((model) => {
-      const haystack = `${model.name} ${providerLabel(model.provider)} ${model.provider} ${model.value}`.toLowerCase();
+      const haystack =
+        `${model.name} ${providerLabel(model.provider)} ${model.provider} ${model.value}`.toLowerCase();
       return haystack.includes(query);
     });
   });
@@ -721,15 +903,12 @@
     }));
   });
 
-  let selectedModelLabel = $derived.by(() => {
+let selectedModelLabel = $derived.by(() => {
     if (!selectedModel) return 'Select model';
     const parsed = parseProviderModelSelection(selectedModel, providerNames);
     if (!parsed.model || !parsed.provider) return selectedModel;
-    const provider = wsStore.providers.find((p) => p.name === parsed.provider);
-    const catalog = (provider as any)?.allAvailableModels as
-      Array<{ id: string; name: string }> | undefined;
-    const modelDef = catalog?.find((m) => m.id === parsed.model);
-    if (modelDef) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
+    const modelDef = findModelDef(parsed.provider, parsed.model);
+    if (modelDef?.name) return `(${providerLabel(parsed.provider)}) ${modelDef.name}`;
     return parsed.model;
   });
 
@@ -782,7 +961,7 @@
               hasImageAttachments?: boolean;
               imageAttachmentCount?: number;
               cachedInputTokens?: number;
-              breakdown?: { system: number; memory: number; tools: number; chat: number };
+              breakdown?: ContextBreakdown;
             };
           };
           if (!response.ok || !result.usage) {
@@ -1043,8 +1222,7 @@
       const entryAttachments = (entry.metadata as { attachments?: Attachment[] } | undefined)
         ?.attachments;
       return (
-        count +
-        (entryAttachments?.filter((attachment) => attachment.type === 'image').length ?? 0)
+        count + (entryAttachments?.filter((attachment) => attachment.type === 'image').length ?? 0)
       );
     }, 0);
   }
@@ -1320,6 +1498,56 @@
     inputRef.style.height = Math.max(minHeightPx, Math.min(h, MAX_HEIGHT_PX)) + 'px';
   }
 
+  let composerMetricsFrame: number | null = null;
+  let composerResizeObserver: ResizeObserver | null = null;
+  let lastActionPanelHeight = -1;
+
+  /**
+   * Re-measure the composer on the next frame, coalescing bursts.
+   *
+   * `autoResize()` measures (`scrollHeight`) and then writes `style.height`, so
+   * running it inside a ResizeObserver callback forces a synchronous relayout
+   * during layout delivery. Chromium cannot report the resulting size change
+   * back in the same cycle and logs "ResizeObserver loop completed with
+   * undelivered notifications" on every composer relayout. Deferring to an
+   * animation frame keeps all measurement and style writes outside the
+   * delivery step.
+   */
+  function scheduleComposerMetrics(): void {
+    if (typeof requestAnimationFrame === 'undefined') return;
+    if (composerMetricsFrame !== null) return;
+    composerMetricsFrame = requestAnimationFrame(() => {
+      composerMetricsFrame = null;
+      syncComposerMinHeight();
+      autoResize();
+    });
+  }
+
+  /**
+   * Point the observer at the current action panel. The panel is rendered
+   * conditionally, so this re-runs whenever `actionPanelRef` changes instead of
+   * latching onto whatever happened to be mounted during `onMount`.
+   */
+  function observeActionPanel(el: HTMLDivElement | undefined): void {
+    if (!composerResizeObserver) {
+      composerResizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[entries.length - 1];
+        if (!entry) return;
+        // `borderBoxSize` is the accurate measurement but is missing in older
+        // engines, so fall back to the content box there.
+        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+        // Only the panel's height feeds the composer's minimum height, so an
+        // unchanged panel must not schedule more work.
+        if (height === lastActionPanelHeight) return;
+        lastActionPanelHeight = height;
+        scheduleComposerMetrics();
+      });
+    }
+    composerResizeObserver.disconnect();
+    lastActionPanelHeight = -1;
+    if (el) composerResizeObserver.observe(el);
+  }
+
   function audioMimeType(): string | undefined {
     return ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find((type) =>
       MediaRecorder.isTypeSupported(type),
@@ -1333,6 +1561,115 @@
       reader.onload = () => resolve(String(reader.result).split(',', 2)[1] ?? '');
       reader.readAsDataURL(blob);
     });
+  }
+
+  function combineAudioChunks(chunks: Float32Array[]): Float32Array {
+    const length = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const combined = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      combined.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return combined;
+  }
+
+  function resampleTo16Khz(input: Float32Array, sampleRate: number): Float32Array {
+    if (!input.length || sampleRate === 16_000) return input;
+    const ratio = sampleRate / 16_000;
+    const outputLength = Math.max(1, Math.round(input.length / ratio));
+    const output = new Float32Array(outputLength);
+    for (let index = 0; index < outputLength; index += 1) {
+      const sourcePosition = index * ratio;
+      const leftIndex = Math.floor(sourcePosition);
+      const rightIndex = Math.min(leftIndex + 1, input.length - 1);
+      const mix = sourcePosition - leftIndex;
+      output[index] = input[leftIndex] * (1 - mix) + input[rightIndex] * mix;
+    }
+    return output;
+  }
+
+  async function pcm16Base64(samples: Float32Array): Promise<string> {
+    const bytes = new Uint8Array(samples.length * 2);
+    const view = new DataView(bytes.buffer);
+    for (let index = 0; index < samples.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, samples[index]));
+      view.setInt16(index * 2, sample < 0 ? sample * 32768 : sample * 32767, true);
+    }
+    return blobBase64(new Blob([bytes.buffer], { type: 'application/octet-stream' }));
+  }
+
+  async function transcribeLocalRecording(samples: Float32Array, language: string) {
+    isTranscribing = true;
+    try {
+      const pcmBase64 = await pcm16Base64(samples);
+      const result = await invoke<{ text: string }>('transcribe_local_voice', {
+        pcmBase64,
+        language,
+      });
+      if (!result.text?.trim()) throw new Error('No speech was detected');
+      appendTranscription(result.text);
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      isTranscribing = false;
+    }
+  }
+
+  function releaseLocalRecorder(recorder: LocalPcmRecorder) {
+    recorder.processor.onaudioprocess = null;
+    recorder.source.disconnect();
+    recorder.processor.disconnect();
+    recorder.sink.disconnect();
+    recorder.stream.getTracks().forEach((track) => track.stop());
+    void recorder.context.close();
+  }
+
+  function stopLocalRecording(transcribe = true) {
+    const recorder = activeLocalRecorder;
+    if (!recorder) return;
+    activeLocalRecorder = null;
+    isRecording = false;
+    releaseLocalRecorder(recorder);
+    if (!transcribe) return;
+    const samples = resampleTo16Khz(combineAudioChunks(recorder.chunks), recorder.sampleRate);
+    if (samples.length) void transcribeLocalRecording(samples, recorder.language);
+  }
+
+  async function startLocalRecording(settings: VoiceSettings) {
+    if (!navigator.mediaDevices?.getUserMedia)
+      throw new Error('Microphone recording is unavailable in this runtime');
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+    });
+    const context = new AudioContext();
+    await context.resume();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const sink = context.createGain();
+    sink.gain.value = 0;
+    const chunks: Float32Array[] = [];
+    processor.onaudioprocess = (event) => {
+      chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    };
+    source.connect(processor);
+    processor.connect(sink);
+    sink.connect(context.destination);
+    activeLocalRecorder = {
+      stream,
+      context,
+      source,
+      processor,
+      sink,
+      chunks,
+      sampleRate: context.sampleRate,
+      language: settings.input.language || 'en',
+    };
+    isRecording = true;
   }
 
   async function loadComposerVoiceSettings(): Promise<VoiceSettings> {
@@ -1354,13 +1691,27 @@
     });
   }
 
-  function startSystemRecognition(settings: VoiceSettings) {
+  function speechRecognitionErrorMessage(error: string): string {
+    if (error === 'service-not-allowed')
+      return 'Speech recognition is not allowed. Check Koryphaios microphone and speech recognition access in System Settings.';
+    if (error === 'not-allowed')
+      return 'Speech recognition is not allowed. Check Koryphaios microphone access in System Settings.';
+    if (error === 'audio-capture') return 'Speech recognition could not access the microphone.';
+    const readable = error.trim().replaceAll('-', ' ') || 'unknown error';
+    return `Speech recognition failed: ${readable}`;
+  }
+
+  async function startSystemRecognition(settings: VoiceSettings) {
     const speechWindow = window as typeof window & {
       SpeechRecognition?: BrowserSpeechRecognitionConstructor;
       webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
     };
     const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
     if (!Recognition) throw new Error('System speech recognition is unavailable in this runtime');
+    if (navigator.mediaDevices?.getUserMedia) {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permissionStream.getTracks().forEach((track) => track.stop());
+    }
     const recognition = new Recognition();
     recognition.lang = settings.input.language;
     recognition.continuous = true;
@@ -1373,7 +1724,7 @@
     };
     recognition.onerror = (event) => {
       if (event.error !== 'aborted' && event.error !== 'no-speech')
-        toastStore.error(`Speech recognition failed: ${event.error}`);
+        toastStore.error(speechRecognitionErrorMessage(event.error));
     };
     recognition.onend = () => {
       if (activeSpeechRecognition === recognition) activeSpeechRecognition = null;
@@ -1404,21 +1755,74 @@
     }
   }
 
-  async function toggleRecording() {
+  /** Stop whatever is currently recording and transcribe it. */
+  function stopRecording() {
+    if (activeLocalRecorder && isRecording) {
+      stopLocalRecording();
+      return true;
+    }
     if (activeSpeechRecognition && isRecording) {
       activeSpeechRecognition.stop();
-      return;
+      return true;
     }
     if (activeRecorder && isRecording) {
       activeRecorder.stop();
-      return;
+      return true;
     }
+    return false;
+  }
+
+  function isRecordingNow(): boolean {
+    return isRecording && !!(activeLocalRecorder || activeSpeechRecognition || activeRecorder);
+  }
+
+  /** Begin a push-to-talk hold from the microphone button. */
+  function beginHoldToTalk() {
+    if (holdToTalkActive || isRecordingNow()) return;
+    holdToTalkActive = true;
+    void startRecording();
+  }
+
+  /** End a push-to-talk hold. Releasing without a recording is a no-op, so a
+   *  hold that was refused (no microphone permission, no model installed) does
+   *  not leave the hold stuck. */
+  function endHoldToTalk() {
+    if (!holdToTalkActive) return;
+    holdToTalkActive = false;
+    stopRecording();
+  }
+
+  async function toggleRecording() {
+    if (stopRecording()) return;
+    await startRecording();
+  }
+
+  async function startRecording() {
     try {
       const settings = await loadComposerVoiceSettings();
       if (!settings.voiceModeEnabled)
         throw new Error('Enable the composer microphone in Voice settings first');
+      if (settings.input.provider === 'kory-local') {
+        let localStatus: LocalVoiceModelStatus;
+        try {
+          localStatus = await invoke<LocalVoiceModelStatus>('local_voice_model_status');
+        } catch {
+          // A refused hold must not stay held, or the next release stops
+          // whatever started later.
+          holdToTalkActive = false;
+          onOpenSettings?.('voice');
+          return;
+        }
+        if (!localStatus.installed) {
+          holdToTalkActive = false;
+          onOpenSettings?.('voice');
+          return;
+        }
+        await startLocalRecording(settings);
+        return;
+      }
       if (settings.input.provider === 'system') {
-        startSystemRecognition(settings);
+        await startSystemRecognition(settings);
         return;
       }
       if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')
@@ -1441,6 +1845,7 @@
       recorder.start();
       isRecording = true;
     } catch (error) {
+      holdToTalkActive = false;
       toastStore.error(error instanceof Error ? error.message : 'Could not access the microphone');
     }
   }
@@ -1461,6 +1866,41 @@
       }
     };
     window.addEventListener('keydown', handleGlobalEsc);
+    // Voice mode is a global action so it works without focusing the composer.
+    // It is push to talk: hold the key to record, release to transcribe.
+    const voiceBlocked = () =>
+      !composerMicrophoneEnabled ||
+      disabled ||
+      imageAdmissionPending ||
+      !!configurationWarning ||
+      isTranscribing;
+    const voiceTargetIsTyping = () => {
+      const target = document.activeElement;
+      if (!target) return false;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
+      return (target as HTMLElement).isContentEditable === true;
+    };
+    const handleVoiceShortcutDown = (e: KeyboardEvent) => {
+      if (e.repeat || !shortcutStore.matches('voice_mode', e)) return;
+      if (voiceBlocked() || isRecordingNow()) return;
+      // A binding with no modifier would otherwise swallow ordinary typing, so
+      // it only acts outside a text field.
+      if (shortcutStore.isBare('voice_mode') && voiceTargetIsTyping()) return;
+      e.preventDefault();
+      beginHoldToTalk();
+    };
+    const handleVoiceShortcutUp = (e: KeyboardEvent) => {
+      if (!holdToTalkActive || !shortcutStore.matches('voice_mode', e)) return;
+      e.preventDefault();
+      endHoldToTalk();
+    };
+    // A key released outside the window never delivers keyup, so the recording
+    // is stopped when focus leaves instead of running forever.
+    const releaseVoiceHold = () => endHoldToTalk();
+    const handleVoiceBlur = () => releaseVoiceHold();
+    window.addEventListener('keydown', handleVoiceShortcutDown);
+    window.addEventListener('keyup', handleVoiceShortcutUp);
+    window.addEventListener('blur', handleVoiceBlur);
     const handleVoiceSettingsChanged = (event: Event) => {
       voiceSettings = (event as CustomEvent<VoiceSettings>).detail;
     };
@@ -1469,45 +1909,41 @@
       voiceSettings = null;
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      syncComposerMinHeight();
-      autoResize();
-    });
-
-    if (actionPanelRef) {
-      resizeObserver.observe(actionPanelRef);
-    }
+    observeActionPanel(actionPanelRef);
 
     const handleWindowResize = () => {
-      syncComposerMinHeight();
-      autoResize();
+      scheduleComposerMetrics();
     };
 
     window.addEventListener('resize', handleWindowResize);
-    requestAnimationFrame(() => {
-      syncComposerMinHeight();
-      autoResize();
-    });
+    scheduleComposerMetrics();
 
     return () => {
-      resizeObserver.disconnect();
+      composerResizeObserver?.disconnect();
+      if (composerMetricsFrame !== null) cancelAnimationFrame(composerMetricsFrame);
+      composerMetricsFrame = null;
       window.removeEventListener('resize', handleWindowResize);
       window.removeEventListener('keydown', handleGlobalEsc);
+      window.removeEventListener('keydown', handleVoiceShortcutDown);
+      window.removeEventListener('keyup', handleVoiceShortcutUp);
+      window.removeEventListener('blur', handleVoiceBlur);
       window.removeEventListener('koryphaios:voice-settings-changed', handleVoiceSettingsChanged);
       activeSpeechRecognition?.abort();
+      if (activeLocalRecorder) stopLocalRecording(false);
       if (activeRecorder?.state !== 'inactive') activeRecorder?.stop();
       activeRecorder?.stream.getTracks().forEach((track) => track.stop());
-      nowClock.unsubscribe();
     };
   });
 
   $effect(() => {
-    actionPanelRef;
-    if (typeof requestAnimationFrame === 'undefined') return;
-    requestAnimationFrame(() => {
-      syncComposerMinHeight();
-      autoResize();
-    });
+    // The action panel is conditional, so re-point the observer whenever the
+    // bound element changes; observing whatever existed at mount time left the
+    // composer permanently unobserved.
+    observeActionPanel(actionPanelRef);
+    scheduleComposerMetrics();
+    return () => {
+      composerResizeObserver?.disconnect();
+    };
   });
 
   $effect(() => {
@@ -1525,14 +1961,41 @@
     used: number;
   } | null>(null);
 
+  function warnWarmCacheBreak(
+    change: string,
+    modelDef: ReturnType<typeof findModelDef>,
+    compareWithCachedRate: boolean,
+  ) {
+    const impact = estimateCacheBreakImpact(
+      wsStore.contextUsage.cachedInputTokens ?? 0,
+      modelDef?.costPerMInputTokens,
+      compareWithCachedRate ? modelDef?.costPerMInputCached : undefined,
+    );
+    if (!impact) return;
+
+    let message = `${change} changes the prompt-cache identity. ~${formatCompactTokens(impact.cachedTokens)} warm input tokens will be re-read fresh on the next turn.`;
+    if (impact.freshCostUsd !== undefined) {
+      message += ` Estimated fresh input: $${impact.freshCostUsd.toFixed(4)}.`;
+    }
+    if (impact.incrementalCostUsd !== undefined) {
+      message += ` About $${impact.incrementalCostUsd.toFixed(4)} more than the cached read.`;
+    }
+    toastStore.warning(message, { duration: 9_000 });
+  }
+
   function applyModelSelection(value: string) {
+    if (value !== selectedModel) {
+      const parsed = parseProviderModelSelection(value, providerNames);
+      warnWarmCacheBreak(
+        `Switching to ${parsed.model ?? 'this model'}`,
+        parsed.provider && parsed.model ? findModelDef(parsed.provider, parsed.model) : undefined,
+        false,
+      );
+    }
     const targetConsentKey = imageConsentKey(value);
     if (
       oneShotImageOmitConsents.size > 0 &&
-      !(
-        oneShotImageOmitConsents.size === 1 &&
-        oneShotImageOmitConsents.has(targetConsentKey)
-      )
+      !(oneShotImageOmitConsents.size === 1 && oneShotImageOmitConsents.has(targetConsentKey))
     ) {
       oneShotImageOmitConsents = oneShotImageOmitConsents.has(targetConsentKey)
         ? new Set([targetConsentKey])
@@ -1644,6 +2107,13 @@
   }
 
   function selectReasoning(value: string) {
+    if (value !== reasoningLevel) {
+      warnWarmCacheBreak(
+        `Changing reasoning to ${reasoningLabel(value)}`,
+        findModelDef(currentProvider, currentModel),
+        true,
+      );
+    }
     reasoningLevel = value;
     showReasoningMenu = false;
   }
@@ -1669,11 +2139,8 @@
     if (!selectedModel) return '';
     const modelId = currentModel;
     if (!modelId) return currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1);
-    const provider = wsStore.providers.find((p) => p.name === currentProvider);
-    const catalog = (provider as any)?.allAvailableModels as
-      Array<{ id: string; name: string }> | undefined;
-    const modelDef = catalog?.find((m) => m.id === modelId);
-    if (modelDef) return modelDef.name;
+    const modelDef = findModelDef(currentProvider, modelId);
+    if (modelDef?.name) return modelDef.name;
     return modelId
       .split('-')
       .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
@@ -1715,18 +2182,21 @@
 
   function setAgentExecutionMode(next: 'auto' | 'single' | 'multi') {
     showAgentModeMenu = false;
-    if ((agentSettingsStore.settings.agentExecutionMode ?? 'auto') === next) return;
-    void agentSettingsStore.saveSettings(
-      {
-        ...agentSettingsStore.settings,
-        agentExecutionMode: next,
-      },
-      { quietSuccess: true },
-    );
+    if (effectiveAgentExecutionMode === next) return;
+    setChatAgentOverrides({ agentExecutionMode: next });
   }
 
+  let effectiveAgentExecutionMode = $derived(
+    chatAgentOverrides.agentExecutionMode ??
+      agentSettingsStore.settings.agentExecutionMode ??
+      'auto',
+  );
+  let effectiveCriticGateEnabled = $derived(
+    chatAgentOverrides.criticGateEnabled ?? agentSettingsStore.settings.criticGateEnabled,
+  );
+
   let agentExecutionModeMeta = $derived.by(() => {
-    const mode = agentSettingsStore.settings.agentExecutionMode ?? 'auto';
+    const mode = effectiveAgentExecutionMode;
     if (mode === 'multi') {
       return {
         label: 'Multi-Agent',
@@ -1999,7 +2469,7 @@
     return files;
   }
 
-  /** Ctrl+V / Cmd+V → paste image if available, else text. */
+  /** Preserve rich text before considering image-only clipboard contents. */
   function handlePaste(e: ClipboardEvent) {
     if (imageAdmissionPending) {
       e.preventDefault();
@@ -2009,6 +2479,35 @@
     if (lastPasteEvent === e) return;
     lastPasteEvent = e;
 
+    const converted = e.clipboardData ? clipboardMarkdown(e.clipboardData) : null;
+    if (converted !== null && inputRef) {
+      e.preventDefault();
+      inputRef.focus();
+      // insertText preserves browser undo history. Unsupported webviews use a
+      // selection-aware fallback instead of replacing the entire draft.
+      let inserted = false;
+      try {
+        inserted = document.execCommand('insertText', false, converted);
+      } catch {
+        /* fallback below */
+      }
+      if (inserted) {
+        value = inputRef.value;
+      } else {
+        const start = inputRef.selectionStart;
+        const end = inputRef.selectionEnd;
+        value = value.slice(0, start) + converted + value.slice(end);
+        void tick().then(() =>
+          inputRef?.setSelectionRange(start + converted.length, start + converted.length),
+        );
+      }
+      void tick().then(autoResize);
+      return;
+    }
+
+    // A copied document may also offer an image representation. If its rich
+    // structure cannot be recovered, preserve text rather than attach a bitmap.
+    if (e.clipboardData?.getData('text/plain')) return;
     const imageFiles = clipboardImageFiles(e.clipboardData);
     if (imageFiles.length > 0) {
       e.preventDefault();
@@ -2225,11 +2724,17 @@
           <button
             type="button"
             class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-            style="background: var(--color-surface-3); color: {reasoningIsValid ? 'var(--color-text-primary)' : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
+            style="background: var(--color-surface-3); color: {reasoningIsValid
+              ? 'var(--color-text-primary)'
+              : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
             onclick={() => (showReasoningMenu = !showReasoningMenu)}
             title={reasoningIsValid ? 'Set auto effort' : 'Choose reasoning effort for this model'}
           >
-            <BrainIcon reasoningLevel={reasoningIsValid ? reasoningLevel : ''} size={20} class="text-[#c890ab]" />
+            <BrainIcon
+              reasoningLevel={reasoningIsValid ? reasoningLevel : ''}
+              size={20}
+              class="text-[#c890ab]"
+            />
             <span>{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span>
             <ChevronDown size={14} class="text-text-muted" />
           </button>
@@ -2315,7 +2820,7 @@
             : onInteractionModeChange?.(interactionMode === 'plan' ? 'act' : 'plan')}
         title={isGuidedDemo
           ? 'Not available in this demo'
-          : 'Plan mode is read-only and keeps a restart-safe planning note'}
+          : 'Plan mode keeps project files unchanged and preserves a planning note between restarts'}
       >
         <ClipboardList size={17} />
         <span
@@ -2459,36 +2964,14 @@
             Recovered unsent goal draft on this device.
           </p>
         {/if}
-        {#if goalError}<p class="mt-1.5 text-xs text-[var(--color-error)]" role="alert"
-            >{goalError}</p
-          >{/if}
+        {#if goalError}<p class="mt-1.5 text-xs text-[var(--color-error)]" role="alert">
+            {goalError}
+          </p>{/if}
       </div>
     {/if}
 
-    {#if goalDisplayStore.composer && activeChatGoal}
-      <button
-        type="button"
-        class="mb-3 flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-[var(--color-surface-3)]"
-        style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 8%, transparent);"
-        onclick={() => {
-          goalStore.selectedGoalId = activeChatGoal!.id;
-          goalDisplayStore.update({ sidebar: true });
-          queueMicrotask(() =>
-            window.dispatchEvent(new CustomEvent('kory:goal-action', { detail: 'goal_open' })),
-          );
-        }}
-        aria-label={`Open active goal in this chat: ${activeChatGoal.objective}`}
-      >
-        <Target size={14} class="shrink-0 text-[var(--color-accent)]" />
-        <span class="min-w-0 flex-1"
-          ><span class="block truncate text-xs font-semibold text-[var(--color-text-primary)]"
-            >Goal in this chat · {activeChatGoal.objective}</span
-          ><span class="block text-[10px] text-[var(--color-text-muted)]"
-            >{activeChatGoal.status} · active {formatGoalRuntime(activeChatGoal, goalClock)}</span
-          ></span
-        >
-      </button>
-    {/if}
+    <ChecklistPanel />
+    <GoalMode />
 
     {#if workflowStatus}
       <button
@@ -2596,18 +3079,6 @@
           </div>
         {/if}
 
-        {#if omittedAttachmentNames.length > 0}
-          <div
-            class="mb-3 rounded-lg border px-3 py-2 text-xs leading-relaxed"
-            style="border-color: color-mix(in srgb, var(--color-warning) 45%, var(--color-border)); background: color-mix(in srgb, var(--color-warning) 9%, transparent); color: var(--color-text-secondary);"
-            role="status"
-          >
-            {omittedAttachmentNames.length === 1
-              ? `${omittedAttachmentNames[0]} is too large to persist and will need to be reattached after a restart — still attached for this session.`
-              : `${omittedAttachmentNames.length} attachments are too large to persist and will need to be reattached after a restart — still attached for now.`}
-          </div>
-        {/if}
-
         <div class="relative">
           <textarea
             bind:this={inputRef}
@@ -2615,12 +3086,17 @@
             oninput={autoResize}
             onkeydown={handleKeydown}
             onpaste={handlePaste}
-            placeholder={disabled ? disabledMessage : imageAdmissionPending ? 'Checking image input…' : placeholder}
+            placeholder={disabled
+              ? disabledMessage
+              : imageAdmissionPending
+                ? 'Checking image input…'
+                : placeholder}
             rows="1"
             class="input w-full"
             data-testid="composer-input"
             disabled={disabled || imageAdmissionPending}
-            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled || imageAdmissionPending
+            style="resize: none; min-height: {minHeightPx}px; max-height: 280px; font-size: 15px; line-height: 1.6; box-sizing: border-box; padding: 10px 88px 10px 12px; background: transparent; border: none; box-shadow: none; {disabled ||
+            imageAdmissionPending
               ? 'opacity: 0.6; cursor: not-allowed;'
               : ''}"
           ></textarea>
@@ -2729,9 +3205,10 @@
               class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
               style="color: var(--color-text-muted);"
               onclick={() => void pasteImageFromClipboard()}
-              disabled={
-                disabled || imageAdmissionPending || !!configurationWarning || isReadingClipboard
-              }
+              disabled={disabled ||
+                imageAdmissionPending ||
+                !!configurationWarning ||
+                isReadingClipboard}
               aria-label={isReadingClipboard
                 ? 'Reading image from clipboard'
                 : 'Paste image from clipboard'}
@@ -2743,23 +3220,45 @@
               <button
                 type="button"
                 class="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[var(--color-surface-3)] disabled:cursor-not-allowed disabled:opacity-40 {isRecording
-                  ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-error)_14%,transparent)]'
+                  ? 'bg-[var(--color-error-bg)] text-[var(--color-error)] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-error)_36%,transparent)]'
                   : 'text-[var(--color-text-muted)]'}"
-                onclick={() => void toggleRecording()}
-                disabled={
-                  disabled || imageAdmissionPending || !!configurationWarning || isTranscribing
-                }
+                onpointerdown={(event) => {
+                  // Push to talk, matching the keyboard shortcut: hold the
+                  // button to record, release to transcribe.
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  beginHoldToTalk();
+                }}
+                onpointerup={() => endHoldToTalk()}
+                onpointerleave={() => endHoldToTalk()}
+                onpointercancel={() => endHoldToTalk()}
+                onkeydown={(event) => {
+                  if (event.repeat) return;
+                  if (event.key !== ' ' && event.key !== 'Enter') return;
+                  event.preventDefault();
+                  beginHoldToTalk();
+                }}
+                onkeyup={(event) => {
+                  if (event.key !== ' ' && event.key !== 'Enter') return;
+                  event.preventDefault();
+                  endHoldToTalk();
+                }}
+                onblur={() => endHoldToTalk()}
+                disabled={disabled ||
+                  imageAdmissionPending ||
+                  !!configurationWarning ||
+                  isTranscribing}
                 aria-pressed={isRecording}
                 aria-label={isTranscribing
                   ? 'Transcribing recording'
                   : isRecording
-                    ? 'Stop recording'
-                    : 'Record voice prompt'}
+                    ? 'Recording, release to transcribe'
+                    : 'Hold to record a voice prompt'}
                 title={isTranscribing
                   ? 'Transcribing…'
                   : isRecording
-                    ? 'Stop and transcribe'
-                    : 'Record voice prompt'}
+                    ? 'Release to transcribe'
+                    : `Hold to record${voiceShortcutHint ? ` (${voiceShortcutHint})` : ''}`}
               >
                 <Mic size={16} class={isRecording || isTranscribing ? 'animate-pulse' : ''} />
               </button>
@@ -2794,8 +3293,7 @@
                   role="menu"
                 >
                   {#each AGENT_MODE_OPTIONS as option (option.value)}
-                    {@const active =
-                      (agentSettingsStore.settings.agentExecutionMode ?? 'auto') === option.value}
+                    {@const active = effectiveAgentExecutionMode === option.value}
                     <button
                       type="button"
                       role="menuitemradio"
@@ -2834,21 +3332,14 @@
 
             <button
               type="button"
-              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {agentSettingsStore
-                .settings.criticGateEnabled
+              class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {effectiveCriticGateEnabled
                 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                 : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] border border-[var(--color-border)] hover:brightness-110'}"
               onclick={() =>
-                agentSettingsStore.saveSettings(
-                  {
-                    ...agentSettingsStore.settings,
-                    criticGateEnabled: !agentSettingsStore.settings.criticGateEnabled,
-                  },
-                  { quietSuccess: true },
-                )}
-              title="Toggle Critic Agent"
+                setChatAgentOverrides({ criticGateEnabled: !effectiveCriticGateEnabled })}
+              title="Toggle Critic Agent for this chat"
             >
-              {#if agentSettingsStore.settings.criticGateEnabled}
+              {#if effectiveCriticGateEnabled}
                 <ShieldCheck size={12} />
                 <span>Critic: On</span>
               {:else}
@@ -2868,9 +3359,7 @@
           <button
             type="button"
             onclick={isRunning || isWaiting ? stop : send}
-            disabled={
-              disabled || imageAdmissionPending || (!isRunning && !isWaiting && !canSend)
-            }
+            disabled={disabled || imageAdmissionPending || (!isRunning && !isWaiting && !canSend)}
             class="btn flex w-full items-center justify-center gap-2 {isRunning
               ? 'stop-btn'
               : isWaiting
@@ -2884,23 +3373,23 @@
             aria-label={imageAdmissionPending
               ? 'Checking image input support'
               : isRunning
-              ? 'Stop the running model'
-              : isWaiting
-                ? 'Kory is waiting — click to cancel'
-                : 'Send message'}
+                ? 'Stop the running model'
+                : isWaiting
+                  ? 'Kory is waiting. Click to cancel'
+                  : 'Send message'}
             title={imageAdmissionPending
               ? 'Checking active image context before sending'
               : isRunning
-              ? 'Stop (Esc)'
-              : isWaiting
-                ? waitingReason
-                  ? `Waiting on ${waitingReason} — click to cancel`
-                  : 'Kory is waiting — click to cancel'
-                : !canSend
-                  ? 'Type a message to send'
-                  : configurationWarning
-                    ? 'Run a local command, or open Settings to configure a provider'
-                    : 'Send (Enter)'}
+                ? 'Stop (Esc)'
+                : isWaiting
+                  ? waitingReason
+                    ? `Waiting on ${waitingReason}. Click to cancel`
+                    : 'Kory is waiting. Click to cancel'
+                  : !canSend
+                    ? 'Type a message to send'
+                    : configurationWarning
+                      ? 'Run a local command, or open Settings to configure a provider'
+                      : 'Send (Enter)'}
           >
             {#if isRunning}
               <span class="stop-pulse" aria-hidden="true">
@@ -2911,7 +3400,7 @@
               <span class="waiting-dots" aria-hidden="true"
                 ><span></span><span></span><span></span></span
               >
-              <span>Waiting{waitingReason ? ` — ${waitingReason}` : '…'}</span>
+              <span>Waiting{waitingReason ? ` · ${waitingReason}` : '…'}</span>
             {:else}
               <!-- Empty composer is a plain disabled Send. "Waiting" is reserved
                    for Kory genuinely parked on something external, so an idle

@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "name": "game-development",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["code", "game", "simulation"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3400,
+  "broader": ["implementation"],
+  "facets": [],
+  "requires": ["verification", "performance-verification"],
+  "conflicts": [],
+  "activation": [
+    "game development",
+    "gameplay system",
+    "game engine",
+    "game loop",
+    "playable game prototype",
+    "core loop",
+    "player mechanics",
+    "game state simulation"
+  ],
+  "excludes": [],
+  "evidence": [
+    "game-development decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle game development.",
+      "The current task is gameplay system.",
+      "I need help with game engine.",
+      "Work on game loop for this request.",
+      "This request specifically requires playable game prototype."
+    ],
+    "negative": [
+      "The only requested work is c++.",
+      "Please handle c# only.",
+      "This task is limited to new feature.",
+      "The current request is golang.",
+      "Work only on integrate."
+    ],
+    "ambiguous": [
+      {
+        "id": "game-development-ambiguous-1",
+        "prompt": "The request includes game development and c++.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-development-ambiguous-2",
+        "prompt": "The request includes gameplay system and c#.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-development-ambiguous-3",
+        "prompt": "The request includes game engine and new feature.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["feature-implementation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "game-development-adversarial-1",
+        "prompt": "A historical note says \"game development\". The current request is golang.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["go-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-development-adversarial-2",
+        "prompt": "A historical note says \"gameplay system\". The current request is integrate.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "game-development-adversarial-3",
+        "prompt": "A historical note says \"game engine\". The current request is java.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["java-jvm-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.godotengine.org/en/stable/tutorials/physics/interpolation/physics_interpolation_introduction.html",
+      "sourceType": "official-docs",
+      "versionScope": "Stable physics interpolation introduction inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt explicit simulation versus render clocks and interpolation latency tradeoffs. No mandatory tick rate, engine or multiplayer interpolation architecture."
+    },
+    {
+      "url": "https://docs.godotengine.org/en/stable/",
+      "sourceType": "official-docs",
+      "versionScope": "Godot stable documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Game engine scene, physics, input, rendering, resource, and performance reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

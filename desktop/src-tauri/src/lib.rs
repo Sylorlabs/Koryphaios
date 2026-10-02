@@ -7,9 +7,15 @@ use tauri::menu::Submenu;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Listener, Manager, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, Listener, Manager, WebviewWindow, WindowEvent,
 };
 use tauri_plugin_dialog::DialogExt;
+#[cfg(target_os = "macos")]
+use objc2::rc::Retained;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::{NSScreen, NSWindow, NSWindowStyleMask};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 
 // Cached updater so install_update doesn't re-fetch the manifest every click.
 // tauri_plugin_updater::Update is not Clone, so we hold it behind a Mutex.
@@ -52,7 +58,7 @@ fn merge_packaged_cors_origins(existing: Option<&str>) -> Result<String, String>
                     "Refusing to launch bundled backend with wildcard CORS_ORIGINS".to_string(),
                 );
             }
-            if !origins.iter().any(|known| known == &origin) {
+            if !origins.iter().any(|known| known == origin) {
                 origins.push(origin.to_string());
             }
         }
@@ -70,6 +76,40 @@ include!(concat!(env!("OUT_DIR"), "/embedded_backend.rs"));
 mod config;
 mod error;
 mod indexer;
+mod local_voice;
+mod voice_python;
+
+// ONNX speech-to-text needs ONNX Runtime, which is not linked on Windows (see
+// Cargo.toml). Everywhere else it is the real runtime.
+#[cfg(not(target_os = "windows"))]
+mod whisper_onnx;
+#[cfg(target_os = "windows")]
+mod whisper_onnx {
+    //! Windows stand-in for the ONNX speech-to-text runtime.
+    //!
+    //! ONNX Runtime ships only execution-provider builds for Windows, and none of
+    //! them has been verified here, so this build says so plainly instead of
+    //! failing mid-recording. ggml and PyTorch voice models are unaffected.
+
+    use std::path::{Path, PathBuf};
+
+    use crate::local_voice::InstalledVoiceModel;
+
+    const UNAVAILABLE: &str =
+        "ONNX voice models are not available in the Windows build of Koryphaios. Use a ggml or PyTorch voice model instead.";
+
+    pub fn validate_onnx_model(_primary: &Path, _tokenizer: Option<PathBuf>) -> Result<(), String> {
+        Err(UNAVAILABLE.to_string())
+    }
+
+    pub fn transcribe(
+        _model: &InstalledVoiceModel,
+        _samples: &[f32],
+        _language: &str,
+    ) -> Result<String, String> {
+        Err(UNAVAILABLE.to_string())
+    }
+}
 use config::{browser_host, AppConfig};
 use error::{log_error, AppError, AppResult};
 
@@ -1086,6 +1126,452 @@ fn get_app_version() -> String {
     AppConfig::get().app.version.clone()
 }
 
+/// Best-effort zoom for the frameless main window: macOS `zoom:` (which backs
+/// `maximize()`) is a silent no-op without a native title bar, so on macOS the
+/// window frame is enforced directly with a synchronous AppKit
+/// `setFrame:display:` to the screen's `visibleFrame`. That yields the full
+/// work-area frame — full width and height, unmagnified, never fullscreen —
+/// below the menu bar and above the Dock, like the native green-button zoom.
+fn zoom_to_work_area(window: &WebviewWindow) {
+    if window.is_maximized().unwrap_or(false) || window.is_fullscreen().unwrap_or(false) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let w = window.clone();
+        let apply = move || {
+            capture_pre_zoom_frame(&w);
+            set_visible_frame(&w);
+        };
+        if MainThreadMarker::new().is_some() {
+            apply();
+        } else {
+            let _ = window.run_on_main_thread(apply);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // `current_monitor()` can briefly return nothing right after show; the
+        // primary monitor is a good enough fallback so the zoom never silently
+        // no-ops and leaves the window at its short config size.
+        let monitor = match window
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| window.primary_monitor().ok().flatten())
+        {
+            Some(monitor) => monitor,
+            None => {
+                println!("[Koryphaios] Zoom skipped: no monitor information available");
+                return;
+            }
+        };
+        let scale = monitor.scale_factor();
+        let area = monitor.work_area();
+        let target_height = area.size.to_logical::<f64>(scale).height;
+        let before_size = window.inner_size().ok();
+        let before_pos = window.outer_position().ok();
+        println!(
+            "[Koryphaios] Zoom check (monitor={}x{}@{}, work_area={}x{}@{},{} window={:?}@{:?})",
+            monitor.size().width,
+            monitor.size().height,
+            scale,
+            area.size.width,
+            area.size.height,
+            area.position.x,
+            area.position.y,
+            before_size,
+            before_pos
+        );
+        let current_height = window
+            .inner_size()
+            .map(|size| size.to_logical::<f64>(scale).height)
+            .unwrap_or(0.0);
+        let current_y = window.outer_position().map(|pos| pos.y).unwrap_or(i32::MAX);
+        let target_y = area.position.y;
+        // Already flush with the work area (top edge and height): nothing to do.
+        // Otherwise take control and enforce the exact frame — growing or
+        // shrinking — so the window sits flush below the menu bar and above the
+        // Dock like every native zoomed Mac app.
+        if (current_height - target_height).abs() <= 1.0 && (current_y - target_y).abs() <= 2 {
+            return;
+        }
+        let width = match window.inner_size() {
+            Ok(size) => size.to_logical::<f64>(scale).width,
+            Err(_) => return,
+        };
+        if width <= 0.0 || target_height <= 0.0 {
+            return;
+        }
+        let target_x = window
+            .outer_position()
+            .map(|pos| pos.x)
+            .unwrap_or(area.position.x);
+        // AppKit applies resizes asynchronously (and the dev watcher can briefly
+        // relaunch under us), so verify on a worker thread and re-apply while
+        // the window is still short or sitting low.
+        let worker = window.clone();
+        std::thread::spawn(move || {
+            if worker.is_fullscreen().unwrap_or(false) {
+                return;
+            }
+            // Distance from the target work-area geometry, as (height_gap_px,
+            // y_gap_px, x_gap_px). Used to tell "AppKit still hasn't applied our
+            // request" (gap shrinks or stays put — keep retrying) from "someone
+            // else is dragging the window" (gap grows — stop fighting them).
+            let gap = |h: f64, x: i32, y: i32| -> (f64, u32, u32) {
+                ((target_height - h).abs(), y.abs_diff(target_y), x.abs_diff(target_x))
+            };
+            let mut prev_gap: Option<(f64, u32, u32)> = None;
+            for attempt in 0..6u32 {
+                // Re-read the width every attempt so an east/west drag by the
+                // user during the retry window is preserved instead of snapped
+                // back to the width captured before the zoom started.
+                let width = worker
+                    .inner_size()
+                    .map(|size| size.to_logical::<f64>(scale).width)
+                    .unwrap_or(width);
+                let _ = worker.set_size(tauri::LogicalSize::new(width, target_height));
+                let _ = worker.set_position(tauri::PhysicalPosition::new(target_x, target_y));
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                let size = worker
+                    .inner_size()
+                    .map(|size| size.to_logical::<f64>(scale))
+                    .unwrap_or_default();
+                let pos = worker.outer_position().unwrap_or_default();
+                let height = size.height;
+                let y = pos.y;
+                if (height - target_height).abs() <= 1.0 && (y - target_y).abs() <= 2 {
+                    println!(
+                        "[Koryphaios] Work-area height settled at {}x{} y={} (attempt {})",
+                        width as u32, height as u32, y, attempt + 1
+                    );
+                    return;
+                }
+                let current_gap = gap(height, pos.x, y);
+                if let Some((prev_h, prev_y, prev_x)) = prev_gap {
+                    let drifted = current_gap.0 > prev_h + 2.0
+                        || current_gap.1 > prev_y + 2
+                        || current_gap.2 > prev_x + 2;
+                    if drifted {
+                        println!(
+                            "[Koryphaios] Work-area zoom aborted: window is being resized or moved externally ({}x{} y={})",
+                            width as u32, height as u32, y
+                        );
+                        return;
+                    }
+                }
+                prev_gap = Some(current_gap);
+            }
+            println!("[Koryphaios] Work-area height fallback did not stick; leaving window as-is");
+        });
+    }
+}
+
+#[cfg(target_os = "macos")]
+static PRE_ZOOM_FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+
+/// Retain the window's NSWindow as a strong reference. Must be on the main
+/// thread; the raw pointer stays valid because Tauri keeps the window alive.
+#[cfg(target_os = "macos")]
+fn retain_ns_window(window: &WebviewWindow) -> Option<Retained<NSWindow>> {
+    let ptr = window.ns_window().ok()?;
+    unsafe { Retained::retain(ptr as *mut NSWindow) }
+}
+
+/// Record the window's current AppKit frame so the zoom can be undone to the
+/// exact pre-zoom geometry (native un-zoom semantics).
+#[cfg(target_os = "macos")]
+fn capture_pre_zoom_frame(window: &WebviewWindow) {
+    let Some(ns_window) = retain_ns_window(window) else {
+        return;
+    };
+    let frame = ns_window.frame();
+    if let Ok(mut slot) = PRE_ZOOM_FRAME.lock() {
+        *slot = Some((
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+        ));
+    }
+}
+
+/// Synchronously set the window frame to the screen's `visibleFrame` — the
+/// work area between the menu bar and the Dock. `setFrame:display:` is
+/// applied immediately (no animation, no async race), and AppKit clamps it
+/// to `constrainFrameRect`, so the frame can never cover the menu bar.
+#[cfg(target_os = "macos")]
+fn set_visible_frame(window: &WebviewWindow) {
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    let Some(ns_window) = retain_ns_window(window) else {
+        return;
+    };
+    let screen = ns_window.screen().or_else(|| NSScreen::mainScreen(mtm));
+    let Some(screen) = screen else {
+        println!("[Koryphaios] Work-area zoom skipped: no screen available");
+        return;
+    };
+    let frame = screen.visibleFrame();
+    println!(
+        "[Koryphaios] Work-area zoom: setFrame origin=({},{}) size={}x{}",
+        frame.origin.x, frame.origin.y, frame.size.width, frame.size.height
+    );
+    ns_window.setFrame_display(frame, false);
+    // Record it so a later display change can tell a zoomed window apart from
+    // one the user sized by hand and re-fill only the former.
+    record_fitted_frame(frame_values(frame));
+}
+
+/// Undo the work-area zoom by restoring the exact pre-zoom frame.
+#[cfg(target_os = "macos")]
+fn restore_pre_zoom_frame(window: &WebviewWindow) {
+    let saved = PRE_ZOOM_FRAME.lock().ok().and_then(|slot| *slot);
+    let Some((x, y, width, height)) = saved else {
+        // Nothing captured (e.g. first run after an external resize): fall
+        // back to tao's un-zoom path.
+        let _ = window.unmaximize();
+        return;
+    };
+    let Some(ns_window) = retain_ns_window(window) else {
+        return;
+    };
+    let frame = NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
+    println!(
+        "[Koryphaios] Work-area un-zoom: setFrame origin=({},{}) size={}x{}",
+        x, y, width, height
+    );
+    ns_window.setFrame_display(frame, false);
+    if let Ok(mut slot) = PRE_ZOOM_FRAME.lock() {
+        *slot = None;
+    }
+    // The window is no longer filled to a work area, so a display change must
+    // not treat it as zoomed and snap it back out to full size.
+    if let Ok(mut slot) = FITTED_FRAME.lock() {
+        *slot = None;
+    }
+}
+
+/// The work-area frame the window was last fitted to, as
+/// `(x, y, width, height)` in logical points. A display change has to tell
+/// "the user had this filled the work area" apart from "the user sized this
+/// themselves", and this is the only place the former is recorded.
+static FITTED_FRAME: Mutex<Option<[f64; 4]>> = Mutex::new(None);
+
+fn fitted_frame() -> Option<[f64; 4]> {
+    FITTED_FRAME.lock().ok().and_then(|slot| *slot)
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn record_fitted_frame(frame: [f64; 4]) {
+    if let Ok(mut slot) = FITTED_FRAME.lock() {
+        *slot = Some(frame);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn frame_values(rect: NSRect) -> [f64; 4] {
+    [
+        rect.origin.x,
+        rect.origin.y,
+        rect.size.width,
+        rect.size.height,
+    ]
+}
+
+/// Whether two frames describe the same rectangle. The one-pixel slack keeps
+/// floating-point scaling noise from reading as a change.
+fn frames_match(a: &[f64; 4], b: &[f64; 4]) -> bool {
+    a.iter().zip(b.iter()).all(|(l, r)| (l - r).abs() < 1.0)
+}
+
+/// Pick the frame the window should take now that the display it sits on
+/// changed, or `None` when it is already correctly placed inside `work`.
+///
+/// `work` is the new display's work area and `frame` the window's current
+/// frame, both `(x, y, width, height)` in logical points with a bottom-left
+/// origin. A window that had been filled to a work area (`fitted`) is
+/// re-filled to the new one, which is what a natively zoomed window does when
+/// the display it was on is unplugged. Otherwise an over-sized window is
+/// shrunk back inside the work area, never grown, so a size the user picked is
+/// never overridden.
+fn frame_for_display_change(
+    work: &[f64; 4],
+    frame: &[f64; 4],
+    fitted: Option<[f64; 4]>,
+) -> Option<[f64; 4]> {
+    let [wx, wy, ww, wh] = *work;
+    let [fx, fy, fw, fh] = *frame;
+    if ww <= 0.0 || wh <= 0.0 || fw <= 0.0 || fh <= 0.0 {
+        return None;
+    }
+    if fitted.is_some_and(|previous| frames_match(&previous, frame)) {
+        let target = [wx, wy, ww, wh];
+        return (!frames_match(&target, frame)).then_some(target);
+    }
+    let width = fw.min(ww);
+    let height = fh.min(wh);
+    if width == fw && height == fh {
+        // The window already fits, so its position is the user's business:
+        // dragging a window partly off-screen to see what is behind it is
+        // normal, and yanking it back would be hostile. An over-sized frame is
+        // a different matter, because AppKit never lets a user make a window
+        // larger than the display — so an over-sized one is always a leftover
+        // from a bigger display, never a deliberate choice.
+        return None;
+    }
+    let target = [
+        fx.clamp(wx, wx + ww - width),
+        fy.clamp(wy, wy + wh - height),
+        width,
+        height,
+    ];
+    (!frames_match(&target, frame)).then_some(target)
+}
+
+/// A normal (un-zoomed) frame on `work`: 85% of it, centered. Used after a
+/// display change so un-zoom lands on a sensible window on the new display
+/// instead of the stale frame captured on the display that went away.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn restore_frame_for_work_area(work: &[f64; 4]) -> [f64; 4] {
+    let [wx, wy, ww, wh] = *work;
+    let width = (ww * 0.85).round();
+    let height = (wh * 0.85).round();
+    [
+        wx + (ww - width) / 2.0,
+        wy + (wh - height) / 2.0,
+        width,
+        height,
+    ]
+}
+
+/// Re-fit the main window to the display it currently lives on.
+///
+/// macOS moves a window onto the built-in panel when an external display is
+/// unplugged but keeps the window's old size, so a window that was 2560px
+/// wide on the external monitor lands with its right third past the edge of a
+/// 1512px screen and — unlike every native app — it never shrinks back. A
+/// frameless window makes this worse, because the shell enforces its own frame
+/// instead of letting AppKit keep a per-display zoom rectangle.
+#[cfg(target_os = "macos")]
+fn refit_window_to_display(window: &WebviewWindow) {
+    let target_window = window.clone();
+    let apply = move || {
+        // Built here rather than captured: MainThreadMarker is not Send, and
+        // this closure has to cross to the main thread from the watcher.
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(ns_window) = retain_ns_window(&target_window) else {
+            return;
+        };
+        // Read fullscreen from the style mask rather than Tauri so this whole
+        // repair runs inside a single main-thread hop.
+        if (ns_window.styleMask().0 & NSWindowStyleMask::FullScreen.0) != 0 {
+            return;
+        }
+        let Some(screen) = ns_window.screen().or_else(|| NSScreen::mainScreen(mtm)) else {
+            return;
+        };
+        let work = frame_values(screen.visibleFrame());
+        let frame = frame_values(ns_window.frame());
+        let Some(target) = frame_for_display_change(&work, &frame, fitted_frame()) else {
+            return;
+        };
+        println!(
+            "[Koryphaios] Display changed: refitting window to ({},{}) {}x{}",
+            target[0], target[1], target[2], target[3]
+        );
+        ns_window.setFrame_display(
+            NSRect::new(
+                NSPoint::new(target[0], target[1]),
+                NSSize::new(target[2], target[3]),
+            ),
+            false,
+        );
+        if frames_match(&target, &work) {
+            record_fitted_frame(target);
+            // The captured un-zoom frame points at the display that just went
+            // away, so replace it with a normal frame on the new work area.
+            if let Ok(mut slot) = PRE_ZOOM_FRAME.lock() {
+                let restore = restore_frame_for_work_area(&work);
+                *slot = Some((restore[0], restore[1], restore[2], restore[3]));
+            }
+        }
+    };
+    if MainThreadMarker::new().is_some() {
+        apply();
+    } else {
+        let _ = window.run_on_main_thread(apply);
+    }
+}
+
+/// Non-macOS counterpart of [`refit_window_to_display`]. There is no frameless
+/// zoom rectangle to restore, so a display change only has to stop the window
+/// from hanging off the edge of a smaller display.
+#[cfg(not(target_os = "macos"))]
+fn refit_window_to_display(window: &WebviewWindow) {
+    // A maximized window belongs to the window manager, which re-zooms it
+    // itself when the display layout changes.
+    if window.is_fullscreen().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
+        return;
+    }
+    let Ok(Some(monitor)) = window.current_monitor() else {
+        return;
+    };
+    let scale = monitor.scale_factor();
+    if scale <= 0.0 {
+        return;
+    }
+    let area = monitor.work_area();
+    let work = [
+        area.position.x as f64 / scale,
+        area.position.y as f64 / scale,
+        area.size.width as f64 / scale,
+        area.size.height as f64 / scale,
+    ];
+    let (Ok(position), Ok(size)) = (window.outer_position(), window.inner_size()) else {
+        return;
+    };
+    let frame = [
+        position.x as f64 / scale,
+        position.y as f64 / scale,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    ];
+    let Some(target) = frame_for_display_change(&work, &frame, fitted_frame()) else {
+        return;
+    };
+    println!(
+        "[Koryphaios] Display changed: refitting window to ({},{}) {}x{}",
+        target[0], target[1], target[2], target[3]
+    );
+    let _ = window.set_size(tauri::LogicalSize::new(target[2], target[3]));
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        (target[0] * scale).round() as i32,
+        (target[1] * scale).round() as i32,
+    ));
+}
+
+/// Repair the main window whenever the display layout changes under it.
+///
+/// Polling rather than subscribing to AppKit's screen notifications keeps the
+/// platform-specific code down to the one frame read/write above, and covers
+/// monitor unplug, resolution changes, and scale-factor changes the same way.
+/// 800ms is far below the time it takes to notice a window hanging off the
+/// edge of a screen, and the read is two float compares when nothing moved.
+fn watch_display_changes(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        let Some(window) = app.get_webview_window("main") else {
+            continue;
+        };
+        refit_window_to_display(&window);
+    });
+}
+
 #[tauri::command]
 fn show_main_window(window: WebviewWindow) {
     let _ = window.show();
@@ -1094,9 +1580,13 @@ fn show_main_window(window: WebviewWindow) {
 }
 
 #[tauri::command]
-fn toggle_fullscreen(window: WebviewWindow) {
+fn toggle_fullscreen(window: WebviewWindow) -> Result<bool, String> {
     let is_fullscreen = window.is_fullscreen().unwrap_or(false);
-    let _ = window.set_fullscreen(!is_fullscreen);
+    let enter_fullscreen = !is_fullscreen;
+    window
+        .set_fullscreen(enter_fullscreen)
+        .map_err(|error| error.to_string())?;
+    Ok(enter_fullscreen)
 }
 
 #[tauri::command]
@@ -1117,9 +1607,28 @@ async fn minimize_window_cmd(window: WebviewWindow) {
 async fn toggle_maximize(window: WebviewWindow) {
     let is_maximized = window.is_maximized().unwrap_or(false);
     if is_maximized {
+        #[cfg(target_os = "macos")]
+        {
+            // tao's unmaximize falls back to a hardcoded 800x600 frame for
+            // borderless windows; restore the real pre-zoom geometry instead.
+            let w = window.clone();
+            let restore = move || restore_pre_zoom_frame(&w);
+            if MainThreadMarker::new().is_some() {
+                restore();
+            } else {
+                let _ = window.run_on_main_thread(restore);
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
         let _ = window.unmaximize();
     } else {
-        let _ = window.maximize();
+        #[cfg(target_os = "macos")]
+        zoom_to_work_area(&window);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = window.maximize();
+            zoom_to_work_area(&window);
+        }
     }
 }
 
@@ -1150,6 +1659,33 @@ async fn select_files_dialog(app: tauri::AppHandle) -> Result<Option<Vec<String>
         .blocking_pick_files();
 
     Ok(result.map(|paths| paths.into_iter().map(|p| p.to_string()).collect()))
+}
+
+// Pick a voice model. The filter names the formats the local runtimes can load
+// rather than one vendor's layout, and the picker stays open on rejection so a
+// wrong file can be replaced without starting over.
+#[tauri::command]
+async fn select_voice_model_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Select a voice model")
+        .add_filter(
+            "Voice models",
+            &[
+                "bin", "onnx", "pt", "pth", "ckpt", "safetensors", "gguf", "npz",
+            ],
+        )
+        .blocking_pick_file();
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+    let path = std::path::PathBuf::from(path.to_string());
+    let format = local_voice::detect_format(&path);
+    if format == local_voice::VoiceModelFormat::Unknown {
+        return Err(local_voice::unknown_format_message(&path));
+    }
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 // Create a new project folder at the specified path
@@ -1484,7 +2020,7 @@ fn create_native_menu(app: &tauri::AppHandle) -> AppResult<Menu<tauri::Wry>> {
     let about = MenuItem::with_id(
         app,
         "about",
-        &format!("About {}", config.app.name),
+        format!("About {}", config.app.name),
         true,
         None::<&str>,
     )
@@ -1882,7 +2418,7 @@ pub fn run() {
                     "toggle_devtools" => {
                         if let Some(window) = app.get_webview_window("main") {
                             // Enable devtools in all builds for debugging
-                            let _ = window.open_devtools();
+                            window.open_devtools();
                         }
                     }
                     "minimize" => {
@@ -1891,12 +2427,9 @@ pub fn run() {
                         }
                     }
                     "about" => {
-                        let config = AppConfig::get();
                         // Use a simple message dialog via tauri-plugin-dialog
                         if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.emit("show-about", {
-                                let _ = ();
-                            });
+                            let _ = window.emit("show-about", ());
                         }
                     }
                     _ => {}
@@ -1912,8 +2445,12 @@ pub fn run() {
 
             // Get main window and ensure visibility
             if let Some(window) = app.get_webview_window("main") {
-                // Start in the platform's maximized/zoomed state while keeping
-                // normal window resizing available. Fullscreen is user-controlled.
+                // Start filling the work area while keeping normal window
+                // resizing available. Fullscreen is user-controlled. On macOS
+                // the frameless window's maximize() is unreliable and leaves
+                // tao state that fights later resizes, so zoom_to_work_area
+                // enforces the frame synchronously after show instead.
+                #[cfg(not(target_os = "macos"))]
                 let _ = window.maximize();
 
                 // CRITICAL: Always force show, focus, and unminimize to ensure window is visible on launch
@@ -1921,6 +2458,16 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
                 let _ = window.unminimize();
+
+                // Frameless windows ignore zoom on macOS, so grow to the work
+                // area instead (after show, so AppKit constrains the final
+                // frame rather than a half-applied one).
+                zoom_to_work_area(&window);
+
+                // Unplugging or re-arranging a display moves the window but
+                // never resizes it, so the frame has to be repaired whenever
+                // the layout changes underneath it.
+                watch_display_changes(app.handle().clone());
 
                 // Set up file drop handler
                 setup_file_drop_handler(&window);
@@ -2008,6 +2555,11 @@ pub fn run() {
             close_window_cmd,
             select_folder_dialog,
             select_files_dialog,
+            select_voice_model_dialog,
+            local_voice::local_voice_model_status,
+            local_voice::download_local_voice_model,
+            local_voice::attach_local_voice_model,
+            local_voice::transcribe_local_voice,
             create_project_folder,
             read_folder_contents,
             path_exists,
@@ -2022,14 +2574,103 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        copy_backend_resource, dev_backend_binding, merge_packaged_cors_origins,
-        open_private_backend_logs, validate_log_file_name,
+        copy_backend_resource, dev_backend_binding, frame_for_display_change,
+        merge_packaged_cors_origins, open_private_backend_logs, restore_frame_for_work_area,
+        validate_log_file_name,
     };
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// A 2560x1410 window on an external display, unplugged onto a 1512x945
+    /// built-in panel: the exact case where macOS relocates the window but
+    /// leaves it wider than the screen it moved to.
+    const EXTERNAL_WORK_AREA: [f64; 4] = [0.0, 0.0, 2560.0, 1410.0];
+    const BUILT_IN_WORK_AREA: [f64; 4] = [0.0, 25.0, 1512.0, 945.0];
+
+    #[test]
+    fn unplugging_a_display_refills_a_work_area_window() {
+        let target = frame_for_display_change(
+            &BUILT_IN_WORK_AREA,
+            &EXTERNAL_WORK_AREA,
+            Some(EXTERNAL_WORK_AREA),
+        );
+        assert_eq!(target, Some(BUILT_IN_WORK_AREA));
+    }
+
+    #[test]
+    fn unplugging_a_display_shrinks_a_user_sized_window_without_growing_it() {
+        let user_sized = [200.0, 100.0, 1200.0, 800.0];
+        assert_eq!(
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &user_sized, Some(EXTERNAL_WORK_AREA)),
+            None,
+            "a window the user sized must be left alone when it still fits"
+        );
+    }
+
+    #[test]
+    fn an_oversized_user_sized_window_is_shrunk_and_slid_inside_the_work_area() {
+        let oversized = [900.0, 100.0, 2200.0, 1200.0];
+        let target =
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &oversized, Some(EXTERNAL_WORK_AREA))
+                .expect("a window wider than the new display must be repaired");
+        assert_eq!(target[2], 1512.0, "shrunk to the new display width");
+        assert_eq!(target[3], 945.0, "shrunk to the new display height");
+        assert_eq!(target[0], 0.0, "flush with the left of the work area");
+        assert_eq!(target[1], 25.0, "flush with the bottom of the work area");
+    }
+
+    #[test]
+    fn a_window_hanging_off_the_new_display_is_left_where_the_user_put_it() {
+        // Dragging a window partly off-screen to see what is behind it is a
+        // normal thing to do. The window fits, so only its size could ever be
+        // a bug.
+        let dragged = [1600.0, 400.0, 800.0, 600.0];
+        assert_eq!(frame_for_display_change(&BUILT_IN_WORK_AREA, &dragged, None), None);
+    }
+
+    #[test]
+    fn an_oversized_window_off_the_edge_of_the_new_display_is_shrunk_and_pulled_back() {
+        // The external display sat to the right of the built-in one, so
+        // unplugging it leaves an over-sized window's origin past the new
+        // display's right edge.
+        let offscreen = [1600.0, 400.0, 2200.0, 1200.0];
+        let target =
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &offscreen, None).expect("must repair");
+        assert_eq!(target[2], 1512.0);
+        assert_eq!(target[3], 945.0);
+        assert!(target[0] + target[2] <= BUILT_IN_WORK_AREA[0] + BUILT_IN_WORK_AREA[2]);
+        assert!(target[1] + target[3] <= BUILT_IN_WORK_AREA[1] + BUILT_IN_WORK_AREA[3]);
+    }
+
+    #[test]
+    fn a_window_already_inside_the_new_display_is_left_untouched() {
+        let settled = [100.0, 100.0, 1200.0, 800.0];
+        assert_eq!(frame_for_display_change(&BUILT_IN_WORK_AREA, &settled, None), None);
+    }
+
+    #[test]
+    fn degenerate_geometry_is_rejected_rather_than_applied() {
+        assert_eq!(
+            frame_for_display_change(&[0.0, 0.0, 0.0, 0.0], &EXTERNAL_WORK_AREA, None),
+            None
+        );
+        assert_eq!(
+            frame_for_display_change(&BUILT_IN_WORK_AREA, &[0.0, 0.0, 0.0, 0.0], None),
+            None
+        );
+    }
+
+    #[test]
+    fn a_restored_frame_stays_inside_the_new_work_area() {
+        let restore = restore_frame_for_work_area(&BUILT_IN_WORK_AREA);
+        assert!(restore[0] >= BUILT_IN_WORK_AREA[0]);
+        assert!(restore[1] >= BUILT_IN_WORK_AREA[1]);
+        assert!(restore[0] + restore[2] <= BUILT_IN_WORK_AREA[0] + BUILT_IN_WORK_AREA[2] + 1.0);
+        assert!(restore[1] + restore[3] <= BUILT_IN_WORK_AREA[1] + BUILT_IN_WORK_AREA[3] + 1.0);
+    }
 
     #[test]
     fn packaged_cors_origins_include_exact_tauri_application_origins() {

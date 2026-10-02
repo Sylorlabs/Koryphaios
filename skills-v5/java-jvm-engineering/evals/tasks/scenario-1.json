@@ -1,0 +1,82 @@
+{
+  "id": "java-jvm-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Java service component that creates a scheduled executor per tenant but never shuts it down when the tenant configuration is removed. Threads accumulate and prevent clean JVM termination. Establish component/executor lifetime, preserve scheduling semantics, make shutdown idempotent, and verify tenant add/remove churn, task exception, concurrent removal, and process shutdown with thread-leak evidence. Do not rely on finalizers.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://java-jvm-engineering/executor-shutdown-leak",
+    "requirements": [
+      "Java tenant scheduler fixture with named threads and lifecycle callbacks",
+      "high-churn tenant add/remove sequence plus concurrent task execution",
+      "thread-count/JVM-termination checks and task-exception fixture",
+      "existing scheduling interval/API compatibility contract",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "java-jvm-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "java-jvm-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "java-jvm-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "executor-shutdown-leak scenario evidence",
+    "java-jvm-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "java-jvm-engineering-individual-scenario-1-result",
+    "java-jvm-engineering-individual-scenario-1-verification",
+    "java-jvm-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual java-jvm-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=kotlin-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm language and JVM targets, build tool, dependency graph, nullability conventions, framework lifecycle, and concurrency model."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Every executor has one explicit component owner and deterministic shutdown path; removing a tenant or stopping the service leaves no live scheduler thread owned by it."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run the authoritative Gradle or Maven checks plus focused tests across supported runtime targets."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not hide lifecycle state in static singletons, block managed event loops, depend on unspecified iteration or reflection order, or add framework annotations without understanding ownership and scope."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (java-jvm-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

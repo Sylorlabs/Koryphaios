@@ -1,0 +1,75 @@
+{
+  "id": "observability-sre-full-task-2",
+  "maturity": "individual",
+  "prompt": "A high-volume event-ingest service exports OpenTelemetry traces with 1% head sampling. During incidents, responders often have no trace for requests that exceeded 2 seconds or returned errors, while Prometheus memory is growing because metric labels include tenant_id and raw route values. Redesign and verify the production telemetry path without changing application business behavior: replace unbounded metric dimensions with bounded service/operation/status dimensions, preserve tenant/request correlation only in appropriate log/trace fields under the repository privacy policy, choose a documented head/tail sampling policy that retains the incident classes the team must diagnose, size/monitor the sampler pipeline, and build an SRE view over latency, traffic, errors, saturation/backlog, plus sampling/export health. Replay a deterministic corpus containing normal, >2s, and error requests and prove the retained traces and metric series satisfy the declared policy without presenting sampled trace counts as full request counts.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://observability-sre/scenario-2",
+    "requirements": [
+      "deterministic event-ingest corpus containing normal, slow, and error requests",
+      "OpenTelemetry collector/sampling configuration with inspectable emitted telemetry",
+      "Prometheus-compatible metric backend with series-count inspection",
+      "repository privacy policy fixture covering correlation identifiers",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "observability-sre-cardinality-2",
+      "assertion": "The revised metric schema removes tenant_id/raw unbounded route values from label dimensions and the deterministic corpus produces a bounded series count consistent with the declared operation/status dimensions."
+    },
+    {
+      "id": "observability-sre-correlation-2",
+      "assertion": "Request/tenant correlation is retained only in signals and fields permitted by the privacy policy and is not copied into metric labels or sensitive payload logging."
+    },
+    {
+      "id": "observability-sre-sampling-2",
+      "assertion": "The documented sampling policy retains every required synthetic error and >2s incident-class trace in the replay corpus or explicitly records a bounded false-negative policy; the result does not assume 1% head sampling can inspect completed trace outcomes."
+    },
+    {
+      "id": "observability-sre-sampler-health-2",
+      "assertion": "The collector/sampler exposes capacity, drop/export failure, and queue/backpressure health needed to detect when the sampling pipeline cannot honor its policy."
+    },
+    {
+      "id": "observability-sre-count-semantics-2",
+      "assertion": "Dashboards use unsampled metric/event counters for full request traffic/error denominators and do not present retained trace counts as population request counts."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "observability-sre-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "before/after metric-series cardinality",
+        "privacy/correlation field audit",
+        "deterministic trace-retention corpus",
+        "sampler health and count semantics"
+      ]
+    },
+    {
+      "id": "observability-sre-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "bounded metric schema and observed series counts",
+    "privacy-safe correlation schema",
+    "sampling policy and deterministic retained/dropped trace inventory",
+    "sampler/export health evidence",
+    "correct full-population metric denominators",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "observability-sre-scenario-2-result",
+    "observability-sre-scenario-2-verification",
+    "observability-sre-scenario-2-paired-evaluation"
+  ]
+}

@@ -1,0 +1,81 @@
+{
+  "id": "usability-evaluation-full-task-operator-terminal",
+  "prompt": "Evaluate the usability of a terminal-based production deployment workflow used by both occasional operators and experienced release engineers. The flow includes target selection, preflight warnings, a long-running deployment, streamed status, safe cancellation, partial failure, rollback, and recovery after reconnecting to a lost terminal session. Produce a task-based evaluation plan and evidence/reporting model that respects the terminal medium and distinguishes novice/expert findings without changing implementation behavior.",
+  "environment": {
+    "kind": "cli",
+    "startingState": "fixture://usability-evaluation/operator-terminal",
+    "requirements": [
+      "working CLI fixture",
+      "novice and expert operator profiles",
+      "failure/recovery scenarios",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "terminal-study-medium",
+      "assertion": "The study runs through the terminal workflow and captures terminal/session conditions; it does not substitute browser usability heuristics for CLI task evidence."
+    },
+    {
+      "id": "terminal-novice-expert-strata",
+      "assertion": "Occasional operators and experienced release engineers are treated as distinct participant strata where expectations, shortcuts, diagnosis strategies, or failure cost differ."
+    },
+    {
+      "id": "terminal-recovery-tasks",
+      "assertion": "Tasks exercise target selection, warnings, long-running status, safe cancellation, partial failure, rollback, lost-session reconnection, and recovery without giving participants the command sequence in the task wording."
+    },
+    {
+      "id": "terminal-observation-to-finding",
+      "assertion": "Raw command/task observations, assistance, errors, recovery, and time/context are traceable to findings while causal explanations remain labeled hypotheses unless separately evidenced."
+    },
+    {
+      "id": "terminal-severity-and-retest",
+      "assertion": "Finding severity reflects operational consequence/recoverability and the plan defines comparable retest conditions for material changes without altering the CLI behavior as part of the evaluation."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "cross-medium-task-evaluation",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "terminal environment captured",
+        "novice/expert scopes separated",
+        "goal-framed deployment and recovery tasks",
+        "completion/error/assistance/recovery observations",
+        "no browser-specific evaluation assumptions"
+      ]
+    },
+    {
+      "id": "finding-and-priority-integrity",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "raw observations trace to findings",
+        "cause hypotheses labeled",
+        "severity tied to operational consequence",
+        "scope limits by expertise/environment",
+        "retest plan for consequential changes"
+      ]
+    },
+    {
+      "id": "blind-terminal-usability-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "participant and environment scope",
+    "realistic task protocol",
+    "task-observation schema",
+    "finding/severity rationale",
+    "retest conditions"
+  ],
+  "requiredArtifacts": [
+    "terminal-usability-evaluation-plan",
+    "operator-findings-model",
+    "paired-experiment-report"
+  ]
+}

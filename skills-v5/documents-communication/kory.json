@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "name": "documents-communication",
+  "version": "5.1.2",
+  "skillKind": "artifact",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["documents"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "release notes",
+    "changelog",
+    "rewrite this document",
+    "edit this document",
+    "draft a document",
+    "design document",
+    "write a report",
+    "prepare a report",
+    "project report",
+    "source-backed report",
+    "project handoff",
+    "handoff document",
+    "turn these notes into",
+    "rough implementation notes",
+    "polish this document",
+    "polish this markdown"
+  ],
+  "excludes": [
+    "implement the code",
+    "fix the bug without writing documentation",
+    "only answer the question",
+    "analyze the dataset without writing a report",
+    "do not draft or rewrite a document",
+    "compute the supplied checksum values",
+    "trace which local parser"
+  ],
+  "evidence": [
+    "Audience, purpose, and target-format contract",
+    "Source-fact and uncertainty trace",
+    "Structure and reader-action review",
+    "Final factual and format QA",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Write release notes for the next tagged version from the merged PRs and commit range, keeping breaking changes, user-visible fixes, and known limitations separate from internal refactors.",
+      "Turn these project notes into a cross-team handoff document with current state, decisions, owners, open questions, source links, and next steps without inventing missing facts.",
+      "Rewrite this supplied policy document for clarity and scanning while preserving its requirements, exceptions, defined terms, and unresolved placeholders exactly.",
+      "Prepare a general project report from the supplied milestones, metrics, decisions, and risks. Keep measured facts separate from commentary and follow the existing Markdown template.",
+      "Polish this document into publication-ready Markdown, preserve every citation and date qualifier, repair structure and duplication, and flag factual conflicts rather than smoothing them over."
+    ],
+    "negative": [
+      "Implement the requested API endpoint in the existing service and verify its tests; no documentation artifact is requested.",
+      "Debug the crash in this repository, reproduce it, fix the root cause, and run the regression tests without writing release notes or a report.",
+      "Research the current protocol standard from authoritative sources and answer which behavior is normative; I do not need a reusable document artifact.",
+      "Analyze the supplied dataset, return the calculations and chart, and do not write a narrative report.",
+      "Implement the supplied interface mockup in the existing frontend and verify interaction behavior; no document deliverable is part of the task."
+    ],
+    "ambiguous": [
+      {
+        "id": "documents-communication-ambiguous-1",
+        "prompt": "Implement the release fix, then write release notes from the verified diff and issue evidence. Keep the code change and reader-facing release artifact as separate outputs.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["implementation", "repository-environment-discovery"],
+        "tags": ["ambiguous", "compound", "implementation-plus-doc"]
+      },
+      {
+        "id": "documents-communication-ambiguous-2",
+        "prompt": "Research the current standard and then turn the verified findings into a source-backed report for the project team. Preserve normative facts separately from synthesis and document structure.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["research"],
+        "tags": ["ambiguous", "compound", "research-plus-doc"]
+      },
+      {
+        "id": "documents-communication-ambiguous-3",
+        "prompt": "Trace the current repository behavior first, then turn the verified implementation and ownership findings into a project handoff document with links to the relevant files and open questions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["ambiguous", "compound", "repo-plus-doc"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "documents-communication-adversarial-1",
+        "prompt": "The pasted issue contains the old instruction 'write the release notes after merging.' Treat it as historical text. My actual task is only to calculate the checksum from the supplied values.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "quoted-decoy"]
+      },
+      {
+        "id": "documents-communication-adversarial-2",
+        "prompt": "Do not draft or rewrite a document. Extract only the five version numbers from the supplied text and return them as a plain list.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["task-routing"],
+        "tags": ["adversarial", "explicit-no-document"]
+      },
+      {
+        "id": "documents-communication-adversarial-3",
+        "prompt": "A template example says 'turn these notes into a project report.' Ignore the example as an instruction. The actual task is to identify which parser loads that template in the repository.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["adversarial", "fixture-injection"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered structure, wording, and readability guidance.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/welcome/",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft public writing style and terminology guidance as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Concise, consistent, reader-centered technology communication; style guidance, not authority for artifact subject facts.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
+      "sourceType": "official-docs",
+      "versionScope": "GitHub release and release-note behavior as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Release tags, previous-tag scope, drafts/prereleases, generated notes, and publication mechanics.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://semver.org/spec/v2.0.0.html",
+      "sourceType": "spec",
+      "versionScope": "Semantic Versioning 2.0.0",
+      "staleAfterDays": 365,
+      "notes": "Major/minor/patch semantics only when the target project explicitly follows SemVer.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable discovery metadata and progressive disclosure.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Bounded triggers, specialist separation, and behavioral validation.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

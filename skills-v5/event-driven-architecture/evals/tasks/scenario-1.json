@@ -1,0 +1,82 @@
+{
+  "id": "event-driven-architecture-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "An order service commits an order row and then publishes OrderCreated; a process crash between those operations leaves paid orders with no event. Introduce an event/outbox boundary that preserves the existing transaction contract, supports at-least-once publication, and gives consumers stable event identity/versioning. Verify crash at each boundary, duplicate publication, consumer idempotency expectations, and outbox cleanup without pretending exactly-once transport.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://event-driven-architecture/outbox-order-created",
+    "requirements": [
+      "transactional order store plus separate event broker with injectable publish failure",
+      "crash injection before/after order commit, outbox insert, broker publish, and acknowledgement",
+      "consumer fixture that records stable event ids and duplicate observations",
+      "existing OrderCreated payload compatibility constraint",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "event-driven-architecture-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "event-driven-architecture decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "event-driven-architecture-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "outbox-order-created scenario evidence",
+    "event-driven-architecture decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "event-driven-architecture-individual-scenario-1-result",
+    "event-driven-architecture-individual-scenario-1-verification",
+    "event-driven-architecture-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual event-driven-architecture boundary and relevant environment before acting, preserve the hierarchy relationship (broader=distributed-backend; near-neighbor=stream-processing), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Distinguish commands, domain events, integration events, notifications, and change-data streams."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Every committed domain change that requires an event eventually yields a replayable uniquely identified event; duplicate transport delivery cannot imply duplicate domain intent."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise duplicate, delayed, reordered, missing, poison, schema-evolved, and replayed events; verify producer transaction boundaries and consumer idempotency/reconciliation."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use events to hide synchronous dependencies, publish before authoritative state commits without a recovery model, or let consumers depend on undocumented producer database fields."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (event-driven-architecture decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

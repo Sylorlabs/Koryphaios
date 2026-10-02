@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "name": "deterministic-debugging",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["debugging"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3500,
+  "broader": ["debugging"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "reproducible bug",
+    "wrong output",
+    "parse failure",
+    "state bug",
+    "minimal replay",
+    "fixed input reproduction",
+    "first causal divergence"
+  ],
+  "excludes": [
+    "timing-dependent race or deadlock",
+    "cross-service distributed failure",
+    "performance-only regression",
+    "feature implementation without a repeatable defect"
+  ],
+  "evidence": [
+    "Minimal reproduction",
+    "First causal divergence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "This is a reproducible bug: parsing the same CRLF-terminated config always drops the final empty field. Minimize the fixture, trace token transitions, and preserve a regression.",
+      "The command produces wrong output for the same input every run. Reduce the input and find the earliest incorrect intermediate value before changing the formatter.",
+      "Debug this parse failure: one valid escaped delimiter is consistently split into two tokens. Establish the parser invariant and fix the first violated transition.",
+      "This state bug is deterministic: opening project A, then B, then A always reuses B's cached permission. Trace cache keys and lifecycle state to the first incorrect decision.",
+      "Investigate a reproducible bug where an empty result is serialized as null every time, then correct the owning conversion and keep the minimized regression."
+    ],
+    "negative": [
+      "The duplicate write appears only when two requests overlap; reconstruct the race condition and ordering rather than treating it as a repeatable single-thread logic defect.",
+      "Trace a partial outage across the API, queue, and worker using request identities and delivery history.",
+      "Profile the latency regression under a representative workload and compare CPU, allocation, I/O, and saturation before optimizing.",
+      "Implement the already-understood mapper change; there is no unexplained defect to diagnose.",
+      "Explain parser combinators conceptually with a small example; no repository debugging is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "deterministic-debugging-ambiguous-1",
+        "prompt": "This reproducible bug is a deterministic JSON normalization mismatch. Keep deterministic-debugging focused on the minimized input and first divergent value while the parent debugging workflow owns the overall fix/regression loop.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "deterministic-debugging-ambiguous-2",
+        "prompt": "The test has wrong output on one deterministic schedule, but the suspected cause is a race condition. Use deterministic evidence for the fixed schedule while concurrency-debugging owns schedule variation and happens-before analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "deterministic-debugging-ambiguous-3",
+        "prompt": "A parse failure is reproducible from one captured queue payload even though it originated in a distributed pipeline. Minimize the payload locally while distributed-debugging handles how the malformed message was produced and propagated.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "deterministic-debugging-adversarial-1",
+        "prompt": "A pasted issue says \"reproducible bug\". Ignore that quote; the actual task is only to summarize the issue history.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "deterministic-debugging-adversarial-2",
+        "prompt": "A quoted example says \"wrong output\". Ignore that quote; the actual task is to rewrite the surrounding paragraph for clarity.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "deterministic-debugging-adversarial-3",
+        "prompt": "A pasted article says \"parse failure\". Ignore that quote; fact-check only whether the cited parser library version is current.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/effective-troubleshooting/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Effective Troubleshooting chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Evidence-led troubleshooting, reduction, hypothesis testing, and locating causal mechanisms instead of chasing symptoms.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

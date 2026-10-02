@@ -1,0 +1,82 @@
+{
+  "id": "developer-experience-full-task-internal-platform",
+  "prompt": "Improve the developer experience of an internal service platform used by both new engineers and experienced service owners. The journey spans repository creation, local setup, credentials, configuration, a self-service deployment command, CI feedback, logs and request traces, failed-deploy diagnosis, rollback, dependency and platform upgrades, ownership transfer, and eventual service removal. Teams report friction, but there is no validated cause yet. Produce an evidence-backed improvement plan that keeps developer feedback, task evidence, and system measures distinct and does not reduce the problem to CI duration alone.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://developer-experience/internal-platform-workflow",
+    "requirements": [
+      "representative service repository",
+      "platform command and configuration inventory",
+      "sample CI, deployment, and diagnostic traces",
+      "new-engineer and experienced-owner task profiles",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "internal-platform-evidence-before-cause",
+      "assertion": "Reported friction remains a hypothesis until supported by task, repository/runtime, or system evidence; the plan does not invent a validated cause from complaints alone."
+    },
+    {
+      "id": "internal-platform-whole-lifecycle",
+      "assertion": "The improvement model covers creation/setup, credentials/configuration, deployment, CI feedback, diagnosis, rollback, upgrades, ownership transfer, and removal rather than optimizing only build or CI duration."
+    },
+    {
+      "id": "internal-platform-segment-differences",
+      "assertion": "New-engineer and experienced-owner journeys are evaluated separately where their knowledge, permissions, failure cost, or frequency differs."
+    },
+    {
+      "id": "internal-platform-recovery-and-inspectability",
+      "assertion": "Permissions, ownership, state, failed-deploy diagnosis, rollback, upgrade, transfer, and removal have observable evidence/recovery checks that can be exercised in representative clean and failure states."
+    },
+    {
+      "id": "internal-platform-balanced-measurement",
+      "assertion": "Success uses multiple outcome signals combining developer feedback, task performance, and system evidence; no single activity, speed, or brevity metric is treated as developer productivity."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "sociotechnical-journey-quality",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "new and experienced developer contexts distinguished",
+        "journey covers setup, feedback, diagnosis, change, rollback, and removal",
+        "cognitive load, feedback loops, and flow treated as diagnostic lenses",
+        "permissions, ownership, and state remain inspectable",
+        "terminal and repository details delegated where appropriate"
+      ]
+    },
+    {
+      "id": "evidence-and-change-integrity",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "reported friction separated from validated causes",
+        "developer feedback paired with task and system evidence",
+        "multiple outcome measures rather than one activity metric",
+        "clean-environment and failure-recovery validation",
+        "upgrade, rollback, ownership-transfer, and removal checks"
+      ]
+    },
+    {
+      "id": "blind-internal-platform-developer-experience-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "developer segments and jobs",
+    "end-to-end platform journey",
+    "friction hypotheses and evidence gaps",
+    "failure/recovery and lifecycle checks",
+    "balanced measurement contract"
+  ],
+  "requiredArtifacts": [
+    "internal-platform-developer-experience-plan",
+    "developer-workflow-evidence-contract",
+    "paired-experiment-report"
+  ]
+}

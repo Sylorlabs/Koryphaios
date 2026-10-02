@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "name": "embedded-device-security",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "embedded"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5700,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "embedded device security",
+    "firmware security",
+    "boot chain",
+    "firmware update security",
+    "production debug interface",
+    "device secret provisioning",
+    "swd pads",
+    "device credential provisioning",
+    "ota safety",
+    "mpu privilege",
+    "secure boot",
+    "firmware signing",
+    "debug port lockout",
+    "embedded security",
+    "device threat model"
+  ],
+  "excludes": [
+    "ordinary embedded firmware implementation with no security objective",
+    "release provenance or dependency integrity as the primary task",
+    "cloud fleet control-plane security as the primary task",
+    "cryptographic primitive design without device lifecycle or enforcement concerns",
+    "documentation heading only"
+  ],
+  "evidence": [
+    "Physical and logical device attack-surface map",
+    "Boot and update trust-chain evidence",
+    "Production interface and debug policy with observed state",
+    "Hardware-versus-simulation verification boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Harden secure boot and OTA updates on an MCU product. Trace Boot ROM through bootloader and application verification, bind accepted images to product/version policy, prevent rollback, and prove recovery from power loss or a corrupt inactive slot on representative hardware.",
+      "Audit a production device whose SWD pads and ROM download mode remain reachable after assembly. Determine what each interface can read or write, how production lock state is established, and whether authorized recovery can coexist with disabling unrestricted debug.",
+      "Design device identity and secret provisioning for a factory line: per-device credentials must be generated or injected safely, remain non-exportable under the stated physical threat, rotate/revoke in the fleet, survive normal update, and be destroyed on decommission.",
+      "Review firmware isolation for an IoT gateway where network parsing, update handling, sensor control, and credential use share one address space. Define MPU/privilege/peripheral boundaries and fail-safe behavior that limit compromise of an exposed parser.",
+      "Verify that a signed but older firmware image cannot downgrade the device and that an interrupted update never boots an unauthenticated image or bricks both normal and recovery paths. Record version counter, slot state, reset cause, and observed boot decision."
+    ],
+    "negative": [
+      "Implement an SPI sensor driver, FreeRTOS task notifications, DMA buffering, and power-state transitions. No secure-boot, secret, debug, update, or attacker-boundary requirement is part of the task.",
+      "Prove SLSA provenance, SBOM completeness, dependency pinning, CI builder identity, and cosign policy for the firmware release artifact before it is shipped to manufacturing.",
+      "Choose an AEAD mode and key-derivation construction for a protocol. Device provisioning, secure storage, boot policy, debug access, and firmware update enforcement are out of scope.",
+      "Harden the AWS IoT fleet backend's IAM roles, VPC paths, certificate-registration service, audit logging, and deployment control plane; assume device firmware is already trusted and unchanged.",
+      "Perform a generic application-security review of a server-side upload and conversion service. No embedded hardware, firmware, device interface, or physical-access boundary exists."
+    ],
+    "ambiguous": [
+      {
+        "id": "embedded-device-security-ambiguous-1",
+        "prompt": "A broad security review found a likely production-debug exposure on the device. Keep security-review responsible for the finding and severity; use embedded-device-security to establish the actual SWD/ROM-mode privilege, fuse state, production lock policy, recovery tradeoff, and representative-hardware proof.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "embedded-device-security-ambiguous-2",
+        "prompt": "Implement an A/B OTA updater and its security policy. embedded-firmware owns flash layout, boot-state transitions, and power-fail mechanics; embedded-device-security owns image authenticity, product binding, anti-rollback state, debug/recovery authority, and malicious-image verification.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-firmware"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "embedded-device-security-ambiguous-3",
+        "prompt": "Threat-model a field robot whose safety controller accepts signed firmware and exposes a maintenance port. robotics-control owns control/safety behavior; embedded-device-security owns firmware trust, maintenance/debug authority, device keys, rollback, and physical-access assumptions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["robotics-control"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "embedded-device-security-adversarial-1",
+        "prompt": "An archived design note says \"embedded security review\". The current task is only to correct its Markdown table alignment; do not inspect firmware or device behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "embedded-device-security-adversarial-2",
+        "prompt": "A sample board README mentions secure boot and JTAG lock. Rename a documentation section only; no fuse, bootloader, firmware, or hardware behavior may change.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-firmware"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "embedded-device-security-adversarial-3",
+        "prompt": "A historical incident report contains a device threat model. Extract only the incident date and affected model number; do not assess the current device or firmware.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["robotics-control"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8259/r1/final",
+      "sourceType": "spec",
+      "versionScope": "NIST IR 8259 Rev. 1 final, April 2026",
+      "revision": "Rev. 1",
+      "staleAfterDays": 365,
+      "notes": "Current foundational cybersecurity activities for IoT product manufacturers; supersedes the 2020 NISTIR 8259 base publication.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8259/a/final",
+      "sourceType": "spec",
+      "versionScope": "NIST IR 8259A final, May 2020; still the device cybersecurity capability core baseline in NIST's 8259 series as verified 2026-09-05",
+      "revision": "8259A",
+      "staleAfterDays": 365,
+      "notes": "Core device capabilities: identification, configuration, data protection, logical access to interfaces, software update, cybersecurity state awareness, and device security.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/193/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-193 final, May 2018",
+      "staleAfterDays": 365,
+      "notes": "Platform firmware protection, detection, and secure recovery guidance for destructive or unauthorized firmware modification.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

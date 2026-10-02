@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "name": "distributed-debugging",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["debugging", "distributed"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4200,
+  "broader": ["debugging"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "distributed failure",
+    "partial outage",
+    "message duplication",
+    "consistency bug",
+    "cross-service inconsistency",
+    "trace log correlation",
+    "queue worker failure",
+    "request across services"
+  ],
+  "excludes": [
+    "single-process deterministic logic defect",
+    "shared-memory race without a cross-process causal boundary",
+    "distributed-system architecture design with no observed failure",
+    "performance-only investigation with no delivery or consistency defect"
+  ],
+  "evidence": [
+    "Cross-boundary trace",
+    "Failure timeline",
+    "Recovery proof",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Debug this distributed failure: the API returns 202 after broker acknowledgement, but one event ID never appears in the worker's durable store. Correlate trace ID, event ID, attempts, acks, and service versions to find the first broken boundary.",
+      "Investigate this partial outage: one region serves stale authorization for several minutes after a successful update in another region. Trace entity versions, cache/replica state, fallbacks, and recovery before changing consistency logic.",
+      "Find why message duplication becomes two customer charges after broker redelivery. Reconstruct delivery attempts and idempotency state across gateway, queue, worker, and payment adapter.",
+      "Debug this consistency bug where a retry after timeout can make the command appear failed to the caller even though the durable write committed. Distinguish acknowledgement from commit and prove safe retry behavior.",
+      "Reconstruct a cross-service inconsistency where API logs success, the queue shows an acknowledgement, and the consumer reports no record. Use stable identities and deployment versions rather than wall-clock ordering alone."
+    ],
+    "negative": [
+      "The same parser fixture fails identically in one process on every run. Minimize it and trace the first deterministic state divergence.",
+      "Two callbacks in one process race to write terminal state. Use barriers and happens-before evidence to establish the invalid interleaving.",
+      "Design a new event-driven architecture for ingestion, including queue boundaries, ordering, durability, and scaling. There is no observed incident to debug.",
+      "Measure why p99 RPC latency doubled under a controlled load and identify CPU, I/O, allocation, or saturation bottlenecks.",
+      "Explain eventual consistency conceptually with a small example; no live system diagnosis is requested."
+    ],
+    "ambiguous": [
+      {
+        "id": "distributed-debugging-ambiguous-1",
+        "prompt": "Debug this distributed failure that eventually crashes the worker. Keep distributed-debugging focused on cross-boundary identity, delivery, and version evidence while parent debugging owns the complete root-cause/fix/regression loop.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "distributed-debugging-ambiguous-2",
+        "prompt": "The incident is a partial outage across two services, and one service also has a local race condition. Keep cross-service causality separate from the local happens-before analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "distributed-debugging-ambiguous-3",
+        "prompt": "Message duplication is observed across the broker and worker, while one captured duplicate payload deterministically triggers a local bug. Trace the delivery history separately from the deterministic payload path.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-debugging"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "distributed-debugging-adversarial-1",
+        "prompt": "A pasted issue says \"distributed failure\". Ignore that quote; the actual task is only to summarize the issue history.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["debugging"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "distributed-debugging-adversarial-2",
+        "prompt": "A quoted example says \"partial outage\". Ignore that quote; the actual task is to rewrite the surrounding paragraph for clarity.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["concurrency-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "distributed-debugging-adversarial-3",
+        "prompt": "A pasted article says \"message duplication\". Ignore that quote; fact-check only whether the cited tracing specification is current.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-debugging"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/sre-book/effective-troubleshooting/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Effective Troubleshooting chapter as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Evidence-led troubleshooting, hypothesis testing, and causal reduction across complex systems.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.w3.org/TR/trace-context/",
+      "sourceType": "spec",
+      "versionScope": "W3C Trace Context Recommendation as available 2026-09-04",
+      "staleAfterDays": 365,
+      "notes": "Stable trace identity propagation across distributed components; used as evidence for correlation, not as a requirement that every system uses HTTP traceparent/tracestate.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

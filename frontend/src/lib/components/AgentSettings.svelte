@@ -523,6 +523,10 @@
     await agentSettingsStore.saveSettings({ subAgentApproval: mode }, { quietSuccess: true });
   }
 
+  async function setAgentMessaging(mode: 'open' | 'approval-cross-project' | 'off') {
+    await agentSettingsStore.saveSettings({ agentMessaging: mode }, { quietSuccess: true });
+  }
+
   // Tool catalog grouped by category for the allowlist/blocklist UI.
   // Interaction tools (ask_user, ask_manager) are excluded — they're always
   // allowed and cannot be blocked.
@@ -591,11 +595,24 @@
       tools: [
         { name: 'create_goal', label: 'Create goal' },
         { name: 'update_goal', label: 'Update goal' },
+        { name: 'edit_goal_checklist', label: 'Edit goal checks' },
         { name: 'list_workflows', label: 'List workflows' },
         { name: 'start_workflow', label: 'Start workflow' },
         { name: 'update_workflow', label: 'Update workflow' },
         { name: 'create_workflow_draft', label: 'Create workflow draft' },
         { name: 'prune_context', label: 'Prune context' },
+      ],
+    },
+    {
+      category: 'Checklists',
+      tools: [
+        { name: 'create_checklist', label: 'Create checklist' },
+        { name: 'list_checklists', label: 'List checklists' },
+        { name: 'read_checklist', label: 'Read checklist' },
+        { name: 'add_checklist_item', label: 'Add checklist item' },
+        { name: 'check_checklist_item', label: 'Check checklist item' },
+        { name: 'update_checklist', label: 'Update checklist' },
+        { name: 'delete_checklist', label: 'Delete checklist' },
       ],
     },
     {
@@ -671,13 +688,13 @@
       value: 'ask',
       label: 'Ask',
       description:
-        'Reads run automatically; file edits and actions that change state ask for approval',
+        'Reads run automatically. File edits and actions that change state ask for approval',
     },
-    { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' },
+    { value: 'edits', label: 'Accept edits', description: 'Apply edits. Ask for other actions' },
     {
       value: 'guarded',
       label: 'Guarded',
-      description: 'All edits automatic; ask only for risky actions',
+      description: 'All edits automatic. Ask only for risky actions',
     },
     { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' },
   ];
@@ -725,7 +742,10 @@
     const byTier = (agentSettingsStore.settings as any).toolPermissionsByTier ?? {};
     const customTier = byTier['custom'];
     const hasCustomEdits =
-      (customTier && (customTier.allow.length > 0 || customTier.block.length > 0)) ||
+      (customTier &&
+        (customTier.allow.length > 0 ||
+          customTier.block.length > 0 ||
+          (customTier.ask?.length ?? 0) > 0)) ||
       permissionModeValue === 'custom' ||
       agentSettingsStore.settings.permissionMode === 'custom';
     if (hasCustomEdits) {
@@ -784,6 +804,9 @@
     if (tierEntry) {
       if (tierEntry.block.includes(toolName)) return 'block';
       if (tierEntry.allow.includes(toolName)) return 'allow';
+      // Explicit Ask sticks even where the preset default is Allow (e.g.
+      // read-only tools in Ask mode). It renders on the Ask button.
+      if (tierEntry.ask?.includes(toolName)) return 'default';
       const d = tierDefault(toolName, tier);
       if (d) return d;
       return 'default';
@@ -801,14 +824,22 @@
 
   async function setToolAccessStateForTier(toolName: string, tier: string, state: ToolAccessState) {
     const currentByTier = (agentSettingsStore.settings as any).toolPermissionsByTier ?? {};
-    const tierEntry = currentByTier[tier] ?? { allow: [], block: [] };
-    let allow = [...tierEntry.allow];
-    let block = [...tierEntry.block];
+    const tierEntry = currentByTier[tier] ?? { allow: [], block: [], ask: [] };
+    let allow = [...(tierEntry.allow ?? [])];
+    let block = [...(tierEntry.block ?? [])];
+    let ask = [...(tierEntry.ask ?? [])];
     allow = allow.filter((n) => n !== toolName);
     block = block.filter((n) => n !== toolName);
+    ask = ask.filter((n) => n !== toolName);
     if (state === 'allow') allow.push(toolName);
     else if (state === 'block') block.push(toolName);
-    const nextByTier = { ...currentByTier, [tier]: { allow, block } };
+    else if (tierDefault(toolName, tier) === 'allow') {
+      // Ask must stick even where the preset default is Allow (e.g. read-only
+      // tools in Ask mode), so record it explicitly. Where the preset already
+      // asks, clearing the override is equivalent.
+      ask.push(toolName);
+    }
+    const nextByTier = { ...currentByTier, [tier]: { allow, block, ask } };
     if (tier === 'custom') {
       const globalAllow = [...(agentSettingsStore.settings.toolAllowlist ?? [])].filter(
         (n) => n !== toolName,
@@ -849,7 +880,10 @@
           ? 'border-[var(--color-accent)] text-[var(--color-text-primary)]'
           : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]'}"
       >
-        <tab.icon size={14} class={agentSettingsStore.activeTab === tab.id ? 'text-[var(--color-accent)]' : ''} />
+        <tab.icon
+          size={14}
+          class={agentSettingsStore.activeTab === tab.id ? 'text-[var(--color-accent)]' : ''}
+        />
         {tab.label}
       </button>
     {/each}
@@ -931,7 +965,10 @@
                 aria-expanded={expandedSections.permissions}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><LockKeyhole size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><LockKeyhole size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Permissions & autonomy</span
@@ -952,15 +989,15 @@
                 <div
                   class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="space-y-5 p-5"
-                  >
+                  <section class="space-y-5 p-5">
                     <div>
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         Approval preset
                       </h4>
                       <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                        Choose a preset or build a custom approval policy for this workspace.
+                        Choose a preset or build a custom approval policy for this workspace. This
+                        is the default for new chats; the composer's permission pill overrides it
+                        per chat.
                       </p>
                     </div>
 
@@ -969,7 +1006,7 @@
                       role="radiogroup"
                       aria-label="Permission mode"
                     >
-                      {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic; ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits; ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Reads run automatically; file edits and actions that change state ask for approval' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' }] as mode (mode.value)}
+                      {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic. Ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits. Ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Reads run automatically. File edits and actions that change state ask for approval' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' }] as mode (mode.value)}
                         {@const active =
                           (agentSettingsStore.settings.permissionMode === 'plan'
                             ? 'guarded'
@@ -1042,9 +1079,7 @@
                     {/if}
                   </section>
 
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         Autonomy limits
@@ -1067,7 +1102,9 @@
                     />
 
                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <label
                           for="max-files"
                           class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
@@ -1089,7 +1126,9 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <label
                           for="max-lines"
                           class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
@@ -1114,9 +1153,7 @@
                     </div>
                   </section>
 
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4
                         class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
@@ -1206,9 +1243,7 @@
                     {/if}
                   </section>
 
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4
                         class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
@@ -1260,9 +1295,10 @@
                       >
                         <AlertTriangle size={16} class="shrink-0" />
                         <span
-                          >Auto-approve lets workers run unconstrained — no approval prompts and no
-                          sandbox. Only enable this for trusted, isolated work. Catastrophic
-                          commands (rm -rf /, mkfs, etc.) are still blocked by the hard floor.</span
+                          >Automatic approval lets workers run unconstrained. There are no approval
+                          prompts and no sandbox. Only enable this for trusted, isolated work.
+                          Catastrophic commands (rm -rf /, mkfs, etc.) are still blocked by the hard
+                          floor.</span
                         >
                       </div>
                     {/if}
@@ -1280,8 +1316,57 @@
                     {/if}
                   </section>
 
+                  <section class="space-y-4 p-5">
+                    <div class="space-y-1">
+                      <h4
+                        class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        <Shield size={16} class="text-[var(--color-accent)]" />
+                        Inter-agent messaging
+                      </h4>
+                      <p class="text-xs text-[var(--color-text-muted)]">
+                        Agents can message other agents within this project, and managers can
+                        message the manager of another open project. Sub-agents always route through
+                        their own manager.
+                      </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      {#each [{ value: 'open', label: 'Open', description: 'Messages are delivered automatically with no approval prompt. A full audit log stays in the messages panel.' }, { value: 'approval-cross-project', label: 'Approve cross project', description: 'Messages within the same project flow freely. Messages to another project manager wait for your approval first.' }, { value: 'off', label: 'Off', description: 'Disable the agent mailbox entirely. Agents keep their normal manager and worker delegation.' }] as mode (mode.value)}
+                        {@const active =
+                          (agentSettingsStore.settings.agentMessaging ?? 'open') === mode.value}
+                        <button
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onclick={() =>
+                            setAgentMessaging(
+                              mode.value as 'open' | 'approval-cross-project' | 'off',
+                            )}
+                          class="min-h-24 rounded-xl border p-3 text-left transition-colors {active
+                            ? 'border-[var(--color-accent)] bg-[var(--color-surface-3)]'
+                            : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:border-[var(--color-border-bright)]'}"
+                        >
+                          <span
+                            class="flex items-center justify-between gap-2 text-xs font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {mode.label}
+                            {#if active}<CheckCircle
+                                size={14}
+                                class="text-[var(--color-accent)]"
+                              />{/if}
+                          </span>
+                          <span
+                            class="mt-2 block text-[10px] leading-relaxed text-[var(--color-text-muted)]"
+                            >{mode.description}</span
+                          >
+                        </button>
+                      {/each}
+                    </div>
+                  </section>
+
                   <section
-                    class="space-y-4 p-5"
+                    class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
                   >
                     <div class="space-y-1">
                       <h4
@@ -1294,7 +1379,7 @@
                         Override the permission preset for individual tools. <strong>Allow</strong>
                         always runs without prompting.
                         <strong>Block</strong> denies the tool entirely.
-                        <strong>Ask</strong> follows the preset.
+                        <strong>Ask</strong> always prompts for approval.
                       </p>
                     </div>
 
@@ -1302,7 +1387,7 @@
                       value={toolAccessTier}
                       options={toolAccessTierOptions}
                       label="Permission tier to customize"
-                      description="Select which tier these tool overrides apply to — Allow/Ask/Block below is saved for that tier"
+                      description="Select which tier these tool overrides apply to. Allow, Ask, or Block below is saved for that tier"
                       onchange={(value) => (toolAccessTier = value)}
                     />
 
@@ -1361,7 +1446,7 @@
                       {/each}
                     </div>
 
-                    {#if ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.allow.length ?? 0) > 0 || ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.block.length ?? 0) > 0}
+                    {#if ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.allow.length ?? 0) > 0 || ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.block.length ?? 0) > 0 || ((agentSettingsStore.settings as any).toolPermissionsByTier?.[toolAccessTier]?.ask?.length ?? 0) > 0}
                       <div
                         class="flex items-center justify-between border-t border-[var(--color-border)] pt-3"
                       >
@@ -1369,6 +1454,7 @@
                           {(agentSettingsStore.settings as any).toolPermissionsByTier?.[
                             toolAccessTier
                           ]?.allow.length ?? 0} allowed · {(agentSettingsStore.settings as any)
+                            .toolPermissionsByTier?.[toolAccessTier]?.ask?.length ?? 0} ask · {(agentSettingsStore.settings as any)
                             .toolPermissionsByTier?.[toolAccessTier]?.block.length ?? 0} blocked in {toolAccessTier}
                         </span>
                         <button
@@ -1407,7 +1493,10 @@
                 aria-expanded={expandedSections.quality}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Gavel size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><Gavel size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Quality & Critic</span
@@ -1428,9 +1517,7 @@
                 <div
                   class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1.5">
                       <h4
                         class="flex items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]"
@@ -1440,7 +1527,8 @@
                       </h4>
                       <p class="text-xs leading-relaxed text-[var(--color-text-muted)]">
                         Configure the distinct Critic pass that reviews actual file changes. Turning
-                        it off leaves changed work explicitly unverified.
+                        it off leaves changed work explicitly unverified. This is the workspace
+                        default; the composer's Critic pill overrides it per chat.
                       </p>
                     </div>
 
@@ -1459,9 +1547,9 @@
                         value={agentSettingsStore.settings.gateStrictness ?? 'strict'}
                         disabled={!agentSettingsStore.settings.criticGateEnabled}
                         options={[
-                          { value: 'strict', label: 'Strict — withhold completion' },
-                          { value: 'advisory', label: 'Advisory — report issues' },
-                          { value: 'off', label: 'Off — mark work unverified' },
+                          { value: 'strict', label: 'Strict · withhold completion' },
+                          { value: 'advisory', label: 'Advisory · report issues' },
+                          { value: 'off', label: 'Off · mark work unverified' },
                         ]}
                         onchange={(value) =>
                           agentSettingsStore.saveSettings(
@@ -1469,7 +1557,9 @@
                             { quietSuccess: true },
                           )}
                       />
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <div class="mb-2 text-xs font-medium text-[var(--color-text-secondary)]">
                           Maximum Critic passes
                         </div>
@@ -1505,7 +1595,10 @@
                 aria-expanded={expandedSections.workflow}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><GitBranch size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><GitBranch size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Workflow</span
@@ -1526,9 +1619,7 @@
                 <div
                   class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         Workflow
@@ -1570,12 +1661,12 @@
                       />
                       <KorySelect
                         label="Execution strategy"
-                        description="How Kory distributes work across one or many agents."
+                        description="How Kory distributes work across one or many agents. This is the workspace default; the composer's Agent Mode pill overrides it per chat."
                         value={agentSettingsStore.settings.agentExecutionMode ?? 'auto'}
                         options={[
                           {
                             value: 'auto',
-                            label: 'Auto — choose for the task',
+                            label: 'Auto · choose for the task',
                             description:
                               'Let Kory decide when a single agent or multiple agents fit best.',
                           },
@@ -1649,7 +1740,7 @@
                             value: 'automatic',
                             label: 'Automatic, reversible',
                             description:
-                              'Create skills automatically; you can undo or remove them later.',
+                              'Create skills automatically. You can undo or remove them later.',
                           },
                         ]}
                         onchange={(value) =>
@@ -1663,16 +1754,9 @@
                       />
                     </div>
                     <SettingsSwitch
-                      checked={goalDisplayStore.sidebar}
-                      label="Show Active Goals in sidebar"
-                      description="Keep the compact cross-chat goal list visible in the session sidebar."
-                      onchange={() =>
-                        goalDisplayStore.update({ sidebar: !goalDisplayStore.sidebar })}
-                    />
-                    <SettingsSwitch
                       checked={goalDisplayStore.composer}
-                      label="Show goal context in composer"
-                      description="Place the optional goal selector to the right of model and reasoning controls."
+                      label="Show Goal Mode in composer"
+                      description="Keep goal quick controls and full goal detail in the bubble above the chat."
                       onchange={() =>
                         goalDisplayStore.update({ composer: !goalDisplayStore.composer })}
                     />
@@ -1690,7 +1774,10 @@
                 aria-expanded={expandedSections.context}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Brain size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><Brain size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Context & memory</span
@@ -1711,9 +1798,7 @@
                 <div
                   class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         Context & memory
@@ -1726,11 +1811,34 @@
                     </div>
 
                     <div class="grid gap-3 sm:grid-cols-2">
+                      <KorySelect
+                        label="Prompt Cache Keepalive"
+                        value={agentSettingsStore.settings.promptCacheKeepaliveMode ?? 'economic'}
+                        description="Economic refreshes only when expected cache savings exceed the replay cost. Always keeps eligible lanes armed. Off disables unattended refreshes."
+                        options={[
+                          { value: 'economic', label: 'Economic · positive value only' },
+                          { value: 'always', label: 'Always · keep eligible lanes armed' },
+                          { value: 'off', label: 'Off · no unattended refresh' },
+                        ]}
+                        onchange={(value) =>
+                          agentSettingsStore.saveSettings(
+                            { promptCacheKeepaliveMode: value as 'economic' | 'always' | 'off' },
+                            { quietSuccess: true },
+                          )}
+                      />
+
                       <SettingsSwitch
                         checked={agentSettingsStore.settings.contextPruningEnabled ?? true}
                         label="Auto-Collapse Old Tool Output"
                         description="Stub stale file reads, terminal output, and search results while keeping them recoverable."
                         onchange={() => toggleSetting('contextPruningEnabled')}
+                      />
+
+                      <SettingsSwitch
+                        checked={agentSettingsStore.settings.promptCacheColdPrewarmEnabled ?? false}
+                        label="Cold Prompt Prewarm"
+                        description="While typing before a cache lane exists, optionally warm the provider prefix. This can reduce first-turn latency but may create an extra billable cache write. Warm lane refreshes stay automatic and economics gated."
+                        onchange={() => toggleSetting('promptCacheColdPrewarmEnabled')}
                       />
 
                       <SettingsSwitch
@@ -1760,7 +1868,9 @@
                         onchange={() => toggleSetting('reasoningExpandedByDefault')}
                       />
 
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <label
                           for="ctx-compact-threshold"
                           class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
@@ -1786,14 +1896,16 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <label
                           for="ctx-keep-turns"
                           class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Keep Recent Turns Full</label
                         >
                         <NumberStepper
-                          value={agentSettingsStore.settings.contextKeepRecentTurns ?? 3}
+                          value={agentSettingsStore.settings.contextKeepRecentTurns ?? 8}
                           min={1}
                           max={10}
                           label="Recent turns kept full"
@@ -1808,14 +1920,16 @@
                         </p>
                       </div>
 
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <label
                           for="ctx-min-chars"
                           class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]"
                           >Minimum Size to Collapse</label
                         >
                         <NumberStepper
-                          value={agentSettingsStore.settings.contextPruneMinChars ?? 600}
+                          value={agentSettingsStore.settings.contextPruneMinChars ?? 2000}
                           min={100}
                           max={10000}
                           step={100}
@@ -1827,16 +1941,14 @@
                             )}
                         />
                         <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
-                          Outputs smaller than this (characters) stay in context — not worth
+                          Outputs smaller than this (characters) stay in context. It is not worth
                           collapsing.
                         </p>
                       </div>
                     </div>
                   </section>
 
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="space-y-1">
                       <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
                         Memory policy
@@ -1850,7 +1962,7 @@
                       <SettingsSwitch
                         checked={agentSettingsStore.settings.agentCanUpdatePreferences}
                         label="Remember explicit requests"
-                        description="Persist only requests that explicitly say remember or always; ordinary conversation never writes project preferences."
+                        description="Persist only requests that explicitly say remember or always. Ordinary conversation never writes project preferences."
                         onchange={() => toggleSetting('agentCanUpdatePreferences')}
                       />
                     </div>
@@ -1868,7 +1980,10 @@
                 aria-expanded={expandedSections.research}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Search size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><Search size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Research</span
@@ -1889,16 +2004,16 @@
                 <div
                   class="border-t border-[var(--color-border)] divide-y divide-[var(--color-border)]"
                 >
-                  <section
-                    class="space-y-4 p-5"
-                  >
+                  <section class="space-y-4 p-5">
                     <div class="flex items-center gap-2 text-[var(--color-warning)]">
                       <FlaskConical size={16} />
                       <h4 class="text-sm font-semibold">Research</h4>
                     </div>
 
                     <div class="space-y-3">
-                      <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
                         <div class="flex items-start justify-between gap-4">
                           <div class="flex items-center gap-2">
                             <Globe size={14} class="mt-0.5 text-[var(--color-text-muted)]" />
@@ -1941,7 +2056,7 @@
                         compact
                         checked={agentSettingsStore.settings.multiSourceResearch}
                         label="Multi-Source Research"
-                        description="Require verification across 3–5 sources for research tasks."
+                        description="Require verification across 3 to 5 sources for research tasks."
                         onchange={() => toggleSetting('multiSourceResearch')}
                       />
                     </div>
@@ -1959,7 +2074,10 @@
                 aria-expanded={expandedSections.routing}
               >
                 <span class="flex items-center gap-3">
-                  <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"><Route size={15} /></span>
+                  <span
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text-secondary)]"
+                    ><Route size={15} /></span
+                  >
                   <span>
                     <span class="block text-sm font-medium text-[var(--color-text-primary)]"
                       >Routing & guidance</span

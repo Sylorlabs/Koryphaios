@@ -1,0 +1,68 @@
+{
+  "id": "security-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A multi-tenant document API has completed its authorization implementation. Run security verification in the supplied disposable environment. Tenant A has users `a-editor` and `a-viewer`; tenant B has `b-editor`; each tenant owns one document whose identifier is intentionally known to the other test tenant. Build an allow/deny matrix for list, read, rename, and delete. Confirm normal same-tenant operations allowed by the documented roles, then directly request tenant-B object identifiers while authenticated as tenant-A users and prove every cross-tenant read or mutation is denied at the API boundary. Also test unauthenticated access and a revoked `a-editor` session. After every denied mutation, read the database and queued side-effect table through the independent test-admin channel to prove no title change, deletion, export job, or other mutation occurred. Inspect response bodies and audit records for object-data/token leakage while confirming required denial audit events are present. UI visibility is not evidence.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://security-verification/multitenant-documents",
+    "requirements": [
+      "the target is a disposable API instance containing only synthetic tenant and document data",
+      "tenant A and tenant B test identities plus same-tenant allowed controls are provisioned",
+      "the test-admin channel can read durable document state, queued side effects, and sanitized audit events independently from the normal API",
+      "one tenant-A editor session can be revoked deterministically before its negative case",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "security-tenant-allow-deny",
+      "assertion": "The evidence matrix includes allowed same-tenant controls and denied unauthenticated, revoked-session, wrong-role, and same-role cross-tenant object cases for the relevant operations."
+    },
+    {
+      "id": "security-tenant-non-effect",
+      "assertion": "Independent database and side-effect reads prove every denied cross-tenant or revoked mutation leaves protected state unchanged and creates no queued privileged work."
+    },
+    {
+      "id": "security-tenant-audit-secrets",
+      "assertion": "Required security audit events exist for denied sensitive operations while response/audit evidence does not disclose protected document content, bearer/session secrets, or another tenant's sensitive fields beyond the declared policy."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "security-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Allow/deny security matrix",
+        "API request/response evidence",
+        "independent denied-path non-effect reads",
+        "sanitized security audit evidence"
+      ]
+    },
+    {
+      "id": "security-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "horizontal and vertical boundaries are distinguished rather than inferred from one denial",
+        "server enforcement and durable non-effects matter more than hidden UI affordances",
+        "the verdict reports untested role/object combinations rather than claiming universal isolation"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Allow/deny security matrix",
+    "API enforcement evidence",
+    "independent durable-state and side-effect evidence",
+    "sanitized audit and leakage review",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "security-verification-scenario-1-authorization-matrix",
+    "security-verification-scenario-1-boundary-evidence",
+    "security-verification-scenario-1-verdict",
+    "security-verification-scenario-1-paired-evaluation"
+  ]
+}

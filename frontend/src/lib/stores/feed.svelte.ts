@@ -2,9 +2,10 @@
 // Split from the monolithic websocket.svelte.ts for better separation of concerns
 
 import type { AgentIdentity } from '@koryphaios/shared';
-import type { CompactionProgressPayload } from '@koryphaios/shared';
+import type { CompactionProgressPayload, ContextBreakdown } from '@koryphaios/shared';
 import type { FeedEntry, FeedEntryType } from '$lib/types';
 import { sessionStore } from './sessions.svelte';
+import { onSessionRemoved } from './session-removal';
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import {
@@ -63,6 +64,66 @@ let feedTransitionGeneration = 0;
 // sequence ordering correctly places reasoning before a persisted answer.
 let feedTransitionBaseIds = new Set<string>();
 const sessionFeedCache = new Map<string, FeedEntry[]>();
+
+// ── Turn-scoped row continuation ───────────────────────────────────────────
+// One turn renders as one answer. A tool call or another agent's row landing
+// mid-sentence must not split the manager's text (or reasoning) into two rows,
+// so continuation deltas resolve the row they continue by identity rather than
+// by "whatever happens to be last". agents.svelte.ts holds the drilldown mirror
+// of this logic (openThreadStreamTarget / closeAgentThreadTurn).
+const FEED_CONTINUATION_TYPES: ReadonlySet<FeedEntry['type']> = new Set(['content', 'thinking']);
+/** The row a given (session, agent, type, visibility) delta continues. */
+const feedStreamTargets = new Map<
+  string,
+  { sessionId: string; agentId: string; entryId: string }
+>();
+/** Turns that have ended: a later delta opens a new row instead of continuing
+ *  a finished answer. Keyed by turn (session + agent). */
+const closedFeedTurns = new Set<string>();
+
+function feedTurnKey(sessionId: string, agentId: string): string {
+  return `${sessionId}::${agentId}`;
+}
+function feedTargetKey(
+  sessionId: string,
+  agentId: string,
+  type: FeedEntry['type'],
+  userHidden: boolean,
+): string {
+  return `${sessionId}::${agentId}::${type}::${userHidden ? 'hidden' : 'visible'}`;
+}
+
+/** The row this delta continues within its session lane, or null when the turn
+ *  has no open row (new turn, ended turn, or a user message started a new one). */
+function openFeedStreamTarget(
+  entries: FeedEntry[],
+  targetKey: string,
+  turnKey: string,
+  entry: FeedEntry,
+): FeedEntry | null {
+  if (closedFeedTurns.has(turnKey)) return null;
+  const lastIdx = entries.length - 1;
+  // A user message is a hard row boundary: it starts a new turn, so nothing
+  // before it may be continued.
+  const boundary = entries.findLastIndex((row) => row.type === 'user_message');
+  const floor = boundary + 1;
+
+  const recorded = feedStreamTargets.get(targetKey);
+  if (recorded) {
+    const at = entries.findIndex((row) => row.id === recorded.entryId);
+    if (at >= floor && at >= 0) return entries[at];
+    // Superseded by a new turn (or evicted) — stop honouring it.
+    feedStreamTargets.delete(targetKey);
+  }
+  for (let i = lastIdx; i >= floor; i--) {
+    const row = entries[i];
+    if (row.type === entry.type && row.agentId === entry.agentId) {
+      return Boolean(row.userHidden) === Boolean(entry.userHidden) ? row : null;
+    }
+  }
+  return null;
+}
+
 type DurableClientFeedEntry = { id: string; kind: 'client_error'; text: string; timestamp: number };
 type SessionFeedPersistence = {
   entries: DurableClientFeedEntry[];
@@ -242,7 +303,13 @@ async function loadFeedPersistence(
  */
 function activateSessionFeed(sessionId: string): number {
   if (feedSessionId === sessionId) return feedTransitionGeneration;
-  if (feedSessionId) sessionFeedCache.set(feedSessionId, cloneEntries(feed));
+  if (feedSessionId) {
+    // A reasoning block still running in the chat the reader is leaving must be
+    // sealed, or reopening it shows a stopwatch climbing from a start timestamp
+    // whose origin the reader can no longer see.
+    sealThinkingInLane(feed, undefined, 0, false);
+    sessionFeedCache.set(feedSessionId, cloneEntries(feed));
+  }
   feedTransitionGeneration++;
   feedSessionId = sessionId;
   const hasSnapshot = sessionId ? sessionFeedCache.has(sessionId) : true;
@@ -355,7 +422,7 @@ function nextFeedId(prefix: string): string {
 
 // ─── Feed Actions ────────────────────────────────────────────────────────────
 
-function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
+function addFeedEntry(entry: Omit<FeedEntry, 'id'>): FeedEntry | undefined {
   const sessionId = entrySessionId(entry as FeedEntry);
   const visible = decorateEntryForSession(sessionId, { ...entry, id: 'pending-feed-entry' });
   if (!visible) return;
@@ -370,6 +437,7 @@ function addFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   if (feed.length > MAX_FEED_ENTRIES) feed.splice(0, feed.length - MAX_FEED_ENTRIES);
   feedVersion++;
   rebuildGroupedFeedCache();
+  return newEntry;
 }
 
 /**
@@ -424,50 +492,73 @@ function accumulateFeedEntry(entry: Omit<FeedEntry, 'id'>) {
   entry = visible;
   const lastIdx = feed.length - 1;
   const last = lastIdx >= 0 ? feed[lastIdx] : null;
+  const continuesTurn = FEED_CONTINUATION_TYPES.has(entry.type);
+  const turnKey = feedTurnKey(sessionId, entry.agentId);
+  const targetKey = feedTargetKey(sessionId, entry.agentId, entry.type, Boolean(entry.userHidden));
+  // A continuation delta resolves the row it continues by identity, not by
+  // "whatever is last": a tool call or another agent's row landing mid-sentence
+  // must not split this turn's text or reasoning into two rows.
+  const target = continuesTurn
+    ? openFeedStreamTarget(feed, targetKey, turnKey, entry as FeedEntry)
+    : last &&
+        last.type === entry.type &&
+        last.agentId === entry.agentId &&
+        Boolean(last.userHidden) === Boolean(entry.userHidden)
+      ? last
+      : null;
 
-  if (
-    last &&
-    last.type === entry.type &&
-    last.agentId === entry.agentId &&
-    Boolean(last.userHidden) === Boolean(entry.userHidden)
-  ) {
+  if (target) {
     const updates: Partial<FeedEntry> = {
-      text: last.text + entry.text,
+      text: target.text + entry.text,
       timestamp: entry.timestamp,
       userHidden: entry.userHidden,
     };
 
-    if (last.type === 'thinking' && last.thinkingStartedAt) {
-      updates.durationMs = entry.timestamp - last.thinkingStartedAt;
-    } else if (last.type === 'thinking' && !last.thinkingStartedAt) {
-      updates.thinkingStartedAt = entry.timestamp;
+    if (target.type === 'thinking') {
+      // Reconnected mid-turn: replayed reasoning is sealed on arrival, so a live
+      // delta arriving afterwards has to re-open the block or the stopwatch
+      // stops counting while the turn is still running.
+      if (entry.thinkingFinalized === undefined && target.thinkingFinalized) {
+        updates.thinkingFinalized = false;
+      }
+      if (target.thinkingStartedAt) {
+        updates.durationMs = entry.timestamp - target.thinkingStartedAt;
+      } else {
+        updates.thinkingStartedAt = entry.timestamp;
+      }
     }
     // Redacted-thinking progress (token estimates) rides in metadata and must
-    // keep updating as new deltas land — monotonically (provider estimates can
+    // keep updating as new deltas land - monotonically (provider estimates can
     // arrive out of order; the display must never count down).
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
-      const merged = { ...last.metadata, ...entry.metadata } as Record<string, unknown>;
+      const merged = { ...target.metadata, ...entry.metadata } as Record<string, unknown>;
       const prevTok =
-        (last.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
+        (target.metadata as { thinkingTokens?: number } | undefined)?.thinkingTokens ?? 0;
       const nextTok = (entry.metadata as { thinkingTokens?: number }).thinkingTokens ?? 0;
       if (prevTok || nextTok) merged.thinkingTokens = Math.max(prevTok, nextTok);
-      const priorSequence = Number(last.metadata?.sequenceStart);
+      const priorSequence = Number(target.metadata?.sequenceStart);
       const nextSequence = Number(entry.metadata.sequenceStart);
       if (Number.isSafeInteger(priorSequence) && Number.isSafeInteger(nextSequence)) {
         merged.sequenceStart = Math.min(priorSequence, nextSequence);
         merged.sequenceEnd = Math.max(
-          Number(last.metadata?.sequenceEnd ?? priorSequence),
-          Number(entry.metadata.sequenceEnd ?? nextSequence),
+          Number(entry.metadata.sequenceEnd ?? priorSequence),
+          Number(nextSequence),
         );
       }
       updates.metadata = merged;
     }
 
-    Object.assign(last, updates);
-    patchGroupedFeedEntry(last.id, last.text, last.timestamp, updates);
+    Object.assign(target, updates);
+    patchGroupedFeedEntry(target.id, target.text, target.timestamp, updates);
     streamingRevision++;
-  } else {
-    addFeedEntry(entry);
+    feedStreamTargets.set(targetKey, { sessionId, agentId: entry.agentId, entryId: target.id });
+    return;
+  }
+
+  const created = addFeedEntry(entry);
+  if (created && continuesTurn) {
+    closedFeedTurns.delete(turnKey);
+    feedStreamTargets.set(targetKey, { sessionId, agentId: entry.agentId, entryId: created.id });
   }
 }
 
@@ -606,23 +697,115 @@ function hasPersistedAssistantContaining(text: string, eventTimestamp: number): 
 
 /** Provider signalled reasoning is over (content started / turn completed):
  * freeze matching live blocks at their server-timestamp duration. */
-function finalizeThinking(agentId?: string, endedAt = Date.now()) {
+/** The entry array backing a session lane: the visible feed when the reader is
+ *  on that session, otherwise its cached transcript. Mutating the returned
+ *  array mutates that lane in place. */
+function laneEntries(sessionId: string): FeedEntry[] | null {
+  if (!sessionId) return null;
+  if (ownsFeed(sessionId)) return feed;
+  return sessionFeedCache.get(sessionId) ?? null;
+}
+
+/** Seal every still-running reasoning block in a lane at a server timestamp.
+ *  `endedAt` is a provider timestamp, never a client clock reading. */
+function sealThinkingInLane(
+  entries: FeedEntry[],
+  agentId: string | undefined,
+  endedAt: number,
+  measured: boolean,
+): boolean {
   let changed = false;
-  for (const e of feed) {
-    if (e.type === 'thinking' && !e.thinkingFinalized && (!agentId || e.agentId === agentId)) {
+  for (const e of entries) {
+    if (e.type !== 'thinking' || e.thinkingFinalized) continue;
+    if (agentId && e.agentId !== agentId) continue;
+    if (measured) {
       const startedAt = e.thinkingStartedAt ?? activeThinkingStartedAt.get(e.agentId);
       if (startedAt !== undefined) e.durationMs = Math.max(e.durationMs ?? 0, endedAt - startedAt);
-      e.thinkingFinalized = true;
-      changed = true;
+    } else {
+      // Leaving the chat: the start timestamp's origin is no longer visible, so
+      // freeze at the last server timestamp observed rather than differencing
+      // a client clock against a server start.
+      e.durationMs = e.durationMs ?? 0;
     }
+    e.thinkingFinalized = true;
+    changed = true;
   }
-  if (agentId) activeThinkingStartedAt.delete(agentId);
-  else activeThinkingStartedAt.clear();
-  if (changed) {
+  return changed;
+}
+
+/** Provider signalled reasoning is over (content started / turn completed):
+ *  freeze matching live blocks at their server-timestamp duration.
+ *
+ *  `sessionId` names the lane the turn belongs to, which is NOT necessarily the
+ *  one the reader is looking at: a run that completes in the background must
+ *  still seal its own transcript instead of the reader's current chat. */
+function finalizeThinking(agentId?: string, endedAt = Date.now(), sessionId?: string) {
+  const lane = sessionId ?? feedSessionId;
+  const entries = laneEntries(lane);
+  if (!entries) return;
+  // `endedAt` is always a provider timestamp here, so a background lane still
+  // measures its own block against its own start — never the reader's clock.
+  const changed = sealThinkingInLane(entries, agentId, endedAt, true);
+  if (agentId) {
+    if (ownsFeed(lane)) activeThinkingStartedAt.delete(agentId);
+  } else if (ownsFeed(lane)) {
+    activeThinkingStartedAt.clear();
+  }
+  if (!changed) return;
+  if (ownsFeed(lane)) {
     feed = [...feed];
     feedVersion++;
     rebuildGroupedFeedCache();
   }
+}
+
+/** Close the rows an agent's current turn may still append to, so the next
+ *  delta opens a new item instead of continuing a finished answer. Mirrors
+ *  closeAgentThreadTurn in the agent drilldown. */
+function closeStreamTurn(agentId?: string) {
+  if (!agentId) {
+    feedStreamTargets.clear();
+    closedFeedTurns.clear();
+    return;
+  }
+  for (const [key, target] of [...feedStreamTargets]) {
+    if (target.sessionId !== feedSessionId) continue;
+    if (target.agentId !== agentId) continue;
+    feedStreamTargets.delete(key);
+  }
+  if (feedSessionId) closedFeedTurns.add(feedTurnKey(feedSessionId, agentId));
+}
+
+/** Turn the live "running" tool card into its completed result card in place.
+ *  Returns true when a live row was completed, or when the result was already
+ *  recorded, so the caller can skip appending a duplicate output row. */
+function completeToolCall(
+  callId: string,
+  resultText: string,
+  toolResult: Record<string, unknown>,
+  timestamp: number,
+): boolean {
+  const target = feed.findLast(
+    (candidate) =>
+      candidate.type === 'tool_call' &&
+      (candidate.metadata as { toolCall?: { id?: string } } | undefined)?.toolCall?.id === callId,
+  );
+  if (target) {
+    target.type = 'tool_result';
+    target.text = resultText;
+    target.timestamp = timestamp;
+    target.metadata = { ...target.metadata, toolResult };
+    streamingRevision++;
+    feedVersion++;
+    rebuildGroupedFeedCache();
+    return true;
+  }
+  return feed.some(
+    (candidate) =>
+      candidate.type === 'tool_result' &&
+      (candidate.metadata as { toolResult?: { callId?: string } } | undefined)?.toolResult
+        ?.callId === callId,
+  );
 }
 
 /** A tool starts before its JSON input is completely streamed. Patch that
@@ -938,6 +1121,28 @@ function resetSessionFeed(sessionId: string): number {
   return feedTransitionGeneration;
 }
 
+/** Drop every trace of a chat that no longer exists. The visible lane is only
+ *  cleared while that chat still owns it — a replacement chat is activated
+ *  separately — and no loading state is left behind, because nothing will
+ *  rebuild this one. */
+function forgetSessionFeed(sessionId: string): void {
+  sessionFeedCache.delete(sessionId);
+  if (feedSessionId !== sessionId) return;
+  // Invalidate a history request that began against the deleted chat, so its
+  // response cannot repopulate the lane after the switch.
+  feedTransitionGeneration++;
+  feed = [];
+  loadingSessionId = '';
+  feedTransitionBaseIds = new Set();
+  streamingRevision = 0;
+  analyzingThoughtId = null;
+  activeThinkingStartedAt.clear();
+  feedVersion++;
+  rebuildGroupedFeedCache();
+}
+
+onSessionRemoved(forgetSessionFeed);
+
 function isDuplicateError(text: string, timestamp: number): boolean {
   const last = feed.length > 0 ? feed[feed.length - 1] : null;
   const delta = last ? timestamp - last.timestamp : -1;
@@ -1075,7 +1280,7 @@ export function getGroupedEntries(entries: FeedEntry[]): FeedEntry[] {
           glowClass: entry.glowClass,
           text: `${entry.agentName} — 1 step`,
           entries: [entry],
-          isCollapsed: false,
+          isCollapsed: true,
           userHidden: entry.userHidden,
           metadata: { domain },
         };
@@ -1135,7 +1340,7 @@ async function loadSessionMessages(
       provider?: string;
       model?: string;
       cachedInputTokens?: number;
-      breakdown?: { system: number; memory: number; tools: number; chat: number };
+      breakdown?: ContextBreakdown;
     }) => void;
   } = {},
 ) {
@@ -1178,7 +1383,7 @@ async function loadSessionMessages(
       provider?: string;
       model?: string;
       cachedInputTokens?: number;
-      breakdown?: { system: number; memory: number; tools: number; chat: number };
+      breakdown?: ContextBreakdown;
     } | null;
     data?: Array<{
       id: string;
@@ -1321,7 +1526,14 @@ async function loadSessionMessages(
   // only the manager's turns are persisted as session messages.
   const persistedTextKeys = new Set<string>();
   const persistedAssistantTexts: string[] = [];
-  for (const m of displayMessages) {
+  // Dedup against every retained row, not just the displayed representatives.
+  // A regenerated response keeps the superseded answer as a retained sibling
+  // variant: it is deliberately excluded from `displayMessages` (one variant is
+  // shown at a time) but it is still persisted. Comparing the live tail only
+  // against the representatives left the live-streamed copy of a superseded
+  // variant unmatched, so it survived the reload and rendered as a second,
+  // duplicate Kory answer next to the one that replaced it.
+  for (const m of messages) {
     persistedTextKeys.add(`${m.role}\u0000${normalizeFeedText(m.content)}`);
     if (m.role === 'assistant') persistedAssistantTexts.push(normalizeFeedText(m.content));
   }
@@ -1500,6 +1712,8 @@ export const feedStore = {
   loadFeedPersistence,
   visibleEntriesForSession,
   finalizeThinking,
+  closeStreamTurn,
+  completeToolCall,
   beginThinking,
   getThinkingStart,
   updateToolCall,
@@ -1507,6 +1721,7 @@ export const feedStore = {
   removeContentEntriesForAgent,
   clearFeed,
   resetSessionFeed,
+  forgetSessionFeed,
   activateSessionFeed,
   finishSessionLoad,
   ownsFeed,

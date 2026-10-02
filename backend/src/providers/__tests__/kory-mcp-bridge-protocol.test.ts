@@ -170,8 +170,11 @@ describe('Kory MCP bridge — 2025-era fallback (InMemoryTransport)', () => {
 // ─── Tool catalog integrity ────────────────────────────────────────────────
 
 describe('Kory MCP bridge — tool catalog integrity', () => {
-  it('KORY_TOOLS has 52 tools', () => {
-    expect(KORY_TOOLS).toHaveLength(52);
+  it('KORY_TOOLS is non-empty and names are unique', () => {
+    // Deliberately not a hardcoded count: the catalog tracks the live tool
+    // registry, so a fixed number rots every time a tool is added or removed.
+    expect(KORY_TOOLS.length).toBeGreaterThan(0);
+    expect(new Set(KORY_TOOLS.map((tool) => tool.name)).size).toBe(KORY_TOOLS.length);
   });
 
   it('every tool name starts with kory__', () => {
@@ -181,7 +184,7 @@ describe('Kory MCP bridge — tool catalog integrity', () => {
   });
 
   it('manager role sees all tools', () => {
-    expect(toolsForRole('manager')).toHaveLength(52);
+    expect(toolsForRole('manager')).toHaveLength(KORY_TOOLS.length);
   });
 
   it('unknown role sees no tools', () => {
@@ -191,5 +194,23 @@ describe('Kory MCP bridge — tool catalog integrity', () => {
   it('createBridgeServer returns a Server with tools capability', () => {
     const server = createBridgeServer(TEST_TOOLS, makeProxy().proxy);
     expect(server).toBeDefined();
+  });
+
+  it('skips a malformed catalog schema without taking down the bridge', () => {
+    expect(() =>
+      createBridgeServer(
+        [
+          {
+            name: 'kory__malformed',
+            description: 'Malformed schema fixture',
+            inputSchema: {
+              type: 'object',
+              properties: { value: { type: 'not-a-json-schema-type' } },
+            },
+          },
+        ],
+        makeProxy().proxy,
+      ),
+    ).not.toThrow();
   });
 });

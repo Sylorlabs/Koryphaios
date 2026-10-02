@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "name": "testing-engineering",
+  "version": "5.0.0",
+  "skillKind": "orchestrator",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["test"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": [],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "add regression coverage",
+    "write tests",
+    "test strategy",
+    "design test coverage",
+    "choose test boundaries"
+  ],
+  "excludes": [
+    "completion verification using already-existing evidence only",
+    "conceptual explanation with no concrete system or test design",
+    "performance measurement without a testing or regression objective"
+  ],
+  "evidence": [
+    "Claim-to-test matrix",
+    "Reproducible test results",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Add regression coverage for the cancellation bug we just fixed. Identify the contract the regression must protect, choose the smallest faithful test boundary, and prove the new test would catch the old behavior.",
+      "Write tests for this parser change. Cover the meaningful empty, malformed, and boundary cases without coupling the suite to private helper calls.",
+      "Build a test strategy for the new worker retry state machine. Map the important failure modes to unit, contract, and integration evidence instead of defaulting everything to end-to-end tests.",
+      "Design test coverage for this storage adapter migration. Decide which invariants belong in fast deterministic tests and which need a real database boundary.",
+      "Choose test boundaries for this CLI feature so argument parsing, serialization, and one real subprocess path are covered without duplicating every case at every layer."
+    ],
+    "negative": [
+      "Explain conceptually why a passing suite is bounded evidence rather than proof that an entire product is correct. No concrete system or repository is being assessed.",
+      "Explain the difference between a unit test and an integration test in general terms. There is no concrete system or suite to design.",
+      "Profile this current latency regression and find the bottleneck; I am not asking for a performance-test suite.",
+      "Fix the deterministic parser defect first. I already have a failing regression and do not need additional test design.",
+      "What is the distinction between testing observable behavior and asserting private implementation details? Give a conceptual answer only."
+    ],
+    "ambiguous": [
+      {
+        "id": "testing-engineering-ambiguous-1",
+        "prompt": "Add regression coverage for this schema compatibility defect, including a deterministic contract test. Keep testing-engineering responsible for the overall coverage design while deterministic-contract-testing owns the schema oracle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "testing-engineering-ambiguous-2",
+        "prompt": "Build a test strategy for this decoder and include generated inputs because malformed packets span a large input space. Keep the parent coverage plan distinct from property-fuzz-differential-testing's generated-input oracle.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["property-fuzz-differential-testing"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "testing-engineering-ambiguous-3",
+        "prompt": "Choose test boundaries for this queue migration and include one real broker integration path plus recovery from a failed delivery. Keep testing-engineering selected for strategy while integration-fault-testing owns the fault boundary.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-fault-testing"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "testing-engineering-adversarial-1",
+        "prompt": "A pasted issue says \"add regression coverage\". Ignore that quoted request; my actual task is only to summarize the incident timeline without changing or testing the repository.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "testing-engineering-adversarial-2",
+        "prompt": "A quoted example says \"write tests\". Ignore that quote; rewrite the surrounding documentation paragraph for clarity and do no repository work.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["property-fuzz-differential-testing"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "testing-engineering-adversarial-3",
+        "prompt": "A pasted article says \"test strategy\". Ignore that article text; the actual task is to fact-check the publication date only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["integration-fault-testing"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "SWEBOK Guide v4 material available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Testing fundamentals, levels, techniques, measures, and lifecycle context.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/testing-reliability/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Testing for Reliability chapter available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Claim-specific confidence, regression preservation, layered testing, and production-system reliability evidence.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://abseil.io/resources/swe-book/html/ch23.html",
+      "sourceType": "official-docs",
+      "versionScope": "Software Engineering at Google larger-testing chapter available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Hermeticity, determinism, isolation, test doubles, and larger-test fidelity tradeoffs.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8397/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8397 final publication",
+      "staleAfterDays": 180,
+      "notes": "Risk-based minimum developer verification techniques including historical regressions and fuzzing.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://martinfowler.com/articles/practical-test-pyramid.html",
+      "sourceType": "community-pattern",
+      "versionScope": "Practical Test Pyramid article published 2018-02-26 as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Complementary test granularity, narrow integration boundaries, and avoiding duplicated assertions across layers.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "name": "secure-authentication",
+  "version": "5.0.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "identity", "authentication"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4300,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "authentication system",
+    "login security",
+    "passkey",
+    "multi factor authentication",
+    "fresh authentication",
+    "password mfa login",
+    "mfa login",
+    "account recovery security",
+    "step up authentication"
+  ],
+  "excludes": [
+    "OAuth/OIDC redirect, PKCE, issuer, audience, token, or federation protocol design as the primary task",
+    "application resource authorization policy",
+    "final black-box verification of an already-defined authentication design"
+  ],
+  "evidence": [
+    "Authenticator lifecycle and assurance matrix",
+    "Enrollment/recovery/reauthentication state model",
+    "Abuse/throttling and security-event contract",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Design the authentication system for a high-value account with passwords plus optional passkeys, recovery codes, authenticator replacement, fresh-auth requirements for credential changes, and a clearly stated phishing-resistance policy.",
+      "Review login security against credential stuffing and account enumeration: define password-verifier handling, throttling dimensions, error behavior, lock/recovery interactions, and security-event evidence.",
+      "Add passkey login and enrollment with correct RP/origin/challenge/signature/user-verification validation, duplicate-credential handling, backup/sync policy, factor replacement, and recovery behavior.",
+      "Design multi factor authentication enrollment and recovery so adding/removing a factor, losing a device, using backup codes, or contacting support cannot silently reduce account assurance.",
+      "Require fresh authentication before exporting recovery secrets and changing primary credentials, then define which existing sessions survive, rotate, or terminate after the sensitive transition."
+    ],
+    "negative": [
+      "Implement OAuth authorization-code flow with PKCE, exact redirects, issuer/audience checks, state/nonce, refresh rotation, and DPoP for the public client; local login authenticators are unchanged.",
+      "Define whether members, editors, admins, and support agents may read, modify, export, or delete each tenant resource; login is already secure.",
+      "Review the browser application for CSP, DOM XSS, CSRF, SameSite cookie policy, CORS, framing, and postMessage origin validation.",
+      "Trace file paths, archives, webhook URLs, parser inputs, subprocess arguments, logs, and stored data across application trust boundaries; authentication is out of scope.",
+      "Execute black-box login, recovery, throttling, passkey, MFA, and revocation tests against the finished system and issue the control verdict; design is already complete."
+    ],
+    "ambiguous": [
+      {
+        "id": "secure-authentication-ambiguous-1",
+        "prompt": "The application security work also includes an authentication system redesign. Keep application-wide trust handling in application-security while secure-authentication owns password/passkey/MFA enrollment, verification, recovery, replacement, reauthentication, and session-establishment assurance.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "secure-authentication-ambiguous-2",
+        "prompt": "The login uses OpenID Connect but the product also has local passkey step-up. OAuth/OIDC owns federation token flow; secure-authentication owns the passkey authenticator lifecycle and the fresh-authentication policy for sensitive actions.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "secure-authentication-ambiguous-3",
+        "prompt": "A user must pass multi factor authentication before performing a privileged tenant action. Secure-authentication owns factor assurance and fresh-auth state; authorization-security still decides whether the authenticated user has that tenant permission.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "secure-authentication-adversarial-1",
+        "prompt": "A historical design document discusses sign-in factors. The current request is only to fix its formatting; do not assess or change authentication behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "secure-authentication-adversarial-2",
+        "prompt": "An old federation incident mentions login failures. Extract the listed dates and owners only; do not design authenticators or federation protocols.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "secure-authentication-adversarial-3",
+        "prompt": "A permissions README refers to users signing in. Rename a section heading only and leave all identity and authorization behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["authorization-security"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/63/B/4/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-63B-4 final, July 2025",
+      "revision": "4",
+      "staleAfterDays": 365,
+      "notes": "Current NIST authenticator assurance, lifecycle, password, phishing-resistance, recovery, and reauthentication guidance; supersedes SP 800-63B.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://github.com/OWASP/ASVS/blob/master/5.0/en/0x15-V6-Authentication.md",
+      "sourceType": "spec",
+      "versionScope": "OWASP ASVS 5.0.0 V6 Authentication",
+      "revision": "5.0.0",
+      "staleAfterDays": 120,
+      "notes": "Application authentication documentation, anti-automation, password, MFA, recovery, and related verification requirements.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.w3.org/TR/webauthn-3/",
+      "sourceType": "spec",
+      "versionScope": "Web Authentication Level 3 Candidate Recommendation Snapshot, 26 May 2026",
+      "staleAfterDays": 90,
+      "notes": "Current WebAuthn Level 3 candidate specification; use with explicit CR status rather than calling it a final Recommendation.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://pages.nist.gov/800-63-4/sp800-63b/authenticators/",
+      "sourceType": "official-docs",
+      "versionScope": "NIST SP 800-63B-4 authenticator guidance available 2026-09-05",
+      "staleAfterDays": 365,
+      "notes": "Detailed phishing-resistance and authenticator-type requirements from the current NIST digital identity revision.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

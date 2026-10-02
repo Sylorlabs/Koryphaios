@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "name": "marketing-strategy",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "marketing", "strategy"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3300,
+  "broader": ["market-competitive-research"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "marketing strategy",
+    "go to market campaign",
+    "demand generation",
+    "brand positioning",
+    "go to market communication plan",
+    "audience message channels",
+    "campaign sequence"
+  ],
+  "excludes": [],
+  "evidence": [
+    "marketing-strategy decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle marketing strategy.",
+      "The current task is go to market campaign.",
+      "I need help with demand generation.",
+      "Work on brand positioning for this request.",
+      "This request specifically requires go to market communication plan."
+    ],
+    "negative": [
+      "The only requested work is market strategy.",
+      "Please handle pricing strategy only.",
+      "This task is limited to vendor evaluation.",
+      "The current request is business case.",
+      "Work only on contract analysis."
+    ],
+    "ambiguous": [
+      {
+        "id": "marketing-strategy-ambiguous-1",
+        "prompt": "The request includes marketing strategy and market strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "marketing-strategy-ambiguous-2",
+        "prompt": "The request includes go to market campaign and pricing strategy.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["pricing-monetization"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "marketing-strategy-ambiguous-3",
+        "prompt": "The request includes demand generation and vendor evaluation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["procurement-vendor-evaluation"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "marketing-strategy-adversarial-1",
+        "prompt": "A historical note says \"marketing strategy\". The current request is business case.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "marketing-strategy-adversarial-2",
+        "prompt": "A historical note says \"go to market campaign\". The current request is contract analysis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["contract-analysis"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "marketing-strategy-adversarial-3",
+        "prompt": "A historical note says \"demand generation\". The current request is customer success.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.ftc.gov/business-guidance/resources/advertising-faqs-guide-small-business",
+      "sourceType": "official-docs",
+      "versionScope": "FTC HTML FAQ sections on express/implied claims and substantiation inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt claim-to-evidence and material-omission checks. US jurisdiction guidance, not a universal rule or permission to publish."
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/plan-your-business/market-research-competitive-analysis",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration market research guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Market sizing, customer, competitor, demand, and evidence framing for business decisions.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.ftc.gov/business-guidance/advertising-marketing",
+      "sourceType": "official-docs",
+      "versionScope": "FTC advertising/marketing business guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Truthful advertising, endorsements, marketing claims, privacy, and consumer-protection boundaries.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

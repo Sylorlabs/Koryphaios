@@ -19,19 +19,27 @@ export interface EnforcedSpendCap {
   globalHourlyCents: number;
   globalDailyCents: number;
   perRequestCents: number;
-  action: 'pause' | 'warn' | 'block';
+  action: 'pause' | 'warn' | 'block' | 'continue';
   notifyAtPercent: number[]; // [80, 95] = notify at 80% and 95%
 }
 
+/**
+ * Safety limits are opt-in. Nothing is enforced until the user turns the
+ * master switch on in Settings > Safety limits, and every individual window
+ * starts at 0 — which `findSpendCapViolation` treats as "no limit" — so an
+ * enabled-but-unconfigured app still runs work instead of pausing on spend.
+ * The breach response is `continue` for the same reason: raising a limit must
+ * never silently become a way to stop a running turn.
+ */
 export const DEFAULT_ENFORCED_CAPS: EnforcedSpendCap = {
-  enabled: true,
-  sessionHourlyCents: 200, // $2/hour per session
-  sessionDailyCents: 1000, // $10/day per session
-  globalHourlyCents: 1000, // $10/hour globally
-  globalDailyCents: 5000, // $50/day globally
-  perRequestCents: 50, // $0.50 max per request
-  action: 'pause', // Default: pause agents
-  notifyAtPercent: [80, 95],
+  enabled: false,
+  sessionHourlyCents: 0,
+  sessionDailyCents: 0,
+  globalHourlyCents: 0,
+  globalDailyCents: 0,
+  perRequestCents: 0,
+  action: 'continue',
+  notifyAtPercent: [],
 };
 
 export interface PauseRecord {
@@ -89,8 +97,8 @@ export function mergeEnforcedCaps(current: EnforcedSpendCap, patch: unknown): En
     if (input[key] !== undefined) next[key] = validateCapCents(key, input[key]);
   }
   if (input.action !== undefined) {
-    if (!['pause', 'warn', 'block'].includes(String(input.action))) {
-      throw new ValidationError('action must be pause, warn, or block');
+    if (!['pause', 'warn', 'block', 'continue'].includes(String(input.action))) {
+      throw new ValidationError('action must be pause, warn, block, or continue');
     }
     next.action = input.action as EnforcedSpendCap['action'];
   }
@@ -462,6 +470,7 @@ async function evaluateSpendCaps(
   };
   const violation = findSpendCapViolation(caps, snapshot, estimatedCostCents);
   if (!violation) return { canProceed: true };
+  if (caps.action === 'continue') return { canProceed: true };
   if (caps.action === 'warn') return { canProceed: true, reason: violation.reason };
   if (caps.action === 'pause' && sessionId) {
     await pauseSession(

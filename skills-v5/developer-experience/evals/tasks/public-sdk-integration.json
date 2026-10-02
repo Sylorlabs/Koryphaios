@@ -1,0 +1,82 @@
+{
+  "id": "developer-experience-full-task-public-sdk",
+  "prompt": "Redesign the developer experience for a public SDK used by teams integrating an asynchronous data-processing service. A developer must install the package, authenticate, choose a project, submit a job, understand an indeterminate network outcome, inspect progress, diagnose permission or rate failures, find the right documentation, upgrade across a supported API version, roll back if needed, and remove test resources. The API contract is mostly fixed. Produce a decision-ready developer-experience plan and evidence contract without inventing user findings or casually changing the API.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://developer-experience/public-sdk-integration",
+    "requirements": [
+      "current SDK surface and API contract",
+      "authentication and permission model",
+      "representative error and request-tracing fixtures",
+      "current version and migration notes",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "public-sdk-contract-preservation",
+      "assertion": "The plan derives its developer journey from the supplied SDK/API/authentication/version contract and does not casually solve experience problems by inventing incompatible API semantics."
+    },
+    {
+      "id": "public-sdk-unknown-outcome",
+      "assertion": "An indeterminate job-submission outcome has explicit identity/reconciliation guidance that avoids unsafe blind resubmission or falsely declaring failure."
+    },
+    {
+      "id": "public-sdk-diagnosability",
+      "assertion": "Permission, rate, and processing failures have an observable diagnosis path using safe request/job identity, progress/error information, and documentation discovery rather than generic retry advice."
+    },
+    {
+      "id": "public-sdk-version-lifecycle",
+      "assertion": "The contract covers supported-version discovery, migration/compatibility evidence, rollback expectations, and removal of test resources without assuming every upgrade is reversible."
+    },
+    {
+      "id": "public-sdk-evaluation-discipline",
+      "assertion": "Evaluation combines developer feedback with task and system measures across first use and repeat/failure use; no single productivity, brevity, or time-to-copy metric determines success."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "developer-journey-and-interface-coherence",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "developer role, job, environment, and failure cost",
+        "first-use through repeat-use journey",
+        "explicit concepts, state, permissions, limits, and version assumptions",
+        "indeterminate outcome and recovery semantics preserved",
+        "narrow specialists identified without duplicating their contracts"
+      ]
+    },
+    {
+      "id": "migration-diagnosis-and-measurement",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "diagnostic and request-tracing path",
+        "runnable example and answer-finding expectations",
+        "compatibility, migration, rollback, and cleanup contract",
+        "developer feedback paired with task/system evidence",
+        "no single productivity metric or brevity proxy"
+      ]
+    },
+    {
+      "id": "blind-public-sdk-developer-experience-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "developer journey and friction model",
+    "interface and state assumptions",
+    "failure/recovery and observability model",
+    "migration/rollback/removal contract",
+    "multi-signal evaluation plan"
+  ],
+  "requiredArtifacts": [
+    "public-sdk-developer-experience-plan",
+    "integration-evidence-contract",
+    "paired-experiment-report"
+  ]
+}

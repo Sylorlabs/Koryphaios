@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "name": "release-planning",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["planning", "release"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5000,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": [
+    "release plan",
+    "rollout plan",
+    "production rollout",
+    "canary release",
+    "staged rollout",
+    "launch checklist",
+    "go no go",
+    "rollback threshold",
+    "risky change gets to production",
+    "rollout stages",
+    "release evidence"
+  ],
+  "excludes": [
+    "pipeline mechanics only",
+    "pipeline is already fixed",
+    "migration plan only",
+    "migration is already complete",
+    "independent verification only",
+    "already frozen rollout plan",
+    "no live release to prepare",
+    "no rollout changes are requested",
+    "quoted old release plan",
+    "quoted old incident",
+    "screenshot caption only",
+    "documentation heading only"
+  ],
+  "evidence": [
+    "Exact release unit and preflight readiness evidence",
+    "Cohort progression and observation-window evidence",
+    "Deterministic stop/go and rollback/disablement evidence",
+    "Post-release health/support and final rollout evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Plan a canary release of an immutable API build through 1%, 5%, 25%, 50% and 100% traffic with control comparisons, observation windows, stop/go thresholds, rollback and support ownership.",
+      "Create a production rollout plan for a backward-compatible service release across regions, with exact artifact identity, readiness gates, regional cohorts, SLO/business guardrails and rollback criteria.",
+      "Plan a feature-flag launch where code is already deployed but user exposure must ramp by tenant cohorts, with metrics, hold/disable thresholds, communication triggers and final cleanup evidence.",
+      "Create a go/no-go release checklist for a high-traffic change that binds tests, capacity, telemetry, runbooks, known issues, artifact identity, rollback readiness and a minimum observation window.",
+      "Design a staged rollout for a risky configuration change with canary/control populations, immutable config identity, explicit stop conditions, fast revert and post-release verification."
+    ],
+    "negative": [
+      "Implement GitHub Actions build, test, artifact and protected-environment jobs for an already-defined rollout policy; pipeline mechanics only.",
+      "Plan an API/database migration with mixed versions, backfill, dual writes and irreversible cutover; the production exposure policy is secondary to migration sequencing.",
+      "Run an independent verification of an already-frozen rollout plan and issue a pass/fail verdict without changing cohorts, gates or rollback thresholds.",
+      "Debug an active production incident caused by a release and coordinate mitigation, communications and incident command; do not redesign future rollout policy during the response.",
+      "Prioritize which product feature should launch next and why based on customer value; safe operational release mechanics are out of scope."
+    ],
+    "ambiguous": [
+      {
+        "id": "release-planning-ambiguous-1",
+        "prompt": "Implement a canary release in GitHub Actions. release-planning owns cohort percentages, observation windows, go/no-go and rollback thresholds; cicd-engineering owns workflow jobs, permissions, artifacts and environment gates.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "release-planning-ambiguous-2",
+        "prompt": "Create a rollout plan for a service version that also changes a persistent schema. release-planning owns exposure stages and operational go/no-go; migration-planning owns mixed-version compatibility, backfill, cutover and rollback/roll-forward limits.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["migration-planning"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "release-planning-ambiguous-3",
+        "prompt": "Build a launch checklist and then independently verify the resulting release drill. release-planning owns gates/cohorts/rollback design; reliability-verification owns the separate pass/fail judgment on observed behavior.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reliability-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "release-planning-adversarial-1",
+        "prompt": "A quoted old incident contains a release plan for the affected service. Ignore that historical plan; today's request is only to correct log timestamp formatting in a script.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "release-planning-adversarial-2",
+        "prompt": "A support transcript mentions a rollout plan as background. Summarize the transcript only; no rollout changes are requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "release-planning-adversarial-3",
+        "prompt": "A README heading says \"Launch Checklist\". Rename that documentation heading only; do not alter release gates, rollout or deployment behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["cicd-engineering"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sre.google/workbook/canarying-releases/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Workbook Canarying Releases chapter as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Canary/control exposure, progressive evaluation, release risk reduction and rollback-oriented release practice.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://sre.google/sre-book/release-engineering/",
+      "sourceType": "official-docs",
+      "versionScope": "Google SRE Release Engineering chapter as available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Reproducible releases, automation, canarying, release consistency and rollback principles.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://semver.org/spec/v2.0.0.html",
+      "sourceType": "spec",
+      "versionScope": "Semantic Versioning 2.0.0",
+      "staleAfterDays": 365,
+      "notes": "Compatibility and public-API release version contract reference; versioning does not replace rollout or migration strategy.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

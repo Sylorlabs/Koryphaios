@@ -11,7 +11,12 @@ import { E2E_BACKEND_URL as BACKEND_URL } from './helpers/urls';
 async function openVoiceSettings(page: import('@playwright/test').Page) {
   await page.goto('/');
   await expect(page.locator('#main-content')).not.toBeEmpty({ timeout: 30_000 });
-  await page.keyboard.press('Control+,');
+  const walkthrough = page.getByTestId('onboarding-walkthrough');
+  if (await walkthrough.isVisible().catch(() => false)) {
+    await walkthrough.getByRole('button', { name: /Skip/ }).click();
+    await expect(walkthrough).toBeHidden();
+  }
+  await page.keyboard.press('ControlOrMeta+,');
   const settingsDialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
   await settingsDialog.getByRole('button', { name: /Voice/ }).click();
@@ -56,11 +61,15 @@ test.describe('Voice settings', () => {
     await expect(dialog.getByText('System default')).toBeVisible();
   });
 
-  test('guides local model setup without downloaded-pack claims', async ({ page }) => {
+  test('shows the alternate local speech server path in browser settings', async ({ page }) => {
     const dialog = await openVoiceSettings(page);
 
-    await expect(dialog.getByRole('heading', { name: 'Run local speech models' })).toBeVisible();
-    await expect(dialog.getByText('Audio stays on your machine', { exact: false })).toBeVisible();
+    await expect(
+      dialog.getByRole('heading', { name: 'Use another local speech server' }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText('Configure its endpoint under Providers & models', { exact: false }),
+    ).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save voice settings' })).toBeVisible();
   });
 });

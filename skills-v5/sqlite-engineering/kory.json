@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "name": "sqlite-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "database", "sqlite"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": ["relational-data-modeling"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["sqlite", "sqlite database", "sqlite wal", "sqlite migration"],
+  "excludes": [],
+  "evidence": [
+    "sqlite-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle sqlite.",
+      "The current task is sqlite database.",
+      "I need help with sqlite wal.",
+      "Work on sqlite migration for this request.",
+      "This request specifically requires sqlite."
+    ],
+    "negative": [
+      "The only requested work is mysql.",
+      "Please handle postgresql only.",
+      "This task is limited to slow query.",
+      "The current request is mongodb.",
+      "Work only on redis."
+    ],
+    "ambiguous": [
+      {
+        "id": "sqlite-engineering-ambiguous-1",
+        "prompt": "The request includes sqlite and mysql.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mysql-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "sqlite-engineering-ambiguous-2",
+        "prompt": "The request includes sqlite database and postgresql.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["postgres-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "sqlite-engineering-ambiguous-3",
+        "prompt": "The request includes sqlite wal and slow query.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["database-performance"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "sqlite-engineering-adversarial-1",
+        "prompt": "A historical note says \"sqlite\". The current request is mongodb.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["mongodb-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "sqlite-engineering-adversarial-2",
+        "prompt": "A historical note says \"sqlite database\". The current request is redis.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["redis-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "sqlite-engineering-adversarial-3",
+        "prompt": "A historical note says \"sqlite wal\". The current request is analytics engineering.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["analytics-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://sqlite.org/docs.html",
+      "sourceType": "official-docs",
+      "versionScope": "SQLite documentation as available 2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "SQLite transactions, locking, SQL, file format, and deployment behavior.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

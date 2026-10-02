@@ -8,7 +8,6 @@ import {
   detectCursorCLILogin,
   detectGrokCLILogin,
   detectCodexCLILogin,
-  detectClineCLILogin,
 } from '../auth-utils';
 
 // Snapshot the env vars these tests mutate so each test is isolated and the suite is restored.
@@ -61,7 +60,6 @@ describe('detectAgentClis', () => {
     expect(list.map((c) => c.id).sort()).toEqual([
       'antigravity',
       'claude',
-      'cline',
       'codex',
       'cursor',
       'devin',
@@ -77,7 +75,6 @@ describe('detectAgentClis', () => {
     expect(byId.grok.provider).toBe('grok'); // Grok Build has its own CLI-harness provider
     expect(byId.cursor.provider).toBe('cursor'); // Cursor CLI harness provider
     expect(byId.devin.provider).toBe('devin'); // Devin CLI harness provider
-    expect(byId.cline.provider).toBe('cline'); // Cline CLI harness provider
   });
 
   it('every entry carries a binary path when installed, and a human note', () => {
@@ -155,28 +152,6 @@ describe('login detectors (deterministic via temp HOME)', () => {
     expect(detectCodexCLILogin()).toBe(true);
   });
 
-  it('detects Cline CLI login only from auth-like fields in ~/.cline/data/secrets.json', () => {
-    expect(detectClineCLILogin()).toBe(false);
-    mkdirSync(join(tmpHome, '.cline', 'data'), { recursive: true });
-    writeFileSync(
-      join(tmpHome, '.cline', 'data', 'secrets.json'),
-      JSON.stringify({
-        providers: { cline: { settings: { model: 'gpt-4o' }, apiUrl: 'https://example.com' } },
-      }),
-    );
-    expect(detectClineCLILogin()).toBe(false);
-
-    writeFileSync(
-      join(tmpHome, '.cline', 'data', 'secrets.json'),
-      JSON.stringify({
-        providers: {
-          cline: { settings: { model: 'gpt-4o' } },
-          auth: { apiKey: 'sk-long-api-key-like-value-for-testing-1234567890' },
-        },
-      }),
-    );
-    expect(detectClineCLILogin()).toBe(true);
-  });
 });
 
 describe('canAutoEnable gate', () => {

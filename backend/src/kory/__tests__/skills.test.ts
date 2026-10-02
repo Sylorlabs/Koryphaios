@@ -24,17 +24,21 @@ import {
   enforceSkillLearningPolicy,
   seedDefaultSkills,
   personalRoot,
+  partitionRuntimeSkillHierarchyIssues,
   auditBundledSkillDefinitions,
   BUNDLED_SKILL_DEFINITIONS,
   createFreeformSkillDraft,
   createSkillDraft,
   deriveAuthoritativeTargetMedium,
+  explicitSkillPinsFromPrompt,
   getBundledSkillContent,
   INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES,
   matchesSkillTrigger,
+  V5_SKILL_PACKAGE_CATALOG,
 } from '../skills';
 import {
   MANAGER_OUTPUT_TOKEN_LIMIT,
+  MIN_SKILL_CONTEXT_BUDGET,
   compilePrompt,
   createTaskContract,
   deriveSkillContextBudget,
@@ -51,7 +55,9 @@ import {
   buildSkillEvaluationCard,
   evaluateSkillPromotion,
   recordSkillEvaluationRun,
+  recordSkillEvaluationRuns,
 } from '../skill-evaluations';
+import { syncSkillStewardRegistry } from '../skill-stewards';
 import { SKILL_PLAYBOOKS } from '../skill-playbooks';
 import { PLAN_MODE_SKILL_INSTRUCTIONS } from '../plan-mode-skill';
 import { PROFESSIONAL_SKILL_DEFINITIONS } from '../professional-skill-definitions';
@@ -73,6 +79,22 @@ afterEach(() => {
   rmSync(skillsHome, { recursive: true, force: true });
 });
 
+/**
+ * A spawned writer must not report a failure on stderr. Requiring stderr to be
+ * byte-empty would instead fail this suite on any unrelated startup diagnostic
+ * the child happens to emit — a nested-checkout config warning, for example,
+ * which is correct behavior driven by where the checkout lives. Keep the
+ * assertion on errors and drop the process logger's own lines.
+ */
+function stderrFailures(stderr: string): string[] {
+  return stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(
+      (line) => line.length > 0 && !/^\[\d{2}:\d{2}:\d{2}\]\s+(TRACE|DEBUG|INFO|WARN)/.test(line),
+    );
+}
+
 describe('local Koryphaios skills', () => {
   test('enforces all three learning modes without limiting human control', () => {
     expect(() => enforceSkillLearningPolicy('human-only', 'human', 'activate')).not.toThrow();
@@ -86,7 +108,7 @@ describe('local Koryphaios skills', () => {
   });
   test('seeds the complete instruction-only default library', () => {
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(79);
+    expect(active).toHaveLength(181);
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
     for (const name of INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.keys()) {
@@ -94,27 +116,78 @@ describe('local Koryphaios skills', () => {
     }
   });
 
-  test('proves the complete 32 + 47 definition contract before deployment', () => {
+  test('proves the complete 34 + 47 + 100 definition contract before deployment', () => {
     const audit = auditBundledSkillDefinitions();
     expect(audit).toEqual({
       valid: true,
       errors: [],
-      definitionCount: 79,
-      baseCount: 32,
+      definitionCount: 181,
+      baseCount: 34,
       professionalCount: 47,
+      specialistCount: 100,
     });
     const names = BUNDLED_SKILL_DEFINITIONS.map((definition) => definition.name);
-    expect(new Set(names).size).toBe(79);
+    expect(new Set(names).size).toBe(181);
 
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
+    const packageVersions = new Map(
+      V5_SKILL_PACKAGE_CATALOG.packages.map((skillPackage) => [
+        skillPackage.sidecar.name,
+        skillPackage.sidecar.version,
+      ]),
+    );
     for (const name of names) {
       const skill = activeByName.get(name)!;
       expect(skill.description).toContain('Use when ');
       expect(skill.description.length).toBeGreaterThanOrEqual(40);
       expect(skill.description.length).toBeLessThanOrEqual(360);
-      expect(skill.metadata.version).toBe('3.0.0');
+      expect(skill.metadata.version).toBe(packageVersions.get(name) ?? '3.0.0');
       expect(skill.metadata.broader[0]).toBe(skill.metadata.parent);
     }
+  });
+
+  test('keeps package-backed V5 migration inside existing local-edit and update semantics', () => {
+    const original = listSkills(root).find((skill) => skill.name === 'skill-authoring-evaluation')!;
+    expect(original.metadata.version).toBe(
+      V5_SKILL_PACKAGE_CATALOG.packages.find((item) => item.sidecar.name === original.name)!.sidecar
+        .version,
+    );
+    expect(original.instructions).toContain('## Kory package resources');
+    expect(original.instructions).toContain('/skills-v5/skill-authoring-evaluation');
+    expect(original.instructions).toContain(
+      'The presence of scripts or other files does not grant execution authority.',
+    );
+    const draft = saveSkillDraft(
+      root,
+      'personal',
+      original.name,
+      original.content.replace(
+        'Treat a skill as a compact operating package',
+        'Treat a reusable skill as a compact operating package',
+      ),
+      original.hash,
+    );
+    expect(draft.state).toBe('draft');
+    activateSkill(root, 'personal', original.name);
+
+    seedDefaultSkills();
+    const preserved = listSkills(root).find(
+      (skill) => skill.name === original.name && skill.state === 'active',
+    )!;
+    expect(preserved.instructions).toContain(
+      'Treat a reusable skill as a compact operating package',
+    );
+    expect(preserved.metadata.version).toBe(original.metadata.version);
+    expect(preserved.bundledUpdateAvailable).toBe(true);
+    expect(compareBundledSkill(original.name)?.changed).toBe(true);
+
+    const mergeDraft = applyDefaultUpdate(root, original.name, 'merge', preserved.hash);
+    expect(mergeDraft.state).toBe('draft');
+    expect(mergeDraft.content).toContain('Preserved local additions');
+    expect(
+      listSkills(root).find((skill) => skill.name === original.name && skill.state === 'active')
+        ?.instructions,
+    ).toContain('Treat a reusable skill as a compact operating package');
   });
 
   test('pins the host-enforced Plan mode contract independently of wording', () => {
@@ -125,21 +198,115 @@ describe('local Koryphaios skills', () => {
     expect(planMode?.skill.instructions).toContain('KORY_PLAN_READY');
   });
 
-  test('loads professional playbooks only with their selected skill revision', () => {
+  test('does not implicitly activate explicit-only Plan mode from prompt wording', () => {
+    const prompt = 'Use plan mode to think through a careful variable rename before editing.';
+    const contract = createTaskContract(prompt);
+    const automatic = resolveSkills(root, prompt, contract, { contextBudget: 60_000 });
+    expect(automatic.selected.map((item) => item.skill.name)).not.toContain('plan-mode');
+    expect(automatic.rejectedCandidates).toContainEqual({
+      name: 'plan-mode',
+      reason: 'Rejected: skill requires explicit user invocation',
+    });
+
+    const pinned = resolveSkills(root, prompt, contract, {
+      pins: ['plan-mode'],
+      contextBudget: 60_000,
+    });
+    expect(pinned.selected.map((item) => item.skill.name)).toContain('plan-mode');
+  });
+
+  test('turns user skill syntax into resolver pins without weakening explicit-only routing', () => {
+    expect(
+      explicitSkillPinsFromPrompt('$plan-mode /verification rename this variable', [
+        'plan-mode',
+        'verification',
+      ]),
+    ).toEqual(['plan-mode', 'verification']);
+    expect(explicitSkillPinsFromPrompt('/help explain this', ['help'])).toEqual([]);
+    expect(explicitSkillPinsFromPrompt('/home/user/project', ['plan-mode'])).toEqual([]);
+
+    for (const prompt of [
+      '/skill plan-mode rename this local variable',
+      '$plan-mode rename this local variable',
+      '/plan-mode rename this local variable',
+    ]) {
+      const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+        contextBudget: 60_000,
+      });
+      expect(result.blocked).toBe(false);
+      expect(
+        result.selected.map((item) => item.skill.name),
+        prompt,
+      ).toContain('plan-mode');
+      expect(result.selected.find((item) => item.skill.name === 'plan-mode')?.reason).toBe(
+        'Pinned explicitly for this task',
+      );
+    }
+
+    const unknown = '/skill definitely-missing-skill rename this variable';
+    const unknownResult = resolveSkills(root, unknown, createTaskContract(unknown), {
+      contextBudget: 60_000,
+    });
+    expect(unknownResult.blocked).toBe(true);
+    expect(unknownResult.hierarchyErrors).toContain(
+      'Pinned skill definitely-missing-skill is unavailable or invalid',
+    );
+
+    const ordinary = 'Use plan mode to think through a careful variable rename before editing.';
+    expect(
+      resolveSkills(root, ordinary, createTaskContract(ordinary), {
+        contextBudget: 60_000,
+      }).selected.map((item) => item.skill.name),
+    ).not.toContain('plan-mode');
+  });
+
+  test('uses repository-relative path scopes as a secondary routing signal', () => {
+    const prompt = 'Please review the current file and make the smallest correct change.';
+    const contract = createTaskContract(prompt);
+    const nested = resolveSkills(root, prompt, contract, {
+      activePaths: ['infra/main.tf'],
+      contextBudget: 60_000,
+    });
+    const terraform = nested.selected.find((item) => item.skill.name === 'terraform-iac');
+    expect(terraform?.reason).toBe('Matched active repository path scope "**/*.tf"');
+    expect(nested.evidence.contextPaths).toEqual(['infra/main.tf']);
+
+    const rootLevel = resolveSkills(root, prompt, contract, {
+      activePaths: ['main.tf'],
+      contextBudget: 60_000,
+    });
+    expect(rootLevel.selected.map((item) => item.skill.name)).toContain('terraform-iac');
+
+    const unrelated = resolveSkills(root, prompt, contract, {
+      activePaths: ['src/main.ts'],
+      contextBudget: 60_000,
+    });
+    expect(unrelated.selected.map((item) => item.skill.name)).not.toContain('terraform-iac');
+
+    const outside = join(root, '..', 'outside.tf');
+    const outsideResult = resolveSkills(root, prompt, contract, {
+      activePaths: [outside],
+      contextBudget: 60_000,
+    });
+    expect(outsideResult.evidence.contextPaths).toEqual([]);
+    expect(outsideResult.selected.map((item) => item.skill.name)).not.toContain('terraform-iac');
+  });
+
+  test('loads V5 package cores without appending retired playbooks to migrated skills', () => {
     const skills = listSkills(root);
     const experience = skills.find((skill) => skill.name === 'human-experience')!;
     const visualDesign = skills.find((skill) => skill.name === 'visual-interface-design')!;
     const visualVerification = skills.find((skill) => skill.name === 'visual-verification')!;
     const routing = skills.find((skill) => skill.name === 'task-routing')!;
-    expect(experience.instructions).toContain('Map entry, orientation, setup');
+    expect(experience.instructions).toContain('Own the end-to-end human outcome');
+    expect(experience.instructions).toContain('[Sources](references/sources.md)');
+    expect(experience.instructions).not.toContain('Map entry, orientation, setup');
+    expect(visualDesign.instructions).toContain('State a concise visual direction');
     expect(visualDesign.instructions).toContain(
-      'State a concise visual read before implementation',
+      'Run a visual pre-flight on representative real-content states',
     );
     expect(visualDesign.instructions).toContain(
-      'Run a visual pre-flight before declaring completion',
-    );
-    expect(visualDesign.instructions).toContain(
-      'These are universal checks, not web prescriptions',
+      'This skill owns visual direction and rendered-state critique',
     );
     expect(visualVerification.instructions).toContain(
       'Mark each visual claim passed, failed, or unavailable',
@@ -160,10 +327,11 @@ describe('local Koryphaios skills', () => {
     expect(embedded.instructions).toContain('For embedded anti-slop');
   });
 
-  test('ships deep professional playbooks for every specialist branch', () => {
+  test('preserves historical playbooks without requiring one for a new V5 package', () => {
     expect(PROFESSIONAL_SKILL_DEFINITIONS).toHaveLength(47);
     const definitionsWithPlaybooks = BUNDLED_SKILL_DEFINITIONS.filter(
-      (definition) => definition.name !== 'plan-mode',
+      (definition) =>
+        !['plan-mode', 'dash-free-writing', 'response-style'].includes(definition.name),
     );
     expect(Object.keys(SKILL_PLAYBOOKS).sort()).toEqual(
       definitionsWithPlaybooks.map((definition) => definition.name).sort(),
@@ -172,6 +340,11 @@ describe('local Koryphaios skills', () => {
       expect(SKILL_PLAYBOOKS[definition.name]?.split(/\s+/).length).toBeGreaterThan(100);
     }
     expect(PLAN_MODE_SKILL_INSTRUCTIONS.split(/\s+/).length).toBeGreaterThan(100);
+    const writing = BUNDLED_SKILL_DEFINITIONS.find(
+      (definition) => definition.name === 'dash-free-writing',
+    )!;
+    expect(writing.instructions).toContain('Preserve exact material');
+    expect(SKILL_PLAYBOOKS[writing.name]).toBeUndefined();
   });
 
   test('keeps low-reasoning cross-medium trials out of web and stack defaults', () => {
@@ -227,7 +400,7 @@ describe('local Koryphaios skills', () => {
       root,
       'personal',
       'implementation',
-      original.content.replace('minimum sufficient', 'smallest sufficient'),
+      original.content.replace('smallest coherent', 'smallest sufficient'),
       original.hash,
     );
     expect(draft.state).toBe('draft');
@@ -391,7 +564,7 @@ describe('local Koryphaios skills', () => {
             new Response(writer.stderr).text(),
           ]);
           expect(exitCode).toBe(0);
-          expect(stderr).toBe('');
+          expect(stderrFailures(stderr)).toEqual([]);
           return stdout.trim();
         }),
       );
@@ -548,7 +721,7 @@ describe('local Koryphaios skills', () => {
         'language-runtime-security',
         'infrastructure-security',
       ],
-      ['Design a blinded LLM evaluation benchmark', 'ml-evaluation', 'data-visualization'],
+      ['Design a blinded LLM evaluation benchmark', 'llm-evaluation', 'data-visualization'],
       [
         'Review research papers on agent routing',
         'literature-research',
@@ -683,6 +856,22 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(result.hierarchyErrors).toEqual([]);
   });
 
+  test('keeps derived depth metadata drift non-blocking during normal resolution', () => {
+    expect(
+      partitionRuntimeSkillHierarchyIssues([
+        'database-performance declares depth 3, expected 2',
+        'broken-skill references missing broader missing-parent',
+      ]),
+    ).toEqual({
+      errors: ['broken-skill references missing broader missing-parent'],
+      warnings: ['Skill metadata warning: database-performance declares depth 3, expected 2'],
+    });
+    const contract = createTaskContract('Diagnose a slow database query');
+    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 60_000 });
+    expect(result.hierarchyErrors.some((error) => error.includes(' declares depth '))).toBe(false);
+    expect(result.blocked).toBe(false);
+  });
+
   test('routes polyhierarchy and one-hop facets without treating technology as a discipline', () => {
     const contract = createTaskContract(
       'Design and build an accessible browser interface for a long-form research workspace',
@@ -702,6 +891,27 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     ).toContain('Professional facet of web-interface');
   });
 
+  test('surfaces broader, facet, and narrower hierarchy breadcrumbs in loaded skill guidance', () => {
+    const contract = createTaskContract(
+      'Design and build an accessible browser interface for a research workspace',
+      { taskKind: 'ui' },
+    );
+    const result = resolveSkills(root, contract.goal, contract, { contextBudget: 60_000 });
+    const web = result.selected.find((item) => item.skill.name === 'web-interface')!;
+    expect(web.promptText).toContain(
+      'Broader skills: visual-interface-design, frontend-engineering',
+    );
+    expect(web.promptText).toContain(
+      'Cross-cutting facets: interaction-design, accessibility-practice',
+    );
+    const frontend = result.selected.find((item) => item.skill.name === 'frontend-engineering')!;
+    expect(frontend.promptText).toContain('Narrower available skills:');
+    expect(frontend.promptText).toContain('react-engineering');
+    expect(frontend.promptText).toContain(
+      'Prefer a narrower child when the task establishes that child boundary',
+    );
+  });
+
   test('forward-tests every non-universal definition with phrased trigger and non-trigger requests', () => {
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
     for (const definition of BUNDLED_SKILL_DEFINITIONS) {
@@ -713,6 +923,83 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       const negative = `Please ${definition.shouldNot[0]} for the current project.`;
       expect(matchesSkillTrigger(skill, negative)).toBe(false);
     }
+  });
+
+  test('keeps non-prefixed adjectives from negating later routing triggers', () => {
+    const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
+    const userResearch = activeByName.get('user-research')!;
+    const web = activeByName.get('web-interface')!;
+    expect(
+      matchesSkillTrigger(
+        userResearch,
+        'Create a non-leading user interview guide and recruitment plan.',
+      ),
+    ).toBe(true);
+    expect(matchesSkillTrigger(web, 'Build a non-web interface for this tool.')).toBe(false);
+  });
+
+  test('applies exclusions only when the excluded scope is requested', () => {
+    const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
+    const skill = structuredClone(activeByName.get('release-planning')!);
+    skill.metadata.activation = ['release coordination'];
+    skill.metadata.excludes = ['deployment mechanics'];
+    skill.metadata.shouldTrigger = ['Coordinate release coordination across owners.'];
+    skill.metadata.shouldNotTrigger = [];
+
+    expect(
+      matchesSkillTrigger(
+        skill,
+        'Coordinate release coordination across owners without changing deployment mechanics.',
+      ),
+    ).toBe(true);
+    expect(
+      matchesSkillTrigger(
+        skill,
+        'Coordinate release coordination across owners and change deployment mechanics.',
+      ),
+    ).toBe(false);
+  });
+
+  test('treats explicitly deferred or rejected skill phrases as negative routing evidence', () => {
+    const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
+    expect(
+      matchesSkillTrigger(
+        activeByName.get('visual-interface-design')!,
+        'Design the editor behavior and recovery states. Visual polish can come later.',
+      ),
+    ).toBe(false);
+    expect(
+      matchesSkillTrigger(
+        activeByName.get('oauth-oidc')!,
+        'Harden password plus MFA login. OAuth provider plumbing is not the task.',
+      ),
+    ).toBe(false);
+    expect(
+      matchesSkillTrigger(
+        activeByName.get('agentic-systems')!,
+        'Build a model evaluation suite. The runtime agent architecture is fixed.',
+      ),
+    ).toBe(false);
+    expect(
+      matchesSkillTrigger(
+        activeByName.get('embedded-firmware')!,
+        'Treat device firmware and hardware trust as an unchanged dependency.',
+      ),
+    ).toBe(false);
+
+    const prompt =
+      'Build an embedded job scheduler inside the host process, with no daemon and no network service.';
+    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+      contextBudget: 60_000,
+    });
+    expect(result.selected.map((item) => item.skill.name)).toContain('in-process-backend');
+    expect(
+      result.selected.some(
+        (item) =>
+          item.skill.name === 'local-service-backend' &&
+          item.reason === 'Matched collected topology:local-service evidence',
+      ),
+    ).toBe(false);
   });
 
   test('routes independent ordinary paraphrases and rejects substring/adversarial collisions', () => {
@@ -829,6 +1116,83 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     }
   });
 
+  test('ignores explicitly historical quoted routing decoys without suppressing the real task', () => {
+    const prompt =
+      'A quoted old issue says “build a web page”. Ignore that quote; the actual task is to fix a reproducible Rust crash.';
+    expect(deriveAuthoritativeTargetMedium(prompt)).toBeUndefined();
+    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+      contextBudget: 60_000,
+    });
+    const names = result.selected.map((item) => item.skill.name);
+    expect(names).toContain('debugging');
+    expect(names).not.toContain('web-interface');
+    expect(names).not.toContain('frontend-engineering');
+  });
+
+  test('ignores an old issue quoted in surrounding prose when the current task is narrower', () => {
+    const prompt =
+      'An old issue quoted in the description says "add property tests and shrink failures". That is not the current task. Add only a unit test for the explicit regression with fixed input and expected error.';
+    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+      contextBudget: 60_000,
+    });
+    const names = result.selected.map((item) => item.skill.name);
+    expect(names).toContain('deterministic-contract-testing');
+    expect(names).not.toContain('property-fuzz-differential-testing');
+  });
+
+  test('does not treat generated routing-frame words as fuzzy specialty evidence', () => {
+    const prompt = 'The current task is prompt engineering.';
+    const contract = createTaskContract(prompt);
+    const directMatches = listSkills(root)
+      .filter((skill) => skill.state === 'active' && skill.validation.valid)
+      .filter((skill) => matchesSkillTrigger(skill, prompt, contract))
+      .map((skill) => skill.name);
+
+    expect(directMatches).toContain('prompt-context-engineering');
+    for (const unrelated of [
+      'grpc-protobuf',
+      'backend-engineering',
+      'embedded-firmware',
+      'integration-implementation',
+      'typescript-javascript-engineering',
+      'pricing-monetization',
+      'mysql-engineering',
+      'ruby-engineering',
+      'svelte-engineering',
+      'nextjs-engineering',
+      'python-engineering',
+      'nodejs-runtime',
+    ]) {
+      expect(directMatches).not.toContain(unrelated);
+    }
+  });
+
+  test('keeps conceptual technology explanations out of procedural skill branches', () => {
+    const prompt =
+      'Summarize what AWS Organizations, IAM roles, VPC ingress, KMS, CloudTrail, backups, and Kubernetes control planes do in general. Do not assess a deployment or inspect application source.';
+    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+      contextBudget: 60_000,
+    });
+    const names = result.selected.map((item) => item.skill.name);
+
+    expect(result.blocked).toBe(false);
+    expect(names).toEqual(['task-routing']);
+    expect(result.evidence.domains).not.toContain('verification');
+  });
+
+  test('keeps dependency provenance bounded so complete V5 guidance fits its package budget', () => {
+    const prompt = 'The current task is prompt engineering.';
+    const result = resolveSkills(root, prompt, createTaskContract(prompt), {
+      contextBudget: 60_000,
+    });
+    const evaluation = result.selected.find((item) => item.skill.name === 'llm-evaluation')!;
+
+    expect(result.blocked).toBe(false);
+    expect(evaluation).toBeDefined();
+    expect(evaluation.reason).toBe('Required by llm-application-engineering');
+    expect(evaluation.contextCost).toBeLessThanOrEqual(evaluation.skill.metadata.contextBudget);
+  });
+
   test('reports only the trigger, collected evidence, or declared relation actually used', () => {
     const prompt = 'Build a local IPC daemon';
     const result = resolveSkills(root, prompt, createTaskContract(prompt), {
@@ -841,14 +1205,19 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(localService.reason).toBe('Matched collected topology:local-service evidence');
     expect(localService.reason).not.toContain('network-service');
     const backend = result.selected.find((item) => item.skill.name === 'backend-engineering')!;
-    expect(backend.reason).toBe('Matched trigger-example terms: build, daemon');
+    expect(backend.reason).toBe('Broader concept of local-service-backend');
     expect(prompt.toLowerCase()).toContain('build');
     expect(prompt.toLowerCase()).toContain('daemon');
   });
 
   test('all bundled professional skills pass their visible trigger and non-trigger cases', () => {
+    const universalSkills = new Set(
+      V5_SKILL_PACKAGE_CATALOG.packages
+        .filter((skillPackage) => skillPackage.sidecar.selectionMode === 'universal')
+        .map((skillPackage) => skillPackage.sidecar.name),
+    );
     const results = listSkills(root)
-      .filter((skill) => skill.state === 'active')
+      .filter((skill) => skill.state === 'active' && !universalSkills.has(skill.name))
       .map((skill) => ({ name: skill.name, result: testSkill(skill) }));
     expect(results.filter((item) => !item.result.passed)).toEqual([]);
   });
@@ -885,12 +1254,20 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(result.selected.map((item) => item.skill.name)).not.toContain('web-interface');
   });
 
-  test('uses a dependency-aware context budget and only blocks mandatory overflow', () => {
+  test('uses a dependency-aware context budget and warns instead of blocking mandatory overflow', () => {
     const contract = createTaskContract('Build a professional accessible web interface');
-    const compressed = resolveSkills(root, contract.goal, contract, { contextBudget: 16_000 });
+    const insufficient = resolveSkills(root, contract.goal, contract, { contextBudget: 16_000 });
+    // Mandatory overflow degrades gracefully: the turn proceeds with minimal
+    // guidance plus warnings instead of throwing Mandatory skill guidance.
+    expect(insufficient.blocked).toBe(false);
+    expect(insufficient.totalContextCost).toBeGreaterThan(16_000);
+    expect(insufficient.hierarchyErrors).toEqual([]);
+    expect(insufficient.warnings.join(' ')).toContain('Mandatory skill guidance requires');
+    expect(insufficient.omittedByBudget.length).toBeGreaterThan(0);
+    const compressed = resolveSkills(root, contract.goal, contract, { contextBudget: 22_000 });
     expect(compressed.blocked).toBe(false);
     expect(compressed.compressedByBudget.length).toBeGreaterThan(0);
-    expect(compressed.totalContextCost).toBeLessThanOrEqual(16_000);
+    expect(compressed.totalContextCost).toBeLessThanOrEqual(22_000);
     expect(compressed.promptText.length).toBe(compressed.totalContextCost);
     expect(compressed.promptText.startsWith('## Active local skills\nManifest: ')).toBe(true);
     expect(compressed.promptText).toContain('\nManifest sha256: ');
@@ -905,9 +1282,9 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     }
     for (const name of ['task-routing', 'testing-engineering', 'verification']) {
       const selected = compressed.selected.find((item) => item.skill.name === name)!;
-      const requiredCore = BUNDLED_SKILL_DEFINITIONS.find(
-        (item) => item.name === name,
-      )!.instructions;
+      const requiredCore = BUNDLED_SKILL_DEFINITIONS.find((item) => item.name === name)!
+        .instructions.replace(/^#\s+[^\n]+\n+/, '')
+        .trim();
       expect(selected.promptText).toContain(requiredCore);
     }
     const names = new Set(compressed.selected.map((item) => item.skill.name));
@@ -918,8 +1295,11 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       contextBudget: 1,
       pins: ['web-interface'],
     });
-    expect(pinned.blocked).toBe(true);
-    expect(pinned.totalContextCost).toBeGreaterThan(1);
+    // Tiny budgets floor at MIN_SKILL_CONTEXT_BUDGET and warn instead of blocking.
+    expect(pinned.contextBudget).toBe(MIN_SKILL_CONTEXT_BUDGET);
+    expect(pinned.blocked).toBe(false);
+    expect(pinned.warnings.join(' ')).toContain('Mandatory skill guidance requires');
+    expect(pinned.totalContextCost).toBeGreaterThan(pinned.contextBudget);
     expect(pinned.selected.map((item) => item.skill.name)).toEqual(
       expect.arrayContaining([
         'task-routing',
@@ -931,7 +1311,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(pinned.omittedByBudget).not.toContain('web-interface');
   });
 
-  test('injects exactly the advertised bounded full compact and minimal representations', () => {
+  test('injects exactly the advertised bounded skill representations', () => {
     const taskContract = createTaskContract('Build a professional accessible web interface');
     const compiled = compilePrompt({
       role: 'worker',
@@ -939,7 +1319,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       provider: 'openai',
       workingDirectory: root,
       taskContract,
-      skillSelection: { contextBudget: 16_000 },
+      skillSelection: { contextBudget: 22_000 },
     });
     const firstSkill = compiled.manifest.skills[0]!;
     const skillTextStart = compiled.systemPrompt.indexOf('## Active local skills');
@@ -947,24 +1327,33 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     const actualInjectedSkills = compiled.systemPrompt.slice(skillTextStart);
     const advertisedCost = compiled.manifest.skillContextCost;
     expect(actualInjectedSkills.length).toBe(advertisedCost);
-    expect(advertisedCost).toBeLessThanOrEqual(16_000);
+    expect(advertisedCost).toBeLessThanOrEqual(22_000);
     expect(actualInjectedSkills).toContain(`### ${firstSkill.name} v`);
     expect(compiled.manifest.skills.map((item) => item.representation)).toContain('minimal');
-    expect(compiled.manifest.skills.map((item) => item.representation)).toContain('compact');
-    expect(compiled.manifest.skills.map((item) => item.representation)).toContain('full');
 
     const roomy = resolveSkills(root, taskContract.goal, taskContract, { contextBudget: 60_000 });
     expect(roomy.selected.map((item) => item.representation)).toContain('full');
-    expect(() =>
-      compilePrompt({
-        role: 'worker',
-        mode: 'advanced',
-        provider: 'openai',
-        workingDirectory: root,
-        taskContract,
-        skillSelection: { contextBudget: 100 },
-      }),
-    ).toThrow('Mandatory skill guidance requires');
+    const justBelowFull = resolveSkills(root, taskContract.goal, taskContract, {
+      contextBudget: roomy.totalContextCost - 1,
+    });
+    expect(justBelowFull.blocked).toBe(false);
+    // One char less than a full fit strictly degrades the bundle without blocking it.
+    expect(justBelowFull.totalContextCost).toBeLessThanOrEqual(roomy.totalContextCost - 1);
+    expect(justBelowFull.totalContextCost).toBeLessThan(roomy.totalContextCost);
+    // Tiny requested budgets floor instead of throwing Mandatory skill guidance.
+    const pressured = compilePrompt({
+      role: 'worker',
+      mode: 'advanced',
+      provider: 'openai',
+      workingDirectory: root,
+      taskContract,
+      skillSelection: { contextBudget: 100 },
+    });
+    expect(pressured.manifest.skillContextBudget.budget).toBe(MIN_SKILL_CONTEXT_BUDGET);
+    expect(pressured.warnings?.join(' ') ?? '').toContain('Mandatory skill guidance requires');
+    expect(pressured.manifest.skillWarnings.join(' ')).toContain(
+      'Mandatory skill guidance requires',
+    );
   });
 
   test('derives skill capacity from verified model space and occupied context', () => {
@@ -985,13 +1374,18 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(open.source).toBe('trusted-model-window');
     expect(open.budget).toBe(15_904);
     expect(crowded.budget).toBeLessThan(open.budget);
-    expect(crowded.budget).toBe(1);
+    // Crowded windows floor at MIN_SKILL_CONTEXT_BUDGET instead of max(1, …).
+    expect(crowded.budget).toBe(MIN_SKILL_CONTEXT_BUDGET);
     expect(crowded.occupiedContextChars).toBe(78_000);
     const planning = deriveSkillContextBudget({
       requestedBudget: 12_345,
       occupiedContextTokenUpperBound: 1_000_000,
     });
     expect(planning).toMatchObject({ budget: 12_345, source: 'planning-default' });
+    // Window-relative default: 10% of a verified window clamped to [8_000, 30_000].
+    expect(deriveSkillContextBudget({ contextWindowTokens: 200_000 }).requestedBudget).toBe(20_000);
+    expect(deriveSkillContextBudget({ contextWindowTokens: 32_000 }).requestedBudget).toBe(8_000);
+    expect(deriveSkillContextBudget({}).requestedBudget).toBe(30_000);
   });
 
   test('reserves the actual completion limit and fails closed on unknown or crowded live context', () => {
@@ -1045,6 +1439,23 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     );
     expect(safe.manifest.totalContextTokenUpperBound).toBeLessThanOrEqual(128_000);
 
+    // A crowded 32k window no longer throws Mandatory skill guidance: the skill
+    // budget floors and warns, and only a genuinely overflowing rendered
+    // prompt still fails closed against the verified window.
+    const crowdedCompiled = compilePrompt({
+      role: 'manager',
+      mode: 'advanced',
+      provider: 'openai',
+      model: 'verified-32k',
+      occupiedContextTokenUpperBound: 1_000,
+      reservedOutputTokens: MANAGER_OUTPUT_TOKEN_LIMIT,
+      requireVerifiedContextWindow: true,
+      workingDirectory: root,
+      taskContract: contract,
+    });
+    expect(crowdedCompiled.manifest.skillContextBudget.budget).toBeGreaterThanOrEqual(
+      MIN_SKILL_CONTEXT_BUDGET,
+    );
     expect(() =>
       compilePrompt({
         role: 'manager',
@@ -1057,7 +1468,7 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
         workingDirectory: root,
         taskContract: contract,
       }),
-    ).toThrow('context budget is 1');
+    ).toThrow('exceeding the verified 32000-token window');
     expect(() =>
       compilePrompt({
         role: 'manager',
@@ -1161,10 +1572,21 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     const card = buildSkillEvaluationCard(root, skill);
     expect(card.gate.status).toBe('unmeasured');
     expect(card.cases.length).toBeGreaterThan(1);
+    expect(card.suite.requiredCategories).toEqual([
+      'positive',
+      'negative',
+      'ambiguous',
+      'adversarial',
+      'full-task',
+    ]);
+    for (const category of card.suite.requiredCategories) {
+      expect(card.suite.categories[category].length).toBeGreaterThan(0);
+    }
     for (const [index, evaluator] of [
       'deterministic',
+      'deterministic',
+      'deterministic',
       'human-blind-review',
-      'human-review',
     ].entries()) {
       recordSkillEvaluationRun(root, {
         id: `run-${index}`,
@@ -1203,6 +1625,614 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       recordedAt: '2026-07-18T00:00:01.000Z',
     });
     expect(evaluateSkillPromotion(root, skill.name, skill.hash).status).toBe('blocked');
+  });
+
+  test('records large evaluation batches atomically with stable-id replacement', () => {
+    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+    const base = {
+      skill: skill.name,
+      revisionHash: skill.hash,
+      provider: 'kory-resolver',
+      model: 'deterministic-v5',
+      harnessVersion: 'batch-test',
+      role: 'worker' as const,
+      evaluator: 'deterministic' as const,
+      quality: 1,
+      verification: 1,
+      integrityFailure: false,
+      recordedAt: '2026-09-06T00:00:00.000Z',
+      protocolVersion: 2 as const,
+      caseCategory: 'positive' as const,
+      variant: 'with-skill' as const,
+      routing: { expectedSelection: true, selected: true },
+    };
+    recordSkillEvaluationRuns(root, [
+      {
+        ...base,
+        id: 'batch-a',
+        caseId: 'case-a',
+        comparisonId: 'pair-a',
+        passed: true,
+        evidence: ['first-a'],
+      },
+      {
+        ...base,
+        id: 'batch-b',
+        caseId: 'case-b',
+        comparisonId: 'pair-b',
+        passed: true,
+        evidence: ['first-b'],
+      },
+    ]);
+    recordSkillEvaluationRuns(root, [
+      {
+        ...base,
+        id: 'batch-a',
+        caseId: 'case-a',
+        comparisonId: 'pair-a',
+        passed: false,
+        quality: 0,
+        evidence: ['replacement-a'],
+      },
+    ]);
+    const runs = buildSkillEvaluationCard(root, skill).runs;
+    expect(runs.map((run) => run.id).sort()).toEqual(['batch-a', 'batch-b']);
+    expect(runs.find((run) => run.id === 'batch-a')).toMatchObject({
+      passed: false,
+      quality: 0,
+      evidence: ['replacement-a'],
+    });
+    expect(() =>
+      recordSkillEvaluationRuns(root, [
+        {
+          ...base,
+          id: 'duplicate',
+          caseId: 'case-c',
+          comparisonId: 'pair-c',
+          passed: true,
+          evidence: ['one'],
+        },
+        {
+          ...base,
+          id: 'duplicate',
+          caseId: 'case-d',
+          comparisonId: 'pair-d',
+          passed: true,
+          evidence: ['two'],
+        },
+      ]),
+    ).toThrow('duplicate run IDs');
+  });
+
+  test('serializes concurrent evaluation ledger writers without losing distinct runs', async () => {
+    const evaluationModule = join(import.meta.dir, '..', 'skill-evaluations.ts');
+    const writerPath = join(root, 'evaluation-ledger-writer.ts');
+    const barrierPath = join(root, 'evaluation-ledger-go');
+    const writerIds = Array.from({ length: 8 }, (_, index) => `concurrent-${index}`);
+    writeFileSync(
+      writerPath,
+      `import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { recordSkillEvaluationRun } from ${JSON.stringify(evaluationModule)};
+
+const [projectRoot, runId] = process.argv.slice(2);
+if (!projectRoot || !runId) throw new Error('missing writer arguments');
+writeFileSync(join(projectRoot, runId + '.ready'), 'ready');
+while (!existsSync(join(projectRoot, 'evaluation-ledger-go'))) await Bun.sleep(2);
+recordSkillEvaluationRun(projectRoot, {
+  id: runId,
+  skill: 'evaluation-ledger-concurrency-test',
+  revisionHash: 'revision-a',
+  caseId: runId,
+  provider: 'test-provider',
+  model: 'test-model',
+  harnessVersion: 'concurrent-writer-test',
+  role: 'worker',
+  evaluator: 'deterministic',
+  passed: true,
+  quality: 1,
+  verification: 1,
+  integrityFailure: false,
+  evidence: ['writer completed'],
+  recordedAt: '2026-09-13T00:00:00.000Z',
+  protocolVersion: 2,
+  caseCategory: 'positive',
+  variant: 'with-skill',
+  comparisonId: runId + ':pair',
+  routing: { expectedSelection: true, selected: true },
+});
+`,
+      'utf8',
+    );
+
+    const writers = writerIds.map((runId) =>
+      Bun.spawn([process.execPath, writerPath, root, runId], {
+        cwd: root,
+        stdout: 'ignore',
+        stderr: 'pipe',
+      }),
+    );
+    const readyDeadline = Date.now() + 10_000;
+    while (!writerIds.every((runId) => existsSync(join(root, `${runId}.ready`)))) {
+      if (Date.now() >= readyDeadline)
+        throw new Error('concurrent evaluation writers did not start');
+      await Bun.sleep(5);
+    }
+    writeFileSync(barrierPath, 'go', 'utf8');
+
+    const exitCodes = await Promise.all(writers.map((writer) => writer.exited));
+    const stderr = await Promise.all(writers.map((writer) => new Response(writer.stderr).text()));
+    expect(exitCodes, stderr.filter(Boolean).join('\n')).toEqual(writerIds.map(() => 0));
+
+    const ledger = JSON.parse(
+      readFileSync(join(root, '.koryphaios', 'skills', 'evaluations.json'), 'utf8'),
+    ) as Array<{ id?: unknown }>;
+    expect(
+      ledger
+        .map((run) => run.id)
+        .filter((id): id is string => typeof id === 'string')
+        .sort(),
+    ).toEqual([...writerIds].sort());
+    expect(existsSync(join(root, '.koryphaios', 'skills', 'evaluations.json.lock'))).toBe(false);
+  });
+
+  test('gates evidence protocol v2 on blinded provenance, routing, baselines, and regressions', () => {
+    syncSkillStewardRegistry(root);
+    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+    const card = buildSkillEvaluationCard(root, skill);
+    const positiveCase = card.suite.categories.positive[0]!;
+    const benchmarkCases = card.suite.requiredCategories.flatMap((category) =>
+      card.suite.categories[category]
+        .slice(0, category === 'full-task' ? 2 : 1)
+        .map((benchmarkCase) => ({ category, benchmarkCase })),
+    );
+
+    expect(() =>
+      recordSkillEvaluationRun(root, {
+        id: 'missing-blind-provenance',
+        skill: skill.name,
+        revisionHash: skill.hash,
+        caseId: positiveCase.id,
+        provider: 'test-provider',
+        model: 'subject-model',
+        harnessVersion: 'v2',
+        role: 'worker',
+        evaluator: 'blind-review',
+        passed: true,
+        quality: 0.9,
+        verification: 0.9,
+        integrityFailure: false,
+        evidence: ['blind-review-artifact'],
+        recordedAt: '2026-07-18T00:00:00.000Z',
+        protocolVersion: 2,
+        variant: 'with-skill',
+        caseCategory: 'positive',
+        comparisonId: 'missing-provenance',
+        routing: { expectedSelection: true, selected: true },
+      }),
+    ).toThrow('Blind review requires evaluator provenance');
+
+    for (const [index, { category, benchmarkCase }] of benchmarkCases.entries()) {
+      recordSkillEvaluationRun(root, {
+        id: `v2-candidate-${category}-${index}`,
+        skill: skill.name,
+        revisionHash: skill.hash,
+        caseId: benchmarkCase.id,
+        provider: 'test-provider',
+        model: 'subject-model',
+        harnessVersion: 'v2',
+        role: 'worker',
+        evaluator: 'deterministic',
+        passed: true,
+        quality: 0.9,
+        verification: 0.9,
+        integrityFailure: false,
+        evidence: [`candidate-${category}`],
+        recordedAt: `2026-07-18T00:00:0${index}.000Z`,
+        protocolVersion: 2,
+        variant: 'with-skill',
+        caseCategory: category,
+        comparisonId: `pair-${category}-${index}`,
+        routing: {
+          expectedSelection: benchmarkCase.expectedSelection,
+          selected: benchmarkCase.expectedSelection,
+        },
+      });
+    }
+
+    const firstBenchmark = benchmarkCases[0]!;
+    recordSkillEvaluationRun(root, {
+      id: 'v2-self-blind-review',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: firstBenchmark.benchmarkCase.id,
+      provider: 'chatgpt-web',
+      model: 'chatgpt-web/pro',
+      harnessVersion: 'v2-blind',
+      role: 'critic',
+      evaluator: 'blind-review',
+      passed: true,
+      quality: 0.9,
+      verification: 0.9,
+      integrityFailure: false,
+      evidence: ['self-review-artifact'],
+      recordedAt: '2026-07-18T00:00:20.000Z',
+      protocolVersion: 2,
+      variant: 'with-skill',
+      caseCategory: firstBenchmark.category,
+      comparisonId: `pair-${firstBenchmark.category}-0`,
+      routing: {
+        expectedSelection: firstBenchmark.benchmarkCase.expectedSelection,
+        selected: firstBenchmark.benchmarkCase.expectedSelection,
+      },
+      evaluatorProvenance: {
+        evaluatorId: 'self-blind-evaluator',
+        kind: 'model',
+        provider: 'chatgpt-web',
+        model: 'chatgpt-web/pro',
+        agentId: 'skill-steward:web-interface',
+        displayLabel: 'ChatGPT web — web-interface',
+        assignmentId: 'self-blind-assignment',
+        blindTo: ['skill-variant', 'expected-outcome'],
+        evidence: ['self-blind-assignment-record'],
+      },
+    });
+    expect(evaluateSkillPromotion(root, skill.name, skill.hash).provenancedBlindReviews).toBe(0);
+
+    recordSkillEvaluationRun(root, {
+      id: 'v2-primary-blind-review',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: firstBenchmark.benchmarkCase.id,
+      provider: 'chatgpt-web',
+      model: 'chatgpt-web/pro',
+      harnessVersion: 'v2-blind',
+      role: 'critic',
+      evaluator: 'blind-review',
+      passed: true,
+      quality: 0.9,
+      verification: 0.9,
+      integrityFailure: false,
+      evidence: ['blind-review-artifact'],
+      recordedAt: '2026-07-18T00:00:30.000Z',
+      protocolVersion: 2,
+      variant: 'with-skill',
+      caseCategory: firstBenchmark.category,
+      comparisonId: `pair-${firstBenchmark.category}-0`,
+      routing: {
+        expectedSelection: firstBenchmark.benchmarkCase.expectedSelection,
+        selected: firstBenchmark.benchmarkCase.expectedSelection,
+      },
+      evaluatorProvenance: {
+        evaluatorId: 'blind-evaluator-1',
+        kind: 'model',
+        provider: 'chatgpt-web',
+        model: 'chatgpt-web/pro',
+        agentId: 'reviewer-agent-1',
+        displayLabel: 'ChatGPT web — web-interface',
+        assignmentId: 'assignment-1',
+        blindTo: ['skill-variant', 'expected-outcome'],
+        evidence: ['blind-assignment-record'],
+      },
+    });
+
+    const withoutBaselines = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(withoutBaselines.status).toBe('insufficient-evidence');
+    expect(withoutBaselines.provenancedBlindReviews).toBe(1);
+    expect(withoutBaselines.routingPrecision).toBe(1);
+    expect(withoutBaselines.routingRecall).toBe(1);
+    expect(withoutBaselines.reasons).toContain(
+      'Skill-vs-no-skill baselines are missing for: positive, negative, ambiguous, adversarial, full-task.',
+    );
+
+    for (const [index, { category, benchmarkCase }] of benchmarkCases.entries()) {
+      recordSkillEvaluationRun(root, {
+        id: `v2-baseline-${category}-${index}`,
+        skill: skill.name,
+        revisionHash: skill.hash,
+        caseId: benchmarkCase.id,
+        provider: 'test-provider',
+        model: 'subject-model',
+        harnessVersion: 'v2',
+        role: 'worker',
+        evaluator: 'deterministic',
+        passed: false,
+        quality: 0.4,
+        verification: 0.4,
+        integrityFailure: false,
+        evidence: [`baseline-${category}`],
+        recordedAt: `2026-07-18T00:01:0${index}.000Z`,
+        protocolVersion: 2,
+        variant: 'without-skill',
+        caseCategory: category,
+        comparisonId: `pair-${category}-${index}`,
+        routing: {
+          expectedSelection: benchmarkCase.expectedSelection,
+          selected: benchmarkCase.expectedSelection,
+        },
+      });
+    }
+
+    const ready = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(ready.status).toBe('ready');
+    expect(ready.baselineRuns).toBe(6);
+    expect(ready.pairedBaselineCases).toBe(6);
+    expect(ready.pairedBaselineCategories).toEqual(card.suite.requiredCategories);
+    expect(ready.pairedBaselineCategoryCounts['full-task']).toBe(2);
+    expect(ready.skillBaselinePassRateDelta).toBe(1);
+    expect(ready.skillBaselineQualityDelta).toBeCloseTo(0.5);
+    expect(ready.skillBaselineVerificationDelta).toBeCloseTo(0.5);
+
+    const firstFullTask = benchmarkCases.find((item) => item.category === 'full-task')!;
+    const firstFullTaskIndex = benchmarkCases.findIndex((item) => item === firstFullTask);
+    recordSkillEvaluationRun(root, {
+      id: 'v2-duplicate-full-task-blind-review',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: firstFullTask.benchmarkCase.id,
+      provider: 'blind-provider',
+      model: 'blind-model',
+      harnessVersion: 'v2-blind',
+      role: 'critic',
+      evaluator: 'blind-review',
+      passed: true,
+      quality: 0.95,
+      verification: 0.95,
+      integrityFailure: false,
+      evidence: ['independent blind review of the existing full-task pair'],
+      recordedAt: '2026-07-18T00:02:00.000Z',
+      protocolVersion: 2,
+      variant: 'with-skill',
+      caseCategory: 'full-task',
+      comparisonId: `pair-full-task-${firstFullTaskIndex}`,
+      routing: { expectedSelection: true, selected: true },
+      evaluatorProvenance: {
+        evaluatorId: 'blind-evaluator-2',
+        kind: 'model',
+        provider: 'blind-provider',
+        model: 'blind-model',
+        assignmentId: 'full-task-blind-assignment',
+        blindTo: ['skill-variant', 'expected-outcome'],
+        evidence: ['randomized full-task artifacts'],
+      },
+    });
+    const deduplicatedCoverage = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(deduplicatedCoverage.categoryCoverage['full-task']).toBe(2);
+    expect(deduplicatedCoverage.pairedBaselineCategoryCounts['full-task']).toBe(2);
+
+    const secondPositiveCase = card.suite.categories.positive[1] ?? positiveCase;
+    recordSkillEvaluationRun(root, {
+      id: 'v2-regression-source',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: secondPositiveCase.id,
+      provider: 'test-provider',
+      model: 'subject-model',
+      harnessVersion: 'v2',
+      role: 'worker',
+      evaluator: 'deterministic',
+      passed: false,
+      quality: 0.9,
+      verification: 0.9,
+      integrityFailure: false,
+      evidence: ['regression-source-artifact'],
+      recordedAt: '2026-07-18T00:02:00.000Z',
+      protocolVersion: 2,
+      variant: 'with-skill',
+      caseCategory: 'positive',
+      comparisonId: 'regression-source-unpaired',
+      routing: { expectedSelection: true, selected: true },
+    });
+
+    const blocked = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(blocked.status).toBe('blocked');
+    expect(blocked.openRegressions).toBe(1);
+
+    const regressionCard = buildSkillEvaluationCard(root, skill);
+    const regressionCase = regressionCard.suite.categories.regression.find(
+      (item) => item.regressionOfRunId === 'v2-regression-source',
+    )!;
+    expect(regressionCase.originCaseId).toBe(secondPositiveCase.id);
+
+    recordSkillEvaluationRun(root, {
+      id: 'v2-regression-retest',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: regressionCase.id,
+      provider: 'test-provider',
+      model: 'subject-model',
+      harnessVersion: 'v2',
+      role: 'worker',
+      evaluator: 'deterministic',
+      passed: true,
+      quality: 0.9,
+      verification: 0.9,
+      integrityFailure: false,
+      evidence: ['regression-retest-artifact'],
+      recordedAt: '2026-07-18T00:03:00.000Z',
+      protocolVersion: 2,
+      variant: 'with-skill',
+      caseCategory: 'regression',
+      comparisonId: 'regression-retest-unpaired',
+      routing: {
+        expectedSelection: regressionCase.expectedSelection,
+        selected: regressionCase.expectedSelection,
+      },
+      regressionId: 'v2-regression-source',
+    });
+
+    const regressionClosed = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(regressionClosed.status).toBe('ready');
+    expect(regressionClosed.regressionCases).toBe(1);
+    expect(regressionClosed.openRegressions).toBe(0);
+  });
+
+  test('uses the latest complete paired retry for skill-vs-no-skill uplift', () => {
+    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+    const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+    const base = {
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: fullTask.id,
+      provider: 'test-provider',
+      model: 'subject-model',
+      harnessVersion: 'retry-v2',
+      role: 'worker' as const,
+      evaluator: 'deterministic' as const,
+      passed: true,
+      quality: 1,
+      integrityFailure: false,
+      evidence: ['paired retry'],
+      protocolVersion: 2 as const,
+      caseCategory: 'full-task' as const,
+    };
+    recordSkillEvaluationRuns(root, [
+      {
+        ...base,
+        id: 'retry-old-with',
+        verification: 0,
+        recordedAt: '2026-07-18T00:00:00.000Z',
+        variant: 'with-skill',
+        comparisonId: 'retry-old',
+        routing: { expectedSelection: true, selected: true },
+      },
+      {
+        ...base,
+        id: 'retry-old-without',
+        verification: 1,
+        recordedAt: '2026-07-18T00:00:01.000Z',
+        variant: 'without-skill',
+        comparisonId: 'retry-old',
+        routing: { expectedSelection: true, selected: false },
+      },
+      {
+        ...base,
+        id: 'retry-new-with',
+        verification: 1,
+        recordedAt: '2026-07-18T00:01:00.000Z',
+        variant: 'with-skill',
+        comparisonId: 'retry-new',
+        routing: { expectedSelection: true, selected: true },
+      },
+      {
+        ...base,
+        id: 'retry-new-without',
+        verification: 1,
+        recordedAt: '2026-07-18T00:01:01.000Z',
+        variant: 'without-skill',
+        comparisonId: 'retry-new',
+        routing: { expectedSelection: true, selected: false },
+      },
+    ]);
+
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.pairedBaselineCategoryCounts['full-task']).toBe(1);
+    expect(gate.skillBaselineVerificationDelta).toBe(0);
+  });
+
+  test('closes a protocol-v3 regression with a later passing equivalent evaluator rerun across revisions', () => {
+    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+    const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+    const contractHash = 'b'.repeat(64);
+    const base = {
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: fullTask.id,
+      provider: 'test-provider',
+      model: 'subject-model',
+      harnessVersion: 'v3-retry@1',
+      role: 'worker' as const,
+      evaluator: 'deterministic' as const,
+      quality: 1,
+      verification: 1,
+      integrityFailure: false,
+      evidence: ['same-contract retry'],
+      protocolVersion: 3 as const,
+      variant: 'with-skill' as const,
+      caseCategory: 'full-task' as const,
+      routing: { expectedSelection: true, selected: true },
+      suiteId: 'test-suite',
+      scenarioId: fullTask.id,
+      evaluationContractHash: contractHash,
+      evaluationContractVersion: 3,
+      materializerId: 'test-materializer@1',
+      deterministicScorerId: 'test-scorer@1',
+    };
+    recordSkillEvaluationRuns(root, [
+      {
+        ...base,
+        id: 'v3-regression-source',
+        revisionHash: 'c'.repeat(64),
+        experimentId: 'v3-regression-source-experiment',
+        passed: false,
+        recordedAt: '2026-09-10T00:00:00.000Z',
+      },
+      {
+        ...base,
+        id: 'v3-regression-rerun',
+        evaluationContractHash: 'd'.repeat(64),
+        harnessVersion: 'v3-retry@2',
+        experimentId: 'v3-regression-rerun-experiment',
+        passed: true,
+        recordedAt: '2026-09-10T00:01:00.000Z',
+      },
+    ]);
+
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.regressionCases).toBe(1);
+    expect(gate.openRegressions).toBe(0);
+  });
+
+  test('does not carry a protocol-v3 regression forward when the evaluator generation is superseded', () => {
+    const skill = listSkills(root).find((item) => item.name === 'web-interface')!;
+    const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+    const base = {
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: fullTask.id,
+      provider: 'test-provider',
+      model: 'subject-model',
+      harnessVersion: 'v3-retry@1',
+      role: 'worker' as const,
+      evaluator: 'deterministic' as const,
+      quality: 1,
+      verification: 1,
+      integrityFailure: false,
+      evidence: ['evaluator generation retry'],
+      protocolVersion: 3 as const,
+      variant: 'with-skill' as const,
+      caseCategory: 'full-task' as const,
+      routing: { expectedSelection: true, selected: true },
+      suiteId: 'test-suite',
+      scenarioId: fullTask.id,
+      evaluationContractVersion: 3,
+      materializerId: 'test-materializer@1',
+    };
+    recordSkillEvaluationRuns(root, [
+      {
+        ...base,
+        id: 'v3-generation-regression-source',
+        revisionHash: 'c'.repeat(64),
+        evaluationContractHash: 'b'.repeat(64),
+        deterministicScorerId: 'test-scorer@1',
+        experimentId: 'v3-generation-regression-source-experiment',
+        passed: false,
+        recordedAt: '2026-09-10T00:00:00.000Z',
+      },
+      {
+        ...base,
+        id: 'v3-generation-regression-rerun',
+        evaluationContractHash: 'd'.repeat(64),
+        deterministicScorerId: 'test-scorer@2',
+        experimentId: 'v3-generation-regression-rerun-experiment',
+        passed: true,
+        recordedAt: '2026-09-10T00:01:00.000Z',
+      },
+    ]);
+
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.regressionCases).toBe(0);
+    expect(gate.openRegressions).toBe(0);
   });
 
   test('supports explicit keep, replace, and merge choices for bundled updates', () => {

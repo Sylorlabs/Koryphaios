@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { createIsolatedTestEnvironment } from '../../../scripts/test-backend-isolated';
 import { handleWSMessage, type WSClientData } from './websocket-handler';
 
 // Resolve relative to this test file so the path is correct regardless of CWD.
@@ -53,23 +56,31 @@ describe('websocket heartbeat handling', () => {
         dependencies,
       );
     `;
-    const child = spawnSync(process.execPath, ['--no-env-file', '-e', childCode], {
-      cwd: process.cwd(),
-      env: {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
-        NODE_ENV: 'test',
-        // The handler module transitively opens the database; keep the child
-        // on an isolated in-memory store so the test-process guard stays intact.
-        DATABASE_URL: 'sqlite::memory:',
-      },
-      encoding: 'utf8',
-      timeout: 5_000,
-    });
+    const home = mkdtempSync(join(tmpdir(), 'kory-ws-audit-'));
+    mkdirSync(join(home, 'tmp'));
+    mkdirSync(join(home, 'project'));
+    const child = (() => {
+      try {
+        return spawnSync(process.execPath, ['--no-env-file', '-e', childCode], {
+          cwd: process.cwd(),
+          env: {
+            ...createIsolatedTestEnvironment(
+              { ...process.env, KORY_RUN_LIVE_PROVIDER_TESTS: '0' },
+              home,
+            ),
+            DATABASE_URL: `sqlite:${join(home, 'db', 'audit.db')}`,
+          },
+          encoding: 'utf8',
+          timeout: 5_000,
+        });
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    })();
     const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
 
     expect(child.error).toBeUndefined();
-    expect(child.status).toBe(0);
+    expect(child.status, output).toBe(0);
     expect(output).not.toContain(sentinel);
     expect(output).not.toContain('synthetic downstream failure');
     expect(output).not.toContain('"raw"');

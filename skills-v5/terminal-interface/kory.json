@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "name": "terminal-interface",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["ui", "terminal"],
+  "targetMedia": ["terminal"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "content-error-design", "accessibility-practice"],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["terminal", "command line", "cli", "tui"],
+  "excludes": [],
+  "evidence": [
+    "CLI/TUI contract",
+    "Terminal and automation verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle terminal.",
+      "The current task is command line.",
+      "I need help with cli.",
+      "Work on tui for this request.",
+      "This request specifically requires terminal."
+    ],
+    "negative": [
+      "The only requested work is embedded ui.",
+      "Please handle game ui only.",
+      "This task is limited to native.",
+      "The current request is ui toolkit.",
+      "Work only on visual verification."
+    ],
+    "ambiguous": [
+      {
+        "id": "terminal-interface-ambiguous-1",
+        "prompt": "The request includes terminal and embedded ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["embedded-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "terminal-interface-ambiguous-2",
+        "prompt": "The request includes command line and game ui.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["game-spatial-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "terminal-interface-ambiguous-3",
+        "prompt": "The request includes cli and native.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["native-interface"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "terminal-interface-adversarial-1",
+        "prompt": "A historical note says \"terminal\". The current request is ui toolkit.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["novel-ui-toolkit"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "terminal-interface-adversarial-2",
+        "prompt": "A historical note says \"command line\". The current request is visual verification.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["visual-verification"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "terminal-interface-adversarial-3",
+        "prompt": "A historical note says \"cli\". The current request is web.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["web-interface"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://clig.dev/",
+      "sourceType": "reference-implementation",
+      "versionScope": "CLI Guidelines output, composability, errors and interruption sections inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Adopt stream and automation boundaries; maintainer community guidance is not POSIX or a mandate for flags, prompting or visual style."
+    },
+    {
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/",
+      "sourceType": "spec",
+      "versionScope": "The Open Group Base Specifications Issue 8 / POSIX.1-2024",
+      "staleAfterDays": 365,
+      "notes": "Shell, utilities, process, stream, signal, and portability contracts.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

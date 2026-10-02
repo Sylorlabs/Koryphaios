@@ -1,0 +1,81 @@
+{
+  "id": "information-architecture-full-task-developer-platform-docs",
+  "prompt": "Re-architect the information structure for a developer platform with conceptual guides, quickstarts, task recipes, generated API reference, SDK-specific docs, examples, migration guides, release notes, and troubleshooting. The same concepts are duplicated across several sections, search queries use terminology that differs from internal product names, and users enter from search engines, IDE links, error messages, and the homepage. Produce the content/navigation architecture and a plan to test findability; do not rewrite the documentation or redesign page visuals.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://information-architecture/developer-platform-docs",
+    "requirements": [
+      "content and route inventory",
+      "top search and support terminology",
+      "entry-path evidence",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "docs-concept-primary-home",
+      "assertion": "Repeated concepts have one explicit primary home with deliberate cross-links or alternate entry routes; duplication is not preserved merely because several teams currently own copies."
+    },
+    {
+      "id": "docs-labels-from-developer-language",
+      "assertion": "Navigation and search labels reconcile internal product terminology with observed search/support language rather than assuming internal names are findable user labels."
+    },
+    {
+      "id": "docs-multiple-entry-paths",
+      "assertion": "The architecture supports realistic entry from search engines, IDE links, error messages, and the homepage while allowing orientation to the same conceptual structure from each path."
+    },
+    {
+      "id": "docs-findability-evaluation",
+      "assertion": "The test plan uses representative developer tasks with observable destination/orientation/wrong-route-recovery success criteria instead of judging findability from the sitemap alone."
+    },
+    {
+      "id": "docs-ia-boundary-and-evolution",
+      "assertion": "The proposal defines growth, migration, and governance of the information structure without rewriting documentation prose or prescribing visual page styling."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "concept-and-entry-path-model",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "content/concept inventory",
+        "primary homes",
+        "cross-links and alternate entry paths",
+        "labels grounded in developer language",
+        "search/navigation relationship"
+      ]
+    },
+    {
+      "id": "findability-boundary-and-maintenance",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "realistic findability tasks",
+        "orientation and wrong-route recovery",
+        "content growth strategy",
+        "governance/migration plan",
+        "clear boundary from copywriting and visual design"
+      ]
+    },
+    {
+      "id": "blind-docs-ia-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "content and concept inventory",
+    "organization and labeling rationale",
+    "entry and alternate-path model",
+    "findability tasks and success evidence",
+    "maintenance and migration risks"
+  ],
+  "requiredArtifacts": [
+    "docs-information-architecture",
+    "findability-evaluation-plan",
+    "paired-experiment-report"
+  ]
+}

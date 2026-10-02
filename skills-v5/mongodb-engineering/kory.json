@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "name": "mongodb-engineering",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["data", "database", "mongodb"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3900,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": ["verification"],
+  "conflicts": [],
+  "activation": ["mongodb", "mongo collection", "mongo aggregation", "mongo index"],
+  "excludes": [],
+  "evidence": [
+    "mongodb-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle mongodb.",
+      "The current task is mongo collection.",
+      "I need help with mongo aggregation.",
+      "Work on mongo index for this request.",
+      "This request specifically requires mongodb."
+    ],
+    "negative": [
+      "The only requested work is redis.",
+      "Please handle relational schema only.",
+      "This task is limited to full text search.",
+      "The current request is vector database.",
+      "Work only on bun runtime."
+    ],
+    "ambiguous": [
+      {
+        "id": "mongodb-engineering-ambiguous-1",
+        "prompt": "The request includes mongodb and redis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["redis-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "mongodb-engineering-ambiguous-2",
+        "prompt": "The request includes mongo collection and relational schema.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["relational-data-modeling"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "mongodb-engineering-ambiguous-3",
+        "prompt": "The request includes mongo aggregation and full text search.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["search-indexing"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "mongodb-engineering-adversarial-1",
+        "prompt": "A historical note says \"mongodb\". The current request is vector database.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "mongodb-engineering-adversarial-2",
+        "prompt": "A historical note says \"mongo collection\". The current request is bun runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "mongodb-engineering-adversarial-3",
+        "prompt": "A historical note says \"mongo aggregation\". The current request is compiler runtime.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.mongodb.com/docs/manual/data-modeling/best-practices/",
+      "sourceType": "official-docs",
+      "versionScope": "MongoDB data-modeling best practices inspected 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Adopt access-pattern and atomicity reasoning; preserve both embedding and referencing as conditional architectures.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.mongodb.com/docs/manual/data-modeling/embedding/",
+      "sourceType": "official-docs",
+      "versionScope": "MongoDB embedding guidance inspected 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Embedding locality and atomic update benefits depend on bounded document growth and relationship shape.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.mongodb.com/docs/manual/data-modeling/referencing/",
+      "sourceType": "official-docs",
+      "versionScope": "MongoDB referencing guidance inspected 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "References remain valid for independent lifecycles, complex relationships, and costly duplication; reject universal embedding.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.mongodb.com/docs/manual/reference/explain-results/",
+      "sourceType": "official-docs",
+      "versionScope": "MongoDB explain results inspected 2026-09-06",
+      "staleAfterDays": 60,
+      "notes": "Query-plan and execution statistics; adapt evidence to representative data without treating a plan as production-latency proof.",
+      "verifiedAt": "2026-09-06"
+    },
+    {
+      "url": "https://www.mongodb.com/docs/manual/",
+      "sourceType": "official-docs",
+      "versionScope": "MongoDB manual as available 2026-09-04",
+      "staleAfterDays": 45,
+      "notes": "MongoDB schema, consistency, indexing, transactions, sharding, and operations reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

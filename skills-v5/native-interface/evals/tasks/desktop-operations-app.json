@@ -1,0 +1,82 @@
+{
+  "id": "native-interface-full-task-desktop-operations",
+  "prompt": "Improve an existing native desktop operations application used for long-running jobs. Preserve the platform and toolkit conventions while clarifying navigation, menus and commands, keyboard-first operation, precision-pointer behavior, progress, partial results, errors, cancellation, destructive confirmation, focus when windows activate/deactivate, resize, display scaling, and relaunch restoration. Produce an implementation and verification contract for the real native runtime without replacing the app with browser-shaped navigation.",
+  "environment": {
+    "kind": "device",
+    "startingState": "fixture://native-interface/desktop-operations",
+    "requirements": [
+      "native desktop application fixture",
+      "platform and toolkit identity",
+      "existing windows, menus, commands, and components",
+      "job-state and failure fixtures",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "desktop-native-platform-contract",
+      "assertion": "Window, menu, command, shortcut, focus, and navigation behavior follows the identified native platform/toolkit conventions or documents a concrete product reason for divergence; browser-shaped navigation is not substituted."
+    },
+    {
+      "id": "desktop-native-job-state",
+      "assertion": "Running, loading, partial-result, error, cancellation, failed-cancellation, completion, and destructive-action states have explicit observable behavior and domain-versus-presentation ownership."
+    },
+    {
+      "id": "desktop-native-input-focus",
+      "assertion": "Representative workflows are operable by keyboard and precision pointer with deterministic focus behavior across window activation/deactivation, commands, dialogs, and recovery."
+    },
+    {
+      "id": "desktop-native-resize-scaling",
+      "assertion": "The contract defines behavior for supported window resizing and display/text scaling without clipping or hiding critical actions/state, and verification exercises representative size/scale changes."
+    },
+    {
+      "id": "desktop-native-restoration-proof",
+      "assertion": "Relaunch/interruption restoration distinguishes durable job/domain state from ephemeral presentation state and is verified in the real native runtime or a faithful native simulator."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "desktop-platform-contract",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "platform and toolkit conventions preserved",
+        "window, menu, command, shortcut, and focus behavior",
+        "domain and presentation state distinguished",
+        "loading, partial, error, cancellation, and destructive states",
+        "no browser navigation assumptions"
+      ]
+    },
+    {
+      "id": "desktop-runtime-verification",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "keyboard and precision-pointer operation",
+        "window resize and display scaling",
+        "active/inactive focus behavior",
+        "relaunch restoration",
+        "real native runtime or faithful simulator evidence"
+      ]
+    },
+    {
+      "id": "blind-desktop-native-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "desktop platform and toolkit contract",
+    "window and command model",
+    "state, cancellation, and restoration matrix",
+    "input, focus, resize, and scaling checks",
+    "native runtime verification plan"
+  ],
+  "requiredArtifacts": [
+    "desktop-native-interface-plan",
+    "desktop-runtime-state-matrix",
+    "paired-experiment-report"
+  ]
+}

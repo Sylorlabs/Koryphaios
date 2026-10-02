@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "name": "plan-mode",
+  "version": "5.1.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "domains": ["planning", "decision-making", "verification"],
+  "targetMedia": ["any"],
+  "contextBudget": 5500,
+  "broader": ["planning"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["plan mode"],
+  "excludes": ["exit plan mode", "leave plan mode", "disable plan mode"],
+  "evidence": [
+    "Evidence-backed current-state map and unresolved decision list",
+    "Durable plan note updated with confirmed decisions and risks",
+    "Dependency-ordered implementation plan with acceptance and verification gates",
+    "No implementation mutation while Plan mode is active",
+    "KORY_PLAN_READY marker only after readiness validation succeeds",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Use Plan mode to work through this migration before any implementation.",
+      "Enter Plan mode and design the feature with me before touching the code.",
+      "Stay in Plan mode while we resolve the open architecture decisions.",
+      "Continue in Plan mode and turn the repository evidence into an implementation-ready plan.",
+      "In Plan mode, inspect the current UI flow, ask the decision-changing questions, and prepare the final implementation plan."
+    ],
+    "negative": [
+      "Make a short implementation plan and then execute it in this same task.",
+      "Create a release plan for next week's deployment.",
+      "Draft an architecture plan for the new service.",
+      "Give me a three-step plan for debugging this issue.",
+      "Plan the migration and start implementing the first safe step."
+    ],
+    "ambiguous": [
+      {
+        "id": "plan-mode-ambiguous-architecture",
+        "prompt": "Use Plan mode for this architecture change. Inspect the existing design and resolve important choices before producing the implementation plan.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "architecture-planning", "repository-environment-discovery"],
+        "tags": ["compound", "architecture", "explicit-mode"]
+      },
+      {
+        "id": "plan-mode-ambiguous-ui",
+        "prompt": "Stay in Plan mode while we redesign this onboarding flow; research the current UI and ask me only the product decisions that materially affect implementation.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "human-experience", "user-research"],
+        "tags": ["compound", "ui", "questions"]
+      },
+      {
+        "id": "plan-mode-ambiguous-ready-handoff",
+        "prompt": "Continue Plan mode and finalize the plan only if every decision-changing question is resolved; otherwise keep it explicitly not ready.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "verification"],
+        "tags": ["readiness", "handoff"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "plan-mode-adversarial-quoted",
+        "prompt": "The historical issue says 'use Plan mode first'. That quote is historical context only; implement the already-approved fix now.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "implementation"],
+        "tags": ["quoted-decoy", "historical-context"]
+      },
+      {
+        "id": "plan-mode-adversarial-negated",
+        "prompt": "Do not use Plan mode. Give me a concise explanation of the failure without editing anything.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "debugging"],
+        "tags": ["negation", "explicit-boundary"]
+      },
+      {
+        "id": "plan-mode-adversarial-exit",
+        "prompt": "Exit Plan mode and implement the approved plan now.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["planning", "implementation"],
+        "tags": ["mode-transition", "implementation-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://developers.openai.com/plugins/plan/use-case",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI plugin planning guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Use-case planning patterns for user goals, required context, expected results, safety boundaries, and explicit build decisions."
+    },
+    {
+      "url": "https://developers.openai.com/codex/guides/agents-md/",
+      "sourceType": "official-docs",
+      "versionScope": "OpenAI Codex AGENTS.md guidance available on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 30,
+      "notes": "Repository instruction discovery and precedence used during evidence gathering before implementation planning."
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as published and verified on 2026-09-04",
+      "verifiedAt": "2026-09-04",
+      "staleAfterDays": 60,
+      "notes": "Portable skill package structure and progressive-disclosure boundary."
+    }
+  ],
+  "authoringMaturity": "individual",
+  "invocationMode": "user-invoked"
+}

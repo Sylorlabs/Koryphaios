@@ -1,0 +1,70 @@
+{
+  "id": "integration-fault-testing-full-task-2",
+  "maturity": "individual",
+  "prompt": "A synthetic fulfillment dependency accepts POST /dispatch with an idempotency key, commits the dispatch, and then can have its TCP response path cut before the client receives the response. Add and run an integration fault test through Toxiproxy for this ambiguous-commit case. The first attempt must produce an uncertain caller outcome while the synthetic dependency records one dispatch; replay the same logical operation with the same key after restoring the connection and prove the dependency still contains exactly one dispatch. Also prove a fresh key succeeds afterward. Keep this as a controlled service/dependency integration test, not a provider-domain review or a broad reliability verdict.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://integration-fault-testing/scenario-2",
+    "requirements": [
+      "protocol-faithful synthetic HTTP dependency with inspectable committed dispatch records",
+      "Toxiproxy v2-compatible proxy between caller and dependency",
+      "fixed retry budget and stable logical request/idempotency key",
+      "isolated empty dispatch state at test start",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "integration-fault-testing-ambiguous-commit-2",
+      "assertion": "The first request reaches and commits at the synthetic dependency before the response path is cut, and the caller does not falsely report a confirmed success from the missing response."
+    },
+    {
+      "id": "integration-fault-testing-single-effect-2",
+      "assertion": "Independent dependency inspection after the failed-response attempt finds exactly one dispatch for the stable idempotency key."
+    },
+    {
+      "id": "integration-fault-testing-replay-2",
+      "assertion": "After restoring the proxy, replaying the same logical operation with the same key leaves the durable dispatch count at exactly one and returns the documented duplicate/replay-safe result."
+    },
+    {
+      "id": "integration-fault-testing-fresh-work-2",
+      "assertion": "A subsequent operation with a new idempotency key succeeds through the recovered boundary, proving the integration is usable after fault removal."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "integration-fault-testing-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.8,
+      "evidence": [
+        "synthetic dependency commit log",
+        "caller-visible uncertain result",
+        "same-key replay result and durable count",
+        "fresh-key post-recovery success"
+      ]
+    },
+    {
+      "id": "integration-fault-testing-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.2,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "fault-proxy and dependency runtime identities",
+    "evidence that commit preceded response-path failure",
+    "durable dispatch count before and after replay",
+    "post-recovery fresh-key result",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "integration-fault-testing-scenario-2-result",
+    "integration-fault-testing-scenario-2-verification",
+    "integration-fault-testing-scenario-2-paired-evaluation"
+  ]
+}

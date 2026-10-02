@@ -1,0 +1,87 @@
+{
+  "id": "backend-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"implement backend behavior\". The fixture includes partial failure, cancellation, retry/idempotency pressure, concurrency, and an attractive topology assumption that is not established by evidence. The acceptance boundary is backend-engineering: Engineer state, computation, policy, persistence, and coordination behind consumers without topology assumptions. The adjacent api-contract-design discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://backend-engineering/idempotent-job-state-machine",
+    "requirements": [
+      "request handler, transactional job table, at-least-once queue, and object-store adapter",
+      "duplicate idempotency-key requests and two workers racing the same queued job",
+      "fault injection after upload and before/after database state transitions",
+      "existing API response/status contract that must remain backward compatible",
+      "paired same-model skill/no-skill execution from the identical starting snapshot",
+      "backend-engineering parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "backend-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "System boundary contract",
+        "Failure and recovery verification",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "backend-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "System boundary contract",
+    "Failure and recovery verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "backend-engineering-individual-scenario-1-result",
+    "backend-engineering-individual-scenario-1-verification",
+    "backend-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual backend-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (children=bun-deno-runtime,compiler-runtime-backend,distributed-backend,in-process-backend,linux-systems,local-service-backend,mongodb-engineering,network-service-backend,nodejs-runtime,redis-engineering,relational-data-modeling,search-indexing,vector-search-systems; near-neighbor=api-contract-design), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Engineer state, computation, policy, persistence, and coordination behind consumers without topology assumptions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Identify consumers, trust, topology, deployment, state ownership, consistency, and quality needs."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Topology and state contract."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: REST, SQL, cloud, or microservices are assumed."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (System boundary contract; Failure and recovery verification; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

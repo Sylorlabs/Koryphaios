@@ -666,6 +666,85 @@ describe('Goal Mode checklist invariants', () => {
   });
 });
 
+describe('Goal Mode human checklist editing', () => {
+  test('adds, renames, reorders, and deletes checks while preserving runtime state', async () => {
+    const goal = await store.create({
+      objective: 'Steer the plan by hand',
+      scope: 'workspace',
+      planningDepth: 'minimal',
+    });
+    const [first, second] = goal.checklist;
+    await new GoalRunner(store).startNext(goal.id);
+    await store.completeItem(goal.id, first!.id, verifiedReview('verified first step'));
+    // Second item is now running, so the plan is mid-flight.
+    await new GoalRunner(store).startNext(goal.id);
+
+    const edited = await store.editChecklistPlan(goal.id, [
+      { id: second!.id, title: 'Renamed second check', order: 0 },
+      { id: first!.id, title: first!.title, order: 1 },
+      { title: 'A check I added by hand', order: 2 },
+    ]);
+
+    // Runtime state on a surviving check is carried over, never taken from the
+    // request: the completed check keeps its verified evidence.
+    const completed = edited?.checklist.find((item) => item.id === first!.id);
+    expect(completed).toMatchObject({ status: 'completed', order: 1 });
+    expect(completed?.evidence).toHaveLength(2);
+    expect(edited?.checklist.find((item) => item.id === second!.id)).toMatchObject({
+      title: 'Renamed second check',
+      status: 'running',
+      order: 0,
+    });
+    // A new check is always pending with no evidence.
+    const added = edited?.checklist.find((item) => item.title === 'A check I added by hand');
+    expect(added).toMatchObject({ status: 'pending', evidence: [] });
+    expect(edited?.activity.some((event) => event.type === 'checklist_edited')).toBe(true);
+  });
+
+  test('refuses to delete the check that is running and to edit a finished goal', async () => {
+    const goal = await store.create({ objective: 'Protect the live check', scope: 'workspace' });
+    const [first, second] = goal.checklist;
+    await new GoalRunner(store).startNext(goal.id);
+    await expect(store.editChecklistPlan(goal.id, [])).rejects.toThrow(
+      'at least one checklist item',
+    );
+    await expect(
+      store.editChecklistPlan(goal.id, [{ id: second!.id, title: second!.title }]),
+    ).rejects.toThrow('Pause the goal before deleting the check that is running');
+    expect(first).toBeDefined();
+
+    const finished = await store.create({
+      objective: 'Closed to edits',
+      scope: 'workspace',
+      planningDepth: 'minimal',
+    });
+    await store.update(finished.id, { status: 'cancelled' });
+    await expect(
+      store.editChecklistPlan(finished.id, [
+        { id: finished.checklist[0]!.id, title: 'edited' },
+        { id: finished.checklist[1]!.id, title: 'edited too' },
+      ]),
+    ).rejects.toThrow('closed to edits');
+  });
+
+  test('drops dependencies on deleted checks instead of rejecting the whole edit', async () => {
+    const goal = await store.create({
+      objective: 'Remove a middle step',
+      scope: 'workspace',
+      planningDepth: 'structured',
+    });
+    // The generated plan chains each check to the one before it.
+    const [a, b, c, d] = goal.checklist;
+    const edited = await store.editChecklistPlan(goal.id, [
+      { id: a!.id, title: a!.title },
+      { id: c!.id, title: c!.title, dependsOn: [a!.id, b!.id] },
+    ]);
+    expect(edited?.checklist.map((item) => item.id)).toEqual([a!.id, c!.id]);
+    expect(edited?.checklist[1]?.dependsOn).toEqual([a!.id]);
+    expect(d).toBeDefined();
+  });
+});
+
 describe('Goal Mode HTTP user flow', () => {
   test('manual/API completion bypasses fail closed and verifier input is sanitized', async () => {
     const goal = await store.create({
@@ -762,6 +841,71 @@ describe('Goal Mode HTTP user flow', () => {
     const finalized = await request(`/api/goals/${goal.id}/finalize`, 'POST', {});
     expect(finalized.status).toBe(409);
     expect((await store.get(goal.id))!.status).not.toBe('completed');
+  });
+
+  test('checklist edits go through the dedicated endpoint, not the guarded PATCH', async () => {
+    const goal = await store.create({
+      objective: 'Edit the plan over HTTP',
+      scope: 'workspace',
+      planningDepth: 'minimal',
+    });
+    await new GoalRunner(store).startNext(goal.id);
+    await store.completeItem(goal.id, goal.checklist[0]!.id, verifiedReview('first step done'));
+    await new GoalRunner(store).startNext(goal.id);
+
+    const app = new Elysia()
+      .onError(({ error, set }) => {
+        const operational = error as { statusCode?: number; message?: string };
+        set.status = operational.statusCode ?? 500;
+        return { error: operational.message ?? 'Request failed' };
+      })
+      .use(goalRoutes);
+    const auth = buildLocalBearerToken(localAuth.createSession());
+    const request = (path: string, method: 'POST' | 'PATCH', body: unknown) =>
+      app.handle(
+        new Request(`http://local${path}`, {
+          method,
+          headers: { authorization: auth, 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    // The generic PATCH stays closed to checklist writes...
+    const smuggled = await request(`/api/goals/${goal.id}`, 'PATCH', {
+      checklist: [{ id: goal.checklist[0]!.id, title: 'forged', status: 'completed' }],
+    });
+    expect(smuggled.status).toBe(409);
+
+    // ...and the dedicated endpoint edits the plan while execution is in flight,
+    // carrying the completed check's verified evidence over untouched.
+    const edited = await request(`/api/goals/${goal.id}/checklist`, 'PATCH', {
+      items: [
+        { id: goal.checklist[1]!.id, title: 'Renamed over HTTP' },
+        { id: goal.checklist[0]!.id, title: goal.checklist[0]!.title },
+        { title: 'A check added over HTTP' },
+      ],
+    });
+    expect(edited.status).toBe(200);
+    const payload = await edited.json();
+    expect(payload.ok).toBe(true);
+    const stored = await store.get(goal.id);
+    expect(stored!.checklist.map((item) => item.status).sort()).toEqual([
+      'completed',
+      'pending',
+      'running',
+    ]);
+    expect(
+      stored!.checklist.find((item) => item.id === goal.checklist[0]!.id)!.evidence,
+    ).toHaveLength(2);
+    expect(stored!.checklist.some((item) => item.title === 'A check added over HTTP')).toBe(true);
+    expect(stored!.activity.some((event) => event.type === 'checklist_edited')).toBe(true);
+
+    // A finished goal's checklist is closed to edits.
+    await store.update(goal.id, { status: 'cancelled' });
+    const closed = await request(`/api/goals/${goal.id}/checklist`, 'PATCH', {
+      items: [{ title: 'too late' }],
+    });
+    expect(closed.status).toBe(409);
   });
 
   test('one drive request continues, verifies, and finalizes through the guarded API', async () => {

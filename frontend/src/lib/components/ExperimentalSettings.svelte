@@ -1,6 +1,5 @@
 <script lang="ts">
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
-  import Check from 'lucide-svelte/icons/check';
   import DollarSign from 'lucide-svelte/icons/dollar-sign';
   import PauseCircle from 'lucide-svelte/icons/pause-circle';
   import RefreshCw from 'lucide-svelte/icons/refresh-cw';
@@ -14,7 +13,6 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import KorySelect from './KorySelect.svelte';
   import NumberStepper from './NumberStepper.svelte';
-  import SettingsPageIntro from './SettingsPageIntro.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
   let showResetDialog = $state(false);
@@ -38,6 +36,15 @@
 
   function dollars(cents: number) {
     return `$${(cents / 100).toFixed(2)}`;
+  }
+
+  function centsToDollars(cents: number): number {
+    return Math.round((cents / 100) * 100) / 100;
+  }
+
+  function dollarsToCents(dollarsValue: number): number {
+    if (!Number.isFinite(dollarsValue) || dollarsValue <= 0) return 0;
+    return Math.round(dollarsValue * 100);
   }
 
   const limitControls: Array<{
@@ -69,19 +76,6 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
-  <SettingsPageIntro
-    title="Safety limits"
-    description="Set server-enforced limits for provider spend recorded by Koryphaios. These settings apply to this local app."
-  >
-    <span
-      class="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[10px] font-medium {config.enabled
-        ? 'text-[var(--color-success)]'
-        : 'text-[var(--color-text-muted)]'}"
-    >
-      {#if config.enabled}<Check size={11} /> Enforcing{:else}Limits off{/if}
-    </span>
-  </SettingsPageIntro>
-
   <p class="sr-only" aria-live="polite">{announcement}</p>
 
   <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
@@ -135,9 +129,7 @@
         </section>
 
         <section
-          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 {config.enabled
-            ? ''
-            : 'opacity-60'}"
+          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <div class="flex items-start gap-3">
             <span
@@ -149,7 +141,7 @@
                 Rolling spend windows
               </h4>
               <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                Values are US cents. Enter 0 to disable one limit while keeping the others active.
+                Values are US dollars. Enter 0 to disable one limit while keeping the others active.
               </p>
             </div>
           </div>
@@ -159,30 +151,30 @@
               <div
                 class="flex min-h-[148px] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
               >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
-                      {control.label}
-                    </h5>
-                    <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-                      {control.description}
-                    </p>
-                  </div>
-                  <span class="shrink-0 font-mono text-xs text-[var(--color-accent)]"
-                    >{config[control.key] === 0 ? 'Off' : dollars(config[control.key])}</span
-                  >
+                <div class="min-w-0">
+                  <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">
+                    {control.label}
+                  </h5>
+                  <p class="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                    {control.description}
+                  </p>
                 </div>
                 <div class="mt-auto pt-3">
                   <NumberStepper
                     compact
-                    value={config[control.key]}
+                    value={centsToDollars(config[control.key])}
                     min={0}
-                    max={1_000_000}
-                    step={50}
-                    label={`${control.label} in cents`}
-                    unit="cents"
+                    max={10_000}
+                    step={1}
+                    decimals={2}
+                    label={`${control.label} in dollars`}
+                    valueText={config[control.key] === 0
+                      ? `${control.label} off`
+                      : `${control.label} ${dollars(config[control.key])}`}
+                    unit="$"
                     disabled={experimentalStore.isLoading}
-                    onchange={(value) => save({ [control.key]: value }, `${control.label} saved.`)}
+                    onchange={(value) =>
+                      save({ [control.key]: dollarsToCents(value) }, `${control.label} saved.`)}
                   />
                 </div>
               </div>
@@ -191,9 +183,7 @@
         </section>
 
         <section
-          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 {config.enabled
-            ? ''
-            : 'opacity-60'}"
+          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
         >
           <div class="flex items-start gap-3">
             <span
@@ -223,35 +213,23 @@
                 value: 'block',
                 label: 'Block while over limit',
                 description:
-                  'Reject requests until the rolling window falls below its limit; do not create a durable pause.',
+                  'Reject requests until the rolling window falls below its limit. Do not create a durable pause.',
               },
               {
                 value: 'warn',
                 label: 'Warn and continue',
                 description: 'Show a warning but allow the provider request to start.',
               },
+              {
+                value: 'continue',
+                label: 'Continue until work is done',
+                description:
+                  'Never pause or block for spend. Usage is still recorded against the windows above.',
+              },
             ]}
             onchange={(value) =>
               save({ action: value as SpendCapConfig['action'] }, 'Spend-limit response saved.')}
           />
-        </section>
-
-        <section
-          class="flex items-start gap-3 rounded-2xl border border-[var(--color-warning)] bg-[var(--color-warning-bg)] p-5"
-        >
-          <AlertTriangle size={18} class="mt-0.5 shrink-0 text-[var(--color-warning)]" />
-          <div>
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
-              What the limit can prove
-            </h4>
-            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-              Koryphaios evaluates provider-reported cost already persisted with assistant messages.
-              It does not invent a cost estimate before a provider responds, so the final request in
-              a window can cross a limit; the next request is stopped. The per-request field remains
-              stored for API clients that can supply an authoritative estimate, but this UI does not
-              present it as active protection.
-            </p>
-          </div>
         </section>
 
         <section

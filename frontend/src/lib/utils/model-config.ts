@@ -9,6 +9,7 @@ function formatProviderName(provider: string): string {
   if (provider === 'aistudio') return 'Google AI Studio';
   if (provider === 'xai') return 'xAI';
   if (provider === 'openrouter') return 'OpenRouter';
+  if (provider === 'unorouter') return 'UnoRouter';
   if (provider === 'vertexai') return 'Vertex AI';
   if (provider === 'copilot') return 'Copilot';
   if (provider === 'kimicode') return 'Kimi Code';

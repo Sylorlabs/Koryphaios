@@ -1,0 +1,83 @@
+{
+  "id": "integration-implementation-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Implement synchronization from a third-party orders API into the existing application. The vendor paginates with opaque cursors, retries may return the same order, rate limits use Retry-After, and one order can be corrected after initial delivery. Preserve raw vendor ids/provenance, make upserts idempotent, checkpoint safely, handle auth/rate-limit/transient/schema errors distinctly, and verify interruption/resume plus a versioned vendor response. Do not redesign internal analytics.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://integration-implementation/vendor-orders-api-sync",
+    "requirements": [
+      "vendor API fixture with opaque cursors, duplicate pages, corrected order, and rate-limit response",
+      "existing internal order adapter/schema and credential abstraction",
+      "checkpoint/restart harness plus stable external-id mapping",
+      "vendor API version/header contract and malformed payload sample",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "integration-implementation-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Boundary contract",
+        "Failure and compatibility tests",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "integration-implementation-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "vendor-orders-api-sync scenario evidence",
+    "Boundary contract",
+    "Failure and compatibility tests",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "integration-implementation-individual-scenario-1-result",
+    "integration-implementation-individual-scenario-1-verification",
+    "integration-implementation-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual integration-implementation boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; children=email-delivery,payment-integration,webhook-integration; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm both sides, isolate translation, identity, lifecycle, retries, timeouts, cancellation, versioning, idempotency, and partial failure."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "External identity/version/provenance and local checkpointing make retry/resume deterministic; vendor transport failures cannot silently corrupt internal state."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Boundary contract; Failure and compatibility tests"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of integration-implementation correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Boundary contract; Failure and compatibility tests; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

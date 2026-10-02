@@ -1,0 +1,91 @@
+{
+  "id": "computer-vision-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"Apply computer vision expertise to this task\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is computer-vision: Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs. The adjacent fine-tuning-training discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://computer-vision/scenario-2",
+    "requirements": [
+      "production-lot/camera/time grouped images with polygon/raster masks, uncertain regions and duplicate crops",
+      "baseline/candidate preprocessing and geometric augmentation implementations",
+      "pinned segmentation model/weights/class map plus mask/decision threshold candidates and prediction fixtures",
+      "per-class/tiny-defect/lighting/material/device metrics plus exported-runtime and accelerator traces",
+      "paired same-model skill/no-skill execution",
+      "computer-vision parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual computer-vision boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=fine-tuning-training), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Define task, labels, camera/image formation, resolution, geometry, lighting, occlusion, populations, deployment hardware, and acceptable error tradeoffs."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Evaluate held-out slices across lighting, scale, occlusion, background, device, demographic or environmental factors where relevant, plus latency/memory on target hardware and confidence calibration."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not let random image splits leak near-duplicates, use augmentation that changes labels, generalize studio benchmarks to field conditions, or hide systematic slice failures in aggregate accuracy."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Camera/image-formation, label ontology, spatial geometry and transform identity; Leakage-safe grouped splits plus task-correct vision metrics and deployment slices; Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence; Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "computer-vision-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Camera/image-formation, label ontology, spatial geometry and transform identity",
+        "Leakage-safe grouped splits plus task-correct vision metrics and deployment slices",
+        "Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence",
+        "Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "computer-vision-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Camera/image-formation, label ontology, spatial geometry and transform identity",
+    "Leakage-safe grouped splits plus task-correct vision metrics and deployment slices",
+    "Model/preprocess/postprocess/calibration identity with visual or machine-readable failure evidence",
+    "Target-runtime latency/memory/throughput plus reproducible promotion and rollback artifacts",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "computer-vision-individual-scenario-2-result",
+    "computer-vision-individual-scenario-2-verification",
+    "computer-vision-individual-scenario-2-paired-evaluation"
+  ]
+}

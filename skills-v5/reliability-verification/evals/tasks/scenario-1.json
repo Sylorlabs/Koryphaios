@@ -1,0 +1,68 @@
+{
+  "id": "reliability-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A queue worker writes an external idempotency-keyed receipt and then acknowledges the broker message. Run a reliability test in the isolated fixture by terminating the worker after the receipt is durably written but before acknowledgement. On restart the broker must replay the message; verify that exactly one durable receipt exists, the replay is recognized without duplicating the external effect, the message is eventually acknowledged, the backlog drains to zero, and the worker returns to steady-state health within the declared 20-second recovery objective. Repeat with two consecutive restarts to check that recovery logic itself does not accumulate duplicate work or stuck leases. Capture the event timeline, durable-state reads, broker delivery/ack evidence, and health/backlog metrics.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://reliability-verification/worker-replay-recovery",
+    "requirements": [
+      "the disposable broker fixture provides deterministic delivery and acknowledgement evidence",
+      "the receipt store exposes an independent read path and starts empty",
+      "the worker can be terminated at the supplied post-write/pre-ack synchronization point",
+      "the declared recovery objective is steady health and zero backlog within 20 seconds after restart",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "reliability-worker-no-duplicate",
+      "assertion": "After each post-write/pre-ack restart and replay, exactly one durable receipt exists for the idempotency key and no duplicate external effect is observed."
+    },
+    {
+      "id": "reliability-worker-eventual-ack",
+      "assertion": "The replayed message is eventually acknowledged, backlog reaches zero, and no stale lease or stuck delivery remains after two consecutive restart cycles."
+    },
+    {
+      "id": "reliability-worker-rto",
+      "assertion": "Steady-state health and zero backlog return within the declared 20-second recovery objective, measured from the restart event rather than inferred from logs."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "reliability-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Disturbance and invariant matrix",
+        "restart/replay timeline",
+        "independent durable-state and broker evidence",
+        "measured recovery timing"
+      ]
+    },
+    {
+      "id": "reliability-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "the restart point targets the real commit/ack vulnerability",
+        "reliability is judged from durable state and broker evidence rather than log optimism",
+        "the verdict distinguishes delivery replay from duplicate business effect"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Disturbance and invariant matrix",
+    "restart/replay event timeline",
+    "durable receipt and broker evidence",
+    "recovery timing and health/backlog artifacts",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "reliability-verification-scenario-1-disturbance-matrix",
+    "reliability-verification-scenario-1-recovery-timeline",
+    "reliability-verification-scenario-1-verdict",
+    "reliability-verification-scenario-1-paired-evaluation"
+  ]
+}

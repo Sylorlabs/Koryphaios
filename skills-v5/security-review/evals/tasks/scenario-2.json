@@ -1,0 +1,89 @@
+{
+  "id": "security-review-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"review authentication permissions\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is security-review: Assess enforced trust, identity, authorization, secret, isolation, and recovery boundaries. The adjacent accessibility-verification discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://security-review/document-import-worker",
+    "requirements": [
+      "the fixture contains an API entry point, queue payload, worker extraction path, template rendering, outbound webhook client, and relevant runtime configuration",
+      "the deterministic oracle includes at least one reachable source-to-sink defect plus at least one decoy protected by an effective framework or validation guarantee",
+      "the worker executes with more filesystem and network capability than the initiating user, making the queue boundary security-relevant",
+      "no production credentials or live targets are present and exploit execution is not required for the review",
+      "paired same-model skill/no-skill execution",
+      "security-review parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual security-review boundary and relevant environment before acting, preserve the hierarchy relationship (children=ai-safety-evaluation,application-security,applied-cryptography,embedded-device-security,infrastructure-security,language-runtime-security,privacy-engineering,security-verification,supply-chain-security,threat-modeling-practice; near-neighbor=accessibility-verification), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Assess enforced trust, identity, authorization, secret, isolation, and recovery boundaries."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Inventory assets, actors, entry points, privileges, and trust boundaries."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Threat and trust-boundary map."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: UI hiding or prompt wording is mistaken for enforcement."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Threat-informed source-to-sink or security-control-flow evidence; Exploit prerequisites, trust boundary, impact, confidence, and severity rationale; False-positive self-check plus remediation and verification boundary; Hierarchy boundary and selected specialist rationale), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "security-review-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Threat-informed source-to-sink or security-control-flow evidence",
+        "Exploit prerequisites, trust boundary, impact, confidence, and severity rationale",
+        "False-positive self-check plus remediation and verification boundary",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "security-review-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Threat-informed source-to-sink or security-control-flow evidence",
+    "Exploit prerequisites, trust boundary, impact, confidence, and severity rationale",
+    "False-positive self-check plus remediation and verification boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "security-review-individual-scenario-2-result",
+    "security-review-individual-scenario-2-verification",
+    "security-review-individual-scenario-2-paired-evaluation"
+  ]
+}

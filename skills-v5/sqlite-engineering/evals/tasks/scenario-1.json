@@ -1,0 +1,82 @@
+{
+  "id": "sqlite-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Diagnose a SQLite WAL-mode desktop app where periodic checkpoints block a writer and users see intermittent “database is locked.” Confirm journal/busy-timeout/checkpoint configuration, identify long read transactions, bound transaction lifetimes, and choose checkpoint/retry behavior appropriate to the embedded workload. Verify concurrent reader/writer, long reader, crash/reopen, WAL growth, and no lost committed writes.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://sqlite-engineering/wal-busy-checkpoint",
+    "requirements": [
+      "SQLite WAL database with reader/writer threads and controllable long read transaction",
+      "busy timeout/checkpoint settings plus WAL size instrumentation",
+      "crash/reopen and commit reconciliation fixture",
+      "pinned SQLite runtime/version behavior",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "sqlite-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "sqlite-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "sqlite-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "wal-busy-checkpoint scenario evidence",
+    "sqlite-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "sqlite-engineering-individual-scenario-1-result",
+    "sqlite-engineering-individual-scenario-1-verification",
+    "sqlite-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual sqlite-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=relational-data-modeling; near-neighbor=mysql-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Treat SQLite as an embedded database with file and process semantics, not a tiny network server."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Transaction and checkpoint policy follows actual SQLite locking/WAL semantics; retries are bounded and committed data remains durable across contention/reopen."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise concurrent readers/writers, crash/reopen behavior where risk warrants it, migration from real prior schemas, foreign-key enforcement, WAL checkpointing, and backup/restore or file replacement flows."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not open unbounded connections, assume foreign keys are always enabled, copy live database files casually, or use network-filesystem deployments without validated locking semantics."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (sqlite-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

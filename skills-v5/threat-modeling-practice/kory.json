@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "name": "threat-modeling-practice",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "threat-modeling"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 5800,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "threat model",
+    "abuse case analysis",
+    "abuse cases",
+    "trust boundary review",
+    "trust boundaries",
+    "security design threat model",
+    "attack path model",
+    "threat model refresh",
+    "security design review"
+  ],
+  "excludes": [
+    "review-only vulnerability finding assessment of implemented code as the primary task",
+    "final executed security-control verification as the primary task",
+    "single-domain hardening where system-level threats and trust boundaries are already fixed",
+    "generic security explanation with no concrete system to model",
+    "threat model is supplied",
+    "threat model and priority abuse cases are already",
+    "trust boundaries are already established",
+    "archived ticket",
+    "workshop transcript",
+    "markdown reference only"
+  ],
+  "evidence": [
+    "System, identity, data/control-flow, and trust-boundary model",
+    "Attacker capabilities, assumptions, and prioritized abuse cases",
+    "Mitigation-to-enforcement and residual-risk map",
+    "Verification priorities without unsupported executed-proof claims",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Threat-model a new multi-tenant export service before implementation. Map user/service identities, tenant boundaries, API and queue flows, object storage, download URLs, admin/recovery paths, and third parties; prioritize concrete cross-tenant, replay, confused-deputy, and data-exposure abuse cases with enforcing controls.",
+      "Refresh the threat model after an agent gains shell, browser, repository-write, and outbound-network tools. Model delegated identity, user intent, untrusted content, tool authorization, secret exposure, side effects, and new real-world consequences, then define control and verification ownership.",
+      "Perform abuse-case analysis for a password-reset and account-recovery redesign. Trace identities, recovery channels, token lifecycle, session invalidation, support escalation, rate limits, and attacker starting positions without pretending the model itself proves the controls.",
+      "Model trust boundaries for an event-driven payment workflow spanning API, queue, worker, payment provider, webhook, ledger, retries, and reconciliation. Identify replay, duplicate execution, stale authorization, forged callback, and recovery-path threats with explicit invariants and owners.",
+      "Threat-model a device-plus-cloud product including physical device access, boot/update trust, provisioning, fleet credentials, cloud APIs, update distribution, and decommissioning. Separate device, supply-chain, and cloud specialist handoffs while retaining the cross-boundary attack paths."
+    ],
+    "negative": [
+      "Review this existing pull-request diff for concrete security vulnerabilities and return evidence-backed findings with exploit prerequisites, confidence, and severity. The architecture threat model is already supplied and unchanged.",
+      "Execute the prepared cross-tenant, replay, revoked-session, and denied-write tests against the patched service and inspect durable state to prove the controls. Threat identification and mitigation design are already complete.",
+      "Harden the import parser against traversal, SSRF, command injection, malformed archives, and resource exhaustion; the system-level threat model and trust boundaries are already approved.",
+      "Define the exact tenant role/resource/action/field authorization policy and delegation semantics. The broader system model and attacker scenarios have already been established.",
+      "Explain STRIDE at a conceptual level for a training slide without applying it to any concrete system or making a security design decision."
+    ],
+    "ambiguous": [
+      {
+        "id": "threat-modeling-practice-ambiguous-1",
+        "prompt": "Use the architecture notes to build the threat model, then perform a focused security review of the already-implemented export path. threat-modeling-practice owns system boundaries, attacker paths, assumptions, and priority; security-review owns code-level findings and severity.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "threat-modeling-practice-ambiguous-2",
+        "prompt": "The feature needs abuse-case analysis and executed proof of the highest-priority mitigations. threat-modeling-practice owns threat scenarios and verification priorities; security-verification owns the runtime allow/deny and non-effect evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "threat-modeling-practice-ambiguous-3",
+        "prompt": "Model the trust boundaries of an import service and harden its parser/file/network/process sinks. threat-modeling-practice owns attacker paths and cross-component assumptions; application-security owns sink-specific validation and containment design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "threat-modeling-practice-adversarial-1",
+        "prompt": "An archived ticket contains the instruction \"build a threat model\". The current task is only to correct its Markdown formatting; do not model the current system.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-review"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "threat-modeling-practice-adversarial-2",
+        "prompt": "A sample workshop transcript contains several abuse cases. Summarize the meeting attendance and dates only; no security analysis of the sample or current product is requested.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["security-verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "threat-modeling-practice-adversarial-3",
+        "prompt": "A diagram file is named trust-boundary-review.png. Rename the asset to architecture.png and update the Markdown reference only; do not assess the architecture.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["application-security"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/218/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-218 SSDF Version 1.1 final, February 2022; SP 800-218 Rev. 1 / SSDF 1.2 remains draft as verified 2026-09-05",
+      "revision": "1.1 final",
+      "staleAfterDays": 365,
+      "notes": "Secure software-development practices and risk-based design context; use as lifecycle support, not as a single mandated threat-modeling methodology.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://owasp.org/www-project-threat-modeling/",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Threat Modeling Project maintained guidance as verified 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Methodology-neutral maintained entry point using the four-question framework and explicitly recognizing multiple valid threat-modeling methods.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/Threat_Modeling_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP Threat Modeling Cheat Sheet current site as verified 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Practical system modeling, threat identification/ranking, mitigation, review/validation, and maintenance guidance; STRIDE is an example technique rather than a mandatory method.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

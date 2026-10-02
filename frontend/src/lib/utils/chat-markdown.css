@@ -1,0 +1,57 @@
+.markdown-content {
+  min-width: 0;
+}
+.markdown-content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+  color: var(--color-text-primary);
+}
+.markdown-content .katex {
+  font-size: 1.1em;
+}
+
+.markdown-content table {
+  width: 100%;
+  min-width: min(520px, 100%);
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-1);
+}
+.markdown-content .kory-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+.markdown-content thead {
+  background: var(--color-surface-3);
+}
+.markdown-content th {
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.markdown-content th,
+.markdown-content td {
+  padding: 10px 13px;
+  text-align: left;
+  vertical-align: top;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.markdown-content tr > :last-child {
+  border-right: 0;
+}
+.markdown-content tbody tr:last-child td {
+  border-bottom: 0;
+}
+.markdown-content tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+}
+.markdown-content tbody tr:hover {
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-surface-1));
+}

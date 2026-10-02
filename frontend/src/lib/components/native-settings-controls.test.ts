@@ -47,7 +47,13 @@ describe('Koryphaios settings controls', () => {
     );
 
     expect(voiceSource).toContain('options={inputOptions}');
-    expect(voiceSource).toContain("allowCustom={settings.input.provider !== 'system'}");
+    expect(voiceSource).toContain('settings.input.provider !== KORY_LOCAL_PROVIDER');
+    expect(voiceSource).toContain("'download_local_voice_model'");
+    expect(voiceSource).toContain("'attach_local_voice_model'");
+    expect(voiceSource).toContain('Voice needs a local voice model');
+    // The pane must not tell users that only one model format works.
+    expect(voiceSource).not.toContain('Whisper ggml');
+    expect(voiceSource).toContain("'select_voice_model_dialog'");
     expect(voiceSource).toContain("new CustomEvent('koryphaios:voice-settings-changed'");
     expect(voiceSource).not.toContain(
       'Connect OpenAI in Providers to enable the composer microphone',
@@ -55,6 +61,9 @@ describe('Koryphaios settings controls', () => {
     expect(composerSource).toContain('{#if composerMicrophoneEnabled}');
     expect(composerSource).toContain("settings.input.provider === 'system'");
     expect(composerSource).toContain("window.addEventListener('koryphaios:voice-settings-changed'");
+    expect(composerSource).toContain("'local_voice_model_status'");
+    expect(composerSource).toContain("'transcribe_local_voice'");
+    expect(composerSource).toContain("onOpenSettings?.('voice')");
   });
 
   it('keeps product controls on the shared Kory contracts', () => {

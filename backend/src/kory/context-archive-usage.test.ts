@@ -17,7 +17,14 @@ describe('ContextArchiveService usage provenance', () => {
         provider: 'grok',
         activeMessageId: 'assistant-final',
         contextRevision: 3,
-        breakdown: { system: 3_000, memory: 4_000, tools: 0, chat: 7_000 },
+        breakdown: {
+          system: 3_000,
+          memory: 4_000,
+          skills: 2_000,
+          tools: 0,
+          chat: 7_000,
+          output: 337,
+        },
         ts: 123,
       });
 
@@ -31,7 +38,14 @@ describe('ContextArchiveService usage provenance', () => {
         provider: 'grok',
         activeMessageId: 'assistant-final',
         contextRevision: 3,
-        breakdown: { system: 3_000, memory: 4_000, tools: 0, chat: 7_000 },
+        breakdown: {
+          system: 3_000,
+          memory: 4_000,
+          skills: 2_000,
+          tools: 0,
+          chat: 7_000,
+          output: 337,
+        },
         ts: 123,
       });
     } finally {

@@ -33,10 +33,15 @@ export interface WorkspaceNavigationSnapshot {
   seq: number;
 }
 
+function isFilesystemRoot(path: string): boolean {
+  const normalized = resolve(path);
+  return normalized === parse(normalized).root;
+}
+
 function isBroadDirectory(path: string): boolean {
   const normalized = resolve(path);
   return (
-    normalized === parse(normalized).root ||
+    isFilesystemRoot(normalized) ||
     normalized === resolve(homedir()) ||
     normalized === resolve(dirname(homedir())) ||
     normalized === resolve(tmpdir())
@@ -47,15 +52,24 @@ function canonicalDirectory(path: string, label: string): string {
   const trimmed = path.trim();
   if (!trimmed || !isAbsolute(trimmed)) throw new Error(`${label} must be an absolute path`);
   const resolved = resolve(trimmed);
-  if (isBroadDirectory(resolved)) throw new Error(`${label} is too broad`);
+  if (isFilesystemRoot(resolved)) throw new Error(`${label} is too broad`);
   if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
     throw new Error(`${label} is unavailable`);
   }
   return realpathSync(resolved);
 }
 
+/** Workspace roots become folder lists, so the broad ones stay rejected:
+ *  `openWorkspace` must never enumerate a home or temp directory. */
 export function validateWorkspaceRoot(path: string): string {
-  return canonicalDirectory(path, 'Workspace root');
+  const trimmed = path.trim();
+  const resolved = resolve(trimmed);
+  // Compare the requested path, not its realpath — home and tmpdir can sit
+  // behind symlinks (macOS /var → /private/var) and would slip past otherwise.
+  if (trimmed && isAbsolute(trimmed) && isBroadDirectory(resolved)) {
+    throw new Error('Workspace root is too broad');
+  }
+  return canonicalDirectory(trimmed, 'Workspace root');
 }
 
 function listImmediateProjects(root: string): WorkspaceProjectEntry[] {

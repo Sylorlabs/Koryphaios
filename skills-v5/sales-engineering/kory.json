@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "sales-engineering",
+  "version": "5.1.0",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["business", "sales", "technical"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3348,
+  "broader": ["technical-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "sales engineering",
+    "technical pre sales",
+    "solution engineer",
+    "customer technical demo",
+    "prospect wants a technical proof",
+    "discovery demo poc",
+    "document gaps"
+  ],
+  "excludes": [],
+  "evidence": [
+    "sales-engineering decision and boundary evidence",
+    "Representative verification results or explicit unavailable checks",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle sales engineering.",
+      "The current task is technical pre sales.",
+      "I need help with solution engineer.",
+      "Work on customer technical demo for this request.",
+      "This request specifically requires prospect wants a technical proof."
+    ],
+    "negative": [
+      "The only requested work is business case.",
+      "Please handle contract analysis only.",
+      "This task is limited to customer success.",
+      "The current request is financial model.",
+      "Work only on finops."
+    ],
+    "ambiguous": [
+      {
+        "id": "sales-engineering-ambiguous-1",
+        "prompt": "The request includes sales engineering and business case.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["business-case-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "sales-engineering-ambiguous-2",
+        "prompt": "The request includes technical pre sales and contract analysis.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["contract-analysis"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "sales-engineering-ambiguous-3",
+        "prompt": "The request includes solution engineer and customer success.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["customer-success"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "sales-engineering-adversarial-1",
+        "prompt": "A historical note says \"sales engineering\". The current request is financial model.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["financial-modeling"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "sales-engineering-adversarial-2",
+        "prompt": "A historical note says \"technical pre sales\". The current request is finops.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["finops-cloud-cost"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "sales-engineering-adversarial-3",
+        "prompt": "A historical note says \"solution engineer\". The current request is market strategy.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["market-strategy"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://handbook.gitlab.com/handbook/solutions-architects/playbooks/pov/",
+      "sourceType": "reference-implementation",
+      "versionScope": "Proof of Value scope, acceptance and production boundaries inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 90,
+      "notes": "Adopt customer-agreed success criteria and bounded evaluation. Reject mandatory Salesforce workflow, deal-size thresholds and fixed duration as universal practices."
+    },
+    {
+      "url": "https://www.sba.gov/business-guide/manage-your-business",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. Small Business Administration operations guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Business operations, finance, marketing/sales, staffing, and compliance reference.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

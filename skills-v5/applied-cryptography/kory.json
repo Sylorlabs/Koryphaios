@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "name": "applied-cryptography",
+  "version": "5.1.1",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["security", "cryptography"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 4600,
+  "broader": ["security-review"],
+  "facets": [],
+  "requires": ["security-verification"],
+  "conflicts": [],
+  "activation": [
+    "cryptography",
+    "encryption design",
+    "digital signature",
+    "authenticated encryption",
+    "domain separated",
+    "password derived encryption",
+    "encryption and key management",
+    "sensitive data encryption"
+  ],
+  "excludes": [
+    "KMS/HSM key lifecycle, access policy, rotation, or destruction as the primary task",
+    "OAuth/OIDC token protocol validation",
+    "standard TLS/network channel configuration without custom/application cryptographic design"
+  ],
+  "evidence": [
+    "Security-property and key/domain map",
+    "Algorithm/nonce/KDF/serialization contract",
+    "Migration and negative cryptographic cases",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Review cryptography for an encrypted file format: choose an AEAD construction, define nonce generation and restart/cloning safety, bind version/object metadata as associated data, and version the envelope for migration.",
+      "Design authenticated encryption for per-tenant records using a KMS-protected master key and derived data keys. Specify key separation, nonce uniqueness, associated data, and ciphertext/key identifiers; leave KMS lifecycle to secrets-key-management.",
+      "Choose a digital signature design for offline release manifests: exact canonical bytes, algorithm/key identifiers, signature verification order, domain separation, rollback/version binding, and migration strategy.",
+      "Review a protocol that currently reuses one key for encryption and MAC across two message types. Replace it with a standard construction or domain-separated subkeys and explicit transcript/context binding.",
+      "Design password-derived encryption for a local backup format using a standard password KDF and AEAD, with stored KDF parameters/salt, authenticated metadata, bounded resource settings, and no password logging."
+    ],
+    "negative": [
+      "Design KMS key hierarchy, HSM custody, key aliases, access grants, rotation, revocation, backup, audit, and destruction; the application already uses a standard AEAD correctly.",
+      "Review OAuth/OIDC issuer, audience, nonce, PKCE, token algorithms, and refresh lifecycle according to the protocol standards.",
+      "Configure TLS certificates, cipher policy, protocol versions, HSTS, service identity, and mutual TLS for a network channel.",
+      "Design passkey/password/MFA enrollment, recovery, throttling, and reauthentication assurance; no custom encryption or signature format is changing.",
+      "Execute the existing known-answer, nonce-reuse rejection, tamper, signature, and migration tests and issue the final cryptographic control verdict; design is already complete."
+    ],
+    "ambiguous": [
+      {
+        "id": "applied-cryptography-ambiguous-1",
+        "prompt": "The application uses KMS but still needs encryption design. Applied cryptography owns AEAD, nonce, associated-data, key-separation, and envelope semantics; secrets-key-management owns KMS hierarchy, access, rotation, and destruction.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secrets-key-management"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "applied-cryptography-ambiguous-2",
+        "prompt": "An OAuth service signs tokens and also needs a separate encrypted application blob. Keep JWT/OAuth algorithm/claim protocol rules in oauth-oidc while applied-cryptography owns the independent AEAD envelope and nonce/key/domain design.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "applied-cryptography-ambiguous-3",
+        "prompt": "The backup feature derives an encryption key from a user password. Secure-authentication owns login/password policy; applied-cryptography owns the backup KDF, salt/parameters, AEAD, associated data, and encrypted-format migration.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secure-authentication"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "applied-cryptography-adversarial-1",
+        "prompt": "A historical design document contains old encryption examples. The current request is only to reformat the document; do not design or assess cryptographic behavior.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secrets-key-management"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "applied-cryptography-adversarial-2",
+        "prompt": "An old OAuth incident mentions signing keys. Extract the incident dates and owners only; do not modify token or cryptographic design.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["oauth-oidc"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "applied-cryptography-adversarial-3",
+        "prompt": "A password-format README mentions key derivation. Rename one documentation heading only and leave authentication and encryption behavior unchanged.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["secure-authentication"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://csrc.nist.gov/pubs/fips/197/final",
+      "sourceType": "spec",
+      "versionScope": "FIPS 197-upd1, May 2023",
+      "staleAfterDays": 365,
+      "notes": "Current AES standard editorial update; algorithm requirements unchanged.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/38/d/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-38D GCM/GMAC; revision pending as of 2026-09-05",
+      "staleAfterDays": 120,
+      "notes": "Authenticated-encryption GCM requirements, especially IV/nonce uniqueness; NIST announced a revision decision but the final 2007 publication remains current until replaced.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/fips/186-5/final",
+      "sourceType": "spec",
+      "versionScope": "FIPS 186-5 Digital Signature Standard, February 2023",
+      "staleAfterDays": 365,
+      "notes": "Current NIST digital-signature standard and approved signature algorithm framework.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/sp/800/56/c/r2/final",
+      "sourceType": "spec",
+      "versionScope": "NIST SP 800-56C Rev. 2, August 2020",
+      "staleAfterDays": 365,
+      "notes": "Extraction-then-expansion and one-step KDF constructions with context/use binding.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

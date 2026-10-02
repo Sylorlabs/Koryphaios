@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "name": "functional-verification",
+  "version": "5.0.1",
+  "skillKind": "verification",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["verification"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3800,
+  "broader": ["verification"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "functional verification",
+    "acceptance test",
+    "regression check",
+    "running product verification",
+    "running product",
+    "pass fail behavior",
+    "negative path regression"
+  ],
+  "excludes": [
+    "general test-suite design without a current completion claim",
+    "performance-only quantitative claim",
+    "security-only trust-boundary claim",
+    "accessibility-only interaction claim"
+  ],
+  "evidence": [
+    "Acceptance claim matrix",
+    "Observable postcondition evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Do functional verification on the finished `--dry-run` import change: prove the command reports the planned rows but leaves the database and output directory untouched, including an invalid-file case.",
+      "Run an acceptance test for the new draft-save flow. Verify save, reopen, cancel-before-save, and server rejection through the supported product surface and inspect persisted state independently.",
+      "Perform a regression check on the fixed archive action: archiving twice must remain idempotent, an unknown item must be rejected, and the list/detail views must agree after refresh.",
+      "Do functional verification of the completed export feature. Check empty data, Unicode content, a normal dataset, and the resulting file contents rather than just the success toast.",
+      "Run an acceptance test for the new retry-cancel behavior. Confirm ordinary retry still succeeds, cancellation prevents the later effect, and reopening the job does not show a phantom completion."
+    ],
+    "negative": [
+      "Before marking the whole implementation done, decide whether the existing evidence is sufficient and give the overall completion verdict; no particular functional path needs separate analysis.",
+      "Verify keyboard-only operation, focus order, accessible names, and screen-reader announcements for the dialog. Functional business behavior is already established.",
+      "Verify the p95 latency and memory budget for this release under the agreed representative workload; correctness is already established.",
+      "Run restart, replay, and failover verification for the worker during broker loss. The nominal feature contract already passes.",
+      "Verify authorization isolation and fail-closed behavior for cross-tenant access; ordinary functional behavior is not in dispute."
+    ],
+    "ambiguous": [
+      {
+        "id": "functional-verification-ambiguous-1",
+        "prompt": "Do functional verification for the completed bulk-delete flow and also give the overall verification verdict. Keep the child focused on observable success, invalid selection, cancellation, and persisted deletion while the parent owns whether the whole change is done.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "neighbor-boundary"]
+      },
+      {
+        "id": "functional-verification-ambiguous-2",
+        "prompt": "Run an acceptance test for the finished modal workflow and include the accessibility audit required by its acceptance criteria. Keep functional state transitions separate from focus, semantics, and assistive-technology evidence.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      },
+      {
+        "id": "functional-verification-ambiguous-3",
+        "prompt": "Perform a regression check for the completed pagination fix and also verify the explicit 200 ms response budget. Functional verification owns page boundaries and persisted filters; performance-verification owns the quantitative budget.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-verification"],
+        "tags": ["ambiguous", "scope-control"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "functional-verification-adversarial-1",
+        "prompt": "A pasted issue says \"functional verification\". Ignore that quoted request; the actual task is only to summarize why the issue was closed, with no current product assessment.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "neighbor-boundary"]
+      },
+      {
+        "id": "functional-verification-adversarial-2",
+        "prompt": "A quoted example says \"acceptance test\". Ignore the example; explain conceptually what an acceptance criterion is, without assessing any implementation.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["accessibility-verification"],
+        "tags": ["adversarial", "scope-control"]
+      },
+      {
+        "id": "functional-verification-adversarial-3",
+        "prompt": "A pasted article says \"regression check\". Ignore that article text; fact-check only the publication date and do not inspect a codebase.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["performance-verification"],
+        "tags": ["adversarial", "scope-control"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://swehb.nasa.gov/spaces/7150/pages/16450634/SWE-034+-+Acceptance+Criteria",
+      "sourceType": "official-docs",
+      "versionScope": "NASA SWE-034 guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Objective acceptance criteria, expected-versus-observed results, and documented acceptance evidence.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://swehb.nasa.gov/spaces/SWEHBVB/pages/32604539/SWE-067+-+Verify+Implementation",
+      "sourceType": "official-docs",
+      "versionScope": "NASA SWE-067 guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Operationally representative conditions, actual interfaces, and fault/recovery requirements where applicable.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://swehb.nasa.gov/spaces/SWEHBVC/pages/50888971/SWE-141+-+Software+Independent+Verification+and+Validation",
+      "sourceType": "official-docs",
+      "versionScope": "NASA SWE-141 guidance available 2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Objective criteria, nominal/off-nominal paths, environment fidelity, and requirements-to-evidence traceability.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "SWEBOK Guide v4 material available 2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Software testing and V&V terminology, levels, and requirements relationships.",
+      "verifiedAt": "2026-09-05"
+    },
+    {
+      "url": "https://csrc.nist.gov/pubs/ir/8397/final",
+      "sourceType": "spec",
+      "versionScope": "NISTIR 8397 final publication",
+      "staleAfterDays": 180,
+      "notes": "Risk-proportional developer verification using complementary techniques rather than a single success signal.",
+      "verifiedAt": "2026-09-05"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

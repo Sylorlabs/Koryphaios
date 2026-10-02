@@ -72,6 +72,7 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { PROJECT_ROOT } from '../runtime/paths';
+import { resolveProjectIdentity } from '../runtime/request-project';
 import { serverLog } from '../logger';
 import {
   ConflictError,
@@ -143,11 +144,14 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = new Set([
 ]);
 
 function resolvedProjectRoot(projectRoot?: string): string | undefined {
-  return projectRoot ? resolve(projectRoot) : undefined;
+  return projectRoot ? resolveProjectIdentity(projectRoot) : undefined;
 }
 
 function rowProjectRoot(row: { id: string; projectRoot?: string | null }): string {
-  return projectDocumentIdentity(row.id)?.projectRoot ?? resolve(row.projectRoot || PROJECT_ROOT);
+  return (
+    projectDocumentIdentity(row.id)?.projectRoot ??
+    resolveProjectIdentity(row.projectRoot || PROJECT_ROOT)
+  );
 }
 
 function isVisibleInProject(
@@ -161,7 +165,7 @@ function isVisibleInProject(
 function projectNotesCondition(projectRoot?: string) {
   const root = resolvedProjectRoot(projectRoot);
   if (!root) return undefined;
-  return root === resolve(PROJECT_ROOT)
+  return root === resolveProjectIdentity(PROJECT_ROOT)
     ? or(eq(notes.projectRoot, root), isNull(notes.projectRoot))
     : eq(notes.projectRoot, root);
 }
@@ -262,7 +266,9 @@ function atomicWrite(path: string, data: string | Buffer): void {
 function projectDocumentId(projectRoot: string, sourcePath: string): string {
   return (
     PROJECT_DOCUMENT_PREFIX +
-    Buffer.from(JSON.stringify([resolve(projectRoot), sourcePath])).toString('base64url')
+    Buffer.from(JSON.stringify([resolveProjectIdentity(projectRoot), sourcePath])).toString(
+      'base64url',
+    )
   );
 }
 
@@ -276,7 +282,7 @@ function projectDocumentIdentity(
     ) as [string, string];
     if (!path || path.startsWith('/') || path.split(/[\\/]/).includes('..')) return undefined;
     if (!projectRoot) return undefined;
-    return { projectRoot: resolve(projectRoot), sourcePath: path };
+    return { projectRoot: resolveProjectIdentity(projectRoot), sourcePath: path };
   } catch (err: unknown) {
     serverLog.debug(
       { err: err instanceof Error ? err.message : String(err) },
@@ -359,7 +365,7 @@ export interface ProjectSyncStatus {
 const projectSyncStatus = new Map<string, ProjectSyncStatus>();
 
 export function getProjectSyncStatus(projectRoot: string): ProjectSyncStatus {
-  return projectSyncStatus.get(resolve(projectRoot)) ?? { state: 'idle' };
+  return projectSyncStatus.get(resolveProjectIdentity(projectRoot)) ?? { state: 'idle' };
 }
 
 /** Ensure a project's docs are mirrored without blocking every call on a full
@@ -368,7 +374,7 @@ export function getProjectSyncStatus(projectRoot: string): ProjectSyncStatus {
  *  keep health and other API work responsive. Later stale scans refresh in the
  *  background. */
 export async function ensureProjectSync(projectRoot: string): Promise<void> {
-  const key = resolve(projectRoot);
+  const key = resolveProjectIdentity(projectRoot);
   const now = Date.now();
   const last = lastSyncAt.get(key);
   if (!initialSyncComplete.get(key)) {
@@ -402,7 +408,7 @@ export async function ensureProjectSync(projectRoot: string): Promise<void> {
 
 /** Returns true only after the initial project sync produced a catalog. */
 export function isInitialSyncComplete(projectRoot: string): boolean {
-  return initialSyncComplete.get(resolve(projectRoot)) === true;
+  return initialSyncComplete.get(resolveProjectIdentity(projectRoot)) === true;
 }
 
 // ============================================================================
@@ -752,7 +758,7 @@ export async function createNote(
 ): Promise<Note> {
   const id = nanoid();
   const now = new Date();
-  const root = resolve(projectRoot);
+  const root = resolveProjectIdentity(projectRoot);
   const title = validateTitle(input.title);
   const content = input.content ?? '';
   assertContentBudget(content, root);
@@ -1422,7 +1428,7 @@ function streamStagedArchive(
  * captured in one SQLite read transaction and the tar is staged on disk, so
  * archive size is bounded by disk rather than process memory. */
 export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<VaultExportArtifact> {
-  const root = resolve(projectRoot);
+  const root = resolveProjectIdentity(projectRoot);
   const syncResult = await syncProjectDocuments(root);
   if (syncResult.truncated || syncResult.unreadablePaths > 0 || syncResult.oversizedFiles > 0) {
     throw new ConflictError(
@@ -1898,7 +1904,7 @@ async function relocateProjectDocumentRow(
 export async function syncProjectDocuments(
   projectRoot = PROJECT_ROOT,
 ): Promise<ProjectDocumentSyncResult> {
-  const root = resolve(projectRoot);
+  const root = resolveProjectIdentity(projectRoot);
   const active = projectSyncs.get(root);
   if (active) return active;
   projectSyncStatus.set(root, { state: 'running' });
@@ -1929,7 +1935,7 @@ export async function syncProjectDocuments(
 }
 
 async function performProjectDocumentSync(projectRoot: string): Promise<ProjectDocumentSyncResult> {
-  const root = resolve(projectRoot);
+  const root = resolveProjectIdentity(projectRoot);
   const files: string[] = [];
   let scanComplete = true;
   let scanLimitReached = false;
@@ -2980,7 +2986,7 @@ export async function parseAndSaveLinks(
 // ============================================================================
 
 export async function getGraphData(projectRoot?: string): Promise<GraphData> {
-  const cacheKey = projectRoot ? resolve(projectRoot) : '';
+  const cacheKey = projectRoot ? resolveProjectIdentity(projectRoot) : '';
   const cached = graphCache.get(cacheKey);
   if (cached) return cached;
 
@@ -3195,7 +3201,7 @@ function ftsSearchIds(query: string, limit: number, projectRoot?: string): strin
   if (!match) return [];
   const raw = getDb();
   const root = resolvedProjectRoot(projectRoot);
-  const includeLegacy = root === resolve(PROJECT_ROOT);
+  const includeLegacy = root === resolveProjectIdentity(PROJECT_ROOT);
   try {
     const rows = (
       root
@@ -3252,8 +3258,80 @@ export async function searchNotes(
   query: string,
   limit = 50,
   projectRoot?: string,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<Note[]> {
   if (!query.trim()) return listNotes({ limit }, projectRoot);
+  // No implicit cross-project export. The existing local search remains available
+  // without a project, when disabled, and on every embedding failure.
+  if (!options.signal?.aborted && projectRoot && process.env.KORY_EMBEDDINGS_ENABLED === '1') {
+    try {
+      const { checkNoteToolPermission } = await import('./notes-settings');
+      const searchPermission = checkNoteToolPermission('search_notes', projectRoot);
+      const readPermission = checkNoteToolPermission('read_note', projectRoot);
+      if (
+        loadNotesSettings(projectRoot).enabled &&
+        searchPermission.allowed &&
+        !searchPermission.requiresApproval &&
+        readPermission.allowed &&
+        !readPermission.requiresApproval
+      ) {
+        const { configuredEmbeddingClient } = await import('../memory/semantic-embeddings');
+        const client = configuredEmbeddingClient();
+        if (client) {
+          await ensureProjectSync(projectRoot);
+          // Apply project + trash visibility before collecting any provider input.
+          const rows = await db
+            .select()
+            .from(notes)
+            .where(scopedNotesCondition(projectRoot))
+            .orderBy(desc(notes.pinned), desc(notes.updatedAt), asc(notes.id))
+            .limit(256);
+          const visible = rows.filter((row) => isVisibleInProject(row, projectRoot));
+          const { retrieveMemory } = await import('../memory/semantic-retrieval');
+          const result = await retrieveMemory(
+            resolveProjectIdentity(projectRoot),
+            visible.map((row) => ({
+              id: row.id,
+              content: `${row.title}\n\n${row.content}`,
+            })),
+            query,
+            { client, limit: 51, signal: options.signal, timeoutMs: options.timeoutMs },
+          );
+          if (result.mode === 'semantic') {
+            const byId = new Map(visible.map((row) => [row.id, row]));
+            const rankedIds = [...new Set(result.hits.map((hit) => hit.id))];
+            // Recheck current visibility after the asynchronous provider request.
+            const current = rankedIds.length
+              ? await db
+                  .select()
+                  .from(notes)
+                  .where(and(inArray(notes.id, rankedIds), scopedNotesCondition(projectRoot)))
+              : [];
+            const currentById = new Map(
+              current
+                .filter((row) => isVisibleInProject(row, projectRoot))
+                .map((row) => [row.id, row]),
+            );
+            return rankedIds
+              .filter((id) => {
+                const before = byId.get(id),
+                  after = currentById.get(id);
+                return (
+                  before &&
+                  after &&
+                  before.content === after.content &&
+                  before.title === after.title
+                );
+              })
+              .slice(0, Math.max(1, Math.min(51, Number.isFinite(limit) ? Math.floor(limit) : 50)))
+              .map((id) => rowToNote(currentById.get(id)!));
+          }
+        }
+      }
+    } catch {
+      // Keep provider/credential errors out of logs and preserve established FTS fallback.
+    }
+  }
   const ids = ftsSearchIds(query, limit, projectRoot);
   if (ids.length === 0) return [];
   const scope = scopedNotesCondition(projectRoot);
@@ -3416,7 +3494,7 @@ async function saveAttachmentUnlocked(
   data: Buffer,
   projectRoot: string,
 ): Promise<NoteAttachment> {
-  const root = resolve(projectRoot);
+  const root = resolveProjectIdentity(projectRoot);
   if (!(await getNote(noteId, root))) throw new NotFoundError('Note', noteId);
   if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(mimeType)) {
     throw new ValidationError(`Attachment type is not allowed: ${mimeType || 'unknown'}`);
@@ -3496,7 +3574,7 @@ export async function getAttachment(
 
   const row = rows[0];
   if (!(await getNote(row.noteId, projectRoot))) return null;
-  const root = resolve(projectRoot || PROJECT_ROOT);
+  const root = resolveProjectIdentity(projectRoot || PROJECT_ROOT);
   if (!attachmentStorageIsAuthorized(row, root)) {
     serverLog.warn(
       { attachmentId: row.id, noteId: row.noteId },

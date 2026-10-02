@@ -43,6 +43,9 @@ import { createPrivateCliTextArtifact } from './private-cli-transport';
 import { ensureManagedCliDirectory, writeManagedCliFile } from './managed-cli-storage';
 import type { SkillRevision } from '../kory/skills';
 
+/** Total char budget for Devin-bridge skill manifests (minimal entries + spillover note). */
+const DEVIN_SKILL_MANIFEST_BUDGET = 15_000;
+
 interface DevinTrajectoryJson {
   schema_version?: string;
   session_id?: string;
@@ -292,23 +295,59 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
 
   buildSkills(ctx: CliBridgeContext): CliSkillFile[] | null {
     // Mirror Kory's active skills as .devin/skills/<name>/SKILL.md so the
-    // Devin CLI discovers them as agent-invocable skills. Each skill's full
-    // instructions are rendered from the Kory skill system.
+    // Devin CLI discovers them as agent-invocable skills. Full-text mirroring
+    // (~1.1M chars for a large personal library) is deliberately NOT done
+    // here: each file carries only a minimal manifest (name/version/description
+    // plus a load_skill_detail pointer, same progressive-disclosure contract as
+    // the kory-mcp-bridge), capped at a fixed char budget with spillover names
+    // listed in a single overflow note.
     if (!this.cached?.supportsSkills) return null;
     try {
       // Lazy import to avoid a circular dependency at module load time.
       const { listSkills } = require('../kory/skills');
       const configDir = getDevinUserConfigDir(getKoryphaiosDevinHome(ctx.sessionId));
-      const skills = listSkills(ctx.workingDirectory).filter(
-        (s: SkillRevision) => s.state === 'active',
-      );
-      return skills.map((skill: SkillRevision) => ({
-        path: join(configDir, 'skills', skill.name, 'SKILL.md'),
-        // SkillRevision carries `instructions` (rendered full-text) and
-        // `content` (raw SKILL.md source). Prefer the rendered instructions;
-        // fall back to raw content if instructions are empty.
-        content: skill.instructions?.trim() || skill.content || '',
-      }));
+      const skills = listSkills(ctx.workingDirectory)
+        .filter((s: SkillRevision) => s.state === 'active')
+        .sort((a: SkillRevision, b: SkillRevision) => a.name.localeCompare(b.name));
+      const files: CliSkillFile[] = [];
+      const spilled: string[] = [];
+      let spent = 0;
+      for (const skill of skills as SkillRevision[]) {
+        const description = (skill.description ?? '').trim().slice(0, 240);
+        const content = [
+          `# ${skill.name} (v${skill.metadata.version}, ${skill.source})`,
+          '',
+          description,
+          '',
+          'Full instructions are NOT embedded here. Load them on demand with the kory__load_skill_detail tool (same contract as the Kory MCP bridge), e.g. {"name": "' +
+            skill.name +
+            '"} — then follow the returned guidance.',
+          '',
+        ].join('\n');
+        if (spent + content.length > DEVIN_SKILL_MANIFEST_BUDGET) {
+          spilled.push(skill.name);
+          continue;
+        }
+        spent += content.length;
+        files.push({
+          path: join(configDir, 'skills', skill.name, 'SKILL.md'),
+          content,
+        });
+      }
+      if (spilled.length > 0) {
+        files.push({
+          path: join(configDir, 'skills', 'KORY_SKILLS_SPILLOVER.md'),
+          content: [
+            `# More Kory skills (${spilled.length} omitted by the ${DEVIN_SKILL_MANIFEST_BUDGET}-char bridge budget)`,
+            '',
+            ...spilled.map((name) => `- ${name}`),
+            '',
+            'Load any of them on demand with the kory__load_skill_detail tool.',
+            '',
+          ].join('\n'),
+        });
+      }
+      return files;
     } catch (err) {
       providerLog.warn({ err }, 'Devin bridge: failed to mirror Kory skills');
       return null;

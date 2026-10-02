@@ -1,0 +1,82 @@
+{
+  "id": "ruby-engineering-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Ruby web service that stores Current.user in thread-local state but fails to clear it on an exception, so a reused server thread can authorize the next request as the previous user. Preserve the current authorization API, establish request cleanup with ensure/lifecycle middleware, and verify alternating users, exception before/after authorization, streaming response, and thread reuse. Do not solve by spawning a new thread per request.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://ruby-engineering/thread-local-request-leak",
+    "requirements": [
+      "Ruby request middleware fixture with thread pool and Current-style thread-local state",
+      "two users with distinct authorization results and forced exception paths",
+      "thread reuse harness plus streaming/late cleanup sequence",
+      "existing authorization call-site compatibility contract",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "ruby-engineering-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "ruby-engineering decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "ruby-engineering-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "thread-local-request-leak scenario evidence",
+    "ruby-engineering decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "ruby-engineering-individual-scenario-1-result",
+    "ruby-engineering-individual-scenario-1-verification",
+    "ruby-engineering-individual-scenario-1-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual ruby-engineering boundary and relevant environment before acting, preserve the hierarchy relationship (broader=implementation; near-neighbor=c-cpp-systems-engineering), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm Ruby and gem versions, runtime entry points, dependency ownership, mutation patterns, and concurrency assumptions."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Request-scoped context is established and cleared in one guaranteed lifecycle boundary; no reusable thread can carry identity across requests after success or failure."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Run the project test suite and linting only as configured, reproduce behavior under the supported Ruby version, and cover transaction rollback, nil handling, time, encoding, and concurrency when relevant."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not patch global classes for local convenience, rescue Exception broadly, depend on load order accidentally, or let implicit ActiveSupport behavior leak into library contracts."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (ruby-engineering decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

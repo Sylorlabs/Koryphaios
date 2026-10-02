@@ -1,0 +1,71 @@
+{
+  "id": "performance-debugging-full-task-2",
+  "maturity": "individual",
+  "prompt": "The supplied desktop app appears to have a memory leak: after each open→close cycle of the same 50 MB project, retained heap after the fixture's explicit settle/GC checkpoint grows by roughly 18 MB and after 20 cycles the process is over 600 MB above its initial steady state. Reproduce 20 cycles, distinguish transient allocation/high-water RSS from retained live objects, take comparable heap/allocation evidence after cycles 1, 10, and 20, identify the ownership/retention path that grows monotonically, implement the narrow lifecycle fix, and repeat the 20-cycle protocol. Preserve project reopen behavior and do not hide growth by forcing extra GC or restarting the process.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://performance-debugging/project-open-close-retention",
+    "requirements": [
+      "the same 50 MB project fixture is used for every cycle",
+      "the harness exposes an identical settle/GC checkpoint after close",
+      "heap/allocation snapshots are available after cycles 1, 10, and 20",
+      "project reopen behavior must remain correct",
+      "process restart or additional forced-GC calls are prohibited as the fix",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "performance-memory-retained-growth",
+      "assertion": "The starting 20-cycle run demonstrates monotonically growing retained/live memory after equivalent settle checkpoints, distinct from temporary allocation or RSS high-water behavior."
+    },
+    {
+      "id": "performance-memory-retention-path",
+      "assertion": "Heap/allocation evidence identifies a concrete retained-object ownership path whose growth matches completed open/close cycles."
+    },
+    {
+      "id": "performance-memory-retest",
+      "assertion": "The identical 20-cycle post-fix run reaches a bounded steady state without extra GC/restarts and project reopen correctness remains green."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "performance-debugging-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Profile",
+        "Comparable benchmark",
+        "Resource accounting",
+        "retained-live versus transient memory accounting",
+        "comparable 20-cycle pre/post measurements"
+      ]
+    },
+    {
+      "id": "performance-debugging-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "retention ownership is causally tied to lifecycle completion",
+        "the fix releases ownership rather than masking memory metrics",
+        "verification demonstrates bounded steady-state behavior"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Profile",
+    "Comparable benchmark",
+    "Resource accounting",
+    "pre-fix cycle/snapshot evidence",
+    "retention-path evidence and actual diff",
+    "post-fix identical-cycle verification",
+    "paired skill/no-skill run artifacts"
+  ],
+  "requiredArtifacts": [
+    "performance-debugging-scenario-2-retention-baseline",
+    "performance-debugging-scenario-2-retention-path",
+    "performance-debugging-scenario-2-retest",
+    "performance-debugging-scenario-2-paired-evaluation"
+  ]
+}

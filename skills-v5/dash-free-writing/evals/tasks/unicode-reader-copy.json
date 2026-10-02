@@ -1,0 +1,55 @@
+{
+  "id": "dash-free-writing-unicode-reader-copy",
+  "maturity": "individual",
+  "prompt": "Revise the supplied customer notice in a natural style without dashes or hyphenated wording in authored prose. It contains several Unicode dash forms and a soft hyphen. Preserve the refund amount, eligibility condition, unconfirmed cause, exact product identifier, email address and a source quotation. Rewrite the time range with words. Deliver the revised notice and a short explanation of exact material that was preserved.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://dash-free-writing/unicode-reader-copy",
+    "requirements": [
+      "Notice with multiple Unicode dash forms and soft hyphen",
+      "Exact product identifier, email and quotation",
+      "Refund amount, time range and conditional eligibility",
+      "Paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "unicode",
+      "assertion": "No dash or invisible soft hyphen remains in authored prose."
+    },
+    {
+      "id": "protected",
+      "assertion": "Exact product, email and quotation remain intact."
+    },
+    {
+      "id": "range",
+      "assertion": "The time range uses words without changing its endpoints."
+    },
+    {
+      "id": "fidelity",
+      "assertion": "Amount, eligibility and uncertainty survive the rewrite."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "unicode-and-literals",
+      "kind": "deterministic",
+      "weight": 0.7,
+      "evidence": ["Unicode punctuation scan", "Protected spans and factual anchors"]
+    },
+    {
+      "id": "reader-quality",
+      "kind": "blind-semantic",
+      "weight": 0.3,
+      "evidence": ["Independent source fidelity and readability assessment"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Revised customer notice",
+    "Exact material preserved",
+    "Semantic fidelity review",
+    "Paired skill/no-skill artifacts"
+  ],
+  "requiredArtifacts": ["revised.md", "review.md"]
+}

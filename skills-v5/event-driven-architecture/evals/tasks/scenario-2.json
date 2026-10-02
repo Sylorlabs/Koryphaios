@@ -1,0 +1,82 @@
+{
+  "id": "event-driven-architecture-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Evolve a CustomerUpdated event to support multiple contact methods while three consumers deploy independently. One old consumer treats an unknown enum as fatal and another assumes email is always present. Design a staged schema/versioning rollout, compatibility tests, replay behavior, and dead-letter recovery so producers and consumers can coexist during migration. Do not couple deployment order through an undocumented flag.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://event-driven-architecture/event-schema-consumer-evolution",
+    "requirements": [
+      "producer plus three consumer fixtures with documented current decoding assumptions",
+      "historical event log to replay through old and new consumers",
+      "new contact-method representation and unknown-enum test vector",
+      "dead-letter/retry fixture proving incompatible events are recoverable and observable",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "event-driven-architecture-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "event-driven-architecture decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "event-driven-architecture-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "event-schema-consumer-evolution scenario evidence",
+    "event-driven-architecture decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "event-driven-architecture-individual-scenario-2-result",
+    "event-driven-architecture-individual-scenario-2-verification",
+    "event-driven-architecture-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual event-driven-architecture boundary and relevant environment before acting, preserve the hierarchy relationship (broader=distributed-backend; near-neighbor=realtime-systems), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Distinguish commands, domain events, integration events, notifications, and change-data streams."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Event evolution has an explicit compatibility envelope across independently deployed consumers, and replay of historical/new events remains deterministic and observable."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise duplicate, delayed, reordered, missing, poison, schema-evolved, and replayed events; verify producer transaction boundaries and consumer idempotency/reconciliation."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not use events to hide synchronous dependencies, publish before authoritative state commits without a recovery model, or let consumers depend on undocumented producer database fields."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (event-driven-architecture decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

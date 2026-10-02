@@ -67,6 +67,9 @@ function fixture(): { root: string; mainPath: string; creditPath: string; sqlite
       blocker TEXT, active_duration_ms INTEGER NOT NULL DEFAULT 0,
       active_started_at INTEGER, updated_at INTEGER NOT NULL
     );
+    CREATE TABLE checklists (
+      id TEXT PRIMARY KEY, title TEXT NOT NULL, scope TEXT NOT NULL, session_id TEXT
+    );
   `);
   for (const table of [
     'abort_controllers',
@@ -142,6 +145,9 @@ function seed(sqlite: Database, creditPath: string): void {
       '[{"id":"target-event","sessionId":"target"},{"id":"keep-event","sessionId":"keep"}]',
       '{"sessionId":"target","provider":"synthetic","model":"offline"}', NULL, 10, 1, 1
     );
+    INSERT INTO checklists VALUES
+      ('checklist-session', 'Mine', 'session', 'target'),
+      ('checklist-workspace', 'Everyone''s', 'workspace', NULL);
   `);
   for (const table of [
     'abort_controllers',
@@ -251,20 +257,10 @@ describe('atomic session erasure', () => {
     expect(count(restarted, 'process_events', 'process_id = ?', 'process-keep')).toBe(1);
     expect(count(restarted, 'process_health_checks', 'process_id = ?', 'process-target')).toBe(0);
     expect(
-      count(
-        restarted,
-        'session_run_continuation_processes',
-        'process_id = ?',
-        'process-target',
-      ),
+      count(restarted, 'session_run_continuation_processes', 'process_id = ?', 'process-target'),
     ).toBe(0);
     expect(
-      count(
-        restarted,
-        'session_run_continuation_processes',
-        'process_id = ?',
-        'process-keep',
-      ),
+      count(restarted, 'session_run_continuation_processes', 'process_id = ?', 'process-keep'),
     ).toBe(1);
     expect(count(restarted, 'session_participants', 'session_id = ?', 'collab-target')).toBe(0);
     expect(count(restarted, 'session_participants', 'session_id = ?', 'collab-keep')).toBe(1);
@@ -332,6 +328,23 @@ describe('atomic session erasure', () => {
     openDatabases.push(credit);
     expect(count(credit, 'credit_usage', 'session_id IS NOT NULL')).toBe(0);
     expect(count(credit, 'credit_usage', 'session_id IS NULL')).toBe(1);
+    credit.close();
+  });
+
+  test('session-scoped checklists are erased and workspace ones are not', () => {
+    const { creditPath, sqlite } = fixture();
+    seed(sqlite, creditPath);
+
+    eraseSessionDataTransaction(sqlite, { kind: 'selected', sessionIds: ['target'] });
+
+    // The list this chat owned is gone with it.
+    expect(count(sqlite, 'checklists', 'id = ?', 'checklist-session')).toBe(0);
+    // A workspace list is not session-owned, so it survives the erasure.
+    expect(count(sqlite, 'checklists', 'id = ?', 'checklist-workspace')).toBe(1);
+    sqlite.close();
+
+    const credit = new Database(creditPath);
+    openDatabases.push(credit);
     credit.close();
   });
 

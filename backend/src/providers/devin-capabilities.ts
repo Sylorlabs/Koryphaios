@@ -362,7 +362,10 @@ export function defaultDevinRulesDirs(projectRoot?: string): string[] {
  *
  * The CLI prints model families as headings (e.g. "Claude Opus 5 (claude-opus-5)")
  * followed by indented rows with an id, display name, and optional context/price
- * metadata. Alias lines ("  aliases: opus") and help text are excluded.
+ * metadata. Alias lines ("  aliases: opus") and help text are excluded. A
+ * trailing `[...]` metadata bracket (prices such as `[$4 / 1M Input · ...]`)
+ * is stripped so the entry keeps just the model name — pricing stays in
+ * billing, never in the name.
  */
 export function parseDevinModelsOutput(output: string): DevinModelEntry[] {
   const lines = output.split('\n');
@@ -374,14 +377,23 @@ export function parseDevinModelsOutput(output: string): DevinModelEntry[] {
   }
 
   for (const line of lines) {
+    // Alias declarations are not selectable models, regardless of spacing.
+    if (/^aliases\s*:/i.test(line.trim())) continue;
     // Model rows are indented and contain an id followed by a display name.
-    // Format: "  <id>  <Display Name>  [Nk context, ...]"
+    // Format: "  <id>  <Display Name>  [Nk context, ...]" or with a trailing
+    // price bracket: "  <id>  <Display Name>  [$X / 1M Input · ...]".
     const match = line.match(
       /^\s{2,}(\S+)\s{2,}(.+?)(?:\s*\[(\d+(?:[._]\d+)*)\s*([KkMm]?)\s*context[^\]]*\])?\s*$/,
     );
     if (match) {
       const id = match[1];
-      const name = match[2].trim();
+      // Strip any leftover trailing metadata bracket (e.g. per-1M prices) so
+      // the entry keeps just the model name.
+      const name =
+        match[2]
+          .trim()
+          .replace(/\s*\[[^\]]*\]\s*$/, '')
+          .trim() || id;
       let contextWindow: number | undefined;
       if (match[3]) {
         const num = parseInt(match[3].replace(/[._]/g, ''), 10);

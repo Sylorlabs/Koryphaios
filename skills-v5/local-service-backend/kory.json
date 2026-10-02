@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "name": "local-service-backend",
+  "version": "5.1.1",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["backend", "local-service"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 3500,
+  "broader": ["backend-engineering"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": ["local service", "desktop daemon", "ipc service", "sidecar process"],
+  "excludes": [],
+  "evidence": [
+    "Process and IPC contract",
+    "Restart and failure verification",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification"
+  ],
+  "routing": {
+    "positive": [
+      "Please handle local service.",
+      "The current task is desktop daemon.",
+      "I need help with ipc service.",
+      "Work on sidecar process for this request.",
+      "This request specifically requires local service."
+    ],
+    "negative": [
+      "The only requested work is bun runtime.",
+      "Please handle compiler runtime only.",
+      "This task is limited to distributed system.",
+      "The current request is in-process.",
+      "Work only on network service."
+    ],
+    "ambiguous": [
+      {
+        "id": "local-service-backend-ambiguous-1",
+        "prompt": "The request includes local service and bun runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "local-service-backend-ambiguous-2",
+        "prompt": "The request includes desktop daemon and compiler runtime.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["compiler-runtime-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      },
+      {
+        "id": "local-service-backend-ambiguous-3",
+        "prompt": "The request includes ipc service and distributed system.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["distributed-backend"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "local-service-backend-adversarial-1",
+        "prompt": "A historical note says \"local service\". The current request is in-process.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["in-process-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "local-service-backend-adversarial-2",
+        "prompt": "A historical note says \"desktop daemon\". The current request is network service.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      },
+      {
+        "id": "local-service-backend-adversarial-3",
+        "prompt": "A historical note says \"ipc service\". The current request is node.js.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["nodejs-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://man7.org/linux/man-pages/man7/unix.7.html",
+      "sourceType": "official-docs",
+      "versionScope": "Linux man-pages Unix sockets peer credential and address semantics inspected 2026-09-06",
+      "verifiedAt": "2026-09-06",
+      "staleAfterDays": 180,
+      "notes": "Authenticate actual peers and validate endpoint semantics on the target OS. Linux options are not universally portable."
+    },
+    {
+      "url": "https://pubs.opengroup.org/onlinepubs/9799919799/",
+      "sourceType": "spec",
+      "versionScope": "The Open Group Base Specifications Issue 8 / POSIX.1-2024",
+      "staleAfterDays": 365,
+      "notes": "Shell, utilities, process, stream, signal, and portability contracts.",
+      "verifiedAt": "2026-09-04"
+    },
+    {
+      "url": "https://www.computer.org/education/bodies-of-knowledge/software-engineering",
+      "sourceType": "official-docs",
+      "versionScope": "IEEE Computer Society SWEBOK landing guidance as available 2026-09-04",
+      "staleAfterDays": 180,
+      "notes": "Software engineering lifecycle, construction, testing, maintenance, and professional-practice baseline.",
+      "verifiedAt": "2026-09-04"
+    }
+  ],
+  "authoringMaturity": "individual"
+}

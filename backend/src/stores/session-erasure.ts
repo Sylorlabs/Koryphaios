@@ -23,6 +23,11 @@ const DIRECT_SESSION_TABLES = [
   'tasks',
   'user_inputs',
   'session_turn_commands',
+  // Only session-scoped checklists carry a session_id (the table's own CHECK
+  // constraint guarantees it), so a `WHERE session_id = ?` delete removes the
+  // lists that chat owned and leaves workspace- and project-scoped ones -- which
+  // are not session-owned -- untouched.
+  'checklists',
 ] as const;
 
 const SPECIAL_SESSION_TABLES = new Set([
@@ -34,8 +39,7 @@ const SPECIAL_SESSION_TABLES = new Set([
 ]);
 
 export type SessionErasureScope =
-  | { kind: 'selected'; sessionIds: readonly string[] }
-  | { kind: 'all' };
+  { kind: 'selected'; sessionIds: readonly string[] } | { kind: 'all' };
 
 export interface SessionErasureReport {
   deletedSessions: number;
@@ -69,11 +73,7 @@ const LINK_COLUMN_POLICIES = new Map<string, ReadonlySet<string>>([
   ['linked_session_ids', new Set(['goals'])],
   [
     'process_id',
-    new Set([
-      'process_events',
-      'process_health_checks',
-      'session_run_continuation_processes',
-    ]),
+    new Set(['process_events', 'process_health_checks', 'session_run_continuation_processes']),
   ],
 ]);
 
@@ -237,9 +237,13 @@ function eraseProcesses(
       'DELETE FROM session_run_continuation_processes WHERE process_id = ?',
       [processId],
     );
-    recordDelete(report, sqlite, 'process_events', 'DELETE FROM process_events WHERE process_id = ?', [
-      processId,
-    ]);
+    recordDelete(
+      report,
+      sqlite,
+      'process_events',
+      'DELETE FROM process_events WHERE process_id = ?',
+      [processId],
+    );
     recordDelete(
       report,
       sqlite,
@@ -341,7 +345,11 @@ export function inventorySessionIdsForErasure(sqlite: Database): string[] {
     }>;
     for (const goal of goals) {
       if (goal.session_id) ids.add(goal.session_id);
-      const linked = parseGoalJson<unknown[]>(goal.linked_session_ids, 'linked_session_ids', goal.id);
+      const linked = parseGoalJson<unknown[]>(
+        goal.linked_session_ids,
+        'linked_session_ids',
+        goal.id,
+      );
       const activity = parseGoalJson<Array<Record<string, unknown>>>(
         goal.activity,
         'activity',
@@ -351,7 +359,9 @@ export function inventorySessionIdsForErasure(sqlite: Database): string[] {
         ? parseGoalJson<Record<string, unknown>>(goal.execution, 'execution', goal.id)
         : null;
       if (!Array.isArray(linked) || !Array.isArray(activity)) {
-        throw new Error(`Session erasure refused structurally damaged session links for goal ${goal.id}`);
+        throw new Error(
+          `Session erasure refused structurally damaged session links for goal ${goal.id}`,
+        );
       }
       for (const value of linked) if (typeof value === 'string' && value) ids.add(value);
       for (const value of activity) {
@@ -422,12 +432,22 @@ function eraseGoalLinks(
     }
 
     const linked = parseGoalJson<unknown[]>(row.linked_session_ids, 'linked_session_ids', row.id);
-    const activity = parseGoalJson<Array<Record<string, unknown>>>(row.activity, 'activity', row.id);
+    const activity = parseGoalJson<Array<Record<string, unknown>>>(
+      row.activity,
+      'activity',
+      row.id,
+    );
     const execution = row.execution
       ? parseGoalJson<Record<string, unknown>>(row.execution, 'execution', row.id)
       : null;
-    if (!Array.isArray(linked) || !Array.isArray(activity) || (execution && typeof execution !== 'object')) {
-      throw new Error(`Session erasure refused structurally damaged session links for goal ${row.id}`);
+    if (
+      !Array.isArray(linked) ||
+      !Array.isArray(activity) ||
+      (execution && typeof execution !== 'object')
+    ) {
+      throw new Error(
+        `Session erasure refused structurally damaged session links for goal ${row.id}`,
+      );
     }
     if (!selected) throw new Error('Session erasure lost its selected-session scope');
     const nextLinked = linked.filter((value) => typeof value !== 'string' || !selected.has(value));
@@ -511,10 +531,7 @@ function eraseAuditRows(
 /** Credit usage lives in a separate WAL database, so it cannot truthfully be
  * described as crash-atomic with the main database. Erase it in its own
  * transaction after the main commit and track it in the durable file receipt. */
-export function eraseCreditUsageTransaction(
-  sqlite: Database,
-  scope: SessionErasureScope,
-): number {
+export function eraseCreditUsageTransaction(sqlite: Database, scope: SessionErasureScope): number {
   assertTableColumns(sqlite, 'credit_usage', ['session_id']);
   if (!tableExists(sqlite, 'credit_usage')) {
     throw new Error('Session credit erasure refused because credit_usage is unavailable');
@@ -523,7 +540,9 @@ export function eraseCreditUsageTransaction(
   const transaction = sqlite.transaction(() => {
     let deleted = 0;
     if (sessionIds === null) {
-      deleted += changes(sqlite.query('DELETE FROM credit_usage WHERE session_id IS NOT NULL').run());
+      deleted += changes(
+        sqlite.query('DELETE FROM credit_usage WHERE session_id IS NOT NULL').run(),
+      );
     } else {
       for (const sessionId of sessionIds) {
         deleted += changes(
@@ -622,71 +641,71 @@ export function eraseSessionDataTransaction(
   assertKnownSessionSchema(sqlite);
 
   const transaction = sqlite.transaction((): SessionErasureReport => {
-      const report: SessionErasureReport = {
-        deletedSessions: 0,
-        deletedRows: {},
-        updatedGoals: 0,
-      };
-      const processIds =
-        sessionIds === null
-          ? readIds(sqlite, 'supervised_processes', 'id', '1 = 1')
-          : sessionIds.flatMap((sessionId) =>
-              readIds(sqlite, 'supervised_processes', 'id', 'session_id = ?', [sessionId]),
-            );
-      const collaborationIds =
-        sessionIds === null
-          ? readIds(sqlite, 'collaboration_sessions', 'id', '1 = 1')
-          : sessionIds.flatMap((sessionId) =>
-              readIds(sqlite, 'collaboration_sessions', 'id', 'base_session_id = ?', [sessionId]),
-            );
+    const report: SessionErasureReport = {
+      deletedSessions: 0,
+      deletedRows: {},
+      updatedGoals: 0,
+    };
+    const processIds =
+      sessionIds === null
+        ? readIds(sqlite, 'supervised_processes', 'id', '1 = 1')
+        : sessionIds.flatMap((sessionId) =>
+            readIds(sqlite, 'supervised_processes', 'id', 'session_id = ?', [sessionId]),
+          );
+    const collaborationIds =
+      sessionIds === null
+        ? readIds(sqlite, 'collaboration_sessions', 'id', '1 = 1')
+        : sessionIds.flatMap((sessionId) =>
+            readIds(sqlite, 'collaboration_sessions', 'id', 'base_session_id = ?', [sessionId]),
+          );
 
-      // Continuations own normalized process references with a RESTRICT edge
-      // to supervised_processes. Remove the session-owned continuation graph
-      // before deleting process rows; bridge rows cascade with it. Corrupt
-      // cross-session process references are removed explicitly by
-      // eraseProcesses so privacy erasure cannot be blocked by stale metadata.
-      deleteDirectRows(sqlite, report, 'session_run_continuations', sessionIds);
-      eraseProcesses(sqlite, report, sessionIds);
-      eraseCollaborations(sqlite, report, sessionIds);
-      eraseGoalLinks(sqlite, report, sessionIds);
-      eraseAuditRows(sqlite, report, sessionIds);
-      for (const table of DIRECT_SESSION_TABLES) {
-        if (table === 'session_run_continuations') continue;
-        deleteDirectRows(sqlite, report, table, sessionIds);
-      }
+    // Continuations own normalized process references with a RESTRICT edge
+    // to supervised_processes. Remove the session-owned continuation graph
+    // before deleting process rows; bridge rows cascade with it. Corrupt
+    // cross-session process references are removed explicitly by
+    // eraseProcesses so privacy erasure cannot be blocked by stale metadata.
+    deleteDirectRows(sqlite, report, 'session_run_continuations', sessionIds);
+    eraseProcesses(sqlite, report, sessionIds);
+    eraseCollaborations(sqlite, report, sessionIds);
+    eraseGoalLinks(sqlite, report, sessionIds);
+    eraseAuditRows(sqlite, report, sessionIds);
+    for (const table of DIRECT_SESSION_TABLES) {
+      if (table === 'session_run_continuations') continue;
+      deleteDirectRows(sqlite, report, table, sessionIds);
+    }
 
-      if (tableExists(sqlite, 'persistent_sessions')) {
-        if (sessionIds === null) {
-          recordDelete(report, sqlite, 'persistent_sessions', 'DELETE FROM persistent_sessions');
-        } else {
-          for (const sessionId of sessionIds) {
-            recordDelete(
-              report,
-              sqlite,
-              'persistent_sessions',
-              'DELETE FROM persistent_sessions WHERE id = ?',
-              [sessionId],
-            );
-          }
+    if (tableExists(sqlite, 'persistent_sessions')) {
+      if (sessionIds === null) {
+        recordDelete(report, sqlite, 'persistent_sessions', 'DELETE FROM persistent_sessions');
+      } else {
+        for (const sessionId of sessionIds) {
+          recordDelete(
+            report,
+            sqlite,
+            'persistent_sessions',
+            'DELETE FROM persistent_sessions WHERE id = ?',
+            [sessionId],
+          );
         }
       }
+    }
 
-      if (tableExists(sqlite, 'sessions')) {
-        if (sessionIds === null) {
-          const result = sqlite.query('DELETE FROM sessions').run();
-          report.deletedSessions = changes(result);
-        } else {
-          for (const sessionId of sessionIds) {
-            sqlite.query('UPDATE sessions SET parent_id = NULL WHERE parent_id = ?').run(sessionId);
-            report.deletedSessions += changes(
-              sqlite.query('DELETE FROM sessions WHERE id = ?').run(sessionId),
-            );
-          }
+    if (tableExists(sqlite, 'sessions')) {
+      if (sessionIds === null) {
+        const result = sqlite.query('DELETE FROM sessions').run();
+        report.deletedSessions = changes(result);
+      } else {
+        for (const sessionId of sessionIds) {
+          sqlite.query('UPDATE sessions SET parent_id = NULL WHERE parent_id = ?').run(sessionId);
+          report.deletedSessions += changes(
+            sqlite.query('DELETE FROM sessions WHERE id = ?').run(sessionId),
+          );
         }
       }
+    }
 
-      assertNoRemnants(sqlite, sessionIds, processIds, collaborationIds);
-      return report;
+    assertNoRemnants(sqlite, sessionIds, processIds, collaborationIds);
+    return report;
   });
   return transaction();
 }

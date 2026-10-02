@@ -10,7 +10,7 @@
   import StickyNote from 'lucide-svelte/icons/sticky-note';
   import Flag from 'lucide-svelte/icons/flag';
   import CheckForUpdatesButton from './CheckForUpdatesButton.svelte';
-  import { getModKeyName } from '$lib/utils/platform';
+  import { getModKeyName, isMac } from '$lib/utils/platform';
   import { formatRecentDate, promptTemplates } from '$lib/utils/projectManager';
   import type { RecentProject } from '$lib/utils/projectManager';
   import { onMount } from 'svelte';
@@ -47,7 +47,8 @@
   }: Props = $props();
 
   let openMenu = $state<'file' | 'edit' | 'view' | null>(null);
-  let isMaximized = $state(false);
+  let isWindowExpanded = $state(false);
+  let usesNativeFullscreen = $state(false);
   let inTauri = $state(false);
   let feedbackOpen = $state(false);
 
@@ -60,15 +61,24 @@
     }
   }
 
-  async function toggleMaximize() {
+  async function toggleWindowSizeMode() {
     if (!browser || !inTauri) return;
     try {
-      await invoke('toggle_maximize');
-      // Update maximized state
       const { getCurrentWindow } = await import('@tauri-apps/api/window');
-      isMaximized = await getCurrentWindow().isMaximized();
+      const currentWindow = getCurrentWindow();
+
+      if (usesNativeFullscreen) {
+        // On macOS, the title-bar expansion control should behave like the
+        // native green traffic-light button: enter a fullscreen Space and let
+        // macOS hide the Dock/menu bar instead of merely zooming the window to
+        // the usable desktop area.
+        isWindowExpanded = await invoke<boolean>('toggle_fullscreen');
+      } else {
+        await invoke('toggle_maximize');
+        isWindowExpanded = await currentWindow.isMaximized();
+      }
     } catch (e) {
-      console.error('Failed to toggle maximize:', e);
+      console.error('Failed to toggle window size mode:', e);
     }
   }
 
@@ -85,20 +95,23 @@
     // Tauri v2 detection
     inTauri =
       typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
+    usesNativeFullscreen = isMac();
 
     if (inTauri) {
-      // Get initial maximized state
+      // Match the state queried by the platform-specific expansion behavior.
       import('@tauri-apps/api/window')
         .then(({ getCurrentWindow }) => {
-          getCurrentWindow()
-            .isMaximized()
-            .then((v: boolean) => {
-              isMaximized = v;
-            });
+          const currentWindow = getCurrentWindow();
+          const expandedState = usesNativeFullscreen
+            ? currentWindow.isFullscreen()
+            : currentWindow.isMaximized();
+          expandedState.then((v: boolean) => {
+            isWindowExpanded = v;
+          });
         })
         .catch((err: unknown) => {
           console.warn(
-            'Window maximized state check failed:',
+            'Window expansion state check failed:',
             err instanceof Error ? err.message : String(err),
           );
         });
@@ -385,7 +398,7 @@
           style="color: var(--color-accent); border-radius: var(--radius-lg);"
           onclick={() => updater.openDialog()}
           data-tauri-drag-region="false"
-          title="Update available — v{updater.updateInfo?.version ?? ''}"
+          title="Update available · v{updater.updateInfo?.version ?? ''}"
         >
           <Download size={14} />
           <span class="text-xs font-semibold"
@@ -474,14 +487,26 @@
         >
           <Minus size={14} />
         </button>
-        <!-- Maximize / Restore -->
+        <!-- Full Screen on macOS; Maximize / Restore elsewhere -->
         <button
           type="button"
           class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)]"
           style="color: var(--color-text-muted);"
-          onclick={toggleMaximize}
-          title={isMaximized ? 'Restore' : 'Maximize'}
-          aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+          onclick={toggleWindowSizeMode}
+          title={usesNativeFullscreen
+            ? isWindowExpanded
+              ? 'Exit Full Screen'
+              : 'Enter Full Screen'
+            : isWindowExpanded
+              ? 'Restore'
+              : 'Maximize'}
+          aria-label={usesNativeFullscreen
+            ? isWindowExpanded
+              ? 'Exit full screen'
+              : 'Enter full screen'
+            : isWindowExpanded
+              ? 'Restore window'
+              : 'Maximize window'}
         >
           <Square size={13} />
         </button>

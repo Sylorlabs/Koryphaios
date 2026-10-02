@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { wsStore } from "$lib/stores/websocket.svelte";
-  import { sessionStore } from "$lib/stores/sessions.svelte";
-  import MessageSquare from "lucide-svelte/icons/message-square";
-  import ArrowRight from "lucide-svelte/icons/arrow-right";
-  import CornerDownRight from "lucide-svelte/icons/corner-down-right";
-  import MessagesSquare from "lucide-svelte/icons/messages-square";
+  import { wsStore } from '$lib/stores/websocket.svelte';
+  import { sessionStore } from '$lib/stores/sessions.svelte';
+  import MessageSquare from 'lucide-svelte/icons/message-square';
+  import ArrowRight from 'lucide-svelte/icons/arrow-right';
+  import CornerDownRight from 'lucide-svelte/icons/corner-down-right';
+  import MessagesSquare from 'lucide-svelte/icons/messages-square';
 
-  let otherValue = $state("");
+  let otherValue = $state('');
   let showOther = $state(false);
   let dialogEl = $state<HTMLElement | null>(null);
 
@@ -15,7 +15,7 @@
   $effect(() => {
     if (pendingQuestion && dialogEl) {
       const focusable = dialogEl.querySelectorAll<HTMLElement>(
-        'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])'
+        'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])',
       );
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -24,9 +24,15 @@
       function trapFocus(e: KeyboardEvent) {
         if (e.key !== 'Tab') return;
         if (e.shiftKey) {
-          if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last?.focus();
+          }
         } else {
-          if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first?.focus();
+          }
         }
       }
 
@@ -36,7 +42,7 @@
   });
 
   function select(option: string) {
-    if (option.toLowerCase().includes("other") || option.toLowerCase().includes("something else")) {
+    if (option.toLowerCase().includes('other') || option.toLowerCase().includes('something else')) {
       showOther = true;
       return;
     }
@@ -46,7 +52,7 @@
   function submit(val: string) {
     if (!sessionStore.activeSessionId) return;
     wsStore.sendUserInput(sessionStore.activeSessionId, val);
-    otherValue = "";
+    otherValue = '';
     showOther = false;
   }
 
@@ -59,7 +65,7 @@
   $effect(() => {
     if (!pendingQuestion) {
       showOther = false;
-      otherValue = "";
+      otherValue = '';
       return;
     }
     showOther = pendingQuestion.allowOther && pendingQuestion.options.length === 0;
@@ -67,15 +73,30 @@
 </script>
 
 {#if pendingQuestion}
-  <div class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-    <div class="w-full max-w-lg bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200" bind:this={dialogEl} role="dialog" aria-modal="true">
-      <div class="px-6 py-5 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] flex items-center gap-3">
-        <div class="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500">
+  <div
+    class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+  >
+    <div
+      class="w-full max-w-lg bg-[var(--color-surface-1)] border border-[var(--color-border)] rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200"
+      bind:this={dialogEl}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        class="px-6 py-5 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] flex items-center gap-3"
+      >
+        <div
+          class="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-500"
+        >
           <MessageSquare size={18} />
         </div>
         <div>
-          <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Kory needs guidance</h3>
-          <p class="text-[10px] text-[var(--color-text-muted)]">Please select an option to continue</p>
+          <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">
+            Kory needs guidance
+          </h3>
+          <p class="text-[10px] text-[var(--color-text-muted)]">
+            Please select an option to continue
+          </p>
         </div>
       </div>
 
@@ -91,8 +112,14 @@
                 class="w-full flex items-center justify-between px-4 py-3 text-left text-sm rounded-xl transition-all border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] hover:border-amber-500/50 group"
                 onclick={() => select(option)}
               >
-                <span class="text-[var(--color-text-primary)] group-hover:text-amber-400 transition-colors">{option}</span>
-                <ArrowRight size={14} class="text-[var(--color-text-muted)] group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+                <span
+                  class="text-[var(--color-text-primary)] group-hover:text-amber-400 transition-colors"
+                  >{option}</span
+                >
+                <ArrowRight
+                  size={14}
+                  class="text-[var(--color-text-muted)] group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all"
+                />
               </button>
             {/each}
             {#if pendingQuestion.allowOther}
@@ -106,7 +133,10 @@
             {#if pendingQuestion.allowKeepChatting !== false}
               <button
                 class="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]"
-                onclick={() => submit('Keep chatting — I am not choosing an option yet. Ask a narrower follow-up or continue discovery.')}
+                onclick={() =>
+                  submit(
+                    'Keep chatting. I am not choosing an option yet. Ask a narrower follow up or continue discovery.',
+                  )}
               >
                 <MessagesSquare size={15} /> Keep chatting
               </button>
@@ -136,7 +166,7 @@
               </button>
               <button
                 class="px-4 py-2.5 text-sm font-medium rounded-xl bg-[var(--color-surface-3)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-4)] transition-colors"
-                onclick={() => showOther = false}
+                onclick={() => (showOther = false)}
               >
                 Back
               </button>

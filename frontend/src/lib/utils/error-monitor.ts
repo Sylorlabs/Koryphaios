@@ -29,6 +29,9 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let _originalError: typeof console.error;
 let _originalWarn: typeof console.warn;
 let _initialized = false;
+let _stallInitialized = false;
+let _stallTimer: ReturnType<typeof setInterval> | null = null;
+let _lastFrameAt = 0;
 
 // Store the real console methods on globalThis so they survive Vite HMR.
 const _g = globalThis as unknown as {
@@ -300,4 +303,122 @@ export function disposeErrorMonitoring(): void {
   window.removeEventListener('error', onWindowError);
   window.removeEventListener('unhandledrejection', onUnhandledRejection);
   _initialized = false;
+  disposeStallMonitoring();
+}
+
+// ─── Renderer stall monitoring ─────────────────────────────────────────────
+// A frozen main thread fires no error events, so a UI freeze otherwise leaves
+// no trace. This tracks requestAnimationFrame gaps plus PerformanceObserver
+// longtasks (both guarded — WebViews without longtask support simply record
+// heartbeat gaps). Stalls are reported through the console.error hook above,
+// which forwards them to the backend debug log, and are readable via
+// getStallSnapshot() for bug-report diagnostics.
+
+export interface RendererStall {
+  at: number;
+  durationMs: number;
+  source: 'heartbeat' | 'longtask';
+}
+
+const STALL_RING_MAX = 10;
+// A stall only counts when the page was visible: background-tab throttling
+// pauses rAF by design and must not masquerade as a freeze.
+const STALL_GAP_THRESHOLD_MS = 3_000;
+
+let stallRing: RendererStall[] = [];
+let stallWorstGapMs = 0;
+let stallLongTaskCount = 0;
+
+export function recordRendererStall(entry: RendererStall): RendererStall[] {
+  stallRing = [...stallRing, entry].slice(-STALL_RING_MAX);
+  if (entry.durationMs > stallWorstGapMs) stallWorstGapMs = entry.durationMs;
+  if (entry.source === 'longtask') stallLongTaskCount++;
+  return stallRing;
+}
+
+export function getStallSnapshot(): {
+  worstFrameGapMs: number;
+  longTaskCount: number;
+  recentStalls: RendererStall[];
+} {
+  return {
+    worstFrameGapMs: stallWorstGapMs,
+    longTaskCount: stallLongTaskCount,
+    recentStalls: [...stallRing],
+  };
+}
+
+/** Test seam: reset stall state (HMR re-entry and unit tests). */
+export function resetStallMonitoring(): void {
+  stallRing = [];
+  stallWorstGapMs = 0;
+  stallLongTaskCount = 0;
+}
+
+function reportStall(durationMs: number, source: RendererStall['source']): void {
+  recordRendererStall({ at: Date.now(), durationMs: Math.round(durationMs), source });
+  try {
+    console.error('[Koryphaios] Renderer stall detected', {
+      durationMs: Math.round(durationMs),
+      source,
+    });
+  } catch {
+    // The reporting path must never break the app it instruments.
+  }
+}
+
+export function initStallMonitoring(): void {
+  if (typeof window === 'undefined' || _stallInitialized) return;
+  _stallInitialized = true;
+  _lastFrameAt = Date.now();
+
+  try {
+    const tick = () => {
+      _lastFrameAt = Date.now();
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  } catch {
+    // rAF unavailable — heartbeat disabled, longtasks may still report.
+  }
+
+  try {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.duration >= STALL_GAP_THRESHOLD_MS) {
+          reportStall(entry.duration, 'longtask');
+        }
+      }
+    });
+    observer.observe({ entryTypes: ['longtask'] });
+  } catch {
+    // WebViews without longtask support: heartbeat gaps still apply.
+  }
+
+  // The heartbeat itself cannot fire while frozen; the gap is measured when
+  // frames resume. A 1s poll keeps worst-case detection latency near the
+  // threshold instead of waiting for the next unrelated timer.
+  _stallTimer = setInterval(() => {
+    try {
+      if (document.visibilityState !== 'visible') {
+        _lastFrameAt = Date.now();
+        return;
+      }
+      const gap = Date.now() - _lastFrameAt;
+      if (gap >= STALL_GAP_THRESHOLD_MS) {
+        // Reset the baseline so one long freeze reports once instead of
+        // once per poll for its whole duration.
+        _lastFrameAt = Date.now();
+        reportStall(gap, 'heartbeat');
+      }
+    } catch {
+      // ignore
+    }
+  }, 1_000);
+}
+
+export function disposeStallMonitoring(): void {
+  if (_stallTimer) clearInterval(_stallTimer);
+  _stallTimer = null;
+  _stallInitialized = false;
 }

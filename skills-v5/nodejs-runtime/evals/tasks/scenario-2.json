@@ -1,0 +1,82 @@
+{
+  "id": "nodejs-runtime-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Fix a Node.js export endpoint that pipes database rows through a CSV transform but ignores stream backpressure and client abort, causing memory growth and continued database reads after disconnect. Use Node stream/AbortSignal lifecycle correctly, bound buffering, propagate errors once, and verify slow client, disconnect, transform error, database error, empty result, and clean process shutdown.",
+  "environment": {
+    "kind": "repository",
+    "startingState": "fixture://nodejs-runtime/stream-backpressure-abort",
+    "requirements": [
+      "Node readable database-row source, transform stream, and HTTP writable sink",
+      "slow consumer plus abrupt disconnect and injected source/transform errors",
+      "memory/highWaterMark and source-read count instrumentation",
+      "AbortSignal or equivalent cancellation path through the data source",
+      "paired same-model skill/no-skill execution from the identical starting snapshot"
+    ]
+  },
+  "scorers": [
+    {
+      "id": "nodejs-runtime-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "nodejs-runtime decision and boundary evidence",
+        "Representative verification results or explicit unavailable checks",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "nodejs-runtime-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "stream-backpressure-abort scenario evidence",
+    "nodejs-runtime decision and boundary evidence",
+    "Hierarchy boundary and selected specialist rationale",
+    "hierarchy boundary and selected specialist rationale",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "nodejs-runtime-individual-scenario-2-result",
+    "nodejs-runtime-individual-scenario-2-verification",
+    "nodejs-runtime-individual-scenario-2-paired-evaluation"
+  ],
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual nodejs-runtime boundary and relevant environment before acting, preserve the hierarchy relationship (broader=backend-engineering; near-neighbor=compiler-runtime-backend), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Confirm Node version and module mode."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "Backpressure and cancellation propagate end to end: the producer cannot outrun bounded buffers or continue external work after the owning HTTP request terminates."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Exercise shutdown, cancellation, stream errors, partial writes, process failures, memory-sensitive workloads, and supported Node versions in addition to focused tests."
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not take the tempting shortcut prohibited by this skill: Do not block the event loop with CPU or sync I/O in latency-sensitive paths, ignore stream backpressure, leak timers/handles, or depend on undocumented internals."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (nodejs-runtime decision and boundary evidence; Representative verification results or explicit unavailable checks; Hierarchy boundary and selected specialist rationale; Representative success, negative-path, and recovery verification), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ]
+}

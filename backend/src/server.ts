@@ -18,6 +18,7 @@ import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
+import { stopCatalogRefresh } from './providers/catalog-refresh';
 import type { WSClientData } from './ws/ws-manager';
 import { validateLocalBearerToken } from './auth/local-route-auth';
 import { serveMcp } from './mcp/koryphaios-mcp-endpoint';
@@ -42,6 +43,7 @@ import { processRoutes } from './routes/v1/processes';
 import { notesRoutes } from './routes/v1/notes';
 import { workspaceRoutes } from './routes/v1/workspace';
 import { goalRoutes } from './routes/v1/goals';
+import { checklistRoutes } from './routes/v1/checklists';
 import { nativeCommandRoutes } from './routes/v1/native-commands';
 import { mcpBridgeRoutes } from './routes/v1/mcp-bridge';
 import { mcpServerRoutes } from './routes/v1/mcp-servers';
@@ -50,6 +52,8 @@ import { voiceRoutes } from './routes/v1/voice';
 import { imageRoutes } from './routes/v1/images';
 import { usageRoutes } from './routes/v1/usage';
 import { feedRoutes } from './routes/v1/feed';
+import { agentMessageRoutes } from './routes/v1/agent-messages';
+import { appearanceRoutes } from './routes/v1/appearance';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
 const SERVER_STARTED_AT = Date.now();
@@ -103,13 +107,16 @@ const baseApp = new Elysia()
   .use(notesRoutes)
   .use(workspaceRoutes)
   .use(goalRoutes)
+  .use(checklistRoutes)
   .use(nativeCommandRoutes)
   .use(mcpBridgeRoutes)
   .use(mcpServerRoutes)
   .use(mcpRegistryRoutes)
   .use(voiceRoutes)
   .use(imageRoutes)
-  .use(usageRoutes);
+  .use(usageRoutes)
+  .use(agentMessageRoutes)
+  .use(appearanceRoutes);
 
 export type App = typeof baseApp;
 
@@ -460,30 +467,33 @@ async function main() {
   async function gracefulShutdown(signal: string) {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
-    serverLog.info({ signal }, 'Graceful shutdown');
-    server.stop(true);
-    clearActivePortFile();
-    // Freeze local lifecycle writers first. Durable user/process waits survive
-    // restart; only provider/compaction work that cannot survive is failed.
-    await kory.shutdown();
-    await runs.recoverInterruptedRuns();
-    await runs.drainOutbox();
-    runs.stopOutboxPump();
-    shutdownAllBrokers();
-    // Dispose the local auth manager so its session-cleanup interval is
-    // cleared and the master key buffer is zeroed before exit.
-    try {
-      const { localAuth } = await import('./auth/local-auth');
-      localAuth.dispose();
-    } catch {
-      /* ignore — auth module may not be loaded */
-    }
-    try {
-      getDb().close();
-    } catch (e) {
-      /* ignore */
-    }
-    process.exit(0);
+      serverLog.info({ signal }, 'Graceful shutdown');
+      server.stop(true);
+      clearActivePortFile();
+      // Stop the adaptive catalog poller so a shutdown never leaves a timer or
+      // a half-finished provider refresh behind.
+      stopCatalogRefresh();
+      // Freeze local lifecycle writers first. Durable user/process waits survive
+      // restart; only provider/compaction work that cannot survive is failed.
+      await kory.shutdown();
+      await runs.recoverInterruptedRuns();
+      await runs.drainOutbox();
+      runs.stopOutboxPump();
+      shutdownAllBrokers();
+      // Dispose the local auth manager so its session-cleanup interval is
+      // cleared and the master key buffer is zeroed before exit.
+      try {
+        const { localAuth } = await import('./auth/local-auth');
+        localAuth.dispose();
+      } catch {
+        /* ignore — auth module may not be loaded */
+      }
+      try {
+        getDb().close();
+      } catch (e) {
+        /* ignore */
+      }
+      process.exit(0);
     })();
     return shutdownPromise;
   }

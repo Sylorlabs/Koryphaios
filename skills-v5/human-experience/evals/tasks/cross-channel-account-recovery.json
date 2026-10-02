@@ -1,0 +1,74 @@
+{
+  "id": "human-experience-full-task-cross-channel-recovery",
+  "prompt": "Redesign an account-recovery journey that spans web sign-in, identity verification, asynchronous manual review, support escalation, and return to the user's interrupted task. The fixture includes existing screens, support scripts, analytics summaries, and conflicting stakeholder assumptions. Produce an evidence-backed experience plan without inventing user findings.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://human-experience/cross-channel-account-recovery",
+    "requirements": [
+      "existing journey artifacts",
+      "research and analytics evidence",
+      "known policy constraints",
+      "paired same-model execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "recovery-whole-journey",
+      "assertion": "The experience plan covers entry/orientation, web-to-verification handoff, asynchronous manual review, support escalation, interruption, completion, and return to the original task rather than optimizing one screen in isolation."
+    },
+    {
+      "id": "recovery-evidence-ledger",
+      "assertion": "Research, analytics, current behavior, policy constraints, stakeholder assumptions, and unresolved questions are distinguished so conflicting assumptions are not presented as user findings."
+    },
+    {
+      "id": "recovery-policy-boundary",
+      "assertion": "The proposed journey respects known identity/policy constraints and marks policy changes as dependencies rather than silently redesigning assurance or entitlement rules."
+    },
+    {
+      "id": "recovery-specialist-routing",
+      "assertion": "Research, interaction, content, information-architecture, accessibility, service/support, and other specialist questions are assigned only where their discipline materially owns the unresolved decision."
+    },
+    {
+      "id": "recovery-no-fabricated-validation",
+      "assertion": "The result identifies the smallest next evidence needed for material assumptions and does not claim user comprehension, usability, or preference without observed evidence."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "whole-journey-coverage",
+      "kind": "deterministic",
+      "weight": 0.4,
+      "evidence": [
+        "entry and orientation",
+        "handoffs",
+        "interruption",
+        "failure and recovery",
+        "completion and return"
+      ]
+    },
+    {
+      "id": "evidence-and-specialist-boundaries",
+      "kind": "deterministic",
+      "weight": 0.35,
+      "evidence": [
+        "evidence versus assumption ledger",
+        "selected specialist disciplines with rationale",
+        "no fabricated research claims"
+      ]
+    },
+    {
+      "id": "blind-human-centred-quality",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": ["randomized candidate and baseline artifacts", "independent evaluator record"],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "journey map",
+    "evidence versus assumption ledger",
+    "specialist selection rationale",
+    "failure and recovery coverage"
+  ],
+  "requiredArtifacts": ["experience-plan", "journey-evidence-matrix", "paired-experiment-report"]
+}

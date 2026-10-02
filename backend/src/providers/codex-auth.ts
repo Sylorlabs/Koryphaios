@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { whichBinary } from './cli-detection';
 import { getManagedCodexAppServer, type CodexAppServerModel } from './codex-app-server';
@@ -6,14 +7,9 @@ import {
   readCodexModelsCacheFromProfile,
   enrichCodexModelsWithCliCache,
 } from './codex-models-cache';
-import type {
-  Provider,
-  ProviderEvent,
-  ProviderMessage,
-  StreamRequest,
-} from './types';
+import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './types';
 import { providerLog } from '../logger';
-import { getKoryphaiosCodexHome } from './cli-bridges';
+import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
 import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,
@@ -27,7 +23,16 @@ import {
 import { appendBoundedProviderFrames } from './bounded-provider-stream';
 import { buildProviderCliEnv } from './cli-environment';
 import { createCliAttachmentScope, type CliAttachmentScope } from './cli-attachments';
-import { codexImageArgs, codexReasoningArgs } from './codex-cli';
+import {
+  buildCodexPrompt,
+  codexImageArgs,
+  codexJsonEvents,
+  codexReasoningArgs,
+  codexTransientFailureMessage,
+  isTransientCodexFailure,
+} from './codex-cli';
+import { createKoryBridgeGrantLease } from './bridge-grant';
+import { writeManagedCliFile } from './managed-cli-storage';
 
 const CODEX_TIMEOUT_MS = 300_000;
 /** A non-secret Koryphaios configuration marker; the app-server owns OAuth tokens. */
@@ -37,27 +42,12 @@ export function buildCodexAuthPrompt(
   systemPrompt: string | undefined,
   messages: ProviderMessage[],
   attachments: Pick<CliAttachmentScope, 'renderContent'>,
+  tools?: StreamRequest['tools'],
+  harnessRole?: StreamRequest['harnessRole'],
 ): string {
-  return [
-    systemPrompt?.trim(),
-    'You are running inside Koryphaios. Follow its supplied instructions and finish every turn with a concise user-facing answer.',
-    ...messages
-      .filter((message) => message.role !== 'system')
-      .map((message) => {
-        const text = attachments.renderContent(message.content).trim();
-        if (!text) return '';
-        const label =
-          message.role === 'assistant'
-            ? 'Assistant'
-            : message.role === 'tool'
-              ? 'Tool result'
-              : 'User';
-        return `${label}: ${text}`;
-      })
-      .filter(Boolean),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  // Parity with the CLI-backed `codex` provider: the same harness note and
+  // <KORY_TOOL_CALL> envelope protocol so Kory control-plane tools work here.
+  return buildCodexPrompt(systemPrompt, messages, tools, harnessRole, attachments);
 }
 
 function modelDefinition(model: CodexAppServerModel): ModelDef | null {
@@ -150,17 +140,85 @@ export class CodexAuthProvider implements Provider {
       yield { type: 'error', error: 'Codex CLI (codex) was not found on PATH.' };
       return;
     }
+    const hasTools = (request.tools?.length ?? 0) > 0;
     const attachmentScope = createCliAttachmentScope();
     const privatePrompt = buildCodexAuthPrompt(
       request.systemPrompt,
       request.messages,
       attachmentScope,
+      request.tools,
+      request.harnessRole,
     );
+
+    // ── Wire rules (AGENTS.md) into the isolated codex home ────────────────
+    // Same control-plane wiring as the CLI-backed `codex` provider: the Kory
+    // MCP bridge is the tool transport, native stays sandboxed read-only.
+    const codexBridge = getCliBridge('codex');
+    const bridgeGrantLease =
+      hasTools && request.sessionId
+        ? createKoryBridgeGrantLease(request.sessionId, request.harnessRole ?? 'manager')
+        : undefined;
+    const bridgeCtx = {
+      provider: 'codex' as const,
+      role: request.harnessRole ?? 'manager',
+      sandbox: request.sandbox,
+      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+      sessionId: request.sessionId,
+      systemPrompt: request.systemPrompt ?? '',
+      tools: request.tools ?? [],
+      bridgeGrantLease,
+    };
+    if (hasTools)
+      try {
+        const ruleFiles = codexBridge?.buildRules(bridgeCtx);
+        if (ruleFiles) {
+          for (const rule of ruleFiles) {
+            writeManagedCliFile(rule.path, rule.content);
+          }
+        }
+      } catch (wiringErr) {
+        providerLog.warn(
+          { err: wiringErr, provider: this.name },
+          'Failed to write rules file for Codex auth',
+        );
+      }
+
+    const codexHome = getKoryphaiosCodexHome();
+
+    // ── Mount the kory MCP server through a per-turn profile ────────────────
+    // `codex --profile kory` layers <codexHome>/kory.config.toml on top of the
+    // base config. Without tools there is nothing to expose, so keep
+    // third-party servers out entirely via mcp_servers={}.
+    let mcpProfile = false;
+    if (hasTools) {
+      try {
+        const mcpConfigs = codexBridge?.buildMcpConfig(bridgeCtx);
+        if (mcpConfigs && mcpConfigs.length > 0) {
+          writeManagedCliFile(
+            join(codexHome, 'kory.config.toml'),
+            serializeCodexMcpProfile(mcpConfigs),
+          );
+          mcpProfile = true;
+        }
+      } catch (mcpErr) {
+        providerLog.warn(
+          { err: mcpErr, provider: this.name },
+          'Failed to write kory MCP profile for Codex auth; continuing with envelope only',
+        );
+      }
+    }
+
     const args = [
       '--ask-for-approval',
       'never',
+      // MCP and the empty-servers override are mutually exclusive: the kory
+      // profile carries the real server list, otherwise keep third-party
+      // servers (and their credentials) out of Koryphaios turns entirely.
+      ...(mcpProfile ? [] : ['--config', 'mcp_servers={}']),
       'exec',
       '--json',
+      // --profile is exec-scoped: it must come after `exec`.
+      ...(mcpProfile ? ['--profile', 'kory'] : []),
       '--ephemeral',
       '--skip-git-repo-check',
       '--color',
@@ -181,13 +239,17 @@ export class CodexAuthProvider implements Provider {
           cwd: request.workingDirectory?.trim() || process.cwd(),
           stdio: ['pipe', 'pipe', 'pipe'],
           env: buildProviderCliEnv('codex', {
-            CODEX_HOME: getKoryphaiosCodexHome(),
-            HOME: getKoryphaiosCodexHome(),
-            USERPROFILE: getKoryphaiosCodexHome(),
+            CODEX_HOME: codexHome,
+            HOME: codexHome,
+            USERPROFILE: codexHome,
           }),
         }),
       [...attachmentScope.artifacts],
+      () => {
+        bridgeGrantLease?.cleanup();
+      },
     );
+    bridgeGrantLease?.bindToChild(child);
     writePrivatePromptToStdin(child, privatePrompt);
     let stderr = '';
     let buffer = '';
@@ -201,30 +263,14 @@ export class CodexAuthProvider implements Provider {
       resolveWaiter?.();
       resolveWaiter = null;
     };
+    const allowedToolNames = (request.tools ?? []).map((tool) => tool.name);
     const consume = (line: string) => {
       if (!line.trim()) return;
       try {
         const event = JSON.parse(line) as Record<string, unknown>;
-        const item = event.item as Record<string, unknown> | undefined;
-        if (event.type === 'item.completed' && item?.type === 'agent_message' && item.text) {
-          events.push({ type: 'content_delta', content: String(item.text) });
-        } else if (event.type === 'item.completed' && item?.type === 'reasoning' && item.text) {
-          events.push({ type: 'thinking_delta', thinking: String(item.text) });
-        } else if (event.type === 'turn.completed') {
-          completed = true;
-          const usage = event.usage as Record<string, unknown> | undefined;
-          if (typeof usage?.input_tokens === 'number' || typeof usage?.output_tokens === 'number') {
-            events.push({
-              type: 'usage_update',
-              tokensIn: usage.input_tokens as number | undefined,
-              tokensOut: usage.output_tokens as number | undefined,
-              tokensCacheRead:
-                typeof usage.cached_input_tokens === 'number'
-                  ? usage.cached_input_tokens
-                  : undefined,
-            });
-          }
-        }
+        const translated = codexJsonEvents(event, allowedToolNames);
+        events.push(...translated.events);
+        if (translated.completed) completed = true;
         wake();
       } catch (err: unknown) {
         providerLog.debug(
@@ -294,6 +340,12 @@ export class CodexAuthProvider implements Provider {
     if (exitCode !== 0) {
       const diagnostic = safeProviderDiagnostic(this.name, 'stderr', stderr, { exitCode });
       providerLog.warn(diagnostic, 'OpenAI Codex CLI request failed');
+      if (isTransientCodexFailure(stderr)) {
+        // Same binary, same transient ChatGPT-side blips as the CLI-backed
+        // provider: honest banner, raw stderr stays in server logs only.
+        yield { type: 'error', error: codexTransientFailureMessage() };
+        return;
+      }
       yield { type: 'error', error: safeProviderFailureMessage(this.name, diagnostic) };
       return;
     }

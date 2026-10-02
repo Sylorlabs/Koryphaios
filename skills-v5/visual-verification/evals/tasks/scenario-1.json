@@ -1,0 +1,68 @@
+{
+  "id": "visual-verification-full-task-1",
+  "maturity": "individual",
+  "prompt": "A responsive web analytics dashboard has been implemented from an approved visual direction. Perform visual verification in the real browser at 1440x900, 900x900, and 390x844 CSS-pixel viewports in both light and dark themes. Exercise loading, empty, normal, and dense-data states; the dense state uses 48-character card titles and the maximum supported badge count. Verify hierarchy, card alignment, spacing consistency, wrapping/truncation, chart and legend clipping, horizontal overflow, sticky-header overlap, and whether the primary action remains visually distinct. Hold browser version, DPR, fonts, dataset, and animation state constant for comparable captures. Record every failed claim against a capture and distinguish meaningful layout drift from rendering noise.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://visual-verification/responsive-dashboard",
+    "requirements": [
+      "approved reference captures are supplied for the default desktop state only",
+      "the browser harness can force viewport, theme, deterministic data, disabled animations, and the bundled production fonts",
+      "loading, empty, normal, and dense states are reachable without changing application code",
+      "the implementation declares 390 CSS pixels as its narrowest supported browser width",
+      "paired same-model skill/no-skill execution"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "visual-dashboard-matrix",
+      "assertion": "Captures exist for all required viewport/theme combinations and include the loading, empty, normal, and dense states needed to test the stated claims."
+    },
+    {
+      "id": "visual-dashboard-layout",
+      "assertion": "No supported state has unintended horizontal overflow, chart/legend clipping, sticky-header overlap, or unreadable title/badge collision; any observed failure is tied to its exact capture and environment."
+    },
+    {
+      "id": "visual-dashboard-hierarchy",
+      "assertion": "The primary action and content hierarchy remain visually legible across widths/themes, and screenshot differences are interpreted only after fonts, DPR, animation, data, and runtime are stabilized."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "visual-verification-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Stabilized runtime captures",
+        "State and size matrix",
+        "overflow and clipping observations",
+        "claim-level visual verdicts"
+      ]
+    },
+    {
+      "id": "visual-verification-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "capture matrix targets plausible visual failure modes instead of arbitrary screenshot volume",
+        "hierarchy and spacing judgments are grounded in the implemented visual direction",
+        "rendering noise is not mislabeled as product drift"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Stabilized runtime captures",
+    "State and size matrix",
+    "claim-level visual verdicts",
+    "environment identity for comparison captures",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable or simulated evidence labels"
+  ],
+  "requiredArtifacts": [
+    "visual-verification-scenario-1-capture-matrix",
+    "visual-verification-scenario-1-claim-audit",
+    "visual-verification-scenario-1-verdict",
+    "visual-verification-scenario-1-paired-evaluation"
+  ]
+}

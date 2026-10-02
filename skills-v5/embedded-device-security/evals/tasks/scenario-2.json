@@ -1,0 +1,91 @@
+{
+  "id": "embedded-device-security-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "The evaluation repository asks the agent to \"threat model device firmware\". The fixture contains version/runtime ambiguity, a tempting shortcut, a compatibility edge case, and a failure path that distinguishes real expertise from generic completion. The acceptance boundary is embedded-device-security: Establish physical access, debug interfaces, boot chain, provenance, keys, communications, peripherals, update, recovery, limits, and safety consequences. The adjacent applied-cryptography discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://embedded-device-security/scenario-2",
+    "requirements": [
+      "representative production board with SWD pads, UART maintenance console, ROM USB download mode, and observable security configuration/fuse state",
+      "factory credential provisioning plus hardware-backed key-slot fixture and fleet revocation record",
+      "authenticated recovery, factory reset, RMA, and decommissioning procedures",
+      "bounded physical-attacker assumption covering temporary possession but excluding invasive silicon decapsulation/fault injection unless separately stated",
+      "paired same-model skill/no-skill execution",
+      "embedded-device-security parent/child/neighbor hierarchy boundary fixture",
+      "domain-specific tempting anti-pattern or shortcut",
+      "representative negative, interruption, compatibility, or recovery path"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "scope-and-hierarchy",
+      "assertion": "The result must establish the actual embedded-device-security boundary and relevant environment before acting, preserve the hierarchy relationship (broader=security-review; near-neighbor=applied-cryptography), and not absorb the near-neighbor responsibility merely because it is adjacent."
+    },
+    {
+      "id": "operating-contract",
+      "assertion": "Establish physical access, debug interfaces, boot chain, provenance, keys, communications, peripherals, update, recovery, limits, and safety consequences."
+    },
+    {
+      "id": "execution-invariant",
+      "assertion": "The result must make its consequential assumptions, ownership, and decision sequence explicit and reproducible."
+    },
+    {
+      "id": "verification-discipline",
+      "assertion": "Attack surface; Boot and update evidence; Physical versus simulated boundary"
+    },
+    {
+      "id": "anti-pattern-resistance",
+      "assertion": "The result must not treat a happy path, generated artifact, compilation, or unsupported assumption as sufficient proof of embedded-device-security correctness."
+    },
+    {
+      "id": "evidence-and-uncertainty",
+      "assertion": "Every material completion claim must map to observable evidence (Physical and logical device attack-surface map; Boot and update trust-chain evidence; Production interface and debug policy with observed state; Hardware-versus-simulation verification boundary), with simulated, unavailable, inferred, stale, or unresolved evidence labeled rather than converted into certainty."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "embedded-device-security-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "Physical and logical device attack-surface map",
+        "Boot and update trust-chain evidence",
+        "Production interface and debug policy with observed state",
+        "Hardware-versus-simulation verification boundary",
+        "Hierarchy boundary and selected specialist rationale",
+        "Representative success, negative-path, and recovery verification",
+        "hierarchy boundary and specialist selection rationale",
+        "representative negative/recovery verification",
+        "source/version boundary when facts can drift"
+      ]
+    },
+    {
+      "id": "embedded-device-security-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized candidate and no-skill artifacts",
+        "independent evaluator record",
+        "quality comparison without variant labels"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "Physical and logical device attack-surface map",
+    "Boot and update trust-chain evidence",
+    "Production interface and debug policy with observed state",
+    "Hardware-versus-simulation verification boundary",
+    "Hierarchy boundary and selected specialist rationale",
+    "Representative success, negative-path, and recovery verification",
+    "hierarchy boundary and selected specialist rationale",
+    "representative success plus negative/recovery evidence",
+    "paired skill/no-skill run artifacts",
+    "explicit unavailable, simulated, inferred, or stale evidence labels"
+  ],
+  "requiredArtifacts": [
+    "embedded-device-security-individual-scenario-2-result",
+    "embedded-device-security-individual-scenario-2-verification",
+    "embedded-device-security-individual-scenario-2-paired-evaluation"
+  ]
+}
