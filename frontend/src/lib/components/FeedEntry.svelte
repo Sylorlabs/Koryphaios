@@ -1201,7 +1201,7 @@
     </button>
   {:else}
     <div
-      class="flex items-start gap-[var(--space-md)] py-[var(--space-sm)] text-sm leading-relaxed rounded px-[var(--space-md)] -mx-[var(--space-md)] transition-all cursor-default
+      class="flex items-start gap-2 py-1.5 text-sm leading-relaxed rounded px-2 -mx-2 transition-colors cursor-default
            {isSelected
         ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30'
         : 'hover:bg-surface-2/30'}"
@@ -1223,11 +1223,10 @@
       role="row"
       tabindex="0"
     >
-      <span class="text-xs text-text-muted shrink-0 w-20 leading-6 tabular-nums whitespace-nowrap">
+      <span class="w-12 shrink-0 whitespace-nowrap text-[11px] leading-6 tabular-nums text-text-muted">
         {new Date(entry.timestamp).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
-          second: '2-digit',
         })}
       </span>
 
@@ -1298,7 +1297,7 @@
               }
             | undefined}
           <div
-            class="w-full rounded-xl border px-3 py-2"
+            class="w-full border-y px-2 py-2"
             style="border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); background: color-mix(in srgb, var(--color-accent) 6%, transparent);"
           >
             <button
@@ -1327,7 +1326,7 @@
               >
             </button>
             <div
-              class="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-3)]"
+              class="mt-2 h-1 overflow-hidden bg-[var(--color-surface-3)]"
               role="progressbar"
               aria-label="Compaction progress"
               aria-valuemin="0"
@@ -1335,7 +1334,7 @@
               aria-valuenow={Math.max(0, Math.min(100, compaction?.progress ?? 100))}
             >
               <div
-                class="h-full rounded-full transition-all duration-500"
+                class="h-full transition-all duration-500"
                 style="width: {Math.max(
                   0,
                   Math.min(100, compaction?.progress ?? 100),
@@ -1369,7 +1368,7 @@
             durationMs={entry.durationMs}
             thinkingStartedAt={entry.thinkingStartedAt}
             agentName={entry.agentName}
-            defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? true}
+            defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
             finalized={entry.thinkingFinalized ?? false}
           />
         {:else if entry.type === 'tool_result' && viewImagePath(entry.metadata)}
@@ -1859,22 +1858,21 @@
          text stays one click away in that worker's own transcript. -->
     {@const bds = domainStyle(entry.metadata)}
     <div
-      class="ml-20 border-l-2 pl-3 py-1.5 space-y-1 my-1 {bds.color} max-h-56 overflow-y-auto agent-group-scroll"
+      class="ml-14 border-l pl-3 py-1 space-y-1 my-1 {bds.color} max-h-56 overflow-y-auto agent-group-scroll"
       style="border-color: currentColor;"
       transition:fly={{ y: -10, duration: 200 }}
     >
-      <div class="text-[10px] uppercase tracking-widest font-bold {bds.color}">
-        {bds.label} sub-agent · {entry.agentName}
+      <div class="text-[10px] font-semibold tracking-wide {bds.color}">
+        {bds.label} · {entry.agentName}
       </div>
       {#each entry.entries || [] as subEntry (subEntry.id)}
         <div
           class="flex items-start gap-2 text-[12px] opacity-85 hover:opacity-100 transition-opacity"
         >
-          <span class="text-[var(--color-muted)] w-12 shrink-0">
+          <span class="w-10 shrink-0 text-[var(--color-text-muted)]">
             {new Date(subEntry.timestamp).toLocaleTimeString([], {
               hour: '2-digit',
               minute: '2-digit',
-              second: '2-digit',
             })}
           </span>
           <div class="flex-1 min-w-0">

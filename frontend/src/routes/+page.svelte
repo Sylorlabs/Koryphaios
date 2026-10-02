@@ -1781,36 +1781,35 @@
         height on very short windows.
       -->
       <div
-        class="flex-1 flex items-center justify-center overflow-y-auto min-h-0 p-4 sm:p-6"
+        class="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-3 sm:p-4"
         style="background: var(--color-surface-1);"
       >
         <div
-          class="w-full max-w-xl text-center rounded-[24px] border px-6 sm:px-8 py-8 sm:py-10"
-          style="background: linear-gradient(180deg, rgba(var(--color-accent-rgb), 0.1), rgba(var(--color-accent-rgb), 0.03)); border-color: rgba(var(--color-accent-rgb), 0.22);"
+          class="w-full max-w-xl rounded-lg border px-4 py-5 text-center sm:px-5 sm:py-6"
+          style="background: var(--color-surface-2); border-color: var(--color-border);"
         >
-          <div class="mb-8">
+          <div class="mb-4">
             <img
               src="/logo-64.png"
               alt="Koryphaios"
-              class="mx-auto rounded-2xl opacity-90"
-              style="width: 72px; height: 72px;"
+              class="mx-auto rounded-lg opacity-90"
+              style="width: 48px; height: 48px;"
             />
           </div>
 
-          <h2 class="text-2xl font-semibold mb-3" style="color: var(--color-text-primary);">
+          <h2 class="mb-2 text-xl font-semibold" style="color: var(--color-text-primary);">
             Open a project to start working
           </h2>
           <p
-            class="text-sm mb-8 max-w-md mx-auto leading-relaxed"
+            class="mx-auto mb-5 max-w-md text-sm leading-relaxed"
             style="color: var(--color-text-secondary);"
           >
-            Koryphaios works best when it can inspect a real codebase, explain the current state,
-            and then make targeted changes.
+            Open a folder or choose a recent project to start a session.
           </p>
 
           {#if projectStore.unavailablePath}
             <div
-              class="mb-6 rounded-xl border px-4 py-3 text-left"
+              class="mb-4 rounded-lg border px-3 py-2.5 text-left"
               style="border-color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 10%, transparent);"
               role="status"
             >
@@ -1844,10 +1843,10 @@
             </div>
           {/if}
 
-          <div class="flex flex-col gap-3 mb-8">
+          <div class="mb-5 flex flex-col gap-1">
             <button
               type="button"
-              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
+              class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-3)]"
               style="color: var(--color-text-primary);"
               onclick={() => handleMenuAction('open_project_folder')}
             >
@@ -1857,7 +1856,7 @@
 
             <button
               type="button"
-              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+              class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors hover:bg-[var(--color-surface-3)]"
               style="color: var(--color-text-secondary);"
               onclick={() => handleMenuAction('open_workspace')}
             >
@@ -1867,7 +1866,7 @@
 
             <button
               type="button"
-              class="flex items-center justify-center gap-3 px-2 py-3 rounded-xl text-sm font-semibold transition-colors hover:bg-[var(--color-surface-2)]"
+              class="flex items-center justify-center gap-3 rounded-md px-2 py-2 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-3)]"
               style="color: var(--color-text-primary);"
               onclick={() => handleMenuAction('new_project')}
             >
@@ -1877,18 +1876,18 @@
           </div>
 
           {#if projectStore.workspaceRoot || projectStore.openProjects.length > 0}
-            <div class="mb-8 text-left">
+            <div class="mb-5 text-left">
               <div
-                class="mb-3 px-1 text-xs font-semibold uppercase tracking-[0.14em]"
+                class="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.14em]"
                 style="color: var(--color-text-muted);"
               >
-                Choose a project for this chat
+                Projects
               </div>
               <div class="flex flex-wrap gap-2">
                 {#if projectStore.workspaceRoot}
                   <button
                     type="button"
-                    class="rounded-xl border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                    class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
                     style="border-color: {projectStore.currentPath === projectStore.workspaceRoot
                       ? 'var(--color-accent)'
                       : 'var(--color-border)'}; color: var(--color-text-primary);"
@@ -1904,7 +1903,7 @@
                 {#each projectStore.openProjects as path (path)}
                   <button
                     type="button"
-                    class="rounded-xl border px-3 py-2 text-xs font-medium transition-colors hover:bg-[var(--color-surface-2)]"
+                    class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-surface-3)]"
                     style="border-color: {projectStore.currentPath === path
                       ? 'var(--color-accent)'
                       : 'var(--color-border)'}; color: var(--color-text-primary);"
@@ -1920,20 +1919,20 @@
 
           {#if recentProjects.length > 0}
             <div class="text-left">
-              <div class="flex items-center gap-2 mb-3 px-1">
+              <div class="mb-2 flex items-center gap-2 px-1">
                 <Clock size={14} style="color: var(--color-text-muted);" />
                 <span
                   class="text-xs font-semibold uppercase tracking-[0.14em]"
                   style="color: var(--color-text-muted);">Recent projects</span
                 >
               </div>
-              <div class="flex flex-col gap-2">
+              <div class="flex flex-col gap-1">
               {#each recentProjects.slice(0, 5) as project (project.id)}
                 <div
                   role="button"
                   tabindex="0"
-                  class="flex items-center justify-between gap-2 px-4 py-3 rounded-xl text-left text-sm transition-colors border hover:bg-[var(--color-surface-2)] cursor-pointer"
-                  style="color: var(--color-text-primary); border-color: var(--color-border); background: rgba(12, 10, 9, 0.2);"
+                  class="flex cursor-pointer items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-[var(--color-surface-3)]"
+                  style="color: var(--color-text-primary); border-color: var(--color-border); background: var(--color-surface-1);"
                   onclick={() => handleMenuAction(`open_recent:${project.id}`)}
                   onkeydown={(e) => {
                     if (e.key === 'Enter') handleMenuAction(`open_recent:${project.id}`);

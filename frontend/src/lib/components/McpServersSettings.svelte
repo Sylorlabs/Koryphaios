@@ -284,7 +284,7 @@
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
   <SettingsPageIntro
     title="MCP servers"
-    description="Manage pluggable Model Context Protocol tool servers. Connection status, tools, and protocol version are reported by the backend."
+    description="Connect local or remote tool servers."
   >
     {#if view === 'list'}
       <div class="flex items-center gap-2">
@@ -306,8 +306,8 @@
     {/if}
   </SettingsPageIntro>
 
-  <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-    <div class="mx-auto max-w-5xl space-y-5">
+  <div class="min-h-0 flex-1 overflow-y-auto p-4">
+    <div class="mx-auto max-w-5xl space-y-3">
       {#if view === 'list'}
         {#if mcpServersStore.error && mcpServersStore.servers.length === 0}
           <section
@@ -341,14 +341,14 @@
           </section>
         {:else if mcpServersStore.servers.length === 0}
           <section
-            class="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-10 text-center"
+            class="border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-6 text-center"
           >
             <Server size={28} class="mx-auto text-[var(--color-text-muted)]" />
             <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
               No MCP servers configured
             </h4>
             <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-              Browse the registry or add a server manually to expose external tools to your agents.
+              Add a server or browse the registry.
             </p>
             <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
               <button
@@ -371,7 +371,7 @@
           <div class="space-y-3">
             {#each mcpServersStore.servers as server (server.name)}
               <section
-                class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
+                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
               >
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
@@ -426,7 +426,7 @@
                       {@const result = testResult[server.name]}
                       {#if result}
                         <div
-                          class="mt-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+                          class="mt-3 border-t border-[var(--color-border)] pt-3"
                         >
                           <div class="flex items-center gap-2 text-xs">
                             {#if result.connected}
@@ -516,8 +516,7 @@
                 Browse MCP registry
               </h4>
               <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
-                Pick a featured connector below or search the official MCP registry at
-                registry.modelcontextprotocol.io to discover servers you can add.
+                Choose a featured server or search the registry.
               </p>
             </div>
             <button

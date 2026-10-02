@@ -253,43 +253,43 @@ textarea:focus-visible,
 /* Glow Effects - Only active agents glow */
 .glow-codex {
   box-shadow:
-    0 0 15px var(--color-glow-codex),
-    0 0 30px rgba(0, 255, 255, 0.15);
+    0 0 8px var(--color-glow-codex),
+    0 0 16px rgba(0, 255, 255, 0.1);
   border-color: rgba(0, 255, 255, 0.3);
 }
 
 .glow-google {
   box-shadow:
-    0 0 15px var(--color-glow-google),
-    0 0 30px rgba(66, 133, 244, 0.15);
+    0 0 8px var(--color-glow-google),
+    0 0 16px rgba(66, 133, 244, 0.1);
   border-color: rgba(66, 133, 244, 0.3);
 }
 
 .glow-claude {
   box-shadow:
-    0 0 15px var(--color-glow-claude),
-    0 0 30px rgba(255, 165, 0, 0.15);
+    0 0 8px var(--color-glow-claude),
+    0 0 16px rgba(255, 165, 0, 0.1);
   border-color: rgba(255, 165, 0, 0.3);
 }
 
 .glow-kory {
   box-shadow:
-    0 0 15px var(--color-glow-kory),
-    0 0 30px rgba(255, 215, 0, 0.15),
-    inset 0 0 8px rgba(255, 215, 0, 0.05);
+    0 0 8px var(--color-glow-kory),
+    0 0 16px rgba(255, 215, 0, 0.1),
+    inset 0 0 6px rgba(255, 215, 0, 0.04);
   border-color: rgba(255, 215, 0, 0.4);
 }
 
 .glow-test {
   box-shadow:
-    0 0 15px var(--color-glow-test),
-    0 0 30px rgba(0, 255, 128, 0.15);
+    0 0 8px var(--color-glow-test),
+    0 0 16px rgba(0, 255, 128, 0.1);
   border-color: rgba(0, 255, 128, 0.3);
 }
 
 /* Active glow pulse - only applied when actually active */
 .glow-active {
-  animation: glow-pulse 2s ease-in-out infinite;
+  animation: glow-pulse 3.5s ease-in-out infinite;
 }
 
 @keyframes glow-pulse {
@@ -298,7 +298,7 @@ textarea:focus-visible,
     opacity: 1;
   }
   50% {
-    opacity: 0.6;
+    opacity: 0.85;
   }
 }
 
@@ -341,11 +341,11 @@ code {
 pre {
   background: var(--color-surface-0);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  padding: var(--space-lg);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
   overflow-x: auto;
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 /* Drawer / Modal Backdrop */
@@ -679,7 +679,7 @@ pre {
   height: 100%;
   color: var(--color-text-muted);
   text-align: center;
-  padding: var(--space-6);
+  padding: var(--space-4);
 }
 
 .empty-state-icon {

@@ -276,7 +276,7 @@
         aria-live="polite"
       >
         <div
-          class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg"
+          class="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg"
         >
           <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
           <span>Loading this chat…</span>
@@ -285,7 +285,7 @@
     {:else if !isWorkspaceReady && filteredFeed.length === 0}
       <div class="absolute inset-0 flex items-center justify-center p-6">
         <div
-          class="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg"
+          class="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-sm text-[var(--color-text-secondary)] shadow-lg"
         >
           <LoaderCircle size={18} class="animate-spin text-[var(--color-accent)]" />
           <span>Loading workspace…</span>
@@ -294,55 +294,44 @@
     {:else if filteredFeed.length === 0}
       <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
         {#if welcomePreferencesStore.preferences.enabled.suggestions}
-        <div class="px-6 py-10 max-w-5xl mx-auto">
-          <div class="flex gap-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div class="flex-1 space-y-6 min-w-0">
-              <div
-                class="rounded-[28px] border p-8 shadow-2xl backdrop-blur-sm"
-                style="background: linear-gradient(165deg, rgba(var(--color-accent-rgb), 0.12), rgba(12, 10, 9, 0.4)); border-color: rgba(var(--color-accent-rgb), 0.24);"
-              >
+        <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6">
+          <div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <div class="min-w-0 border-b border-[var(--color-border)] pb-5">
                 <h2
-                  class="text-3xl font-semibold leading-tight mb-4 tracking-tight"
+                  class="mb-3 text-xl font-semibold leading-tight tracking-tight"
                   style="color: var(--color-text-primary);"
                 >
-                  {isWorkspace
-                    ? 'What should Koryphaios do with your workspace?'
-                    : 'What should Koryphaios do with your project?'}
+                  {isWorkspace ? 'Start with your workspace' : 'Start with your project'}
                 </h2>
 
                 <p
-                  class="text-[15px] max-w-2xl leading-relaxed mb-10"
+                  class="mb-5 max-w-2xl text-sm leading-relaxed"
                   style="color: var(--color-text-secondary);"
                 >
-                  I'm connected and ready to help. Choose a strategic starting point or describe
-                  your task in the composer below.
+                  Start with a task, or type one below.
                 </p>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-2">
                     {#each suggestions as suggestion (suggestion.id)}
                       {@const Icon = suggestion.icon}
                       <div
-                        class="suggestion-card relative flex flex-col items-start p-5 rounded-2xl border text-left transition-all duration-300 group overflow-hidden {editingSuggestionId ===
+                        class="suggestion-card group relative flex flex-col items-start rounded-md border p-3 text-left transition-colors duration-150 {editingSuggestionId ===
                         suggestion.id
                           ? ''
                           : 'cursor-pointer'}"
-                        style="background: rgba(12, 10, 9, 0.4); border-color: var(--color-border);"
+                        style="background: transparent; border-color: var(--color-border);"
                       >
                         {#if editingSuggestionId !== suggestion.id}
                           <button
                             type="button"
-                            class="absolute inset-0 z-0 rounded-2xl bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
-                            aria-label={`Load ${suggestion.label} into composer`}
+                            class="absolute inset-0 z-0 rounded-md bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
+                            aria-label={`Use ${suggestion.label}`}
                             onclick={() => runSuggestion(suggestion.prompt)}
                           ></button>
                         {/if}
-                        <div
-                          class="pointer-events-none absolute inset-0 bg-gradient-to-br from-[var(--color-accent)]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
-                        ></div>
-
                         <button
                           type="button"
-                          class="absolute top-4 right-4 z-10 flex h-8 w-8 items-center justify-center rounded-lg transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-surface-3)]"
+                          class="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-surface-3)]"
                           style="color: var(--color-text-muted);"
                           onclick={(e) => {
                             e.stopPropagation();
@@ -361,27 +350,28 @@
                             : 'pointer-events-none'}"
                         >
                           <div
-                            class="w-11 h-11 rounded-xl flex items-center justify-center mb-5 bg-[var(--color-surface-3)] group-hover:scale-110 group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)] transition-all duration-300"
+                            class="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-[var(--color-surface-3)] transition-colors group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)]"
                             style="color: var(--color-text-secondary);"
                           >
                             <Icon size={19} />
                           </div>
 
                           <span
-                            class="text-sm font-bold mb-2 block pr-10 tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]"
+                            class="mb-1 block pr-8 text-sm font-medium tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]"
                             style="color: var(--color-text-secondary);">{suggestion.label}</span
                           >
 
                           {#if editingSuggestionId === suggestion.id}
                             <textarea
                               bind:value={editingSuggestionText}
-                              class="w-full min-h-[120px] rounded-xl border px-3 py-2 text-xs leading-relaxed focus:ring-1 focus:ring-[var(--color-accent)]/30 outline-none"
+                              aria-label={`${suggestion.label} prompt`}
+                              class="min-h-24 w-full rounded-md border px-3 py-2 text-xs leading-relaxed outline-none focus:ring-1 focus:ring-[var(--color-accent)]/30"
                               style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
                               onclick={(e) => e.stopPropagation()}
                             ></textarea>
                           {:else}
                             <span
-                              class="text-xs leading-relaxed block transition-colors duration-300 group-hover:text-[var(--color-text-secondary)]"
+                              class="line-clamp-2 text-xs leading-relaxed transition-colors group-hover:text-[var(--color-text-secondary)]"
                               style="color: var(--color-text-muted);">{suggestion.prompt}</span
                             >
                           {/if}
@@ -391,7 +381,7 @@
                           <div class="relative mt-4 flex items-center gap-2">
                             <button
                               type="button"
-                              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
+                              class="flex items-center gap-1.5 rounded-md bg-[var(--color-accent)]/10 px-3 py-1.5 text-[11px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/20"
                               onclick={(e) => {
                                 e.stopPropagation();
                                 saveSuggestionEdit(suggestion.id);
@@ -402,7 +392,7 @@
                             </button>
                             <button
                               type="button"
-                              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                              class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)]"
                               onclick={(e) => {
                                 e.stopPropagation();
                                 cancelEditingSuggestion();
@@ -412,13 +402,6 @@
                               Cancel
                             </button>
                           </div>
-                        {:else}
-                          <div
-                            class="relative mt-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.15em] opacity-0 group-hover:opacity-40 transition-all duration-300 translate-y-2 group-hover:translate-y-0"
-                            style="color: var(--color-text-muted);"
-                          >
-                            Load into composer <ArrowDown size={10} />
-                          </div>
                         {/if}
                       </div>
                     {/each}
@@ -426,7 +409,6 @@
               </div>
             </div>
           </div>
-        </div>
         {/if}
       </div>
     {:else}
@@ -542,10 +524,6 @@
     overscroll-behavior: contain;
   }
   .suggestion-card:hover {
-    transform: translateY(-2px);
     border-color: rgba(var(--color-accent-rgb), 0.4) !important;
-    box-shadow:
-      0 10px 30px -10px rgba(0, 0, 0, 0.5),
-      0 0 20px rgba(var(--color-accent-rgb), 0.05);
   }
 </style>
