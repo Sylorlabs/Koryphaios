@@ -4,9 +4,11 @@
   import Check from 'lucide-svelte/icons/check';
   import ChevronUp from 'lucide-svelte/icons/chevron-up';
   import { slide } from 'svelte/transition';
+  import { copyText } from '$lib/utils/clipboard';
+  import { requestExpandAnchor } from '$lib/utils/expand-anchor';
 
   let {
-    open = false,
+    open = $bindable(false),
     title = 'Tool output',
     content = '',
     command = '',
@@ -22,7 +24,7 @@
   let copied = $state(false);
 
   async function copyOutput() {
-    await navigator.clipboard.writeText(content);
+    await copyText(content);
     copied = true;
     setTimeout(() => (copied = false), 1200);
   }
@@ -35,7 +37,7 @@
       <span>{title}</span>
       <div class="actions">
         {#if content}
-          <button type="button" onclick={copyOutput} title="Copy output">
+          <button type="button" onclick={copyOutput} aria-label={copied ? 'Copied output' : 'Copy output'} title="Copy output">
             {#if copied}<Check size={13} />{:else}<Copy size={13} />{/if}
           </button>
         {/if}
@@ -44,17 +46,24 @@
           class="collapse-indicator"
           aria-label="Collapse tool output"
           title="Collapse"
-          onclick={() => (open = false)}
+          onclick={(event) => {
+            requestExpandAnchor(event.currentTarget);
+            open = false;
+          }}
         >
           <ChevronUp size={14} />
         </button>
       </div>
     </header>
     {#if command}
-      <div class="command">$ {command}</div>
+      <!-- Scrollable commands must be reachable with the keyboard. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div class="command" role="region" aria-label="Command" tabindex="0">$ {command}</div>
     {/if}
     {#if content}
-      <pre>{content}</pre>
+      <!-- Scrollable output must be reachable with the keyboard. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <pre tabindex="0" aria-label={title}>{content}</pre>
     {/if}
   </section>
 {/if}
@@ -62,9 +71,8 @@
 <style>
   .tool-panel {
     overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-radius: 3px;
-    background: var(--color-surface-1);
+    border-left: 1px solid var(--color-border);
+    color: var(--color-text-secondary);
   }
 
   .tool-panel.failed {
@@ -76,10 +84,8 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-2);
-    font-size: 11px;
-    font-weight: 600;
+    font-size: var(--text-sm);
+    font-weight: 500;
   }
 
   .actions {
@@ -93,22 +99,21 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 24px;
-    width: 24px;
-    border-radius: 3px;
+    height: 28px;
+    width: 28px;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
   }
 
   button:hover {
     background: var(--color-surface-3);
   }
 
-  .collapse-indicator {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 24px;
-    width: 24px;
-    border-radius: 3px;
+  button:focus-visible,
+  pre:focus-visible,
+  .command:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
   }
 
   .command,
@@ -120,11 +125,13 @@
     line-height: 1.55;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    max-height: 20rem;
+    overflow: auto;
+    scrollbar-width: thin;
   }
 
   .command {
-    border-bottom: 1px solid var(--color-border);
-    background: var(--color-surface-0);
+    color: var(--color-text-primary);
   }
 
   pre {

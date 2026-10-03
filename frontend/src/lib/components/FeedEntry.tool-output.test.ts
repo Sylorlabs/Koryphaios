@@ -35,6 +35,7 @@ vi.mock('$lib/stores/toast.svelte', () => ({
 }));
 
 import FeedEntry from './FeedEntry.svelte';
+import { EXPAND_ANCHOR_EVENT } from '$lib/utils/expand-anchor';
 
 const OUTPUT = 'diff --git a/x.ts b/x.ts\nindex 1..2 100644\n+++ b/x.ts';
 
@@ -74,11 +75,21 @@ describe('FeedEntry tool output panel', () => {
     mocks.copyText.mockResolvedValue(undefined);
   });
 
-  it('opens a terminal-style panel with the command, line count, and copy action', async () => {
+  it('opens flat details with the command, line count, and copy action', async () => {
     const { container } = renderEntry(toolResultEntry());
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const onAnchor = vi.fn();
+    container.addEventListener(EXPAND_ANCHOR_EVENT, onAnchor);
+    const toggle = screen.getByRole('button', { name: 'Details' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await fireEvent.click(toggle);
 
+    const details = screen.getByRole('region', { name: 'Tool details' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-controls', details.id);
+    expect(container.querySelector('pre.tool-output-pre')).toHaveClass('max-h-80', 'overflow-auto');
+    expect(container.querySelector('pre.tool-output-pre')).toHaveAttribute('tabindex', '0');
+    expect(onAnchor).toHaveBeenCalledTimes(1);
     expect(screen.getByText('Terminal Output')).toBeTruthy();
     expect(screen.getAllByText('bash').length).toBeGreaterThan(0);
     expect(screen.getByText('git diff')).toBeTruthy();
@@ -90,6 +101,32 @@ describe('FeedEntry tool output panel', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Collapse details' }));
     expect(screen.queryByText('Terminal Output')).toBeNull();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveFocus();
+    expect(onAnchor).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps long tool logs clipped and bounded', async () => {
+    const output = 'x'.repeat(8_000);
+    const { container } = renderEntry(toolResultEntry({
+      toolResult: { name: 'bash', output, isError: false },
+    }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    const log = container.querySelector('pre.tool-output-pre');
+    expect(log?.textContent).toBe(`${output.slice(0, 4_000)}\n\n…output clipped`);
+    expect(log).toHaveClass('max-h-80', 'overflow-auto');
+  });
+
+  it('does not treat nested action keys as row selection', async () => {
+    const onSelect = vi.fn();
+    render(FeedEntry, { props: {
+      entry: toolResultEntry(), isSelected: false, isExpanded: false,
+      onSelect, onToggleGroup: vi.fn(), onDelete: vi.fn(),
+    } });
+    await fireEvent.keyDown(screen.getByRole('button', { name: 'Details' }), { key: 'Enter' });
+    expect(onSelect).not.toHaveBeenCalled();
+    await fireEvent.keyDown(screen.getByRole('row'), { key: 'Enter' });
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
   it('shows an empty state and omits copy when nothing was reported', async () => {

@@ -680,21 +680,21 @@
       label: 'YOLO',
       description: 'Run actions without approval prompts or risk checks.',
       icon: Zap,
-      tone: 'text-amber-300',
+      tone: 'text-[var(--color-warning)]',
     },
     {
       value: 'guarded',
       label: 'Guarded',
       description: 'Run all edits and routine tools. Ask only before risky actions.',
       icon: ShieldCheck,
-      tone: 'text-emerald-300',
+      tone: 'text-[var(--color-success)]',
     },
     {
       value: 'edits',
       label: 'Accept edits',
       description: 'Apply file edits automatically. Ask before other actions.',
       icon: Pencil,
-      tone: 'text-sky-300',
+      tone: 'text-[var(--color-info)]',
     },
     {
       value: 'ask',
@@ -708,7 +708,7 @@
       label: 'Custom',
       description: 'Use the detailed approval rules from Settings.',
       icon: SlidersHorizontal,
-      tone: 'text-violet-300',
+      tone: 'text-[var(--color-accent)]',
     },
   ] as const;
 
@@ -903,7 +903,7 @@
     }));
   });
 
-let selectedModelLabel = $derived.by(() => {
+  let selectedModelLabel = $derived.by(() => {
     if (!selectedModel) return 'Select model';
     const parsed = parseProviderModelSelection(selectedModel, providerNames);
     if (!parsed.model || !parsed.provider) return selectedModel;
@@ -2202,7 +2202,8 @@ let selectedModelLabel = $derived.by(() => {
         label: 'Multi-Agent',
         title: 'Agent Mode: Multi-Agent',
         icon: Users,
-        className: 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30',
+        className:
+          'bg-[var(--color-info-bg)] text-[var(--color-info)] border border-[var(--color-info)]/30',
       };
     }
     if (mode === 'single') {
@@ -2219,7 +2220,7 @@ let selectedModelLabel = $derived.by(() => {
       title: 'Agent Mode: Auto',
       icon: Sparkles,
       className:
-        'bg-emerald-500/14 text-emerald-300 border border-emerald-500/25 hover:brightness-110',
+        'bg-[var(--color-success-bg)] text-[var(--color-success)] border border-[var(--color-success)]/25 hover:brightness-110',
     };
   });
 
@@ -2542,10 +2543,10 @@ let selectedModelLabel = $derived.by(() => {
   <!-- No project: show error -->
   {#if disabled}
     <div
-      class="mb-4 px-4 py-3 rounded-xl text-sm font-medium flex items-center gap-2"
-      style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); color: var(--color-text-primary);"
+      class="mb-2 px-3 py-2 rounded-md text-sm flex items-center gap-2"
+      style="background: var(--color-warning-bg); border: 1px solid color-mix(in srgb, var(--color-warning) 35%, var(--color-border)); color: var(--color-text-primary);"
     >
-      <span class="text-amber-400">⚠</span>
+      <span class="text-[var(--color-warning)]">⚠</span>
       <span>{disabledMessage}</span>
     </div>
   {/if}
@@ -2553,33 +2554,37 @@ let selectedModelLabel = $derived.by(() => {
   <!-- No provider: show blocking setup state -->
   {#if !disabled && configurationWarning}
     <div
-      class="mb-4 flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
-      style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: var(--color-text-primary);"
+      class="mb-2 flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-md"
+      style="background: var(--color-error-bg); border: 1px solid color-mix(in srgb, var(--color-error) 35%, var(--color-border)); color: var(--color-text-primary);"
     >
-      <div class="flex items-center gap-2 min-w-0">
-        <span class="text-red-400 font-semibold shrink-0">Setup required</span>
-        <span class="text-sm min-w-0" style="color: var(--color-text-secondary);"
+      <div class="flex-1 min-w-48">
+        <span class="text-xs" style="color: var(--color-text-secondary);"
           >{configurationWarning}</span
         >
       </div>
-      <button type="button" class="btn btn-secondary shrink-0" onclick={() => onOpenSettings?.()}>
+      <button
+        type="button"
+        class="shrink-0 rounded px-2 py-1 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)] focus-visible:outline focus-visible:outline-[var(--color-accent)]"
+        onclick={() => onOpenSettings?.()}
+      >
         Open Settings
       </button>
     </div>
   {/if}
 
   <div
-    class="rounded-[20px] border px-5 py-3"
-    style="background: rgba(12, 10, 9, 0.2); border-color: var(--color-border);"
+    class="rounded-xl border px-4 py-3"
+    style="background: var(--color-surface-1); border-color: var(--color-border);"
   >
     <!-- Controls row: Model picker + Reasoning toggle -->
-    <div class="mb-3 flex flex-wrap items-center gap-3">
+    <div class="mb-2 flex flex-wrap items-center gap-2">
       <!-- Model selector -->
       <div class="relative model-picker">
         <button
           type="button"
-          class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-          style="background: var(--color-surface-3); color: {selectedModel
+          class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+          aria-expanded={showModelPicker}
+          style="background: var(--color-surface-2); color: {selectedModel
             ? 'var(--color-text-primary)'
             : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
           onclick={() => {
@@ -2723,8 +2728,9 @@ let selectedModelLabel = $derived.by(() => {
         <div class="relative reasoning-picker">
           <button
             type="button"
-            class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
-            style="background: var(--color-surface-3); color: {reasoningIsValid
+            class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
+            aria-expanded={showReasoningMenu}
+            style="background: var(--color-surface-2); color: {reasoningIsValid
               ? 'var(--color-text-primary)'
               : 'var(--color-text-muted)'}; border: 1px solid var(--color-border);"
             onclick={() => (showReasoningMenu = !showReasoningMenu)}
@@ -2733,7 +2739,7 @@ let selectedModelLabel = $derived.by(() => {
             <BrainIcon
               reasoningLevel={reasoningIsValid ? reasoningLevel : ''}
               size={20}
-              class="text-[#c890ab]"
+              class="text-[var(--color-accent)]"
             />
             <span>{reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}</span>
             <ChevronDown size={14} class="text-text-muted" />
@@ -2742,11 +2748,11 @@ let selectedModelLabel = $derived.by(() => {
           {#if showReasoningMenu}
             <div
               class="absolute bottom-full left-0 mb-2 w-72 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md"
-              style="background: var(--color-surface-2-alpha, rgba(30, 30, 35, 0.9)); border-color: var(--color-border);"
+              style="background: var(--color-surface-2); border-color: var(--color-border);"
             >
               <div
-                class="px-4 py-3 text-xs font-bold uppercase tracking-widest opacity-70"
-                style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border); background: rgba(255,255,255,0.03);"
+                class="px-4 py-2.5 text-xs font-medium"
+                style="color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border);"
               >
                 {`${modelDisplayName} · ${reasoningIsValid ? reasoningLabel(reasoningLevel) : 'Choose reasoning'}`}
               </div>
@@ -2771,10 +2777,7 @@ let selectedModelLabel = $derived.by(() => {
                         ></div>
                       {/if}
                     </div>
-                    <div
-                      class="text-[11px] leading-relaxed opacity-60 group-hover:opacity-100 transition-opacity"
-                      style="color: var(--color-text-muted);"
-                    >
+                    <div class="text-xs leading-relaxed" style="color: var(--color-text-muted);">
                       {opt.description}
                     </div>
                   </button>
@@ -2788,7 +2791,7 @@ let selectedModelLabel = $derived.by(() => {
       {#if fastModeSupported}
         <button
           type="button"
-          class="flex items-center gap-2 px-3.5 h-10 rounded-xl text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98]"
+          class="flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors hover:brightness-110"
           style="background: {fastMode
             ? 'color-mix(in srgb, var(--color-accent) 22%, var(--color-surface-3))'
             : 'var(--color-surface-3)'}; color: {fastMode
@@ -2807,10 +2810,10 @@ let selectedModelLabel = $derived.by(() => {
 
       <button
         type="button"
-        class="flex h-10 items-center gap-2 rounded-xl border px-3.5 text-sm font-medium transition-all hover:brightness-110 active:scale-[0.98] {isGuidedDemo
+        class="flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:brightness-110 {isGuidedDemo
           ? 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]'
           : interactionMode === 'plan'
-            ? 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200'
+            ? 'border-[var(--color-info)]/40 bg-[var(--color-info-bg)] text-[var(--color-info)]'
             : 'border-[var(--color-border)] bg-[var(--color-surface-3)] text-[var(--color-text-primary)]'}"
         aria-pressed={!isGuidedDemo && interactionMode === 'plan'}
         aria-disabled={isGuidedDemo}
@@ -2835,7 +2838,7 @@ let selectedModelLabel = $derived.by(() => {
       <div class="permission-picker relative">
         <button
           type="button"
-          class="flex h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-3)] px-3.5 text-sm font-medium text-[var(--color-text-primary)] transition-all hover:brightness-110 active:scale-[0.98]"
+          class="flex min-h-9 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm font-medium text-[var(--color-text-primary)] transition-colors hover:brightness-110"
           onclick={() => (showPermissionMenu = !showPermissionMenu)}
           title={`Permissions: ${permissionModeMeta.label}`}
           aria-haspopup="menu"
@@ -2855,9 +2858,7 @@ let selectedModelLabel = $derived.by(() => {
             <div
               class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3"
             >
-              <span
-                class="text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]"
-                >Permissions</span
+              <span class="text-xs font-medium text-[var(--color-text-secondary)]">Permissions</span
               >
               <button
                 type="button"
@@ -2934,7 +2935,7 @@ let selectedModelLabel = $derived.by(() => {
           <button
             type="button"
             class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
-            style="background: var(--color-accent); color: var(--color-background, #101010);"
+            style="background: var(--color-accent); color: var(--color-on-accent);"
             onclick={() => void createGoal()}
             aria-label={agentSettingsStore.settings.automaticGoalDriving
               ? 'Create and start goal'
@@ -3001,7 +3002,7 @@ let selectedModelLabel = $derived.by(() => {
             style="background: var(--color-surface-2); border-color: var(--color-border);"
           >
             <div
-              class="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em]"
+              class="px-3 py-2 text-xs font-medium"
               style="color: var(--color-text-muted); border-bottom: 1px solid var(--color-border);"
             >
               {triggerContext?.trigger === '/' ? 'Commands' : 'Files'}
@@ -3029,10 +3030,7 @@ let selectedModelLabel = $derived.by(() => {
                         {item.description}
                       </div>
                     </div>
-                    <div
-                      class="shrink-0 text-[10px] uppercase tracking-[0.12em]"
-                      style="color: var(--color-text-muted);"
-                    >
+                    <div class="shrink-0 text-xs" style="color: var(--color-text-muted);">
                       {item.type}
                     </div>
                   </button>
@@ -3269,8 +3267,8 @@ let selectedModelLabel = $derived.by(() => {
       <div class="w-full xl:w-auto xl:self-end">
         <div
           bind:this={actionPanelRef}
-          class="flex flex-col gap-3 rounded-2xl border px-3 py-3 xl:min-w-[188px]"
-          style="background: rgba(12, 10, 9, 0.34); border-color: var(--color-border);"
+          class="flex flex-col gap-2 border-t pt-3 xl:min-w-[188px] xl:border-t-0 xl:border-l xl:pl-3 xl:pt-0"
+          style="border-color: var(--color-border);"
         >
           <div class="flex flex-wrap items-center gap-2 xl:justify-end">
             <div class="agent-mode-picker relative">
@@ -3333,11 +3331,12 @@ let selectedModelLabel = $derived.by(() => {
             <button
               type="button"
               class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md transition-colors {effectiveCriticGateEnabled
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                ? 'bg-[var(--color-warning-bg)] text-[var(--color-warning)] border border-[var(--color-warning)]/30'
                 : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] border border-[var(--color-border)] hover:brightness-110'}"
               onclick={() =>
                 setChatAgentOverrides({ criticGateEnabled: !effectiveCriticGateEnabled })}
               title="Toggle Critic Agent for this chat"
+              aria-pressed={effectiveCriticGateEnabled}
             >
               {#if effectiveCriticGateEnabled}
                 <ShieldCheck size={12} />
@@ -3351,7 +3350,7 @@ let selectedModelLabel = $derived.by(() => {
           {#if interactionMode === 'plan' && planReady}
             <button
               type="button"
-              class="rounded-lg bg-cyan-300 px-3 py-2 text-xs font-semibold text-slate-950 hover:opacity-90"
+              class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-xs font-semibold text-[var(--color-on-accent)] hover:opacity-90"
               onclick={() => onApprovePlan?.()}>Approve plan & implement</button
             >
           {/if}
@@ -3365,7 +3364,7 @@ let selectedModelLabel = $derived.by(() => {
               : isWaiting
                 ? 'waiting-btn'
                 : 'btn-primary'}"
-            style="height: 52px; padding: 0 20px; font-size: 14px; {disabled ||
+            style="height: 44px; padding: 0 16px; font-size: 14px; {disabled ||
             imageAdmissionPending ||
             (!isRunning && !isWaiting && !canSend)
               ? 'opacity: 0.5; cursor: not-allowed;'
@@ -3471,9 +3470,7 @@ let selectedModelLabel = $derived.by(() => {
           <p class="truncate text-sm font-medium text-[var(--color-text-primary)]">
             {previewAttachment.name}
           </p>
-          <p class="text-[10px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-            Image preview
-          </p>
+          <p class="text-xs text-[var(--color-text-muted)]">Image preview</p>
         </div>
         <span class="hidden text-[10px] text-[var(--color-text-muted)] sm:block">Esc to close</span>
         <button
@@ -3582,21 +3579,20 @@ let selectedModelLabel = $derived.by(() => {
 {/if}
 
 <style>
-  /* Waiting button — Kory is parked on something external (background
-     terminal, user input). Amber, calm slow pulse: alive but not burning. */
+  /* Waiting is distinct from running, with a calm, theme-aware status tone. */
   :global(.waiting-btn) {
-    background: color-mix(in srgb, #d5b261 14%, transparent);
-    color: #d5b261;
-    border: 1px solid color-mix(in srgb, #d5b261 45%, transparent);
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+    border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
     animation: waiting-breathe 2.4s ease-in-out infinite;
   }
   @keyframes waiting-breathe {
     0%,
     100% {
-      box-shadow: 0 0 0 0 rgba(var(--color-accent-rgb), 0);
+      box-shadow: 0 0 0 0 transparent;
     }
     50% {
-      box-shadow: 0 0 14px 0 rgba(var(--color-accent-rgb), 0.35);
+      box-shadow: 0 0 14px 0 color-mix(in srgb, var(--color-warning) 25%, transparent);
     }
   }
   .waiting-dots {
@@ -3631,9 +3627,9 @@ let selectedModelLabel = $derived.by(() => {
 
   /* Stop button — unmistakably "live, click to stop" with a pulsing ring. */
   :global(.stop-btn) {
-    background: rgb(239 68 68 / 0.12);
-    border: 1px solid rgb(239 68 68 / 0.45);
-    color: #fca5a5;
+    background: var(--color-error-bg);
+    border: 1px solid color-mix(in srgb, var(--color-error) 45%, transparent);
+    color: var(--color-error);
     font-weight: 600;
     transition:
       background 0.15s ease,
@@ -3641,9 +3637,9 @@ let selectedModelLabel = $derived.by(() => {
       color 0.15s ease;
   }
   :global(.stop-btn:hover) {
-    background: rgb(239 68 68 / 0.2);
-    border-color: rgb(239 68 68 / 0.85);
-    color: #fecaca;
+    background: color-mix(in srgb, var(--color-error) 20%, var(--color-surface-1));
+    border-color: var(--color-error);
+    color: var(--color-error);
   }
   :global(.stop-pulse) {
     position: relative;
@@ -3653,8 +3649,8 @@ let selectedModelLabel = $derived.by(() => {
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: #ef4444;
-    color: #fff;
+    background: var(--color-error-bg);
+    color: var(--color-error);
     flex-shrink: 0;
   }
   :global(.stop-pulse::after) {
@@ -3662,7 +3658,7 @@ let selectedModelLabel = $derived.by(() => {
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 2px solid rgb(239 68 68 / 0.7);
+    border: 2px solid color-mix(in srgb, var(--color-error) 70%, transparent);
     animation: stop-ping 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
   @keyframes stop-ping {
@@ -3677,7 +3673,9 @@ let selectedModelLabel = $derived.by(() => {
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    :global(.stop-pulse::after) {
+    :global(.stop-pulse::after),
+    :global(.waiting-btn),
+    .waiting-dots span {
       animation: none;
     }
   }

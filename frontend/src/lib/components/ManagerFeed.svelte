@@ -7,7 +7,6 @@
   import { fade } from 'svelte/transition';
   import { projectStore } from '$lib/stores/project.svelte';
   import ArrowDown from 'lucide-svelte/icons/arrow-down';
-  import Trash2 from 'lucide-svelte/icons/trash-2';
   import Paintbrush from 'lucide-svelte/icons/paintbrush';
   import Bug from 'lucide-svelte/icons/bug';
   import Zap from 'lucide-svelte/icons/zap';
@@ -294,11 +293,11 @@
     {:else if filteredFeed.length === 0}
       <div bind:this={feedContainer} class="absolute inset-0 overflow-y-auto p-4 feed-scroll">
         {#if welcomePreferencesStore.preferences.enabled.suggestions}
-        <div class="mx-auto max-w-4xl px-4 py-6 sm:px-6">
-          <div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <div class="min-w-0 border-b border-[var(--color-border)] pb-5">
+          <div class="mx-auto max-w-3xl px-2 py-4 sm:px-4">
+            <div class="animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div class="min-w-0">
                 <h2
-                  class="mb-3 text-xl font-semibold leading-tight tracking-tight"
+                  class="mb-2 text-lg font-semibold leading-tight tracking-tight"
                   style="color: var(--color-text-primary);"
                 >
                   {isWorkspace ? 'Start with your workspace' : 'Start with your project'}
@@ -308,104 +307,95 @@
                   class="mb-5 max-w-2xl text-sm leading-relaxed"
                   style="color: var(--color-text-secondary);"
                 >
-                  Start with a task, or type one below.
+                  Choose a starting point, or write a task below.
                 </p>
 
-                <div class="grid w-full grid-cols-1 gap-2 md:grid-cols-2">
-                    {#each suggestions as suggestion (suggestion.id)}
-                      {@const Icon = suggestion.icon}
-                      <div
-                        class="suggestion-card group relative flex flex-col items-start rounded-md border p-3 text-left transition-colors duration-150 {editingSuggestionId ===
-                        suggestion.id
-                          ? ''
-                          : 'cursor-pointer'}"
-                        style="background: transparent; border-color: var(--color-border);"
-                      >
-                        {#if editingSuggestionId !== suggestion.id}
-                          <button
-                            type="button"
-                            class="absolute inset-0 z-0 rounded-md bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
-                            aria-label={`Use ${suggestion.label}`}
-                            onclick={() => runSuggestion(suggestion.prompt)}
-                          ></button>
-                        {/if}
+                <div class="w-full divide-y divide-[var(--color-border)]">
+                  {#each suggestions as suggestion (suggestion.id)}
+                    {@const Icon = suggestion.icon}
+                    <div
+                      class="group relative flex flex-col items-start px-2 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                    >
+                      {#if editingSuggestionId !== suggestion.id}
                         <button
                           type="button"
-                          class="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-md opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--color-surface-3)]"
-                          style="color: var(--color-text-muted);"
-                          onclick={(e) => {
-                            e.stopPropagation();
-                            startEditingSuggestion(suggestion);
-                          }}
-                          title="Edit suggestion"
-                          aria-label={`Edit ${suggestion.label}`}
-                        >
-                          <Pencil size={14} />
-                        </button>
+                          class="absolute inset-0 z-0 rounded-md bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/70"
+                          aria-label={`Load ${suggestion.label} into composer`}
+                          onclick={() => runSuggestion(suggestion.prompt)}
+                        ></button>
+                      {/if}
+                      <button
+                        type="button"
+                        class="absolute right-1 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[var(--color-surface-3)]"
+                        style="color: var(--color-text-muted);"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          startEditingSuggestion(suggestion);
+                        }}
+                        title="Edit suggestion"
+                        aria-label={`Edit ${suggestion.label}`}
+                      >
+                        <Pencil size={14} />
+                      </button>
 
-                        <div
-                          class="relative z-[1] w-full text-left {editingSuggestionId ===
-                          suggestion.id
-                            ? ''
-                            : 'pointer-events-none'}"
-                        >
-                          <div
-                            class="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-[var(--color-surface-3)] transition-colors group-hover:bg-[var(--color-accent)]/10 group-hover:text-[var(--color-accent)]"
-                            style="color: var(--color-text-secondary);"
-                          >
-                            <Icon size={19} />
-                          </div>
-
-                          <span
-                            class="mb-1 block pr-8 text-sm font-medium tracking-tight transition-colors group-hover:text-[var(--color-text-primary)]"
-                            style="color: var(--color-text-secondary);">{suggestion.label}</span
-                          >
-
-                          {#if editingSuggestionId === suggestion.id}
-                            <textarea
-                              bind:value={editingSuggestionText}
-                              aria-label={`${suggestion.label} prompt`}
-                              class="min-h-24 w-full rounded-md border px-3 py-2 text-xs leading-relaxed outline-none focus:ring-1 focus:ring-[var(--color-accent)]/30"
-                              style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
-                              onclick={(e) => e.stopPropagation()}
-                            ></textarea>
-                          {:else}
-                            <span
-                              class="line-clamp-2 text-xs leading-relaxed transition-colors group-hover:text-[var(--color-text-secondary)]"
-                              style="color: var(--color-text-muted);">{suggestion.prompt}</span
-                            >
-                          {/if}
+                      <div
+                        class="relative z-[1] w-full text-left {editingSuggestionId ===
+                        suggestion.id
+                          ? ''
+                          : 'pointer-events-none'}"
+                      >
+                        <div class="mb-1 flex items-center gap-2 pr-8">
+                          <Icon size={15} class="shrink-0 text-[var(--color-text-muted)]" />
+                          <span class="text-sm font-medium text-[var(--color-text-primary)]">
+                            {suggestion.label}
+                          </span>
                         </div>
 
                         {#if editingSuggestionId === suggestion.id}
-                          <div class="relative mt-4 flex items-center gap-2">
-                            <button
-                              type="button"
-                              class="flex items-center gap-1.5 rounded-md bg-[var(--color-accent)]/10 px-3 py-1.5 text-[11px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/20"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                saveSuggestionEdit(suggestion.id);
-                              }}
-                            >
-                              <Check size={12} />
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)]"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                cancelEditingSuggestion();
-                              }}
-                            >
-                              <X size={12} />
-                              Cancel
-                            </button>
-                          </div>
+                          <textarea
+                            bind:value={editingSuggestionText}
+                            aria-label={`${suggestion.label} prompt`}
+                            class="min-h-24 w-full rounded-md border px-3 py-2 text-xs leading-relaxed outline-none focus:ring-1 focus:ring-[var(--color-accent)]/30"
+                            style="background: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-primary); resize: vertical;"
+                            onclick={(e) => e.stopPropagation()}
+                          ></textarea>
+                        {:else}
+                          <span
+                            class="line-clamp-2 pl-[23px] pr-8 text-xs leading-relaxed transition-colors group-hover:text-[var(--color-text-secondary)]"
+                            style="color: var(--color-text-muted);">{suggestion.prompt}</span
+                          >
                         {/if}
                       </div>
-                    {/each}
-                  </div>
+
+                      {#if editingSuggestionId === suggestion.id}
+                        <div class="relative mt-2 flex items-center gap-2">
+                          <button
+                            type="button"
+                            class="flex items-center gap-1.5 rounded-md bg-[var(--color-accent)]/10 px-3 py-1.5 text-[11px] font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/20"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              saveSuggestionEdit(suggestion.id);
+                            }}
+                          >
+                            <Check size={12} />
+                            Save prompt
+                          </button>
+                          <button
+                            type="button"
+                            class="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)]"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              cancelEditingSuggestion();
+                            }}
+                          >
+                            <X size={12} />
+                            Cancel
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
               </div>
             </div>
           </div>
@@ -522,8 +512,5 @@
   }
   .feed-scroll {
     overscroll-behavior: contain;
-  }
-  .suggestion-card:hover {
-    border-color: rgba(var(--color-accent-rgb), 0.4) !important;
   }
 </style>

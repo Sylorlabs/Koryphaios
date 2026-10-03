@@ -271,6 +271,7 @@
   let selectedVariant = $state(-1);
   let selectedVariantKey = $state('');
   let toolDetailsOpen = $state(false);
+  const detailsId = $props.id();
   let contextMenu = $state<{ x: number; y: number } | null>(null);
   // Capture the live text selection at context-menu-open time.  Clicking the
   // "Copy" button in the menu moves focus to the button and clears the
@@ -1205,22 +1206,35 @@
            {isSelected
         ? 'bg-[var(--color-accent)]/10 ring-1 ring-[var(--color-accent)]/30'
         : 'hover:bg-surface-2/30'}"
-      onclick={(e) =>
+      onclick={(e) => {
+        if (entry.type === 'tool_group' || entry.type === 'agent_group') {
+          requestExpandAnchor(e.currentTarget);
+        }
         entry.type === 'tool_group'
           ? (toolDetailsOpen = true)
           : entry.type === 'agent_group'
             ? onToggleGroup()
-            : onSelect(e)}
+            : onSelect(e);
+      }}
       onkeydown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ')
+        // Nested buttons own their keyboard activation; do not also toggle the row.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (entry.type === 'tool_group' || entry.type === 'agent_group') {
+            requestExpandAnchor(e.currentTarget);
+          }
           entry.type === 'tool_group'
             ? (toolDetailsOpen = true)
             : entry.type === 'agent_group'
               ? onToggleGroup()
               : onSelect(e as unknown as MouseEvent);
+        }
       }}
       oncontextmenu={openContextMenu}
       role="row"
+      aria-expanded={entry.type === 'tool_group' ? toolDetailsOpen : entry.type === 'agent_group' ? isExpanded : undefined}
+      aria-controls={entry.type === 'tool_group' && toolDetailsOpen ? detailsId : entry.type === 'agent_group' && isExpanded ? `${detailsId}-agent` : undefined}
       tabindex="0"
     >
       <span class="w-12 shrink-0 whitespace-nowrap text-[11px] leading-6 tabular-nums text-text-muted">
@@ -1262,22 +1276,17 @@
       <div class="flex-1 min-w-0 {entry.type === 'content' ? 'markdown-content' : ''}">
         {#if entry.agentHidden}
           <span
-            class="inline-flex items-center gap-1 mr-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-400/10 text-amber-400"
+            class="inline-flex items-center gap-1 mr-2 py-0.5 text-xs text-[var(--color-warning)]"
             title="This is stubbed out of the agent's context (recoverable via fetch_context)"
           >
             <Bot size={9} /> hidden from agent
           </span>
         {/if}
-        <!-- The agent name only appears when the agent is actually saying
-           something — tool calls, results, and reasoning stay unlabeled to
-           keep the feed compact. -->
-        {#if (entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought' || entry.type === 'error') && entry.agentName}
+        <!-- Only identify distinct speakers; the user's icon and manager's
+             transcript already establish their roles. Errors identify their source below. -->
+        {#if (entry.type === 'content' || entry.type === 'thought') && entry.agentId !== 'kory-manager' && entry.agentName}
           <span
-            class="text-xs font-semibold tracking-wide {entry.glowClass === 'glow-kory'
-              ? 'text-yellow-400'
-              : entry.type === 'user_message'
-                ? 'text-accent'
-                : 'text-text-secondary'}"
+            class="text-xs font-medium text-[var(--color-text-secondary)]"
           >
             {entry.agentName}
           </span>
@@ -1404,12 +1413,11 @@
           {@const isSimple = toolCat === 'read' || toolCat === 'write'}
           {#if toolFailed}
             <section
-              class="mt-1 overflow-hidden rounded-lg border"
-              style="border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, var(--color-surface-2));"
+              class="mt-1 overflow-hidden border-l"
+              style="border-color: var(--color-error);"
             >
               <div
-                class="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400"
-                style="border-color: color-mix(in srgb, var(--color-error) 35%, transparent);"
+                class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[var(--color-error)]"
               >
                 <AlertTriangle size={12} />
                 <span>{getToolNameFromMeta(entry.metadata) || 'Tool'} failed</span>
@@ -1418,7 +1426,8 @@
                     >{entry.metadata.sourceProvider}</span
                   >{/if}
               </div>
-              <pre class="error-box-body">{currentText ||
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <pre class="error-box-body" tabindex="0" aria-label="Tool error">{currentText ||
                 'The tool failed without returning diagnostic output.'}</pre>
             </section>
           {:else if toolCat === 'search'}
@@ -1434,13 +1443,10 @@
           {:else if toolCat === 'web'}
             {@const q = getWebQuery(entry.metadata)}
             {@const searching = entry.type === 'tool_call'}
-            <div
-              class="mt-1 flex items-center gap-2.5 rounded-xl border px-3 py-2"
-              style="border-color: rgba(56,189,248,0.28); background: rgba(56,189,248,0.06);"
-            >
-              <Globe size={15} class="shrink-0 text-sky-400 {searching ? 'globe-spin' : ''}" />
+            <div class="mt-1 flex items-center gap-2 text-xs">
+              <Globe size={14} class="shrink-0 text-[var(--color-info)] {searching ? 'globe-spin' : ''}" />
               <div class="min-w-0 flex-1">
-                <div class="text-[10px] font-bold uppercase tracking-widest text-sky-400/80">
+                <div class="text-xs text-[var(--color-text-secondary)]">
                   {searching ? 'Searching the web' : 'Web results'}
                 </div>
                 {#if q}
@@ -1476,7 +1482,9 @@
               {/if}
               <button
                 type="button"
-                class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+                class="detail-toggle ml-auto"
+                aria-expanded={toolDetailsOpen}
+                aria-controls={toolDetailsOpen ? detailsId : undefined}
                 onclick={(event) => {
                   event.stopPropagation();
                   requestExpandAnchor(event.currentTarget);
@@ -1487,19 +1495,16 @@
           {/if}
         {:else if entry.type === 'user_message' || entry.type === 'content' || entry.type === 'thought'}
           {#if rawTaskTranscript}
-            <div
-              class="mt-1 flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-[11px]"
-            >
-              <Terminal size={13} class="text-emerald-400" />
+            <div class="mt-1 flex items-center gap-2 py-1 text-xs">
+              <Terminal size={13} class="text-[var(--color-text-muted)]" />
               <span class="font-medium text-[var(--color-text-secondary)]"
                 >Background task completed</span
               >
-              <span class="min-w-0 truncate text-[var(--color-text-muted)]"
-                >Internal command output is hidden from the conversation.</span
-              >
               <button
                 type="button"
-                class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)]"
+                class="detail-toggle ml-auto"
+                aria-expanded={toolDetailsOpen}
+                aria-controls={toolDetailsOpen ? detailsId : undefined}
                 onclick={(event) => {
                   event.stopPropagation();
                   requestExpandAnchor(event.currentTarget);
@@ -1556,8 +1561,8 @@
               {#each noteRenderIds as noteId (noteId)}
                 {@const note = renderedNotes[noteId]}
                 <section
-                  class="overflow-hidden rounded-xl border"
-                  style="border-color: var(--color-border); background: var(--color-surface-1);"
+                  class="overflow-hidden border-y"
+                  style="border-color: var(--color-border);"
                 >
                   {#if note === undefined}
                     <div class="px-4 py-3 text-xs" style="color: var(--color-text-muted);">
@@ -1581,7 +1586,7 @@
                     </div>
                     {#if note.format === 'html'}
                       <iframe
-                        class="h-[480px] w-full border-0 bg-white"
+                        class="h-[480px] w-full border-0 bg-[var(--color-surface-1)]"
                         title={`Rendered ${note.title}`}
                         sandbox=""
                         referrerpolicy="no-referrer"
@@ -1651,13 +1656,11 @@
           {/if}
 
           {#if entry.type === 'content' && !isStreaming && currentText}
-            <div class="mt-2 flex items-center gap-2" in:fade>
+            <div class="response-actions mt-2 flex flex-wrap items-center gap-1" in:fade>
               <button
                 type="button"
-                class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all
-                       {copied
-                  ? 'bg-emerald-500/10 text-emerald-400'
-                  : 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
+                class="response-action"
+                class:copied
                 onclick={(e) => {
                   e.stopPropagation();
                   if (isImageResponse) void copyImageToClipboard();
@@ -1669,17 +1672,17 @@
                   Copied
                 {:else if isImageResponse}
                   <Copy size={10} />
-                  Copy Image
+                  Copy image
                 {:else}
                   <Copy size={10} />
-                  Copy Response
+                  Copy response
                 {/if}
               </button>
 
               {#if !isImageResponse}
                 <button
                   type="button"
-                  class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)]"
+                  class="response-action"
                   onclick={(event) => {
                     event.stopPropagation();
                     void toggleVoicePlayback();
@@ -1693,7 +1696,7 @@
               {#if currentMessageId}
                 <button
                   type="button"
-                  class="flex items-center gap-1.5 rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+                  class="response-action disabled:opacity-40"
                   onclick={(e) => {
                     e.stopPropagation();
                     void regenerateResponse();
@@ -1708,7 +1711,7 @@
 
               {#if responseVariants.length > 1}
                 <div
-                  class="flex items-center rounded-md bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
+                  class="flex items-center text-[var(--color-text-muted)]"
                 >
                   <button
                     type="button"
@@ -1722,7 +1725,7 @@
                   >
                     <ChevronLeft size={12} />
                   </button>
-                  <span class="min-w-8 text-center font-mono text-[10px]"
+                  <span class="min-w-8 text-center tabular-nums text-xs"
                     >{selectedVariant + 1}/{responseVariants.length}</span
                   >
                   <button
@@ -1740,13 +1743,13 @@
                 </div>
                 {#if selectedVariantIsActive}
                   <span
-                    class="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-300"
+                    class="px-2 py-1 text-xs text-[var(--color-success)]"
                     title="Follow-up messages continue from this response">Active branch</span
                   >
                 {:else}
                   <button
                     type="button"
-                    class="rounded-md bg-[var(--color-surface-3)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] transition-all hover:bg-[var(--color-border)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                    class="response-action disabled:cursor-not-allowed disabled:opacity-40"
                     disabled={activatingVariant || regenerating || !variantIdentityAuthoritative}
                     onclick={(event) => {
                       event.stopPropagation();
@@ -1764,7 +1767,7 @@
               {#if entry.ghostHash}
                 <button
                   type="button"
-                  class="flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all bg-[var(--color-surface-3)] text-[var(--color-text-muted)] hover:text-amber-400 hover:bg-amber-400/10"
+                  class="response-action disabled:opacity-40"
                   onclick={(e) => {
                     e.stopPropagation();
                     void wsStore.rewind(entry.ghostHash!);
@@ -1778,7 +1781,7 @@
                     Loading preview
                   {:else}
                     <Undo size={10} />
-                    Rewind to Here
+                    Rewind to here
                   {/if}
                 </button>
               {/if}
@@ -1786,12 +1789,11 @@
           {/if}
         {:else if entry.type === 'error'}
           <section
-            class="mt-1 overflow-hidden rounded-lg border"
-            style="border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent);"
+            class="mt-1 overflow-hidden border-l"
+            style="border-color: var(--color-error);"
           >
             <div
-              class="flex items-center gap-2 border-b px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-400"
-              style="border-color: color-mix(in srgb, var(--color-error) 35%, transparent);"
+              class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[var(--color-error)]"
             >
               <AlertTriangle size={12} />
               <span>{entry.agentName ? `${entry.agentName} failed` : 'System error'}</span>
@@ -1799,7 +1801,8 @@
                 >{entry.metadata?.source ?? 'runtime'}</span
               >
             </div>
-            <pre class="error-box-body">{currentText || 'No error details were provided.'}</pre>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <pre class="error-box-body" tabindex="0" aria-label="Error details">{currentText || 'No error details were provided.'}</pre>
           </section>
         {:else}
           <div class="{getEntryColor(entry.type)} break-words mt-1">
@@ -1809,7 +1812,7 @@
       </div>
 
       <div
-        class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+        class="shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-60 group-focus-within:opacity-100 hover:!opacity-100 transition-opacity"
       >
         {#if archiveId}
           <button
@@ -1857,14 +1860,17 @@
          tool log must not scroll the whole conversation away. The unclamped
          text stays one click away in that worker's own transcript. -->
     {@const bds = domainStyle(entry.metadata)}
+    <!-- Scrollable activity must be reachable with the keyboard. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
+      id={`${detailsId}-agent`}
+      role="region"
+      aria-label={`${entry.agentName} activity`}
+      tabindex="0"
       class="ml-14 border-l pl-3 py-1 space-y-1 my-1 {bds.color} max-h-56 overflow-y-auto agent-group-scroll"
       style="border-color: currentColor;"
       transition:fly={{ y: -10, duration: 200 }}
     >
-      <div class="text-[10px] font-semibold tracking-wide {bds.color}">
-        {bds.label} · {entry.agentName}
-      </div>
       {#each entry.entries || [] as subEntry (subEntry.id)}
         <div
           class="flex items-start gap-2 text-[12px] opacity-85 hover:opacity-100 transition-opacity"
@@ -1958,10 +1964,13 @@
     detailIsInput && detailCommand && isCommandOnlyInput(entry.metadata) ? '' : detailRaw}
   {@const detailLines = detailBody ? detailBody.split('\n').length : 0}
   <div
-    class="tool-output-panel ml-[calc(6.25rem+2*var(--space-md))] mt-1.5 mb-2 overflow-hidden rounded-xl border"
+    id={detailsId}
+    class="tool-output-panel ml-14 mt-1.5 mb-2 min-w-0 overflow-hidden border-l"
+    role="region"
+    aria-label="Tool details"
     class:tool-output-panel-failed={detailFailed}
   >
-    <header class="flex min-h-9 items-center gap-2.5 border-b px-3 py-1.5">
+    <header class="flex min-h-9 flex-wrap items-center gap-2 px-3 py-1.5">
       {#if entry.type === 'tool_group'}
         <Layers size={13} class="shrink-0 text-blue-400" />
       {:else}
@@ -2015,7 +2024,12 @@
         <button
           type="button"
           class="tool-output-action"
-          onclick={() => (toolDetailsOpen = false)}
+          onclick={(event) => {
+            requestExpandAnchor(event.currentTarget);
+            toolDetailsOpen = false;
+            (entryElement?.querySelector<HTMLElement>('.detail-toggle') ??
+              entryElement?.querySelector<HTMLElement>('[role="row"]'))?.focus();
+          }}
           aria-label="Collapse details"
           title="Collapse"
         >
@@ -2032,16 +2046,25 @@
               {subEntry.text.replace(/^Calling tool: /, '')}
             </p>
             {#if detail}
+              <!-- Scrollable output must be reachable with the keyboard. -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
               <pre
-                class="tool-output-pre mt-2 max-h-40 overflow-auto rounded-lg px-3 py-2">{detail}</pre>
+                tabindex="0"
+                aria-label="Step output"
+                class="tool-output-pre mt-2 max-h-40 overflow-auto py-2">{detail}</pre>
             {/if}
           </article>
         {/each}
       </div>
     {:else}
       {#if detailCommand && !rawTaskTranscript}
+        <!-- Scrollable commands must be reachable with the keyboard. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div
-          class="tool-output-command flex items-start gap-2 border-b px-3 py-2 font-mono text-[11.5px] leading-relaxed"
+          class="tool-output-command flex max-h-40 overflow-auto items-start gap-2 px-3 py-2 font-mono text-xs leading-relaxed"
+          role="region"
+          aria-label="Command"
+          tabindex="0"
         >
           <span class="shrink-0 select-none text-emerald-400/80">$</span>
           <span
@@ -2051,8 +2074,12 @@
         </div>
       {/if}
       {#if detailBody}
+        <!-- Scrollable output must be reachable with the keyboard. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <pre
-          class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3.5 py-3">{detailBody}</pre>
+          tabindex="0"
+          aria-label="Tool output"
+          class="tool-output-pre tool-output-scroll max-h-80 overflow-auto px-3 py-2">{detailBody}</pre>
       {:else if !detailCommand}
         <p class="px-3.5 py-4 text-center text-[11px] text-[var(--color-text-muted)]">
           {detailIsInput ? 'No input was recorded.' : 'No output was reported.'}
@@ -2112,12 +2139,10 @@
     border-radius: var(--radius-full);
   }
 
-  /* Error box body: fills the red frame flush so it reads as one rectangular box.
-     The frame and header carry the error color; the body stays on the neutral base
-     surface so a long diagnostic dump does not read as one red slab. */
+  /* Errors remain bounded and identifiable without a second nested surface. */
   .error-box-body {
     margin: 0;
-    background: var(--color-surface-0);
+    background: transparent;
     border: 0;
     border-radius: 0;
     padding: 10px 12px;
@@ -2131,11 +2156,38 @@
     color: color-mix(in srgb, var(--color-error) 30%, var(--color-text-primary));
   }
 
-  /* Tool output panel: a quiet terminal-like surface aligned with the entry body. */
+  .response-action,
+  .detail-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 400;
+    color: var(--color-text-muted);
+  }
+  .response-action.copied {
+    color: var(--color-success);
+  }
+  .response-action:hover,
+  .detail-toggle:hover {
+    color: var(--color-text-primary);
+    background: var(--color-surface-2);
+  }
+  .response-actions button:focus-visible,
+  .error-box-body:focus-visible,
+  .agent-group-scroll:focus-visible,
+  .detail-toggle:focus-visible,
+  .tool-output-panel :is(button, pre, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+
+  /* Expanded details continue the transcript rather than adding another card. */
   .tool-output-panel {
     border-color: var(--color-border);
-    background: var(--color-surface-1);
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
   }
   .tool-output-panel-failed {
     border-color: color-mix(in srgb, var(--color-error) 40%, var(--color-border));
@@ -2145,33 +2197,23 @@
   .tool-output-step {
     border-color: var(--color-border);
   }
-  .tool-output-panel > header {
-    background: var(--color-surface-2);
-  }
   .tool-output-kicker {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: var(--text-sm);
+    font-weight: 500;
     color: var(--color-text-secondary);
   }
   .tool-output-meta {
-    font-size: 10.5px;
+    font-size: var(--text-sm);
     color: var(--color-text-muted);
   }
   .tool-output-chip {
-    font-size: 10.5px;
-    line-height: 1;
-    padding: 4px 6px;
-    border-radius: 6px;
-    color: var(--color-text-secondary);
-    background: var(--color-surface-0);
-    border: 1px solid var(--color-border);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
   }
   .tool-output-action {
     display: inline-flex;
-    height: 1.5rem;
-    width: 1.5rem;
+    height: 1.75rem;
+    width: 1.75rem;
     align-items: center;
     justify-content: center;
     border-radius: 6px;
@@ -2184,26 +2226,18 @@
   .tool-output-action:focus-visible {
     color: var(--color-text-primary);
     background: var(--color-surface-3);
-    outline: none;
-  }
-  .tool-output-command {
-    background: var(--color-surface-0);
   }
   .tool-output-pre {
     margin: 0;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: var(--text-sm);
     line-height: 1.6;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
     tab-size: 4;
     color: var(--color-text-secondary);
-    background: var(--color-surface-0);
-  }
-  .tool-output-step .tool-output-pre {
-    border: 1px solid var(--color-border);
-    font-size: 10.5px;
+    background: transparent;
   }
   .tool-output-scroll {
     scrollbar-width: thin;

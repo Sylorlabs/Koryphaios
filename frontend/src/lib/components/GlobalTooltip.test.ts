@@ -15,7 +15,9 @@ describe('global tooltip focus lifecycle', () => {
       expect(screen.getByRole('tooltip').textContent).toContain('First action');
       first.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
       second.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-      await waitFor(() => expect(screen.getByRole('tooltip').textContent).toContain('Second action'));
+      await waitFor(() =>
+        expect(screen.getByRole('tooltip').textContent).toContain('Second action'),
+      );
       expect(first.title).toBe('First action');
       await fireEvent.focusOut(second);
       await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());

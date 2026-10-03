@@ -50,9 +50,14 @@ describe('ThinkingBlock expansion anchoring', () => {
     expect(onAnchor).toHaveBeenCalledTimes(1);
     expect(onAnchor.mock.calls[0][0].bubbles).toBe(true);
     expect(container.querySelector('.thinking-full-text')).not.toBeNull();
+    const region = screen.getByRole('region', { name: 'Reasoning' });
+    expect(region).toHaveAttribute('tabindex', '0');
+    expect(screen.getByTitle('Hide reasoning')).toHaveAttribute('aria-controls', region.id);
+    expect(screen.getByTitle('Hide reasoning')).toHaveAttribute('aria-expanded', 'true');
 
     // Collapsing asks for the same anchoring, in reverse.
     await fireEvent.click(screen.getByTitle('Hide reasoning'));
     expect(onAnchor).toHaveBeenCalledTimes(2);
+    expect(screen.getByTitle('Show reasoning')).toHaveAttribute('aria-expanded', 'false');
   });
 });

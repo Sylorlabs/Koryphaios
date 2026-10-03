@@ -282,10 +282,7 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col overflow-hidden">
-  <SettingsPageIntro
-    title="MCP servers"
-    description="Connect local or remote tool servers."
-  >
+  <SettingsPageIntro title="MCP servers" description="Connect local or remote tool servers.">
     {#if view === 'list'}
       <div class="flex items-center gap-2">
         <button
@@ -340,39 +337,11 @@
             <RefreshCw size={16} class="animate-spin" /> Loading MCP servers…
           </section>
         {:else if mcpServersStore.servers.length === 0}
-          <section
-            class="border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-6 text-center"
-          >
-            <Server size={28} class="mx-auto text-[var(--color-text-muted)]" />
-            <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
-              No MCP servers configured
-            </h4>
-            <p class="mt-1 text-xs text-[var(--color-text-muted)]">
-              Add a server or browse the registry.
-            </p>
-            <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onclick={openBrowse}
-                class="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-              >
-                <Search size={14} /> Browse registry
-              </button>
-              <button
-                type="button"
-                onclick={openAddForm}
-                class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--color-border)] px-4 text-xs font-semibold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
-              >
-                <Plus size={14} /> Add manually
-              </button>
-            </div>
-          </section>
+          <p class="py-2 text-sm text-[var(--color-text-muted)]">No servers configured.</p>
         {:else}
-          <div class="space-y-3">
+          <div class="divide-y divide-[var(--color-border)]">
             {#each mcpServersStore.servers as server (server.name)}
-              <section
-                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3"
-              >
+              <section class="py-4 first:pt-0">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">
@@ -410,7 +379,7 @@
                       </span>
                     </div>
                     <div
-                      class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]"
+                      class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]"
                     >
                       <span>{server.toolCount} tool{server.toolCount === 1 ? '' : 's'}</span>
                       {#if server.protocolVersion}
@@ -425,9 +394,7 @@
                     {#if testResult[server.name]}
                       {@const result = testResult[server.name]}
                       {#if result}
-                        <div
-                          class="mt-3 border-t border-[var(--color-border)] pt-3"
-                        >
+                        <div class="mt-3 border-t border-[var(--color-border)] pt-3">
                           <div class="flex items-center gap-2 text-xs">
                             {#if result.connected}
                               <Check size={12} class="text-[var(--color-success)]" />
@@ -466,12 +433,12 @@
                       {/if}
                     {/if}
                   </div>
-                  <div class="flex shrink-0 flex-wrap gap-2">
+                  <div class="flex shrink-0 flex-wrap gap-1">
                     <button
                       type="button"
                       disabled={testingName === server.name}
                       onclick={() => void handleTest(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
                     >
                       {#if testingName === server.name}
                         <LoaderCircle size={13} class="animate-spin" /> Testing…
@@ -483,21 +450,21 @@
                       type="button"
                       disabled={mcpServersStore.loading}
                       onclick={() => void handleReload(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
+                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:opacity-50"
                     >
                       <RefreshCw size={13} /> Reload
                     </button>
                     <button
                       type="button"
                       onclick={() => void startEdit(server)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
                     >
                       <Pencil size={13} /> Edit
                     </button>
                     <button
                       type="button"
                       onclick={() => confirmRemove(server.name)}
-                      class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-error)]/50 hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                      class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-error-bg)] hover:text-[var(--color-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
                     >
                       <Trash2 size={13} /> Remove
                     </button>
@@ -545,7 +512,8 @@
               <input
                 type="text"
                 bind:value={registrySearchInput}
-                placeholder="Search servers (e.g. filesystem, github, slack…)"
+                aria-label="Search MCP registry"
+                placeholder="Search servers…"
                 class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] py-2.5 pl-9 pr-4 text-sm text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
               />
             </div>
@@ -583,16 +551,12 @@
             <div class="space-y-6">
               {#each featuredGroups as group (group.category)}
                 <div>
-                  <h5
-                    class="mb-2 text-[10px] font-semibold uppercase tracking-widest text-[var(--color-text-muted)]"
-                  >
+                  <h5 class="mb-1 text-xs font-medium text-[var(--color-text-secondary)]">
                     {group.category}
                   </h5>
-                  <div class="grid gap-3 lg:grid-cols-2">
+                  <div class="divide-y divide-[var(--color-border)]">
                     {#each group.servers as result (result.id)}
-                      <section
-                        class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
-                      >
+                      <section class="flex flex-col py-3">
                         <div class="flex items-start justify-between gap-3">
                           <div class="min-w-0">
                             <div class="flex flex-wrap items-center gap-2">
@@ -683,11 +647,9 @@
               </p>
             </div>
           {:else}
-            <div class="space-y-3">
+            <div class="divide-y divide-[var(--color-border)]">
               {#each mcpServersStore.registryResults as result (result.id)}
-                <section
-                  class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
-                >
+                <section class="py-4 first:pt-0">
                   <div class="flex flex-wrap items-start justify-between gap-3">
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
@@ -797,9 +759,7 @@
         </section>
       {:else if view === 'form'}
         <!-- ─── Add / Edit form view ──────────────────────────────────── -->
-        <section
-          class="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5"
-        >
+        <section class="max-w-3xl space-y-4">
           <div class="flex items-start justify-between gap-3">
             <div>
               <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -808,7 +768,7 @@
               <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
                 {editingName
                   ? 'Re-enter configuration fields. Existing env values are masked. Type a new value to replace them.'
-                  : 'Configure a stdio or SSE Model Context Protocol server.'}
+                  : 'Run a local process (stdio) or connect to a remote endpoint (SSE).'}
               </p>
             </div>
             <button
@@ -941,21 +901,14 @@
                   <Plus size={11} /> Add variable
                 </button>
               </div>
-              <p class="mb-2 mt-1 text-[10px] text-[var(--color-text-muted)]">
-                Values are stored securely and never displayed. Existing keys show a masked
-                placeholder. Type a new value to replace.
+              <p class="mb-2 mt-1 text-xs text-[var(--color-text-muted)]">
+                Stored securely. Existing values are masked; enter a new value to replace one.
               </p>
               {#if envLoading}
                 <div class="flex items-center gap-2 py-3 text-xs text-[var(--color-text-muted)]">
                   <LoaderCircle size={14} class="animate-spin" /> Loading env keys…
                 </div>
-              {:else if envRows.length === 0}
-                <div
-                  class="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-4 text-center text-[10px] text-[var(--color-text-muted)]"
-                >
-                  No environment variables configured.
-                </div>
-              {:else}
+              {:else if envRows.length > 0}
                 <div class="space-y-2">
                   {#each envRows as row, index (index)}
                     <div class="flex items-center gap-2">

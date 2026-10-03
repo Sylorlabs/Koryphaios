@@ -4,7 +4,7 @@
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
   import Check from 'lucide-svelte/icons/check';
   import X from 'lucide-svelte/icons/x';
-  import Clock from 'lucide-svelte/icons/clock';
+  import { requestExpandAnchor } from '$lib/utils/expand-anchor';
   import type { AgentMessage, AgentMessageStatus } from '@koryphaios/shared';
   import {
     agentMessagesFor,
@@ -18,6 +18,7 @@
 
   let expanded = $state(false);
   let deciding = $state('');
+  const messagesId = $props.id();
 
   const activeSessionId = $derived(sessionStore.activeSessionId ?? '');
   const messages = $derived(activeSessionId ? agentMessagesFor(activeSessionId) : []);
@@ -88,13 +89,18 @@
 </script>
 
 <div
-  class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
+  class="agent-messages border-y border-[var(--color-border)]"
   data-testid="agent-messages-panel"
 >
   <button
     type="button"
-    class="flex w-full items-center gap-2 px-4 py-3 text-left"
-    onclick={() => (expanded = !expanded)}
+    class="flex w-full flex-wrap items-center gap-2 py-3 text-left"
+    aria-expanded={expanded}
+    aria-controls={expanded ? messagesId : undefined}
+    onclick={(event) => {
+      requestExpandAnchor(event.currentTarget);
+      expanded = !expanded;
+    }}
   >
     {#if expanded}
       <ChevronDown size={16} class="text-[var(--color-text-muted)]" />
@@ -105,7 +111,8 @@
     <span class="text-sm font-semibold text-[var(--color-text-primary)]">Agent messages</span>
     {#if unread > 0}
       <span
-        class="rounded-full bg-[var(--color-accent)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-surface-1)]"
+        class="text-xs font-medium text-[var(--color-accent)]"
+        aria-label={`${unread} unread`}
         data-testid="agent-messages-unread"
       >
         {unread}
@@ -113,7 +120,7 @@
     {/if}
     {#if hasPending}
       <span
-        class="rounded-full border border-[var(--color-warning)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]"
+        class="text-xs font-medium text-[var(--color-warning)]"
       >
         approval needed
       </span>
@@ -122,23 +129,24 @@
   </button>
 
   {#if expanded}
-    <div class="space-y-2 px-4 pb-4">
+    <!-- The bounded message history needs a keyboard scroll target. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div id={messagesId} class="message-list max-h-80 overflow-y-auto pb-2" role="region" aria-label="Agent messages" tabindex="0">
       {#if messages.length === 0}
         <p class="py-2 text-xs text-[var(--color-text-muted)]">
-          No inter-agent messages yet. Agents coordinate here when they message managers of other
-          projects or each other within this project.
+          No messages yet.
         </p>
       {:else}
         {#each messages as message (message.id)}
           <div
-            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+            class="border-t border-[var(--color-border)] py-3"
             data-testid="agent-message-entry"
           >
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-semibold text-[var(--color-text-primary)]">
                 {summaryLine(message)}
               </span>
-              <span class="text-[10px] {statusStyles[message.status]}">
+              <span class="text-xs {statusStyles[message.status]}">
                 {statusLabel(message)}
               </span>
             </div>
@@ -148,12 +156,12 @@
                 {relativeTime(message.createdAt)}
               </span>
             </p>
-            <p class="mt-1 line-clamp-4 whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">
+            <p class="mt-1 whitespace-pre-wrap break-words text-sm text-[var(--color-text-secondary)]">
               {message.body}
             </p>
             {#if message.reply}
               <p
-                class="mt-2 rounded-lg bg-[var(--color-surface-3)] p-2 text-xs text-[var(--color-text-primary)]"
+                class="mt-2 border-l border-[var(--color-border)] pl-3 whitespace-pre-wrap break-words text-sm text-[var(--color-text-primary)]"
               >
                 Reply: {message.reply}
               </p>
@@ -163,7 +171,7 @@
                 <button
                   type="button"
                   disabled={deciding === message.id}
-                  class="flex items-center gap-1 rounded-lg border border-[var(--color-success)] px-2 py-1 text-[11px] font-semibold text-[var(--color-success)] disabled:opacity-50"
+                  class="flex min-h-7 items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[var(--color-success)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
                   onclick={() => decide(message.id, true)}
                 >
                   <Check size={12} /> Approve
@@ -171,12 +179,11 @@
                 <button
                   type="button"
                   disabled={deciding === message.id}
-                  class="flex items-center gap-1 rounded-lg border border-[var(--color-error)] px-2 py-1 text-[11px] font-semibold text-[var(--color-error)] disabled:opacity-50"
+                  class="flex min-h-7 items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[var(--color-error)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
                   onclick={() => decide(message.id, false)}
                 >
                   <X size={12} /> Decline
                 </button>
-                <Clock size={12} class="ml-auto self-center text-[var(--color-text-muted)]" />
               </div>
             {/if}
           </div>
@@ -185,3 +192,16 @@
     </div>
   {/if}
 </div>
+
+<style>
+  .message-list {
+    scrollbar-width: thin;
+    overflow-wrap: anywhere;
+  }
+
+  .agent-messages button:focus-visible,
+  .message-list:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+  }
+</style>

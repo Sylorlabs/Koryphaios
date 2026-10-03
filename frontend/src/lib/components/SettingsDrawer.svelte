@@ -1364,10 +1364,6 @@
         >
           Settings
         </h2>
-        <span class="hidden h-4 w-px bg-[var(--color-border)] sm:block" aria-hidden="true"></span>
-        <p class="hidden truncate text-xs text-[var(--color-text-muted)] sm:block">
-          Durable preferences and product capability status
-        </p>
       </div>
       <button
         type="button"
@@ -1418,7 +1414,7 @@
             {#if groupEntries.length}
               <div class="mb-2">
                 <div
-                  class="hidden px-2.5 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)] sm:block"
+                  class="hidden px-2.5 pb-1 pt-3 text-xs font-medium text-[var(--color-text-muted)] sm:block"
                 >
                   {group}
                 </div>
@@ -1499,7 +1495,7 @@
         <!-- Providers Tab -->
         <div
           class={activeTab === 'providers'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 space-y-6'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4 sm:px-6 space-y-4'
             : 'hidden'}
         >
           <div class="flex items-center gap-2">
@@ -1511,7 +1507,8 @@
               />
               <input
                 type="text"
-                placeholder="Search providers..."
+                aria-label="Search providers"
+                placeholder="Search providers…"
                 bind:value={providerSearchQuery}
                 class="input w-full py-2 text-sm"
                 style="padding-left: 2.75rem;"
@@ -1547,9 +1544,7 @@
 
           <!-- Detected on your system — presence is not an authentication verdict. -->
           {#if showDetectedCliSummary}
-            <div
-              class="rounded-xl border border-[var(--color-border)] p-4 bg-[var(--color-surface-1)]"
-            >
+            <div class="border-y border-[var(--color-border)] py-3">
               <div class="flex items-center justify-between mb-3">
                 <span class="text-sm font-semibold text-[var(--color-text-primary)]"
                   >Detected on your system</span
@@ -1654,7 +1649,7 @@
             <button
               type="button"
               onclick={() => (showAddCustom = true)}
-              class="group w-full rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-1)] p-4 text-left transition-colors duration-150 hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
+              class="group flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/50"
             >
               <div class="flex items-center gap-2">
                 <span
@@ -1673,9 +1668,7 @@
               >
             </button>
           {:else}
-            <section
-              class="rounded-xl border border-dashed border-[var(--color-accent)]/60 bg-[var(--color-surface-1)] p-4"
-            >
+            <section class="border-y border-[var(--color-border)] py-4">
               <button
                 type="button"
                 onclick={() => {
@@ -1697,19 +1690,13 @@
               </button>
               <div class="mt-4 space-y-3 border-t border-[var(--color-border)] pt-4">
                 <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
-                  Bring your own endpoint. Works with any OpenAI compatible API (vLLM, LiteLLM, LM
-                  Studio, self hosted gateways, OpenRouter style services), plus Anthropic and
-                  Gemini compatible servers. Koryphaios detects the wire format automatically from
-                  the endpoint, repairs common pasted endpoint paths, then checks
-                  <code>/models</code> before anything is saved. Catalog access does not claim that inference,
-                  entitlement, or quota works; the first real response establishes that. If discovery
-                  is unsupported, you can explicitly save with manual model IDs.
+                  Connect an OpenAI-, Anthropic-, or Gemini-compatible endpoint. Koryphaios detects
+                  the format and checks <code>/models</code> before saving. Catalog access does not verify
+                  inference, entitlement, or quota; those are checked on first use. If discovery is unsupported,
+                  you can save with manual model IDs.
                 </p>
                 <div class="space-y-1">
-                  <label
-                    class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                    for="custom-label">Display name</label
-                  >
+                  <label class="settings-field-label" for="custom-label">Display name</label>
                   <input
                     id="custom-label"
                     type="text"
@@ -1719,10 +1706,7 @@
                   />
                 </div>
                 <div class="space-y-1">
-                  <label
-                    class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                    for="custom-url">Base URL</label
-                  >
+                  <label class="settings-field-label" for="custom-url">Base URL</label>
                   <input
                     id="custom-url"
                     type="text"
@@ -1732,9 +1716,7 @@
                   />
                 </div>
                 <div class="space-y-1">
-                  <label
-                    class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                    for="custom-key"
+                  <label class="settings-field-label" for="custom-key"
                     >API key <span class="opacity-60 normal-case"
                       >(optional. Leave blank if not required)</span
                     ></label
@@ -1762,9 +1744,7 @@
                   </div>
                 </div>
                 <div class="space-y-1">
-                  <label
-                    class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                    for="custom-models"
+                  <label class="settings-field-label" for="custom-models"
                     >Models <span class="opacity-60 normal-case">(optional, comma-separated)</span
                     ></label
                   >
@@ -1831,9 +1811,7 @@
                           ]}
                           onchange={(value) => (customForm.adapter = value)}
                         />
-                        <label
-                          class="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-medium"
-                          for="custom-headers"
+                        <label class="settings-field-label" for="custom-headers"
                           >Custom headers <span class="opacity-60 normal-case">(optional)</span
                           ></label
                         >
@@ -1948,7 +1926,7 @@
             </div>
           {:else}
             <div
-              class="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              class="divide-y divide-[var(--color-border)] border-y border-[var(--color-border)]"
             >
               {#each filteredProviderList as prov (prov.key)}
                 {@const status = getProviderStatus(prov.key)}
@@ -1956,19 +1934,16 @@
                 {@const installedCli = installedCliFor(prov.key)}
                 {@const deployment = deploymentDescription(status?.deployment, prov.key)}
                 {@const badge = deploymentLabel(status?.deployment, prov.key)}
-                <div
-                  class="flex h-full flex-col rounded-xl border border-[var(--color-border)] p-4 transition-all {expandedProvider ===
-                  prov.key
-                    ? 'bg-[var(--color-surface-2)] ring-1 ring-[var(--color-accent)]/30'
-                    : 'bg-[var(--color-surface-1)] hover:bg-[var(--color-surface-2)] shadow-sm'}"
-                >
+                <div class="flex flex-col">
                   <button
                     type="button"
                     onclick={() =>
                       (expandedProvider = expandedProvider === prov.key ? null : prov.key)}
-                    class="flex min-h-[4.75rem] w-full items-center justify-between gap-3 text-left group"
+                    class="group flex min-h-12 w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                    aria-expanded={expandedProvider === prov.key}
+                    aria-controls={`provider-details-${prov.key}`}
                   >
-                    <div class="flex items-center gap-3">
+                    <div class="flex min-w-0 items-center gap-3">
                       <div
                         class="w-8 h-8 rounded-lg bg-[var(--color-surface-3)] flex items-center justify-center p-1.5 shrink-0 overflow-hidden"
                       >
@@ -1980,7 +1955,7 @@
                           title={status?.label ?? prov.label}>{status?.label ?? prov.label}</span
                         >
                         <p
-                          class="line-clamp-2 text-[10px] leading-4 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
+                          class="line-clamp-2 text-xs leading-5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)]"
                         >
                           {#if status?.configurationBlocked}
                             Unavailable in this build
@@ -2012,10 +1987,10 @@
                         </p>
                       </div>
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex shrink-0 items-center gap-2">
                       {#if status?.connectionState === 'verified'}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
                           title="Connected to Koryphaios and working"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
@@ -2023,7 +1998,7 @@
                         </div>
                       {:else if status?.connectionState === 'failed'}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-error-bg)] text-[var(--color-error)] text-xs font-medium"
                           title={status.verificationError ?? 'The last connection attempt failed'}
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-error)]"></span>
@@ -2031,7 +2006,7 @@
                         </div>
                       {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog' && prov.key.startsWith('custom:')}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-success-bg)] text-[var(--color-success)] text-xs font-medium"
                           title="Endpoint added and model catalog confirmed. Inference verifies on first use"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-success)]"></span>
@@ -2039,7 +2014,7 @@
                         </div>
                       {:else if status?.connectionState === 'detected' && status?.verificationScope === 'catalog'}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-info-bg)] text-[var(--color-info)] text-xs font-medium"
                           title="Model catalog access succeeded. Inference is checked on first use"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-info)]"></span>
@@ -2047,7 +2022,7 @@
                         </div>
                       {:else if installedCli}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-warning-bg)] text-[var(--color-warning)] text-xs font-medium"
                           title="CLI found on this system but not connected"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-warning)]"></span>
@@ -2055,7 +2030,7 @@
                         </div>
                       {:else if status?.credentialDetected ?? status?.authenticated}
                         <div
-                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-[9px] font-bold"
+                          class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] text-xs font-medium"
                           title="Configuration is saved but has not been verified"
                         >
                           <span class="w-1 h-1 rounded-full bg-[var(--color-text-muted)]"></span>
@@ -2063,15 +2038,25 @@
                         </div>
                       {:else}
                         <div
-                          class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50 ring-4 ring-[var(--color-border)]"
+                          class="w-2 h-2 rounded-full bg-[var(--color-text-muted)] opacity-50"
                         ></div>
                       {/if}
+                      <ChevronDown
+                        size={15}
+                        class="text-[var(--color-text-muted)] transition-transform {expandedProvider ===
+                        prov.key
+                          ? 'rotate-180'
+                          : ''}"
+                      />
                     </div>
                   </button>
                   {#if expandedProvider === prov.key}
                     {@const caps = getProviderCaps(prov.key)}
                     {@const configurationBlocked = status?.configurationBlocked === true}
-                    <div class="mt-4 space-y-3 pt-4 border-t border-[var(--color-border)]">
+                    <div
+                      id={`provider-details-${prov.key}`}
+                      class="space-y-3 px-2 pb-4 pt-2 sm:pl-13"
+                    >
                       {#if status?.description}
                         <p class="text-[10px] text-[var(--color-text-muted)] leading-relaxed">
                           {status.description}
@@ -2079,7 +2064,7 @@
                       {/if}
                       {#if badge}
                         <div
-                          class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide ${
+                          class={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
                             status?.deployment === 'cloud'
                               ? 'bg-[var(--color-info-bg)] text-[var(--color-info)]'
                               : status?.deployment === 'hybrid'
@@ -2095,7 +2080,7 @@
                       {#if prov.key.startsWith('custom:')}
                         {@const currentCustomIcon = providersStore.getCustomProviderIcon(prov.key)}
                         <div
-                          class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
+                          class="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3"
                         >
                           <div class="flex min-w-0 items-center gap-2.5">
                             <div
@@ -2178,9 +2163,7 @@
                             >Disconnect</button
                           >
                         </div>
-                        <div
-                          class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 px-3 py-2 text-[10px] leading-relaxed text-[var(--color-text-muted)]"
-                        >
+                        <div class="text-xs leading-relaxed text-[var(--color-text-muted)]">
                           {#if status?.connectionState === 'verified'}
                             Connected to Koryphaios and working{status.verificationScope
                               ? ` · ${status.verificationScope} scope`
@@ -2278,9 +2261,7 @@
                           {/if}
                           {#if caps.supportsApiKey}
                             <div class="flex items-center justify-between gap-3">
-                              <label
-                                class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-                                for={`provider-key-${prov.key}`}
+                              <label class="settings-field-label" for={`provider-key-${prov.key}`}
                                 >{isBedrock(prov.key)
                                   ? 'AWS Access Key ID'
                                   : isNotion(prov.key)
@@ -2338,9 +2319,7 @@
                             </div>
                           {/if}
                           {#if showTokenInput(prov.key, caps)}
-                            <label
-                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-                              for={`provider-token-${prov.key}`}
+                            <label class="settings-field-label" for={`provider-token-${prov.key}`}
                               >{isBedrock(prov.key) ? 'Secret Access Key' : 'Auth Token'}</label
                             >
                             <div class="relative">
@@ -2371,7 +2350,7 @@
                           {/if}
                           {#if isBedrock(prov.key)}
                             <label
-                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
+                              class="settings-field-label"
                               for={`provider-aws-region-${prov.key}`}>AWS Region</label
                             >
                             <input
@@ -2384,7 +2363,7 @@
                                 e.key === 'Enter' && handleConnectProvider(prov.key)}
                             />
                             <label
-                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
+                              class="settings-field-label"
                               for={`provider-aws-session-${prov.key}`}
                               >Session Token
                               <span class="normal-case opacity-70"
@@ -2417,9 +2396,8 @@
                             </div>
                           {/if}
                           {#if caps.requiresBaseUrl}
-                            <label
-                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-                              for={`provider-url-${prov.key}`}>Endpoint URL</label
+                            <label class="settings-field-label" for={`provider-url-${prov.key}`}
+                              >Endpoint URL</label
                             >
                             <input
                               id={`provider-url-${prov.key}`}
@@ -2433,7 +2411,7 @@
                           {/if}
                           {#if caps.requiresDeployment}
                             <label
-                              class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
+                              class="settings-field-label"
                               for={`provider-deployment-${prov.key}`}
                               >{prov.key === 'sapai' ? 'Deployment ID' : 'Deployment name'}</label
                             >
@@ -2549,8 +2527,7 @@
                           {#if usesBrowserAuth(prov.key) && caps.supportsApiKey}
                             <div class="flex items-center gap-3 py-1">
                               <div class="flex-1 border-t border-[var(--color-border)]"></div>
-                              <span
-                                class="text-[9px] text-[var(--color-text-muted)] uppercase tracking-wider font-medium"
+                              <span class="text-xs font-medium text-[var(--color-text-secondary)]"
                                 >or use API key</span
                               >
                               <div class="flex-1 border-t border-[var(--color-border)]"></div>
@@ -2601,15 +2578,11 @@
                         </div>
                       {/if}
                       {#if !configurationBlocked && getProviderAccounts(prov.key).length > 1}
-                        <div
-                          class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
-                        >
+                        <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
                           <div class="flex items-center justify-between gap-3">
                             <div>
-                              <p
-                                class="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-muted)]"
-                              >
-                                Saved Accounts
+                              <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                                Saved accounts
                               </p>
                               <p class="text-[11px] text-[var(--color-text-muted)]">
                                 Keep multiple keys or account logins per provider and switch between
@@ -2636,7 +2609,7 @@
                             <div class="space-y-2">
                               {#each getProviderAccounts(prov.key) as account (account.id)}
                                 <div
-                                  class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] p-2.5"
+                                  class="border-b border-[var(--color-border)] py-2.5 last:border-b-0"
                                 >
                                   {#if account.source === 'cli-autodetect' && hasMultipleCliProfiles(prov.key)}
                                     <SettingsSwitch
@@ -2733,8 +2706,8 @@
                           <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
                             {#if usesLocalCliConnection(prov.key)}
                               <p class="text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                                This provider's accounts are managed by its CLI. Sign in there,
-                                then use the check-login button above.
+                                This provider's accounts are managed by its CLI. Sign in there, then
+                                use the check-login button above.
                               </p>
                             {:else}
                               <input
@@ -2843,15 +2816,11 @@
                       {/if}
                       {#if hasMultipleCliProfiles(prov.key)}
                         {@const orderedAccounts = getOrderedFallbackAccounts(prov.key)}
-                        <div
-                          class="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/70 p-3"
-                        >
+                        <div class="space-y-3 border-t border-[var(--color-border)] pt-3">
                           <div class="flex items-center justify-between gap-3">
                             <div>
-                              <p
-                                class="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--color-text-muted)]"
-                              >
-                                Fallback Order
+                              <p class="text-xs font-medium text-[var(--color-text-secondary)]">
+                                Fallback order
                               </p>
                               <p class="text-[11px] text-[var(--color-text-muted)]">
                                 Choose the CLI profiles Koryphaios may use, then drag to set their
@@ -2920,8 +2889,7 @@
                                       .join(' · ')}
                                   </div>
                                 </div>
-                                <span
-                                  class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] shrink-0"
+                                <span class="text-xs text-[var(--color-text-muted)] shrink-0"
                                   >{i === 0
                                     ? '1st'
                                     : i === 1
@@ -3072,9 +3040,7 @@
             >
               <div class="flex items-start justify-between gap-4">
                 <div>
-                  <h4
-                    class="text-xs font-bold uppercase tracking-widest text-[var(--color-text-muted)]"
-                  >
+                  <h4 class="text-xs font-medium text-[var(--color-text-secondary)]">
                     Image &amp; voice API usage
                   </h4>
                   <p class="mt-1 text-[10px] text-[var(--color-text-muted)]">
@@ -3202,9 +3168,7 @@
               ></div>
               <div class="relative mb-3 flex items-start justify-between gap-4">
                 <div>
-                  <div
-                    class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold"
-                  >
+                  <div class="text-xs font-medium text-[var(--color-text-secondary)]">
                     API Spend
                   </div>
                   <div class="mt-1 text-[9px] text-[var(--color-text-muted)]">
@@ -3242,9 +3206,7 @@
             <div
               class="p-6 rounded-2xl bg-[var(--color-surface-2)] border border-[var(--color-border)]"
             >
-              <div
-                class="text-[10px] text-[var(--color-text-muted)] uppercase tracking-widest font-bold mb-2"
-              >
+              <div class="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                 Provider Balance
               </div>
               <div
@@ -3313,13 +3275,13 @@
                         </div>
                         {#if cli.planType}
                           <span
-                            class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"
+                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-surface-3)] text-[var(--color-text-secondary)]"
                             >{cli.planType}</span
                           >
                         {/if}
                         {#if cli.apiProviderName}
                           <span
-                            class="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-bold bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                            class="px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
                             title="Raw inference API provider backing this CLI subscription"
                             >API: {cli.apiProviderName}</span
                           >
@@ -3473,9 +3435,7 @@
                           <div
                             class="p-2.5 rounded-xl bg-[var(--color-surface-1)] border border-[var(--color-border)]"
                           >
-                            <div
-                              class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold"
-                            >
+                            <div class="text-xs font-medium text-[var(--color-text-secondary)]">
                               {w.period}
                             </div>
                             <div
@@ -3607,7 +3567,7 @@
                                 <div
                                   class="mt-0.5 flex items-center gap-1 text-[9px] text-[var(--color-text-muted)]"
                                 >
-                                  <span class="uppercase tracking-wider font-bold">API equiv</span>
+                                  <span class="font-medium">API equivalent</span>
                                   <span
                                     class="font-mono text-[var(--color-accent)]/80 truncate"
                                     title={m.apiEquivalent ?? m.apiProvider ?? ''}
@@ -3692,9 +3652,7 @@
 
                       {#if cli.modelCatalog?.length}
                         <div class="space-y-1.5">
-                          <div
-                            class="text-[9px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
-                          >
+                          <div class="text-xs font-medium text-[var(--color-text-secondary)]">
                             Installed model context{showSubscriptionApiEquivalent
                               ? ' and OpenRouter rates'
                               : ''}
@@ -3820,9 +3778,7 @@
                         ? `$${bal.availableUsd.toFixed(2)}`
                         : 'Not available'}
                     </div>
-                    <div
-                      class="text-[9px] uppercase tracking-wider text-[var(--color-text-muted)] font-bold mt-1"
-                    >
+                    <div class="text-xs font-medium text-[var(--color-text-muted)] mt-1">
                       {getProviderDisplayLabel(bal.provider)}
                     </div>
                   </div>
@@ -4187,9 +4143,7 @@
                   {:else}
                     <!-- Relay not configured — show legacy join code -->
                     <div class="text-center">
-                      <p
-                        class="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]"
-                      >
+                      <p class="mb-2 block text-xs font-medium text-[var(--color-text-secondary)]">
                         Join Code (local network only)
                       </p>
                       <code
@@ -4227,8 +4181,7 @@
                           <div class="flex items-start justify-between gap-4">
                             <div class="flex-1 min-w-0">
                               <div class="flex items-center gap-2 mb-1">
-                                <span
-                                  class="text-[10px] font-bold uppercase text-[var(--color-warning)]"
+                                <span class="text-xs font-medium text-[var(--color-warning)]"
                                   >{p.name}</span
                                 >
                                 <span class="text-[10px] text-[var(--color-text-muted)]"
@@ -4475,12 +4428,7 @@
 
           <!-- Enable / disable -->
           <div class="space-y-5">
-            <div
-              class="text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style="color: var(--color-text-muted);"
-            >
-              General
-            </div>
+            <div class="settings-field-label">General</div>
 
             <SettingsSwitch
               checked={notesStore.settings.enabled}
@@ -4576,12 +4524,7 @@
               <div>
                 <div class="flex items-center gap-2">
                   <Shield size={14} style="color: var(--color-accent);" />
-                  <div
-                    class="text-[10px] font-semibold uppercase tracking-[0.14em]"
-                    style="color: var(--color-text-muted);"
-                  >
-                    Agent Permissions
-                  </div>
+                  <div class="settings-field-label">Agent permissions</div>
                 </div>
                 <p class="text-xs mt-1.5" style="color: var(--color-text-muted);">
                   Control what agents can do in the note network. Hidden tools are removed entirely
@@ -4706,12 +4649,7 @@
 
           <!-- Graph physics -->
           <div class="space-y-4">
-            <div
-              class="text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style="color: var(--color-text-muted);"
-            >
-              Graph Physics
-            </div>
+            <div class="settings-field-label">Graph physics</div>
 
             <KorySlider
               id="notes-gravity"
@@ -4761,12 +4699,7 @@
 
           <!-- Actions -->
           <div class="space-y-3">
-            <div
-              class="text-[10px] font-semibold uppercase tracking-[0.14em]"
-              style="color: var(--color-text-muted);"
-            >
-              Actions
-            </div>
+            <div class="settings-field-label">Actions</div>
 
             <button
               type="button"
@@ -4998,10 +4931,7 @@
       </div>
       <div class="mt-4 space-y-3">
         <div>
-          <label
-            class="text-[10px] text-[var(--color-text-muted)] font-medium uppercase tracking-wider"
-            for="manage-account-label">Profile Name</label
-          >
+          <label class="settings-field-label" for="manage-account-label">Profile name</label>
           <input
             id="manage-account-label"
             type="text"
@@ -5102,18 +5032,6 @@
     color: var(--color-accent);
   }
 
-  /* Glassmorphism input styling override */
-  :global(.input) {
-    background: var(--color-surface-0) !important;
-    border: 1px solid var(--color-border) !important;
-    border-radius: 0.75rem !important;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
-  }
-  :global(.input:focus) {
-    border-color: var(--color-accent) !important;
-    box-shadow: 0 0 0 4px var(--color-accent-transparent) !important;
-    background: var(--color-surface-1) !important;
-  }
   .secret-visibility {
     display: inline-flex;
     height: 1.9rem;

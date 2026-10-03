@@ -24,6 +24,7 @@
   // svelte-ignore state_referenced_locally
   let expanded = $state(defaultExpanded);
   let panelEl = $state<HTMLDivElement>();
+  const panelId = $props.id();
 
   // Monotonic guard: even if a stale prop update arrives, never display a
   // smaller number than the user has already seen.
@@ -121,9 +122,11 @@
 
 <!-- Collapsed: reasoning fully hidden — just the stopwatch line -->
 <button
+  type="button"
   class="thinking-row group"
   onclick={toggle}
   aria-expanded={expanded}
+  aria-controls={expanded ? panelId : undefined}
   title={expanded ? 'Hide reasoning' : 'Show reasoning'}
 >
   {#if isLive}
@@ -137,12 +140,18 @@
 
 <!-- Expanded: full reasoning (streams live while thinking) -->
 {#if expanded}
+  <!-- Scrollable reasoning must be reachable with the keyboard. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
+    id={panelId}
     class="thinking-expanded"
+    role="region"
+    aria-label="Reasoning"
+    tabindex="0"
     bind:this={panelEl}
     transition:slide={{ duration: 180 }}
   >
-    <p class="thinking-full-text">{text || 'This provider keeps its raw reasoning private.'}</p>
+    <p class="thinking-full-text">{text || 'Reasoning not provided.'}</p>
     {#if isLive}
       <span class="live-caret" aria-hidden="true"></span>
     {/if}
@@ -157,18 +166,18 @@
     cursor: pointer;
     border: none;
     background: none;
+    min-height: 28px;
     padding: 2px 0;
     text-align: left;
-    opacity: 0.75;
-    transition: opacity var(--duration-normal) var(--ease-in-out);
   }
 
-  .thinking-row:hover {
-    opacity: 1;
+  .thinking-row:focus-visible,
+  .thinking-expanded:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
   }
 
   .label {
-    font-style: italic;
     font-size: var(--text-sm);
     color: var(--color-text-muted);
   }
@@ -213,9 +222,8 @@
 
   .expand-cue {
     display: inline-block;
-    font-size: 9px;
+    font-size: var(--text-sm);
     color: var(--color-text-muted);
-    opacity: 0.4;
     transition: transform var(--duration-normal) var(--ease-in-out);
     flex-shrink: 0;
   }
@@ -226,12 +234,14 @@
 
   .thinking-expanded {
     position: relative;
-    padding: var(--space-md) var(--space-lg);
-    border-left: 2px solid var(--color-border);
+    padding: var(--space-sm) 0 var(--space-sm) var(--space-md);
+    border-left: 1px solid var(--color-border);
     margin: var(--space-sm) 0;
-    max-width: 90%;
+    max-width: 100%;
     max-height: 18rem;
     overflow-y: auto;
+    overflow-wrap: anywhere;
+    scrollbar-width: thin;
   }
 
   .thinking-full-text {

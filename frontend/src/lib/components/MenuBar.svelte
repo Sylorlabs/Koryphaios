@@ -361,7 +361,7 @@
       </div>
     </div>
 
-    <div class="flex-1 flex items-center justify-center h-full" data-tauri-drag-region>
+    <div class="hidden lg:flex flex-1 items-center justify-center h-full" data-tauri-drag-region>
       <!-- Fixed to the viewport center so the project name stays in the top
            middle regardless of sidebar/panel state. -->
       {#if projectStore.currentPath}
