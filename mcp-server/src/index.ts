@@ -67,7 +67,7 @@ export function createPassiveServer(): McpServer {
   return new McpServer(
     {
       name: 'koryphaios',
-      version: '0.2.0',
+      version: '0.5.0',
     },
     {
       capabilities: {
@@ -75,7 +75,7 @@ export function createPassiveServer(): McpServer {
         prompts: {},
         resources: {},
       },
-    },
+    }
   );
 }
 
@@ -166,7 +166,9 @@ export async function main(): Promise<void> {
     // Start the server
     await server.start();
   } catch (error) {
-    process.stderr.write(`Failed to start Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `Failed to start Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`
+    );
     process.exit(1);
   }
 }
@@ -177,7 +179,9 @@ export async function main(): Promise<void> {
 const entrypoint = process.argv[1] ? resolve(process.argv[1]) : '';
 if (entrypoint === fileURLToPath(import.meta.url)) {
   main().catch(error => {
-    process.stderr.write(`Fatal error in Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write(
+      `Fatal error in Koryphaios MCP server: ${error instanceof Error ? error.message : String(error)}\n`
+    );
     process.exit(1);
   });
 }

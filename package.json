@@ -1,6 +1,6 @@
 {
   "name": "koryphaios",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "devDependencies": {
     "@playwright/test": "^1.62.1",
     "playwright": "^1.62.1",

@@ -12,7 +12,7 @@ const HEALTHY_BACKEND: LauncherBackendHealth = {
   data: {
     id: 'koryphaios',
     pid: 1234,
-    version: '0.2.0',
+    version: '0.5.0',
     compat: { serverStartedAt: 1 },
   },
 };

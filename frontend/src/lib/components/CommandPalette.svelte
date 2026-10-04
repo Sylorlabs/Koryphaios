@@ -21,7 +21,7 @@
   import { getModKeyName } from '$lib/utils/platform';
   import { notesStore } from '$lib/stores/notes.svelte';
 
-  const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.2.0';
+  const frontendVersion = __KORYPHAIOS_FRONTEND_VERSION__ ?? '0.5.0';
 
   let { 
     open = $bindable(false), 

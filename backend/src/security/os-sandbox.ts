@@ -32,6 +32,10 @@ import { serverLog } from '../logger';
 export interface OsSandboxOptions {
   /** Host roots the child is allowed to read/write. */
   allowedRoots: string[];
+  /** Fixed canonical host-owned write grant. When present it supersedes all
+   * allowedRoots, cannot be broadened by cwd, and must not have been replaced
+   * by a symlink since authorization. Outside reads are not this boundary. */
+  requiredWorkspaceRoot?: string;
   /** Working directory for the child. Must be inside allowedRoots. */
   cwd: string;
   /** When true, block network syscalls (Linux) / network in sandbox-exec. */
@@ -40,6 +44,10 @@ export interface OsSandboxOptions {
   blockSubprocesses: boolean;
   /** Extra env to merge into the child (PATH is always preserved). */
   env?: Record<string, string>;
+  /** Host-owned subprocess transport; ignored by default for shell tools. */
+  stdin?: 'ignore' | 'pipe';
+  /** Host-owned process group for bounded Git/helper teardown. */
+  detached?: boolean;
 }
 
 export interface OsSandboxAvailability {
@@ -105,7 +113,7 @@ function normalizeRoots(roots: string[]): string[] {
   const out = new Set<string>();
   for (const r of roots) {
     if (!r) continue;
-    const canonical = safeRealpath(r);
+    const canonical = realpathSync(r);
     out.add(canonical);
   }
   return [...out];
@@ -137,21 +145,26 @@ export function spawnSandboxed(
     );
   }
 
-  // A private scratch root provides normal TMPDIR semantics without granting
-  // the child write access to the host-wide temporary directory.
-  const scratch = mkdtempSync(join(tmpdir(), 'kory-sandbox-runtime-'));
-  const roots = normalizeRoots([...opts.allowedRoots, scratch]);
-  const cwd = safeRealpath(opts.cwd);
+  const grant = opts.requiredWorkspaceRoot;
+  if (grant && realpathSync(grant) !== grant) {
+    throw new Error('Mandatory workspace root changed after authorization');
+  }
+  const roots = normalizeRoots(grant ? [grant] : opts.allowedRoots);
+  const cwd = realpathSync(opts.cwd);
   const cwdInRoots = roots.some((r) => {
     const rel = relative(r, cwd);
     return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
   });
   if (!cwdInRoots) {
-    rmSync(scratch, { recursive: true, force: true });
     throw new Error(
       `spawnSandboxed: cwd ${cwd} is not inside any allowed root. ` + `Roots: ${roots.join(', ')}`,
     );
   }
+
+  // A private scratch root provides TMPDIR without granting host /tmp writes.
+  // It is never eligible as a caller-selected cwd or a broader workspace grant.
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'kory-sandbox-runtime-')));
+  roots.push(scratch);
 
   // Sandboxed tools never inherit provider keys, database URLs, or backend
   // credentials. Callers can add only explicitly scoped values through env.
@@ -292,6 +305,31 @@ function spawnBwrap(
     args.push('--ro-bind', '/sbin', '/sbin');
   }
 
+  // Expose only the runtime executable (not the user's home or credentials)
+  // when Bun/Node/Git is installed outside the system mounts.
+  const executable = isAbsolute(argv[0]) ? argv[0] : findOnPath(argv[0]);
+  const systemRoots = ['/usr', '/lib', '/lib64', '/bin', '/etc', '/sbin'];
+  const extraExecutable =
+    executable &&
+    !systemRoots.some((root) => executable === root || executable.startsWith(`${root}/`))
+      ? executable
+      : undefined;
+  const parents = new Set<string>();
+  for (const target of [...roots, ...(extraExecutable ? [extraExecutable] : [])]) {
+    let parent = '';
+    for (const part of target.split('/').filter(Boolean).slice(0, -1)) {
+      parent += `/${part}`;
+      if (
+        parents.has(parent) ||
+        systemRoots.some((root) => parent === root || parent.startsWith(`${root}/`))
+      )
+        continue;
+      args.push('--dir', parent);
+      parents.add(parent);
+    }
+  }
+  if (extraExecutable) args.push('--ro-bind', extraExecutable, extraExecutable);
+
   // Bind-mount each allowed root read-write.
   for (const root of roots) {
     args.push('--bind', root, root);
@@ -330,7 +368,8 @@ function spawnBwrap(
   serverLog.debug({ bwrap, roots, blockNetwork: opts.blockNetwork }, 'spawning bwrap sandbox');
 
   const proc = spawn(bwrap, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: opts.detached ?? false,
+    stdio: [opts.stdin ?? 'ignore', 'pipe', 'pipe'],
     shell: false,
   });
   return { proc, cleanup: () => {} };
@@ -349,7 +388,8 @@ function spawnMacSandbox(
   // roots. Reads are broad — see the note below — minus an explicit deny list of
   // credential stores.
   const allowFile = (root: string) =>
-    `(allow file-read* (subpath "${root}"))\n` + `  (allow file-write* (subpath "${root}"))\n`;
+    `(allow file-read* (subpath ${JSON.stringify(root)}))\n` +
+    `  (allow file-write* (subpath ${JSON.stringify(root)}))\n`;
   //
   // Why reads stay broad on macOS: a profile built solely from filtered
   // `(allow file-read* (subpath ...))` rules aborts the child during dynamic
@@ -374,6 +414,9 @@ function spawnMacSandbox(
     '(allow sysctl-read)',
     '(allow file-read*)',
     '(allow file-ioctl)',
+    // Git and runtimes open the null device O_RDWR. This is a sink, not a
+    // writable filesystem tree; never broaden this to /dev or host /tmp.
+    '(allow file-write-data (literal "/dev/null"))',
     // IPC primitives needed by the C runtime and system frameworks.
     '(allow ipc-posix-sem*)',
     '(allow ipc-posix-shm*)',
@@ -389,7 +432,32 @@ function spawnMacSandbox(
   for (const secretPath of macOsCredentialPaths()) {
     const canonical = safeRealpath(secretPath);
     if (existsSync(canonical)) {
-      profileLines.push(`(deny file-read* (subpath "${canonical}"))`);
+      // Durable chat checkouts may live below KORYPHAIOS_DATA_DIR. Deny the
+      // surrounding state/credentials, not the explicitly owned checkout.
+      // This exception is never applied to credential stores such as ~/.ssh.
+      const grant = opts.requiredWorkspaceRoot;
+      const grantRelative = grant ? relative(canonical, grant) : undefined;
+      const dataDir = process.env.KORYPHAIOS_DATA_DIR?.trim();
+      const containsGrant =
+        grantRelative !== undefined &&
+        grantRelative !== '' &&
+        !grantRelative.startsWith('..') &&
+        !isAbsolute(grantRelative);
+      const filter =
+        grant && dataDir === secretPath && containsGrant
+          ? `(require-all (subpath ${JSON.stringify(canonical)}) (require-not (subpath ${JSON.stringify(grant)})))`
+          : `(subpath ${JSON.stringify(canonical)})`;
+      profileLines.push(`(deny file-read* ${filter})`);
+      // Reaching an owned checkout still requires walking its ancestors: Git
+      // canonicalizes and creates every leading component of a path, so denying
+      // the whole data dir made `rev-parse --is-inside-work-tree` and
+      // `worktree add` fail closed with EPERM on directories the chat legitimately
+      // owns. Re-allow metadata only (stat/lstat/access) under the data dir.
+      // File contents stay denied, so sibling chats, the databases, and
+      // credentials remain unreadable.
+      if (filter.startsWith('(require-all')) {
+        profileLines.push(`(allow file-read-metadata (subpath ${JSON.stringify(canonical)}))`);
+      }
     }
   }
 
@@ -421,7 +489,8 @@ function spawnMacSandbox(
   );
 
   const proc = spawn('/usr/bin/sandbox-exec', macArgs, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: opts.detached ?? false,
+    stdio: [opts.stdin ?? 'ignore', 'pipe', 'pipe'],
     cwd,
     env,
     shell: false,

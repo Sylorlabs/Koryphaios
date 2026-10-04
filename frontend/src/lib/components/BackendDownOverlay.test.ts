@@ -15,7 +15,7 @@ vi.mock('$lib/stores/backend-health.svelte', () => ({
     consecutiveFailures: 275,
     lastCheckedAt: Date.now(),
     failureDetail: 'Could not reach http://127.0.0.1:3001/api/health',
-    frontendVersion: '0.2.0',
+    frontendVersion: '0.5.0',
   },
 }));
 
