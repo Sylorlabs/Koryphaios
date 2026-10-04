@@ -26,6 +26,10 @@ import {
   ShellManageTool,
   ReadFileTool,
   ViewImageTool,
+  GenerateVideoTool,
+  RememberTool,
+  RecallTool,
+  ForgetTool,
   WriteFileTool,
   EditFileTool,
   BatchEditTool,
@@ -165,7 +169,9 @@ export async function bootstrap(): Promise<AppContext> {
   const tools = await initTools(providers);
 
   // MCP Connections
-  const mcpManager = await initMCP(config, tools);
+  // Scope MCP clients — and their OAuth grants — to the same project root the
+  // settings API resolves, so a token stored via the UI is found at connect time.
+  const mcpManager = await initMCP(config, tools, PROJECT_ROOT);
 
   // Stores & Core
   const sessions = new SessionStore();
@@ -296,6 +302,7 @@ async function initEncryption() {
 import { registerGitTools, registerCheckpointTools } from './tools';
 import { CreateGoalTool, UpdateGoalTool, EditGoalChecklistTool } from './tools/goals';
 import { noteTools } from './tools/notes';
+import { createComputerUseTools } from './computer-use/tools';
 import { checklistTools } from './tools/checklists';
 import { configureAgentMail } from './kory/services/agent-mail-service';
 
@@ -303,10 +310,15 @@ import { configureAgentMail } from './kory/services/agent-mail-service';
 export async function initTools(providers: ProviderRegistry) {
   const tools = new ToolRegistry();
   const defaultTools = [
+    ...createComputerUseTools(),
     new BashTool(),
     new ShellManageTool(),
     new ReadFileTool(),
     new ViewImageTool(),
+    new GenerateVideoTool(),
+    new RememberTool(),
+    new RecallTool(),
+    new ForgetTool(),
     new WriteFileTool(),
     new EditFileTool(),
     new BatchEditTool(),

@@ -1,7 +1,7 @@
 // Persist Jules session IDs per Koryphaios session for continuity across turns.
 
 import { db, sessions } from '../db';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { serverLog } from '../logger';
 
 export interface JulesSessionMeta {
@@ -23,7 +23,10 @@ function parseMetadata(raw: string | null | undefined): SessionMetadataJson {
       ? (parsed as SessionMetadataJson)
       : {};
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Jules session store: metadata JSON parse failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Jules session store: metadata JSON parse failed',
+    );
     return {};
   }
 }
@@ -42,27 +45,27 @@ export async function setJulesSessionMeta(
   korySessionId: string,
   meta: JulesSessionMeta,
 ): Promise<void> {
-  const row = await db.query.sessions.findFirst({
-    where: eq(sessions.id, korySessionId),
-    columns: { metadata: true },
-  });
-  const current = parseMetadata(row?.metadata ?? null);
-  current.jules = meta;
+  // Apply only the provider-owned key to the current row. A read/modify/write
+  // can erase a Git workspace or settings persisted by a concurrent request.
   await db
     .update(sessions)
-    .set({ metadata: JSON.stringify(current), updatedAt: new Date() })
+    .set({
+      metadata: sql`json_set(CASE WHEN json_valid(${sessions.metadata}) THEN
+        CASE WHEN json_type(${sessions.metadata}) = 'object' THEN ${sessions.metadata} ELSE '{}' END
+        ELSE '{}' END, '$.jules', json(${JSON.stringify(meta)}))`,
+      updatedAt: new Date(),
+    })
     .where(eq(sessions.id, korySessionId));
 }
 
 export async function clearJulesSessionMeta(korySessionId: string): Promise<void> {
-  const row = await db.query.sessions.findFirst({
-    where: eq(sessions.id, korySessionId),
-    columns: { metadata: true },
-  });
-  const current = parseMetadata(row?.metadata ?? null);
-  delete current.jules;
   await db
     .update(sessions)
-    .set({ metadata: JSON.stringify(current), updatedAt: new Date() })
+    .set({
+      metadata: sql`json_remove(CASE WHEN json_valid(${sessions.metadata}) THEN
+        CASE WHEN json_type(${sessions.metadata}) = 'object' THEN ${sessions.metadata} ELSE '{}' END
+        ELSE '{}' END, '$.jules')`,
+      updatedAt: new Date(),
+    })
     .where(eq(sessions.id, korySessionId));
 }

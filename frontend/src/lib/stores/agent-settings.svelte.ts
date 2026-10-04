@@ -9,6 +9,7 @@
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
+import { defaultComputerUseSettings, type ComputerUseSettings } from '@koryphaios/shared';
 
 // ============================================================================
 // Types
@@ -40,6 +41,8 @@ export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
 };
 
 export interface AgentSettings {
+  /** Host-issued concurrency token; never persisted as authorization. */
+  computerUseRevision?: string;
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   agentExecutionMode: 'auto' | 'single' | 'multi';
   /** Default approval behavior exposed in the composer permission picker. */
@@ -69,6 +72,8 @@ export interface AgentSettings {
   approvalThresholdLines: number;
   /** Apply the configured file/line approval thresholds. Off by default. */
   autonomyLimitsEnabled: boolean;
+  /** First-party computer use has independent preset, role and app permission gates. */
+  computerUse: ComputerUseSettings;
   /** Bash execution sandbox controls. */
   sandbox: SandboxSettings;
   /** Sub-agent (worker) approval policy: 'manager' | 'user' | 'auto'. */
@@ -106,6 +111,11 @@ export interface AgentSettings {
   /** Show complete reasoning blocks expanded in the chat feed by default */
   reasoningExpandedByDefault: boolean;
   skillCollisionChoices: Record<string, 'personal' | 'project'>;
+  /**
+   * Per-turn character budget for injected skill guidance. `null` (the default)
+   * imposes no user limit — budgeting follows the model context window.
+   */
+  skillContextBudget: number | null;
   updatedAt?: number;
 }
 
@@ -392,6 +402,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   approvalThresholdFiles: 5,
   approvalThresholdLines: 100,
   autonomyLimitsEnabled: false,
+  computerUse: defaultComputerUseSettings(),
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
   subAgentApproval: 'manager',
   toolAllowlist: [],
@@ -411,6 +422,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,
   skillCollisionChoices: {},
+  skillContextBudget: null,
 };
 
 // ============================================================================
@@ -482,7 +494,10 @@ function createAgentSettingsStore() {
       const res = await apiFetch(apiUrl('/api/agent/settings'), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings),
+        body: JSON.stringify({
+          ...newSettings,
+          computerUseRevision: previousSettings.computerUseRevision,
+        }),
       });
 
       if (res.ok) {
@@ -497,6 +512,11 @@ function createAgentSettingsStore() {
           }
           return true;
         }
+      }
+      if (res.status === 409) {
+        throw new Error(
+          'Computer permissions changed or were stopped. Reload settings before saving again.',
+        );
       }
       throw new Error('The backend did not persist the agent setting');
     } catch (err) {

@@ -26,6 +26,26 @@ function artifactText(root: string, path: string): { artifact: unknown | null; t
   return { artifact, text: JSON.stringify(artifact ?? '').toLowerCase() };
 }
 
+export function hasAffirmativeLlvmVulnerabilityClaim(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .replace(
+      /\bnot\s+(?:an?\s+)?claim\s+of\s+(?:an?\s+)?(?:generic\s+)?llvm\s+vulnerabilit(?:y|ies)\b/gu,
+      '',
+    )
+    .replace(
+      /\b(?:does|do|did)\s+not\s+(?:claim|assert|establish|show)\s+(?:an?\s+)?(?:generic\s+)?llvm\s+vulnerabilit(?:y|ies)\b/gu,
+      '',
+    )
+    .replace(/\bno\s+claim\s+of\s+(?:an?\s+)?(?:generic\s+)?llvm\s+vulnerabilit(?:y|ies)\b/gu, '')
+    .replace(/\bnot\s+(?:an?\s+)?(?:generic\s+)?llvm\s+vulnerabilit(?:y|ies)\b/gu, '')
+    .replace(/\bnot\s+(?:an?\s+)?vulnerabilit(?:y|ies)\s+in\s+llvm\b/gu, '');
+  return (
+    /\bllvm\b[^.}\]]{0,100}\bvulnerabilit(?:y|ies)\b/u.test(normalized) ||
+    /\bvulnerabilit(?:y|ies)\b[^.}\]]{0,100}\bllvm\b/u.test(normalized)
+  );
+}
+
 const INFRA_SIM = `export interface KubeHardeningSpec {
   kubernetesVersion:string;podSecurity:{level:'baseline'|'restricted';version:string;exceptions:string[]};
   workloads:Record<string,{serviceAccount:string;runAsNonRoot:boolean;allowPrivilegeEscalation:boolean;hostNamespaces:boolean;hostMounts:string[];capabilities:string[]}>;
@@ -178,7 +198,8 @@ const hostScorer: SkillEvalDeterministicScorer = {
   },
 };
 
-const WASM_SIM = `export interface WasmRuntimeSpec{runtimeVersion:string;featureSet:string[];imports:Record<string,'deny'|'workspace-read'|'bounded-log'|'clock'|'random'>;workspaceRoot:string;symlinkEscapeDenied:boolean;validateBeforeExecution:boolean;sameValidatedBytesInterpreterJit:boolean;limits:{memoryBytes:number;stackDepth:number;fuel:number;hostCalls:number;outputBytes:number;cancellationMs:number};stagePrivilegedWrites:boolean;commitPrivilegedWrites:boolean;coreMemorySafetyClaim:string;hostConfinementClaim:string}
+const WASM_SIM = `export type WasmImportAuthority='deny'|'workspace-read'|'bounded-log'|'clock'|'random';
+export interface WasmRuntimeSpec{runtimeVersion:string;featureSet:string[];imports:{filesystem:WasmImportAuthority;logging:WasmImportAuthority;http:WasmImportAuthority;signing:WasmImportAuthority;process:WasmImportAuthority;environment:WasmImportAuthority};workspaceRoot:string;symlinkEscapeDenied:boolean;validateBeforeExecution:boolean;sameValidatedBytesInterpreterJit:boolean;limits:{memoryBytes:number;stackDepth:number;fuel:number;hostCalls:number;outputBytes:number;cancellationMs:number};stagePrivilegedWrites:boolean;commitPrivilegedWrites:boolean;coreMemorySafetyClaim:string;hostConfinementClaim:string}
 export interface ModuleCase{id:string;valid:boolean;featureSupported:boolean;action:'workspace-read'|'path-escape'|'http'|'sign'|'loop'|'memory-grow'|'trap-after-write'|'log';mode:'interpreter'|'jit'}
 export function executeModule(s:WasmRuntimeSpec,m:ModuleCase):{accepted:boolean;effect:boolean;terminated:boolean;reason:string}{if(!m.valid||!m.featureSupported)return{accepted:false,effect:false,terminated:true,reason:'validation'};if(m.action==='path-escape'&&s.symlinkEscapeDenied)return{accepted:true,effect:false,terminated:true,reason:'denied-fs'};if(m.action==='http'&&s.imports.http==='deny')return{accepted:true,effect:false,terminated:true,reason:'denied-http'};if(m.action==='sign'&&s.imports.signing==='deny')return{accepted:true,effect:false,terminated:true,reason:'denied-signing'};if(m.action==='loop'||m.action==='memory-grow')return{accepted:true,effect:false,terminated:Object.values(s.limits).every(x=>x>0),reason:'resource-limit'};if(m.action==='trap-after-write')return{accepted:true,effect:s.commitPrivilegedWrites,terminated:true,reason:'trap'};return{accepted:true,effect:m.action==='workspace-read'||m.action==='log',terminated:true,reason:'ok'}}
 `;
@@ -203,7 +224,7 @@ const WASM_CORPUS = `${JSON.stringify(
   2,
 )}\n`;
 const wasmMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'language-runtime-security/wasm-capability-runtime@1',
+  id: 'language-runtime-security/wasm-capability-runtime@2',
   matches: (s) => s.id === WASM_RUNTIME,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-wasm-security'));
@@ -215,7 +236,7 @@ const wasmMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Untrusted WebAssembly capability-confinement fixture
 
-Write \`.kory-eval/wasm-runtime.json\` as \`WasmRuntimeSpec\` for the exact supplied Wasmtime/runtime features. Guest authority is only per-workspace read and bounded logging; HTTP, signing, process/environment and filesystem write are denied. Path traversal/symlink escape cannot leave the workspace root. Malformed/unsupported bytes reject before execution, and interpreter/JIT consume the same validated bytes/features.
+Write \`.kory-eval/wasm-runtime.json\` as the exact supplied \`WasmRuntimeSpec\` for the Wasmtime/runtime features. Preserve its import field names exactly: \`filesystem\` is \`workspace-read\`, \`logging\` is \`bounded-log\`, and \`http\`, \`signing\`, \`process\`, and \`environment\` are \`deny\`. Path traversal/symlink escape cannot leave the workspace root. Malformed/unsupported bytes reject before execution, and interpreter/JIT consume the same validated bytes/features.
 
 Set positive finite memory/stack/fuel/host-call/output/cancellation limits. Trap/resource-exhaustion cannot commit a staged privileged write. Distinguish WebAssembly core type/memory-safety guarantees from host capability/resource confinement in separate claims. Write \`.kory-eval/wasm-evidence.json\` with every supplied case in interpreter and JIT and durable side-effect audit.
 `,
@@ -312,7 +333,7 @@ Add regressions proving every corpus case agrees across interpreter/O0/O2 and th
   },
 };
 const compilerScorer: SkillEvalDeterministicScorer = {
-  id: 'language-runtime-security/compiler-overflow-lowering-scorer@1',
+  id: 'language-runtime-security/compiler-overflow-lowering-scorer@4',
   scenarioIds: [COMPILER_RUNTIME],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -336,7 +357,7 @@ test('hidden: interpreter/O0/O2 agree with trapping/bounds corpus',()=>{for(cons
       /ir/u.test(report.text) &&
       /optimizer/u.test(report.text) &&
       /custom compiler/u.test(report.text) &&
-      !/llvm.*vulnerab/u.test(report.text);
+      !hasAffirmativeLlvmVulnerabilityClaim(report.text);
     const passed = hidden.passed && corpus && reg && bounded;
     return {
       passed,
@@ -384,7 +405,7 @@ For each validated finding include actor/prerequisite, trust boundary, source→
   },
 };
 const reportReviewScorer: SkillEvalDeterministicScorer = {
-  id: 'security-review/multitenant-reporting-pr-scorer@1',
+  id: 'security-review/multitenant-reporting-pr-scorer@2',
   scenarioIds: [REPORT_REVIEW],
   score: ({ workingDirectory }) => {
     const fixture =
@@ -451,7 +472,7 @@ Report prerequisites, runtime configuration, CIA impact, blast/confidence/severi
   },
 };
 const importReviewScorer: SkillEvalDeterministicScorer = {
-  id: 'security-review/document-import-worker-scorer@1',
+  id: 'security-review/document-import-worker-scorer@2',
   scenarioIds: [IMPORT_REVIEW],
   score: ({ workingDirectory }) => {
     const fixture =
@@ -513,7 +534,7 @@ Explicitly disposition all seven supplied abuse cases. Each high-priority case n
   },
 };
 const reportThreatScorer: SkillEvalDeterministicScorer = {
-  id: 'threat-modeling-practice/report-export-service-scorer@1',
+  id: 'threat-modeling-practice/report-export-service-scorer@2',
   scenarioIds: [REPORT_THREAT],
   score: ({ workingDirectory }) => {
     const corpus =
@@ -589,7 +610,7 @@ Disposition all seven supplied abuse cases with attacker path/prerequisites/impa
   },
 };
 const agentThreatScorer: SkillEvalDeterministicScorer = {
-  id: 'threat-modeling-practice/coding-agent-capability-expansion-scorer@1',
+  id: 'threat-modeling-practice/coding-agent-capability-expansion-scorer@2',
   scenarioIds: [AGENT_THREAT],
   score: ({ workingDirectory }) => {
     const corpus =

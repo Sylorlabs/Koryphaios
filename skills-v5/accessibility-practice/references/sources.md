@@ -28,4 +28,4 @@ Rampstack's MIT `accessibility-audit` package provides useful community workflow
 - Apple HIG Accessibility: official Apple documentation verified 2026-09-04; recheck within 90 days.
 - Android accessibility principles: official Android documentation verified 2026-09-04; recheck within 60 days because the documentation is actively being refactored around Compose.
 - Xbox Accessibility Guidelines: Microsoft Learn guidance verified 2026-09-04; recheck within 60 days.
-- Rampstack `accessibility-audit`: GitHub `main` inspected 2026-09-04; repository license is MIT. Recheck within 30 days.
+- Rampstack `accessibility-audit`: GitHub `main` at `e5bc67519991` inspected 2026-10-03; repository license is MIT. Recheck within 30 days.

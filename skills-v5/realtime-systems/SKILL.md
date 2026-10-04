@@ -23,6 +23,7 @@ Failure boundaries: Do not assume persistent ordered connections, keep unbounded
 
 - Choose the transport from directionality and lifecycle needs. WebSocket supports full duplex messaging; server-sent events provide a server-to-client event stream over HTTP with reconnect behavior.
 - Define ordering scope, event identity, replay or resume position, and authoritative state before promising continuity across reconnects.
+- Advance a resumable cursor only across a contiguous acknowledged prefix in its declared ordering scope. The greatest event ID merely observed is not a safe resume point when gaps, reordering, parallel delivery, or partial processing can occur; track gaps explicitly or reconcile from authoritative state before advancing past them.
 - Treat connection identity and authentication as renewable state. Revalidate or refresh authorization when credentials expire or subscriptions change.
 - Bound per-client buffering and define slow-consumer behavior. Dropping, disconnecting, coalescing, or backpressuring are product and transport decisions that must be explicit.
 - Treat presence as an inferred, time-bounded signal unless the system has stronger consistency infrastructure and a product contract that requires it.
@@ -31,6 +32,7 @@ Failure boundaries: Do not assume persistent ordered connections, keep unbounded
 
 - Force disconnect and reconnect while traffic is active and verify the documented resume, replay, or reconciliation behavior.
 - Inject duplicate, missed, and reordered application messages where the protocol or scale-out path can produce them.
+- Create a gap, deliver a later event, reconnect from the recorded resume position, and prove the missing event is replayed or recovered rather than skipped by a max-observed cursor.
 - Throttle a client and measure queue growth, coalescing, backpressure, or disconnect behavior against the configured bound.
 - Expire credentials during an active connection and verify subscription and identity handling.
 - Restart or move a server instance and verify catch-up from authoritative state rather than relying on a connection surviving indefinitely.

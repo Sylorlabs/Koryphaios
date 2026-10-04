@@ -1,14 +1,40 @@
 // Path traversal protection and safe path resolution
 // Prevents directory traversal attacks via .. sequences, URL encoding, etc.
 
-import { resolve, normalize, relative, isAbsolute, join } from 'path';
-import { realpathSync, existsSync } from 'fs';
+import { resolve, normalize, relative, isAbsolute, join, dirname, basename } from 'path';
+import { realpathSync, lstatSync } from 'fs';
 import { serverLog } from '../logger';
 
 export interface PathValidationResult {
   allowed: boolean;
   resolvedPath?: string;
   reason?: string;
+}
+
+/** Canonicalize existing ancestors too, so a new file below a symlink cannot
+ * escape its grant. Dangling links, permission errors and link loops fail closed. */
+export function canonicalPathForAccess(path: string): string {
+  let cursor = resolve(path);
+  const missing: string[] = [];
+  for (;;) {
+    try {
+      lstatSync(cursor);
+      return resolve(realpathSync(cursor), ...missing);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      // An existing dangling symlink is not a missing path component.
+      try {
+        lstatSync(cursor);
+        throw new Error('Cannot resolve symbolic link');
+      } catch (linkError) {
+        if ((linkError as NodeJS.ErrnoException).code !== 'ENOENT') throw linkError;
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) throw error;
+      missing.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
 }
 
 /**
@@ -45,7 +71,10 @@ export function validatePathAccess(
   try {
     decodedPath = decodeURIComponent(requestedPath);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL encoding in path');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Invalid URL encoding in path',
+    );
     return { allowed: false, reason: 'Invalid URL encoding in path' };
   }
 
@@ -54,7 +83,10 @@ export function validatePathAccess(
   try {
     doubleDecodedPath = decodeURIComponent(decodedPath);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Double URL decode failed, using single-decoded path');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Double URL decode failed, using single-decoded path',
+    );
     doubleDecodedPath = decodedPath;
   }
 
@@ -111,17 +143,24 @@ export function validatePathAccess(
       continue; // Try next root
     }
 
-    // Optional: Check for symlink traversal
-    if (followSymlinks && existsSync(resolvedPath)) {
+    // Check existing ancestors even when the requested file does not exist.
+    if (followSymlinks) {
       try {
-        const realPath = realpathSync(resolvedPath);
-        const realRelative = relative(root, realPath);
-        if (realRelative.startsWith('..') || isAbsolute(realRelative)) {
-          return { allowed: false, reason: 'Symbolic link traversal detected' };
+        const canonicalRoot = realpathSync(root);
+        // Filesystem callers use literal names, not URL-decoded names. Check
+        // both so an encoded-looking symlink cannot hide behind a safe alias.
+        for (const candidate of [resolvedPath, resolve(root, requestedPath)]) {
+          const realRelative = relative(canonicalRoot, canonicalPathForAccess(candidate));
+          if (realRelative.startsWith('..') || isAbsolute(realRelative)) {
+            return { allowed: false, reason: 'Symbolic link traversal detected' };
+          }
         }
       } catch (err: unknown) {
         // If we can't resolve the symlink, deny access
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Cannot verify symlink safety, denying access');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Cannot verify symlink safety, denying access',
+        );
         return { allowed: false, reason: 'Cannot verify symlink safety' };
       }
     }
@@ -225,7 +264,10 @@ export function validateApiPath(
   try {
     decoded = decodeURIComponent(pathname);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Invalid URL encoding in API path');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Invalid URL encoding in API path',
+    );
     return new Response('Invalid URL encoding', { status: 400 });
   }
 
@@ -234,7 +276,10 @@ export function validateApiPath(
   try {
     doubleDecoded = decodeURIComponent(decoded);
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Double URL decode failed in API path, using single-decoded path');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Double URL decode failed in API path, using single-decoded path',
+    );
     doubleDecoded = decoded;
   }
 

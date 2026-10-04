@@ -12,6 +12,7 @@ import {
   type SkillEvaluationRun,
 } from '../backend/src/kory/skill-evaluations';
 import {
+  blindJudgeQuoteIsStructural,
   buildBlindReviewJudgePrompt,
   findBlindJudgeRubricViolation,
   type BlindPairExecutionEvidence,
@@ -27,8 +28,8 @@ import {
 
 const projectRoot = resolve(import.meta.dir, '..');
 const evaluationContractVersion = CURRENT_SKILL_EVAL_CONTRACT_VERSION;
-const BLIND_HARNESS_VERSION = 'v5-blind-semantic@6';
-const BLIND_EVALUATOR_ID = 'chatgpt-web-blind-semantic-v6';
+const BLIND_HARNESS_VERSION = 'v5-blind-semantic@7';
+const BLIND_EVALUATOR_ID = 'chatgpt-web-blind-semantic-v7';
 const packages = loadV5SkillPackages(resolve(projectRoot, 'skills-v5')).packages;
 const currentByName = new Map(
   listSkills(projectRoot)
@@ -276,7 +277,7 @@ function parseJudgeResult(output: string): JudgeResult {
           if (
             !escaped &&
             char === '\\' &&
-            (nextChar === '[' || nextChar === ']' || nextChar === '_')
+            (nextChar === '[' || nextChar === ']' || nextChar === '_' || nextChar === '`')
           ) {
             continue;
           }
@@ -288,12 +289,11 @@ function parseJudgeResult(output: string): JudgeResult {
           } else if (char === '"') {
             // Some Web reviewers quote a label inside an evidence sentence
             // without escaping it. Treat a quote as the string terminator
-            // only when the following token can legally begin the next JSON
-            // member/value; otherwise preserve it as literal string content.
+            // only when the following text is structurally a JSON boundary;
+            // prose punctuation such as `"value", which ...` stays inside
+            // the evidence string.
             const tail = structuralCandidate.slice(index + 1);
-            const escapedStructural = tail.match(/^\s*\\*([,\]}:])/u)?.[1];
-            const following = escapedStructural ?? tail.match(/\S/u)?.[0];
-            if (!following || ',]}:'.includes(following)) {
+            if (blindJudgeQuoteIsStructural(tail)) {
               inString = false;
             } else {
               normalized = normalized.slice(0, -1) + '\\"';
@@ -310,7 +310,7 @@ function parseJudgeResult(output: string): JudgeResult {
           let runEnd = index;
           while (structuralCandidate[runEnd] === '\\') runEnd += 1;
           const following = structuralCandidate[runEnd];
-          if (following === '[' || following === ']' || following === '_') {
+          if (following === '[' || following === ']' || following === '_' || following === '`') {
             index = runEnd - 1;
             continue;
           }

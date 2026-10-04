@@ -36,6 +36,13 @@ function contrastRatio(foreground: Rgb, background: Rgb): number {
 }
 
 describe('theme palette accessibility contracts', () => {
+  it('keeps light-mode checkbox outlines visible on content surfaces', () => {
+    const palette = THEME_PRESETS.light;
+    for (const token of ['--color-surface-0', '--color-surface-1', '--color-surface-2']) {
+      expect(contrastRatio(parseHex(palette['--color-border-bright']), parseHex(palette[token]))).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('keeps primary, secondary, and muted text AA-readable on every surface', () => {
     for (const [themeName, palette] of Object.entries(THEME_PRESETS)) {
       const surfaces = Object.entries(palette).filter(([token]) =>

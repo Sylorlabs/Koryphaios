@@ -44,6 +44,33 @@ function runHiddenPython(root: string, source: string): { passed: boolean; evide
   }
 }
 
+function runTypeScriptTypecheck(root: string): { passed: boolean; evidence: string } {
+  const backendRoot = join(import.meta.dir, '..', '..');
+  const compiler = join(backendRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+  const typeRoots = join(backendRoot, 'node_modules', '@types');
+  if (!existsSync(compiler) || !existsSync(typeRoots)) {
+    return {
+      passed: false,
+      evidence: 'TypeScript typecheck unavailable: evaluator compiler/type roots are missing',
+    };
+  }
+  const result = spawnSync(
+    process.execPath,
+    [compiler, '--noEmit', '-p', 'tsconfig.json', '--types', 'bun', '--typeRoots', typeRoots],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 1_000_000,
+    },
+  );
+  const evidence = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim().slice(-4_000);
+  return {
+    passed: result.status === 0,
+    evidence: evidence || `tsc exited ${result.status ?? 'without status'}`,
+  };
+}
+
 const WEBHOOK_SOURCE = `export type DomainEvent =
   | { type: 'created'; version: 1; payload: { id: string; amount: number } }
   | { type: 'deleted'; version: 1; payload: { id: string; hard: boolean } };
@@ -95,7 +122,7 @@ Add regressions for both valid variants, unknown type/version, missing discrimin
 };
 
 const webhookScorer: SkillEvalDeterministicScorer = {
-  id: 'typescript-javascript-engineering/runtime-webhook-validation-scorer@1',
+  id: 'typescript-javascript-engineering/runtime-webhook-validation-scorer@2',
   scenarioIds: [TS_WEBHOOK],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -112,6 +139,7 @@ test('hidden: malformed nested values rejected while benign extra field does not
       /unknown|version/iu,
       /malform|nested|amount|hard/iu,
     ]);
+    const typecheck = runTypeScriptTypecheck(workingDirectory);
     const report = artifactText(workingDirectory, '.kory-eval/typescript-webhook.json');
     const bounded =
       Boolean(report.artifact) &&
@@ -119,17 +147,27 @@ test('hidden: malformed nested values rejected while benign extra field does not
       /static|typecheck/u.test(report.text) &&
       /implementation/u.test(report.text) &&
       /c\/?c\+\+|c-cpp/u.test(report.text);
-    const passed = hidden.passed && !unsafe && regression && bounded;
+    const passed = hidden.passed && typecheck.passed && !unsafe && regression && bounded;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && !unsafe ? 0.8 : hidden.passed ? 0.6 : 0,
-      verification: hidden.passed ? 1 : 0,
+      quality: passed
+        ? 1
+        : hidden.passed && typecheck.passed && !unsafe
+          ? 0.8
+          : hidden.passed && !unsafe
+            ? 0.7
+            : hidden.passed
+              ? 0.6
+              : 0,
+      verification: hidden.passed && typecheck.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
         `runtime validation checks: ${hidden.passed ? 'pass' : 'fail'}`,
+        `repository typecheck: ${typecheck.passed ? 'pass' : 'fail'}`,
         `unsafe assertion/any absent: ${!unsafe ? 'yes' : 'no'}`,
         `negative regressions: ${regression ? 'present' : 'missing'}`,
         `hierarchy/evidence report: ${bounded ? 'bounded' : 'missing'}`,
+        typecheck.evidence,
         hidden.evidence,
       ],
     };

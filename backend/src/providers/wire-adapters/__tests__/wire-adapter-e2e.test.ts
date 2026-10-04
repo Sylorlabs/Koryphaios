@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { probeCustomProvider } from '../../custom';
 import { getWireAdapter, listWireAdapters } from '../registry';
 import { ollamaAdapter } from '../ollama';
+import { cohereAdapter } from '../cohere';
+import { CustomProvider } from '../../custom';
 import { WireAdapterProvider } from '../wire-adapter-provider';
 import type { ProviderEvent } from '../../types';
 
@@ -65,6 +67,52 @@ describe('wire adapter registry', () => {
     expect(getWireAdapter('nope')).toBeUndefined();
     expect(listWireAdapters().length).toBeGreaterThanOrEqual(2);
   });
+
+  test.each([ollamaAdapter, cohereAdapter])(
+    'sends confirmed images through the custom $id provider',
+    async (adapter) => {
+      const name = `custom:${adapter.id}-vision`;
+      let submitted: Record<string, unknown> | undefined;
+      const path = adapter.id === 'ollama' ? '/api/chat' : '/v2/chat';
+      mockFetchByUrl({
+        [`http://image-fixture.test${path}`]: (_url, init) => {
+          submitted = JSON.parse(init?.body as string);
+          return adapter.id === 'ollama'
+            ? jsonlResponse([{ message: { content: 'Image seen' }, done: true }])
+            : sseResponse([
+                { type: 'content-delta', delta: { message: { content: { text: 'Image seen' } } } },
+              ]);
+        },
+      });
+      const provider = new CustomProvider({
+        name,
+        custom: true,
+        adapter: adapter.id,
+        baseUrl: 'http://image-fixture.test',
+        disabled: false,
+      });
+      const events: ProviderEvent[] = [];
+      for await (const event of provider.streamResponse({
+        model: 'vision-fixture',
+        systemPrompt: '',
+        imageInputOverride: { provider: name, model: 'vision-fixture' },
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Inspect' },
+              { type: 'image', imageData: 'cGl4ZWxz', imageMimeType: 'image/png' },
+            ],
+          },
+        ],
+      }))
+        events.push(event);
+      expect(provider.imageInputTransport).toBe('native');
+      expect(JSON.stringify(submitted)).toContain('cGl4ZWxz');
+      expect(events.some((event) => event.content === 'Image seen')).toBe(true);
+      expect(events.some((event) => event.type === 'error')).toBe(false);
+    },
+  );
 });
 
 describe('ollama adapter end to end', () => {

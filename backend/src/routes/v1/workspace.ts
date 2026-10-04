@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { requireLocalRouteAuth, validateLocalBearerToken } from '../../auth/local-route-auth';
 import { registerWorkspaceRoot } from '../../memory/unified-memory';
 import { loadAgentSettings } from '../../agent-settings';
-import { getRequestProjectRoot } from '../../runtime/request-project';
+import { getRequestProjectRoot, getRequestWorkspaceRoot } from '../../runtime/request-project';
 import { IMAGE_MIME_TYPES } from '../../tools/image';
 import { existsSync, statSync, readFileSync } from 'node:fs';
 import { resolve, extname } from 'node:path';
@@ -89,7 +89,7 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     broadcastWorkspaceUpdate(snapshot);
     return { ok: true, data: snapshot };
   })
-  .get('/raw', ({ request, query, set }) => {
+  .get('/raw', async ({ request, query, set }) => {
     // <img src> can't send Authorization headers, so accept the bearer token
     // via ?auth= as well (same validation, local session token either way).
     const authed =
@@ -98,14 +98,21 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
       set.status = 401;
       return { ok: false, error: 'Unauthorized' };
     }
-    const abs = resolve(String(query.path ?? ''));
+    // Image elements cannot attach routing headers either. Resolve relative
+    // paths server-side so an unavailable checkout never reads the source tree.
+    const headers = new Headers(request.headers);
+    if (query.sessionId !== undefined) headers.set('x-koryphaios-session', String(query.sessionId));
+    if (query.project !== undefined) headers.set('x-koryphaios-project', String(query.project));
+    const scopedRequest = new Request(request.url, { headers });
+    const workspaceRoot = await getRequestWorkspaceRoot(scopedRequest);
+    const abs = resolve(workspaceRoot, String(query.path ?? ''));
     const home = homedir();
     const mime = IMAGE_MIME_TYPES[extname(abs).toLowerCase()];
     // Images only, hard 10MB cap — this is a chat renderer, not a general
     // file server. Paths outside home require the allowExternalPaths setting.
     const inHome = abs.startsWith(home + '/');
     const externalAllowed =
-      inHome || loadAgentSettings(getRequestProjectRoot(request)).allowExternalPaths === true;
+      inHome || loadAgentSettings(getRequestProjectRoot(scopedRequest)).allowExternalPaths === true;
     if (!mime || !externalAllowed || !existsSync(abs) || !statSync(abs).isFile()) {
       set.status = 404;
       return { ok: false, error: 'Not found' };
@@ -127,7 +134,7 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
     const glob = new Bun.Glob('**/*');
     const files: string[] = [];
 
-    const requestRoot = getRequestProjectRoot(request);
+    const requestRoot = await getRequestWorkspaceRoot(request);
     for await (const match of glob.scan({ cwd: requestRoot, onlyFiles: true })) {
       if (shouldSkipPath(match)) continue;
       if (search && !match.toLowerCase().includes(search)) continue;

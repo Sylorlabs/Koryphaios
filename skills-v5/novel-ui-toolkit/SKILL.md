@@ -53,6 +53,7 @@ Design a reusable rendering or widget substrate without cloning browser architec
 - Real vertical slice.
 - Invariant, rendering, event, focus, cleanup, and performance tests.
 - At least one representative application workflow.
+- Reconcile the completion summary against the retained verification results. If semantic focus, pointer input, keyboard traversal, rendering, cleanup, accessibility, or another required invariant fails, report that failure and keep the corresponding capability unverified. Do not replace a mixed or failing result with a blanket statement such as "verification passed."
 
 ### Anti-misinterpretation boundaries
 
@@ -60,6 +61,7 @@ Design a reusable rendering or widget substrate without cloning browser architec
 - Do not force one product aesthetic into primitives.
 - Do not postpone text or accessibility as polish.
 - Do not claim portability from one backend.
+- Do not claim a capability is implemented or verified merely because the relevant code path exists; the observed result at that boundary controls the completion claim.
 
 ## Completion evidence
 

@@ -1,11 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  blindJudgeQuoteIsStructural,
   buildBlindReviewJudgePrompt,
   findBlindJudgeRubricViolation,
 } from '../skill-eval-blind-review';
 import type { V5FullTaskFixture } from '../skill-packages';
 
 describe('blind review prompt', () => {
+  test('distinguishes JSON delimiters from commas inside malformed quoted prose', () => {
+    expect(blindJudgeQuoteIsStructural(',"next evidence"]}')).toBeTrue();
+    expect(blindJudgeQuoteIsStructural('\\]},"preference":"B"')).toBeTrue();
+    expect(blindJudgeQuoteIsStructural(':"value"')).toBeTrue();
+    expect(blindJudgeQuoteIsStructural(', which weakens reproducibility.')).toBeFalse();
+  });
+
   test('supplies anonymous harness owned pair evidence without exposing arm identity', () => {
     const task = {
       id: 'blind-pair-evidence-test',
@@ -51,6 +59,49 @@ describe('blind review prompt', () => {
     expect(prompt).not.toContain('without-skill');
   });
 
+  test('distinguishes later host verification from candidate claims without trusting scorers blindly', () => {
+    const task = {
+      prompt: 'Revise a candidate package and bound qualification to observed evidence.',
+      falsifiableChecks: [],
+      requiredEvidence: [],
+      requiredArtifacts: [],
+    } as unknown as V5FullTaskFixture;
+    const artifact = {
+      finalOutput: 'The candidate could not run the resolver; promotion remains pending.',
+      executionEvidence: ['real-resolver held-out routing: pass (1.000/1.000)'],
+      changes: [],
+    };
+    const prompt = buildBlindReviewJudgePrompt({
+      task,
+      artifactA: artifact,
+      artifactB: artifact,
+      pairEvidence: {
+        matchedPair: true,
+        sameScenario: true,
+        sameProviderModel: true,
+        sameHarness: true,
+        sameEvaluationContract: true,
+        sameMaterializer: true,
+        sameDeterministicScorer: true,
+        randomizedArmIdentity: true,
+        evidenceOwner: 'evaluation-harness',
+      },
+    });
+    expect(prompt).toContain('supplied by the host after the agent attempt');
+    expect(prompt).toContain('that difference alone is not an integrity failure');
+    expect(prompt).toContain('finalOutput or authored file content');
+    expect(prompt).toContain('possible verifier defect');
+    expect(prompt).toContain(artifact.finalOutput);
+    expect(prompt).toContain(artifact.executionEvidence[0]!);
+    expect(
+      findBlindJudgeRubricViolation({
+        artifactA: { evidence: ['The agent falsely claimed its own tests passed.'] },
+        artifactB: { evidence: [] },
+        rationale: [],
+      }),
+    ).toBeNull();
+  });
+
   test('rejects criticism that penalizes evaluator owned hierarchy or pairing narration', () => {
     expect(
       findBlindJudgeRubricViolation({
@@ -70,6 +121,20 @@ describe('blind review prompt', () => {
         rationale: ['Missing paired skill versus no skill run artifacts.'],
       }),
     ).toContain('paired skill');
+  });
+
+  test('allows explicit non-penalty statements about evaluator owned meta evidence', () => {
+    expect(
+      findBlindJudgeRubricViolation({
+        artifactA: {
+          evidence: [
+            'Evaluator-owned paired execution evidence satisfies the routing/hierarchy and paired-run provenance requirements; no penalty is assigned for lack of agent-authored hierarchy narration.',
+          ],
+        },
+        artifactB: { evidence: [] },
+        rationale: [],
+      }),
+    ).toBeNull();
   });
 
   test('allows concrete task boundary criticism', () => {

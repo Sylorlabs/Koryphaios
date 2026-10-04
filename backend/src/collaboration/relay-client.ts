@@ -6,7 +6,9 @@
  */
 
 import { serverLog } from '../logger';
-import type { CollaborationPolicy } from '@koryphaios/shared';
+import { resolveTeamJoinCode } from './join-code';
+import { ValidationError } from '../errors/types';
+import { sharedTeamFolders, type CollaborationPolicy } from '@koryphaios/shared';
 import { RTCPeerConnection, type RTCDataChannel } from 'werift';
 
 const log = serverLog.child({ module: 'collab-relay' });
@@ -27,6 +29,7 @@ class HybridPeerTransport {
   constructor(
     private signal: (message: Record<string, unknown>) => void,
     private receive: (message: Record<string, unknown>) => void,
+    private mayReceive: (tierId: string, message: Record<string, unknown>) => boolean,
   ) {}
 
   private createPeer(guestId: string, tierId: string) {
@@ -92,7 +95,7 @@ class HybridPeerTransport {
     const delivered: string[] = [];
     const encoded = JSON.stringify(message);
     for (const [guestId, peer] of this.peers) {
-      if (peer.channel?.readyState !== 'open') continue;
+      if (peer.channel?.readyState !== 'open' || !this.mayReceive(peer.tierId, message)) continue;
       try {
         peer.channel.send(encoded);
         delivered.push(guestId);
@@ -129,12 +132,25 @@ export class RelayClient {
   private readonly peerTransport = new HybridPeerTransport(
     (message) => this.sendRelay(message),
     (message) => this.handlePeerMessage(message),
+    (tierId, message) => {
+      const tier = this.activePolicy?.accessTiers.find((item) => item.id === tierId);
+      if (!tier) return false;
+      if (tier.id === 'models')
+        return ['provider-catalog', 'host-disconnected', 'session-ended'].includes(String(message.type));
+      if (message.type === 'chat') return tier.permissions.viewChat;
+      if (message.type === 'diff') return tier.permissions.viewDiffs;
+      if (message.type === 'log') return tier.permissions.viewSystemMessages;
+      if (message.type === 'agent-status') return tier.permissions.viewAgentStatus;
+      if (message.type === 'guest-joined' || message.type === 'guest-left') return tier.permissions.viewParticipants;
+      if (message.type === 'provider-catalog') return tier.permissions.useRemoteProviders === true;
+      return false;
+    },
   );
 
   private handlePeerMessage(message: Record<string, unknown>) {
     if (message.type !== 'guest-prompt' || !this.activePolicy) return;
     const tier = this.activePolicy.accessTiers.find((item) => item.id === message.tierId);
-    if (!tier?.permissions.submitPrompts) return;
+    if (tier?.id === 'models' || !tier?.permissions.submitPrompts) return;
     const requestedModel = String(message.model || '');
     const model =
       requestedModel &&
@@ -233,6 +249,12 @@ export class RelayClient {
   /** Create a signed invite link for a given role. */
   async createInvite(tierId = 'viewer'): Promise<string> {
     if (!this.sessionId) throw new Error('No active relay session');
+    if (tierId === 'models') {
+      const health = await fetch(`${this.config.relayUrl}/health`, { signal: AbortSignal.timeout(10_000) });
+      const data = await health.json().catch(() => null);
+      if (!health.ok || data?.capabilities?.modelOnlyIsolation !== true || data?.capabilities?.revocableInvites !== true)
+        throw new ValidationError('Update the collaboration relay to support isolated, revocable model sharing.');
+    }
     const res = await fetch(`${this.config.relayUrl}/session/${this.sessionId}/invite`, {
       method: 'POST',
       headers: {
@@ -260,17 +282,18 @@ export class RelayClient {
     const res = await fetch(`${this.config.relayUrl}/session/${this.sessionId}/policy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-host-secret': this.config.hostSecret },
-      body: JSON.stringify(policy),
+      body: JSON.stringify({
+        ...policy,
+        workspacePaths: undefined,
+        sharedFolders: sharedTeamFolders(policy.workspacePaths ?? []),
+      }),
     });
     if (!res.ok) throw new Error(`Failed to update team policy: ${res.status}`);
     this.activePolicy = policy;
   }
 
   async resolveJoinCode(joinCode: string) {
-    const res = await fetch(`${this.config.relayUrl}/code/${encodeURIComponent(joinCode)}`);
-    if (!res.ok)
-      throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
-    return (await res.json()) as { ok: true; inviteUrl: string; sessionId: string; role: string };
+    return resolveTeamJoinCode(joinCode, this.config.relayUrl);
   }
 
   /** Broadcast an event to all connected guests via the relay. */
@@ -314,6 +337,17 @@ export class RelayClient {
     this.sessionToken = null;
     this.activePolicy = null;
     await this.peerTransport.closeAll();
+  }
+
+  /** Revoke invitations as well as disconnecting the private host transport. */
+  async endSession() {
+    if (this.sessionId) {
+      const res = await fetch(`${this.config.relayUrl}/session/${encodeURIComponent(this.sessionId)}`, {
+        method: 'DELETE', headers: { 'x-host-secret': this.config.hostSecret },
+      });
+      if (!res.ok) throw new Error('Could not revoke the model-sharing session');
+    }
+    await this.disconnect();
   }
 
   private async connect(wsBase: string, token: string): Promise<void> {
@@ -389,18 +423,7 @@ function getRelayConfig(): RelayConfig | null {
 const publicRelayUrl = process.env.RELAY_URL?.replace(/\/$/, '') ?? null;
 
 export async function resolveRelayJoinCode(joinCode: string) {
-  if (!publicRelayUrl)
-    throw new Error('Internet relay URL is not configured on this Koryphaios installation');
-  const res = await fetch(`${publicRelayUrl}/code/${encodeURIComponent(joinCode)}`);
-  if (!res.ok)
-    throw new Error(res.status === 404 ? 'Invalid or inactive join code' : 'Relay join failed');
-  return (await res.json()) as {
-    ok: true;
-    inviteUrl: string;
-    sessionId: string;
-    sessionName: string;
-    tierId: string;
-  };
+  return resolveTeamJoinCode(joinCode, process.env.RELAY_URL?.replace(/\/$/, '') ?? null);
 }
 
 const _config = getRelayConfig();

@@ -6,6 +6,8 @@
     DEFAULT_SANDBOX_SETTINGS,
   } from '$lib/stores/agent-settings.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import ComputerUseSettings from './ComputerUseSettings.svelte';
+  import { defaultComputerUseSettings } from '@koryphaios/shared';
   import SettingsToggle from './SettingsToggle.svelte';
   import { providersStore } from '$lib/stores/providers.svelte';
   import NumberStepper from './NumberStepper.svelte';
@@ -696,7 +698,11 @@
       label: 'Guarded',
       description: 'All edits automatic. Ask only for risky actions',
     },
-    { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' },
+    {
+      value: 'yolo',
+      label: 'YOLO',
+      description: 'Skip Kory approvals for allowed computer actions; explicit blocks and native failures still apply',
+    },
   ];
 
   let permissionModeValue = $derived(
@@ -1006,7 +1012,7 @@
                       role="radiogroup"
                       aria-label="Permission mode"
                     >
-                      {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic. Ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits. Ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Reads run automatically. File edits and actions that change state ask for approval' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'No approval or risk checks' }] as mode (mode.value)}
+                      {#each [{ value: 'guarded', label: 'Guarded', description: 'All edits automatic. Ask only for risky actions' }, { value: 'edits', label: 'Accept edits', description: 'Apply edits. Ask for other actions' }, { value: 'ask', label: 'Ask', description: 'Reads run automatically. File edits and actions that change state ask for approval' }, { value: 'custom', label: 'Custom', description: 'Use the rules below' }, { value: 'yolo', label: 'YOLO', description: 'Skip Kory approvals for allowed computer actions; explicit blocks and native failures still apply' }] as mode (mode.value)}
                         {@const active =
                           (agentSettingsStore.settings.permissionMode === 'plan'
                             ? 'guarded'
@@ -1483,6 +1489,15 @@
                 </div>
               {/if}
             </div>
+            {#key editorDraftScope}
+              <ComputerUseSettings
+                settings={agentSettingsStore.settings.computerUse ?? defaultComputerUseSettings()}
+                saving={agentSettingsStore.settingsSaving}
+                onstopped={() => agentSettingsStore.loadSettings()}
+                onchange={(computerUse) =>
+                  agentSettingsStore.saveSettings({ computerUse }, { quietSuccess: true })}
+              />
+            {/key}
             <div
               class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] overflow-hidden"
             >
@@ -1867,6 +1882,47 @@
                         description="Show reasoning automatically while keeping every block individually collapsible."
                         onchange={() => toggleSetting('reasoningExpandedByDefault')}
                       />
+
+                      <div
+                        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+                      >
+                        <SettingsSwitch
+                          checked={(agentSettingsStore.settings.skillContextBudget ?? null) !== null}
+                          label="Limit Skill Context"
+                          description="Off by default: skill guidance is budgeted against the model context window and never blocked. Turn this on to cap injected skill characters per turn."
+                          onchange={() => {
+                            void agentSettingsStore.saveSettings(
+                              {
+                                skillContextBudget:
+                                  (agentSettingsStore.settings.skillContextBudget ?? null) !== null
+                                    ? null
+                                    : 30000,
+                              },
+                              { quietSuccess: true },
+                            );
+                          }}
+                        />
+                        <div class="mt-3">
+                          <NumberStepper
+                            value={agentSettingsStore.settings.skillContextBudget ?? 30000}
+                            min={4000}
+                            max={400000}
+                            step={1000}
+                            unit="chars"
+                            label="Maximum injected skill characters per turn"
+                            disabled={(agentSettingsStore.settings.skillContextBudget ?? null) === null}
+                            onchange={(value) =>
+                              agentSettingsStore.saveSettings(
+                                { skillContextBudget: value },
+                                { quietSuccess: true },
+                              )}
+                          />
+                        </div>
+                        <p class="mt-2 text-[10px] text-[var(--color-text-muted)]">
+                          Individual skills carry their own advisory <code>contextBudget</code> in
+                          frontmatter. Those are authoring metadata only and never block a turn.
+                        </p>
+                      </div>
 
                       <div
                         class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
@@ -3067,7 +3123,7 @@
 <ConfirmDialog
   open={showResetConfirmation}
   title="Restore project agent defaults?"
-  message="This replaces the current project's agent permissions, workflow, quality, context, research, and routing settings with Koryphaios defaults. Preferences and skill files are not changed."
+  message="This replaces the current project's agent permissions, computer-use grants, workflow, quality, context, research, and routing settings with Koryphaios defaults. Preferences and skill files are not changed."
   confirmLabel="Restore defaults"
   variant="warning"
   onCancel={() => (showResetConfirmation = false)}

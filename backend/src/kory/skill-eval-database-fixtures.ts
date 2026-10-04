@@ -26,6 +26,13 @@ const MONGO_INDEX = 'mongodb-engineering-full-task-2-individual';
 const REDIS_LOCK = 'redis-engineering-full-task-1-individual';
 const REDIS_STREAM = 'redis-engineering-full-task-2-individual';
 
+const POSTGRES_RUNTIME_BLOCKER =
+  'Full-task qualification requires PostgreSQL 17.5-backed lock, concurrency, constraint, and plan execution; this fixture currently checks SQL/report structure only.';
+const MYSQL_RUNTIME_BLOCKER =
+  'Full-task qualification requires MySQL 8/InnoDB-backed DDL, metadata-lock, replication, and deadlock execution; this fixture currently checks SQL/report structure or an in-memory transfer model only.';
+const MONGODB_RUNTIME_BLOCKER =
+  'Full-task qualification requires MongoDB-backed atomic-update and explain/index execution; this fixture currently uses an in-memory document/index model only.';
+
 function artifactText(root: string, path: string): { artifact: unknown | null; text: string } {
   const artifact = readJsonArtifact<unknown>(root, path);
   return { artifact, text: JSON.stringify(artifact ?? '').toLowerCase() };
@@ -216,7 +223,8 @@ SELECT id FROM jobs WHERE status = 'queued' ORDER BY priority DESC, id LIMIT 1;
 UPDATE jobs SET status = 'running' WHERE id = $1;
 `;
 const pgQueueMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'postgres-engineering/job-claim-sql@1',
+  id: 'postgres-engineering/job-claim-sql@2',
+  readinessBlockers: [POSTGRES_RUNTIME_BLOCKER],
   matches: (s) => s.id === POSTGRES_QUEUE,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-pg-queue'));
@@ -270,7 +278,8 @@ const pgQueueScorer: SkillEvalDeterministicScorer = {
 };
 
 const pgConstraintMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'postgres-engineering/not-valid-constraint@1',
+  id: 'postgres-engineering/not-valid-constraint@2',
+  readinessBlockers: [POSTGRES_RUNTIME_BLOCKER],
   matches: (s) => s.id === POSTGRES_CONSTRAINT,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-pg-constraint'));
@@ -325,7 +334,8 @@ const pgConstraintScorer: SkillEvalDeterministicScorer = {
 };
 
 const mysqlIndexMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mysql-engineering/online-index-ddl@1',
+  id: 'mysql-engineering/online-index-ddl@2',
+  readinessBlockers: [MYSQL_RUNTIME_BLOCKER],
   matches: (s) => s.id === MYSQL_INDEX,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mysql-index'));
@@ -387,7 +397,8 @@ export class TransferStore{accounts=new Map<string,Account>();ledger=new Map<str
 const f=this.accounts.get(from)!,t=this.accounts.get(to)!;if(f.balance<amount)return'insufficient';f.balance-=amount;t.balance+=amount;this.ledger.set(transferId,{transferId,from,to,amount});return'ok'}}
 `;
 const mysqlDeadlockMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mysql-engineering/transfer-deadlock-order@1',
+  id: 'mysql-engineering/transfer-deadlock-order@2',
+  readinessBlockers: [MYSQL_RUNTIME_BLOCKER],
   matches: (s) => s.id === MYSQL_DEADLOCK,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mysql-deadlock'));
@@ -481,12 +492,13 @@ Write \`.kory-eval/sqlite-wal.json\` with SQLite runtime version, journal/busy/c
   },
 };
 const sqliteWalScorer: SkillEvalDeterministicScorer = {
-  id: 'sqlite-engineering/wal-checkpoint-contention-scorer@1',
+  id: 'sqlite-engineering/wal-checkpoint-contention-scorer@2',
   scenarioIds: [SQLITE_WAL],
   score: ({ workingDirectory }) => {
     const hidden = runPython(
       workingDirectory,
-      `import os,tempfile,sqlite3
+      `import os,sys,tempfile,sqlite3
+sys.path.insert(0, os.getcwd())
 from src.db import open_db,read_snapshot
 fd,path=tempfile.mkstemp();os.close(fd)
 try:
@@ -556,12 +568,13 @@ Write \`.kory-eval/sqlite-migration.json\` with runtime-version branch, preserve
   },
 };
 const sqliteMigrationScorer: SkillEvalDeterministicScorer = {
-  id: 'sqlite-engineering/copy-table-migration-scorer@1',
+  id: 'sqlite-engineering/copy-table-migration-scorer@2',
   scenarioIds: [SQLITE_MIGRATION],
   score: ({ workingDirectory }) => {
     const hidden = runPython(
       workingDirectory,
-      `import sqlite3
+      `import os,sys,sqlite3
+sys.path.insert(0, os.getcwd())
 from src.migration import migrate
 db=sqlite3.connect(':memory:');db.execute('pragma foreign_keys=on');db.executescript('create table parents(id integer primary key);create table widgets(id integer primary key,parent_id integer references parents(id),legacy text,score integer);create index idx_widgets_parent on widgets(parent_id);create table audit(msg text);create trigger trg_widgets after insert on widgets begin insert into audit(msg) values(new.id);end;insert into parents values(1);insert into widgets values(1,1,"old",5);')
 migrate(db)
@@ -601,7 +614,8 @@ export interface IndexSpec{keys:Array<[string,1|-1]>;partialUnresolved?:boolean}
 export function explainRecentUnresolved(spec:IndexSpec,tenantDocs:number,unresolvedDocs:number){const names=spec.keys.map(x=>x[0]);const ideal=names[0]==='tenantId'&&names.includes('resolved')&&names.at(-1)==='createdAt';const sortCovered=ideal&&spec.keys.find(x=>x[0]==='createdAt')?.[1]===-1;const examined=ideal?Math.max(unresolvedDocs,20):tenantDocs;return{examined,returned:Math.min(unresolvedDocs,100),sortCovered,writeCost:spec.keys.length};}
 `;
 const mongoUpdateMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mongodb-engineering/atomic-array-update@1',
+  id: 'mongodb-engineering/atomic-array-update@2',
+  readinessBlockers: [MONGODB_RUNTIME_BLOCKER],
   matches: (s) => s.id === MONGO_UPDATE,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mongo-update'));
@@ -655,7 +669,8 @@ test('hidden: duplicate id and stale remove are explicit',()=>{const s=new Mongo
 };
 
 const mongoIndexMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'mongodb-engineering/skewed-compound-index@1',
+  id: 'mongodb-engineering/skewed-compound-index@2',
+  readinessBlockers: [MONGODB_RUNTIME_BLOCKER],
   matches: (s) => s.id === MONGO_INDEX,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-mongo-index'));

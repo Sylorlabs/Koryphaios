@@ -9,6 +9,7 @@
 // keeps existing user MCP servers working while supporting the current spec.
 
 import { mcpLog, serverLog } from '../logger';
+import { validatedToolImages } from '../tools/tool-images';
 import { resolve } from 'node:path';
 import type { Tool, ToolCallInput, ToolContext, ToolCallOutput } from '../tools/registry';
 import { ToolRegistry } from '../tools/registry';
@@ -85,6 +86,113 @@ interface MCPToolResult {
 const MCP_REQUEST_TIMEOUT_MS = 30_000;
 const MCP_IDLE_SHUTDOWN_MS = 2 * 60_000;
 export const MCP_STDIO_MAX_FRAME_BYTES = 8 * 1024 * 1024;
+/** Timeout for a single Streamable HTTP JSON-RPC round trip. */
+export const MCP_HTTP_TIMEOUT_MS = 30_000;
+/** Ceiling on a single Streamable HTTP response body. */
+export const MCP_HTTP_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+/** Parse a JSON body without ever letting the server-controlled text escape
+ *  into an error message (JSON.parse errors embed the rejected input). */
+function safeJsonParse(raw: string): MCPResponse | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object') return parsed as MCPResponse;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A JSON object is only a JSON-RPC response if it carries the envelope or a
+ * well-formed result/error member. Gateways and proxies answer MCP requests
+ * with bodies like `{"error":"route_not_found"}`, which must not be mistaken
+ * for a successful response — otherwise callers report a meaningless
+ * "failed (undefined)" instead of the HTTP status that actually explains it.
+ */
+function isJsonRpcResponse(value: MCPResponse | null): value is MCPResponse {
+  if (!value) return false;
+  if (value.jsonrpc === '2.0') return true;
+  const hasResult = 'result' in value && value.result !== undefined;
+  const hasError = 'error' in value && value.error !== undefined;
+  return hasResult || hasError;
+}
+
+/** Human-readable reason for a JSON-RPC `error` member that is not the
+ *  expected `{ code, message }` object. Returns undefined when the error is
+ *  well-formed, so the message never embeds server-controlled content. */
+function jsonRpcErrorMessage(response: MCPResponse): string | undefined {
+  const error = response.error;
+  if (error && typeof error === 'object' && typeof error.message === 'string') {
+    return error.message;
+  }
+  return 'malformed error response';
+}
+
+/**
+ * Extract the JSON-RPC response from a Streamable HTTP SSE body.
+ *
+ * Servers frame each response as one or more SSE events whose `data:` field
+ * holds the JSON-RPC message. Multi-line data is concatenated per the SSE
+ * spec. Returns the first parseable JSON-RPC message, or null.
+ */
+export function parseSseJsonRpcPayload(body: string, serverName: string): MCPResponse | null {
+  let eventData: string[] = [];
+  const flush = (): MCPResponse | null => {
+    if (eventData.length === 0) return null;
+    const joined = eventData.join('\n');
+    eventData = [];
+    return safeJsonParse(joined);
+  };
+
+  for (const line of body.split(/\r\n|\r|\n/)) {
+    if (line === '') {
+      const found = flush();
+      if (found) return found;
+      continue;
+    }
+    if (line.startsWith(':')) continue; // SSE comment / keep-alive
+    const colon = line.indexOf(':');
+    const field = colon === -1 ? line : line.slice(0, colon);
+    let value = colon === -1 ? '' : line.slice(colon + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+    if (field === 'data') eventData.push(value);
+  }
+  const trailing = flush();
+  if (trailing) return trailing;
+
+  mcpLog.warn(
+    { server: serverName, responseBytes: Buffer.byteLength(body) },
+    'MCP SSE response contained no JSON-RPC message',
+  );
+  return null;
+}
+
+/** Read a response body with a hard byte ceiling so a hostile or broken
+ *  server cannot exhaust memory. */
+export async function readBoundedText(resp: Response, limitBytes: number): Promise<string> {
+  const body = resp.body;
+  if (!body) return '';
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > limitBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`MCP response exceeded ${limitBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
 
 /** MCP servers fully control stderr and may print prompts, credentials, or
  * unbounded tool diagnostics. Logs record only the byte count. */
@@ -140,6 +248,13 @@ export function mcpOversizedStdoutLogMetadata(
 
 // ─── MCP Client ─────────────────────────────────────────────────────────────
 
+/**
+ * Supplies an `Authorization` header for a remote MCP server, refreshing an
+ * expired OAuth grant on demand. Returning null means the user has not
+ * authorized this server yet.
+ */
+export type McpAuthHeaderResolver = () => Promise<Record<string, string> | null>;
+
 export class MCPClient {
   private process?: ReturnType<typeof Bun.spawn>;
   private requestId = 0;
@@ -161,11 +276,34 @@ export class MCPClient {
   private idleShutdown: ReturnType<typeof setTimeout> | null = null;
   /** Negotiated protocol version for this server connection. */
   private protocolVersion: ProtocolVersion = LEGACY_PROTOCOL_VERSION;
+  /** Streamable HTTP session id handed out by a 2025-era server's initialize
+   *  response. The 2026-07-28 stateless flow does not use one. */
+  private httpSessionId: string | null = null;
+  /** Set when the server answered 401 and no usable OAuth grant exists. The
+   *  settings UI turns this into an "Authorize" affordance. */
+  needsAuthorization = false;
+  /** The `WWW-Authenticate` challenge from the last 401, used to drive
+   *  discovery. Server-controlled, so never logged verbatim. */
+  private authorizationChallenge: string | null = null;
   /** Last connection error, surfaced in listServers() for the UI. */
   lastError: string | undefined;
 
-  constructor(private config: MCPServerConfig) {
+  constructor(
+    private config: MCPServerConfig,
+    /**
+     * Supplies a fresh `Authorization` header per request, refreshing an expired
+     * OAuth grant when needed. Returning null means "no usable grant" — the
+     * client then reports that the server needs authorization instead of
+     * silently retrying unauthenticated.
+     */
+    private resolveAuthHeaders?: McpAuthHeaderResolver,
+  ) {
     this.serverName = config.name;
+  }
+
+  /** The raw challenge header, for the OAuth service to start discovery. */
+  get authorizationChallengeHeader(): string | null {
+    return this.authorizationChallenge;
   }
 
   get name() {
@@ -411,37 +549,155 @@ export class MCPClient {
     );
   }
 
+  /**
+   * Perform one Streamable HTTP JSON-RPC round trip.
+   *
+   * Streamable HTTP is a SINGLE endpoint: every JSON-RPC method is POSTed to
+   * the configured URL verbatim, with the method name carried in the
+   * `Mcp-Method` header. Appending `/initialize`, `/tools/list` or
+   * `/tools/call` to the URL — as this client used to — 404s against every
+   * real hosted server.
+   *
+   * Servers answer with either `application/json` or an SSE stream
+   * (`text/event-stream`) whose `data:` lines carry the JSON-RPC response, so
+   * both encodings are decoded. `Mcp-Session-Id` is captured from the
+   * initialize response and echoed on later requests for 2025-era servers.
+   *
+   * Non-2xx responses are returned (not thrown) so callers can report the
+   * status; only transport/parse failures throw.
+   *
+   * A 401 is handled here rather than by callers: the challenge is recorded so
+   * the settings UI can offer authorization, and the request is retried exactly
+   * once with a freshly resolved bearer token (refreshing an expired grant).
+   * Retrying is bounded to a single attempt so a permanently rejected token
+   * cannot spin.
+   */
+  private async httpRpc(
+    method: string,
+    params: unknown,
+    options: { notify?: boolean; headers?: Record<string, string> } = {},
+    authAttempt: 'initial' | 'retry' = 'initial',
+  ): Promise<{ status: number; response: MCPResponse | null }> {
+    const url = this.config.url;
+    if (!url) throw new Error(`MCP server ${this.serverName}: url is required for SSE transport`);
+
+    // Resolve the bearer token up front so every request in the handshake
+    // carries it, not just tools/call.
+    let authHeaders: Record<string, string> = {};
+    if (this.resolveAuthHeaders) {
+      authHeaders = (await this.resolveAuthHeaders()) ?? {};
+    }
+
+    const body: Record<string, unknown> = { jsonrpc: '2.0', method };
+    // Notifications carry no id — they are fire-and-forget.
+    if (!options.notify) body.id = ++this.requestId;
+    if (params !== undefined) body.params = params;
+    // 2026-07-28 is stateless: version + identity ride along per request. The
+    // 2025-era handshake gets them once, in initialize.
+    if (this.protocolVersion === CURRENT_PROTOCOL_VERSION) {
+      body._meta = {
+        'io.modelcontextprotocol/protocolVersion': this.protocolVersion,
+        'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
+        'io.modelcontextprotocol/clientCapabilities': {},
+      };
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Both encodings must be advertised or strict servers reject the call.
+        Accept: 'application/json, text/event-stream',
+        'Mcp-Method': method,
+        'Mcp-Name': '',
+        ...(this.httpSessionId ? { 'Mcp-Session-Id': this.httpSessionId } : {}),
+        ...authHeaders,
+        ...(this.config.headers ?? {}),
+        ...(options.headers ?? {}),
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(MCP_HTTP_TIMEOUT_MS),
+    });
+
+    if (resp.status === 401) {
+      // Keep the challenge so the UI can start discovery from the server's own
+      // advertised metadata URL rather than guessing.
+      this.authorizationChallenge = resp.headers.get('www-authenticate');
+      this.needsAuthorization = true;
+      if (authAttempt === 'initial') {
+        // A grant may have been issued (or refreshed) since we last looked.
+        const refreshed = this.resolveAuthHeaders ? ((await this.resolveAuthHeaders()) ?? {}) : {};
+        if (Object.keys(refreshed).length > 0) {
+          const hadAuth = Object.keys(authHeaders).length > 0;
+          // Only retry when the token actually changed; otherwise we would loop
+          // on a token the server keeps rejecting.
+          if (JSON.stringify(refreshed) !== JSON.stringify(authHeaders) || !hadAuth) {
+            mcpLog.info(
+              { server: this.serverName, method },
+              'MCP request retried with a refreshed OAuth token after 401',
+            );
+            return this.httpRpc(method, params, options, 'retry');
+          }
+        }
+      }
+      mcpLog.warn(
+        { server: this.serverName, method },
+        'MCP server rejected the request as unauthorized',
+      );
+    }
+
+    const sessionId = resp.headers.get('mcp-session-id');
+    if (sessionId) this.httpSessionId = sessionId;
+
+    // 202 / 204 carry no body (accepted-notification responses).
+    if (resp.status === 202 || resp.status === 204) {
+      return { status: resp.status, response: null };
+    }
+    if (!resp.ok) {
+      return { status: resp.status, response: null };
+    }
+    if (this.needsAuthorization && Object.keys(authHeaders).length > 0) {
+      this.needsAuthorization = false;
+      this.authorizationChallenge = null;
+    }
+
+    const raw = await readBoundedText(resp, MCP_HTTP_MAX_RESPONSE_BYTES);
+    if (!raw.trim()) return { status: resp.status, response: null };
+
+    const contentType = resp.headers.get('content-type') ?? '';
+    const payload = contentType.includes('text/event-stream')
+      ? parseSseJsonRpcPayload(raw, this.serverName)
+      : safeJsonParse(raw);
+
+    if (!payload) {
+      throw new Error(
+        `MCP server ${this.serverName}: ${method} returned an unparseable ${contentType || 'unknown'} response`,
+      );
+    }
+    if (!isJsonRpcResponse(payload)) {
+      // A well-formed JSON body that is not a JSON-RPC envelope (a proxy/gateway
+      // error page, a login redirect, …). Report it as a transport failure so
+      // the caller surfaces the HTTP status rather than "undefined".
+      mcpLog.warn(
+        { server: this.serverName, method, status: resp.status },
+        'MCP endpoint returned a non-JSON-RPC body',
+      );
+      return { status: resp.status, response: null };
+    }
+    return { status: resp.status, response: payload };
+  }
+
   private async connectSSE(): Promise<void> {
     // Streamable HTTP transport — connect to HTTP endpoint.
-    const { url, headers = {} } = this.config;
+    const { url } = this.config;
     if (!url) throw new Error(`MCP server ${this.serverName}: url is required for SSE transport`);
 
     // ── Protocol negotiation via server/discover ──────────────────────────
     let discovered = false;
     try {
-      const discoverResp = await fetch(`${url}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Mcp-Method': 'server/discover',
-          'Mcp-Name': '',
-          ...headers,
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: ++this.requestId,
-          method: 'server/discover',
-          params: {},
-          _meta: {
-            'io.modelcontextprotocol/protocolVersion': CURRENT_PROTOCOL_VERSION,
-            'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
-            'io.modelcontextprotocol/clientCapabilities': {},
-          },
-        }),
-      });
-      if (discoverResp.ok) {
-        const data = (await discoverResp.json()) as MCPResponse;
-        const discover = data.result as MCPDiscoverResult | undefined;
+      const { status, response } = await this.httpRpc('server/discover', {});
+      if (status === 200 && response) {
+        const discover = response.result as MCPDiscoverResult | undefined;
         if (discover?.supportedVersions?.length) {
           const serverSupported = new Set(discover.supportedVersions);
           const negotiated = SUPPORTED_PROTOCOL_VERSIONS.find((v) => serverSupported.has(v));
@@ -464,70 +720,50 @@ export class MCPClient {
     }
 
     if (!discovered) {
-      // Legacy 2025-11-25 initialize over HTTP.
+      // Legacy 2025-11-25 initialize over HTTP. send `Mcp-Protocol-Version` so
+      // servers that validate it accept the handshake.
       this.protocolVersion = LEGACY_PROTOCOL_VERSION;
-      const initResp = await fetch(`${url}/initialize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: ++this.requestId,
-          method: 'initialize',
-          params: {
-            protocolVersion: LEGACY_PROTOCOL_VERSION,
-            capabilities: { roots: { listChanged: false } },
-            clientInfo: { name: 'koryphaios', version: VERSION },
-          },
-        }),
+      const { status, response } = await this.httpRpc('initialize', {
+        protocolVersion: LEGACY_PROTOCOL_VERSION,
+        capabilities: { roots: { listChanged: false } },
+        clientInfo: { name: 'koryphaios', version: VERSION },
       });
-      if (!initResp.ok) {
+      if (status !== 200 || !response) {
         throw new Error(
-          `MCP server ${this.serverName}: initialization failed (${initResp.status})`,
+          this.needsAuthorization
+            ? `MCP server ${this.serverName} requires authorization before it can be used`
+            : `MCP server ${this.serverName}: initialization failed (HTTP ${status})`,
         );
       }
-      const initData = (await initResp.json()) as MCPResponse;
+      if (response.error) {
+        throw new Error(
+          `MCP server ${this.serverName}: initialization failed (${jsonRpcErrorMessage(response)})`,
+        );
+      }
       this.serverCapabilities =
-        (initData.result as { capabilities?: Record<string, unknown> } | undefined)?.capabilities ??
+        (response.result as { capabilities?: Record<string, unknown> } | undefined)?.capabilities ??
         {};
+      // 2025-era servers require the initialized notification before tools/list.
+      await this.httpRpc('notifications/initialized', undefined, { notify: true });
     }
 
     // List tools
-    const toolsResp = await fetch(`${url}/tools/list`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Mcp-Method': 'tools/list',
-        'Mcp-Name': '',
-        ...headers,
-      },
-      body: JSON.stringify(
-        this.protocolVersion === CURRENT_PROTOCOL_VERSION
-          ? {
-              jsonrpc: '2.0',
-              id: ++this.requestId,
-              method: 'tools/list',
-              params: {},
-              _meta: {
-                'io.modelcontextprotocol/protocolVersion': this.protocolVersion,
-                'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
-                'io.modelcontextprotocol/clientCapabilities': {},
-              },
-            }
-          : {
-              jsonrpc: '2.0',
-              id: ++this.requestId,
-              method: 'tools/list',
-              params: {},
-            },
-      ),
-    });
-
-    if (toolsResp.ok) {
-      const data = (await toolsResp.json()) as MCPResponse;
-      const result = data.result as
-        { tools?: MCPToolDef[]; ttlMs?: number; cacheScope?: string } | undefined;
-      this.tools = result?.tools ?? [];
+    const { status, response } = await this.httpRpc('tools/list', {});
+    if (status !== 200 || !response) {
+      throw new Error(
+        this.needsAuthorization
+          ? `MCP server ${this.serverName} requires authorization before it can be used`
+          : `MCP server ${this.serverName}: tools/list failed (HTTP ${status})`,
+      );
     }
+    if (response.error) {
+      throw new Error(
+        `MCP server ${this.serverName}: tools/list failed (${jsonRpcErrorMessage(response)})`,
+      );
+    }
+    const result = response.result as
+      { tools?: MCPToolDef[]; ttlMs?: number; cacheScope?: string } | undefined;
+    this.tools = result?.tools ?? [];
 
     this.connected = true;
     this.scheduleIdleShutdown();
@@ -551,53 +787,25 @@ export class MCPClient {
         }
         return response.result as MCPToolResult;
       } else {
-        // Streamable HTTP transport
-        const isCurrent = this.protocolVersion === CURRENT_PROTOCOL_VERSION;
-        const resp = await fetch(`${this.config.url}/tools/call`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Mcp-Method': 'tools/call',
-            'Mcp-Name': name,
-            ...(this.config.headers ?? {}),
-          },
-          body: JSON.stringify(
-            isCurrent
-              ? {
-                  jsonrpc: '2.0',
-                  id: ++this.requestId,
-                  method: 'tools/call',
-                  params: { name, arguments: args },
-                  _meta: {
-                    'io.modelcontextprotocol/protocolVersion': this.protocolVersion,
-                    'io.modelcontextprotocol/clientInfo': { name: 'koryphaios', version: VERSION },
-                    'io.modelcontextprotocol/clientCapabilities': {},
-                  },
-                }
-              : {
-                  jsonrpc: '2.0',
-                  id: ++this.requestId,
-                  method: 'tools/call',
-                  params: { name, arguments: args },
-                },
-          ),
+        // Streamable HTTP transport — single endpoint, method in the header.
+        const { status, response } = await this.httpRpc('tools/call', {
+          name,
+          arguments: args,
         });
 
-        if (!resp.ok) {
+        if (status !== 200 || !response) {
           return {
-            content: [{ type: 'text', text: `MCP HTTP Error: ${resp.status}` }],
+            content: [{ type: 'text', text: `MCP HTTP Error: ${status}` }],
             isError: true,
           };
         }
-
-        const data = (await resp.json()) as MCPResponse;
-        if (data.error) {
+        if (response.error) {
           return {
-            content: [{ type: 'text', text: `MCP Error: ${data.error.message}` }],
+            content: [{ type: 'text', text: `MCP Error: ${jsonRpcErrorMessage(response)}` }],
             isError: true,
           };
         }
-        return data.result as MCPToolResult;
+        return (response.result ?? { content: [] }) as MCPToolResult;
       }
     } finally {
       this.scheduleIdleShutdown();
@@ -850,6 +1058,9 @@ export class MCPToolWrapper implements Tool {
         callId: input.id,
         name: this.name,
         output: text || '[No text output from MCP tool]',
+        images: result.isError
+          ? []
+          : validatedToolImages(result.content.filter((c) => c.type === 'image')),
         isError: !!result.isError,
         durationMs: performance.now() - start,
       };
@@ -896,13 +1107,33 @@ export class MCPManager {
     }
   }
 
+  /**
+   * Build the per-request auth resolver for a server.
+   *
+   * Only remote (streamable HTTP) servers use OAuth. The resolver asks the OAuth
+   * service for a current bearer token, which refreshes an expired grant when a
+   * refresh token is available and returns null when the user has not authorized
+   * the server yet — which is what puts the client into its
+   * "requires authorization" state instead of failing opaquely.
+   */
+  private authResolverFor(
+    config: MCPServerConfig,
+    projectRoot: string,
+  ): McpAuthHeaderResolver | undefined {
+    if (config.transport === 'stdio') return undefined;
+    return async () => {
+      const { ensureAccessToken } = await import('./oauth-service');
+      return ensureAccessToken(projectRoot, config.name);
+    };
+  }
+
   async connectServer(
     config: MCPServerConfig,
     projectRoot = this.workingDirectory,
   ): Promise<MCPClient> {
     this.assertNameNotActiveInAnotherProject(config.name, projectRoot);
     const key = this.scopeKey(config.name, projectRoot);
-    const client = new MCPClient(config);
+    const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
     await client.connect();
     this.clients.set(key, client);
     return client;
@@ -923,7 +1154,7 @@ export class MCPManager {
       registry.unregisterByPrefix(`mcp_${config.name}_`);
       this.clients.delete(key);
     }
-    const client = new MCPClient(config);
+    const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
     await client.connect();
     this.clients.set(key, client);
     await registerMCPToolsInRegistry(registry, client);
@@ -1003,20 +1234,32 @@ interface MCPInitConfig {
 
 /**
  * Initialize MCP servers from configuration.
+ *
+ * `projectRoot` scopes the manager's clients AND their OAuth grants. It must be
+ * the same root the settings API uses (`getRequestProjectRoot`), otherwise a
+ * server is registered under one project scope while its stored OAuth token is
+ * looked up in another and every request comes back 401.
  */
-export async function initMCP(config: MCPInitConfig, tools: ToolRegistry): Promise<MCPManager> {
-  const manager = new MCPManager(process.cwd());
+export async function initMCP(
+  config: MCPInitConfig,
+  tools: ToolRegistry,
+  projectRoot: string = process.cwd(),
+): Promise<MCPManager> {
+  const manager = new MCPManager(projectRoot);
   const servers = config.mcpServers || {};
 
   for (const [name, serverConfig] of Object.entries(servers)) {
     try {
       const cfg = serverConfig;
-      await manager.connectServer({
-        name,
-        ...cfg,
-        // Normalize "type" field to "transport" (config files use "type")
-        transport: (cfg.transport ?? cfg.type ?? 'stdio') as 'stdio' | 'sse',
-      });
+      await manager.connectServer(
+        {
+          name,
+          ...cfg,
+          // Normalize "type" field to "transport" (config files use "type")
+          transport: (cfg.transport ?? cfg.type ?? 'stdio') as 'stdio' | 'sse',
+        },
+        projectRoot,
+      );
     } catch (err: unknown) {
       mcpLog.error(
         { server: name, err: err instanceof Error ? err.message : String(err) },

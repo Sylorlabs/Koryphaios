@@ -16,7 +16,7 @@ describe('V5 skill packages', () => {
     const catalog = loadV5SkillPackages();
     expect(catalog.errors).toEqual([]);
     expect(catalog.warnings).toEqual([]);
-    expect(catalog.packages).toHaveLength(180);
+    expect(catalog.packages).toHaveLength(182);
     const skillPackage = catalog.packages.find(
       (item) => item.sidecar.name === 'skill-authoring-evaluation',
     )!;
@@ -329,10 +329,10 @@ describe('V5 skill packages', () => {
       loadV5SkillPackages(),
       new Date('2026-09-05T00:00:00Z'),
     );
-    expect(audit.packageCount).toBe(180);
+    expect(audit.packageCount).toBe(182);
     expect(audit.catalogErrors).toEqual([]);
     expect(audit.catalogWarnings).toEqual([]);
-    expect(audit.maturityCounts).toEqual({ individual: 180, scaffold: 0 });
+    expect(audit.maturityCounts).toEqual({ individual: 182, scaffold: 0 });
     expect(audit.stalePackages).toEqual([]);
     expect(audit.weakSourceAuthorityPackages).toEqual([]);
     expect(audit.missingIndividualTaskPackages).toEqual([]);

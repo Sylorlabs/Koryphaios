@@ -122,7 +122,8 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
     iconPath: '/provider-icons/lobehub/antigravity.svg',
     deployment: 'local',
     description:
-      'CLI only. Runs the official agy CLI on your machine. Install agy, run "agy login", then click Auth — credentials stay in the CLI.',
+      'CLI only. Runs the official agy CLI on your machine. Install agy, run "agy login", then click Auth — credentials stay in the CLI. ' +
+      'Native shell, file writes, and web tools are denied by Koryphaios; all host actions run through its approval-gated tool bridge.',
   },
   cursor: {
     label: 'Cursor',
@@ -300,6 +301,69 @@ export const PROVIDER_DISPLAY: Partial<Record<ProviderName, ProviderDisplayMeta>
   },
   stepfun: {
     credentialUrl: 'https://platform.stepfun.com/',
+  },
+
+  // Dedicated capability providers: these have no chat-completions contract,
+  // so they are configured and verified through their own adapters and appear
+  // in the surface matching their API rather than in the chat picker.
+  replicate: {
+    label: 'Replicate',
+    iconPath: '/provider-icons/lobehub/replicate.svg',
+    deployment: 'api',
+    credentialUrl: 'https://replicate.com/account/api-tokens',
+    description: 'Runs image, video, audio, and embedding models through the predictions API.',
+    managerHint:
+      'Replicate generates media asynchronously. For image or video requests call the Koryphaios image or video route rather than expecting a chat completion.',
+  },
+  luma: {
+    label: 'Luma',
+    iconPath: '/provider-icons/lobehub/luma.svg',
+    deployment: 'api',
+    credentialUrl: 'https://platform.lumalabs.ai/',
+    description: 'Dream Machine video and image generation through asynchronous generation jobs.',
+    managerHint:
+      'Luma generations are asynchronous and can take minutes. Submit the job and let the video route poll it rather than blocking a turn.',
+  },
+  klingai: {
+    label: 'Kling AI',
+    iconPath: '/provider-icons/lobehub/kling.svg',
+    deployment: 'api',
+    credentialUrl: 'https://kling.ai/dev',
+    description: 'Kling AI text-to-video, image-to-video, and image generation tasks.',
+    managerHint:
+      'Kling video tasks are asynchronous and billed per task. Use the video route and expect a multi-minute wait.',
+  },
+  prodia: {
+    label: 'Prodia',
+    deployment: 'api',
+    credentialUrl: 'https://app.prodia.com/dashboard/api-tokens',
+    description: 'FLUX, SDXL, Gemini, Recraft, and Wan inference through the unified job endpoint.',
+  },
+  lmnt: {
+    label: 'LMNT',
+    deployment: 'api',
+    credentialUrl: 'https://lmnt.com/settings',
+    description: 'Low-latency speech synthesis with voice cloning across 31 languages.',
+  },
+  voyageai: {
+    label: 'Voyage AI',
+    iconPath: '/provider-icons/lobehub/voyage.svg',
+    deployment: 'api',
+    credentialUrl: 'https://dashboard.voyageai.com/api-keys',
+    description: 'Embeddings and rerankers that back semantic memory retrieval.',
+  },
+  mem0: {
+    label: 'Mem0',
+    deployment: 'cloud',
+    credentialUrl: 'https://app.mem0.ai/dashboard/api-keys',
+    description: 'Managed long-term memory that survives across machines and restarts.',
+  },
+  letta: {
+    label: 'Letta',
+    iconPath: '/provider-icons/letta.svg',
+    deployment: 'cloud',
+    credentialUrl: 'https://app.letta.com/api-keys',
+    description: 'Stateful agents with archival memory blocks and searchable passages.',
   },
 };
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
+  import { providerCapabilityKinds, type ProviderCapabilityKind } from '@koryphaios/shared';
   import { providersStore } from '$lib/stores/providers.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { shortcutStore } from '$lib/stores/shortcuts.svelte';
@@ -40,12 +41,14 @@
   import Eye from 'lucide-svelte/icons/eye';
   import EyeOff from 'lucide-svelte/icons/eye-off';
   import AudioLines from 'lucide-svelte/icons/audio-lines';
+  import Film from 'lucide-svelte/icons/film';
   import ImageIcon from 'lucide-svelte/icons/image';
   import Plug from 'lucide-svelte/icons/plug';
   import Clock3 from 'lucide-svelte/icons/clock-3';
   import House from 'lucide-svelte/icons/house';
   import MemoryEditor from './MemoryEditor.svelte';
   import KorySelect from './KorySelect.svelte';
+  import ProviderExecutionModes from './ProviderExecutionModes.svelte';
   import AgentSettings from './AgentSettings.svelte';
   import ExperimentalSettings from './ExperimentalSettings.svelte';
   import ProviderIcon from './icons/ProviderIcon.svelte';
@@ -72,6 +75,7 @@
   import SettingsSwitch from './SettingsSwitch.svelte';
   import VoiceSettings from './VoiceSettings.svelte';
   import ImageSettings from './ImageSettings.svelte';
+  import VideoSettings from './VideoSettings.svelte';
   import WelcomeSettings from './WelcomeSettings.svelte';
   import McpServersSettings from './McpServersSettings.svelte';
   import ArchivedChatsSettings from './ArchivedChatsSettings.svelte';
@@ -130,8 +134,28 @@
     billing: CreditCard,
     experimental: Shield,
     images: ImageIcon,
+    video: Film,
     mcp: Plug,
   };
+
+  /**
+   * Where a non-chat provider is actually used. These providers have no
+   * chat-completions endpoint, so the badge tells the user which surface the
+   * credential will power instead of leaving them wondering why no models appear.
+   */
+  const CAPABILITY_SURFACE_LABELS: Partial<Record<ProviderCapabilityKind, string>> = {
+    image: 'Images',
+    video: 'Video',
+    audio: 'Voice',
+    embedding: 'Embeddings',
+    rerank: 'Rerank',
+    memory: 'Memory',
+  };
+
+  function capabilityKinds(providerKey: string): ProviderCapabilityKind[] {
+    return providerCapabilityKinds(providerKey);
+  }
+
   const filteredSettingsCatalog = $derived(filterSettingsCatalog(SETTINGS_CATALOG, settingsSearch));
   const selectedSettingsEntry = $derived(
     SETTINGS_CATALOG.find((entry) => entry.id === activeTab) ?? SETTINGS_CATALOG[0],
@@ -171,6 +195,7 @@
   let newKeyValue = $state('');
   let teamJoinCode = $state('');
   let teamGuestName = $state('');
+  let teamHostName = $state('');
   let hostWorkspacePaths = $state<string[]>(
     projectStore.currentPath ? [projectStore.currentPath] : [],
   );
@@ -307,7 +332,7 @@
       toastStore.error('Add at least one workspace path before hosting');
       return;
     }
-    if (await collaborationStore.hostSession(paths)) requestSettingsClose();
+    await collaborationStore.hostSession(paths, teamHostName.trim() || 'Host');
   }
 
   const NOTE_PERMISSION_PRESETS: Array<{
@@ -1985,6 +2010,23 @@
                             Not configured
                           {/if}
                         </p>
+                        {#if capabilityKinds(prov.key).length > 0}
+                          <div class="mt-1 flex flex-wrap items-center gap-1">
+                            {#each capabilityKinds(prov.key) as kind (kind)}
+                              <span
+                                class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]"
+                              >
+                                {CAPABILITY_SURFACE_LABELS[kind] ?? kind}
+                              </span>
+                            {/each}
+                            <span
+                              class="text-[10px] text-[var(--color-text-muted)]"
+                              title="This provider has no chat-completions endpoint. Its key powers the surfaces above, and it is deliberately absent from the chat model list."
+                            >
+                              · no chat models
+                            </span>
+                          </div>
+                        {/if}
                       </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-2">
@@ -2077,6 +2119,7 @@
                           {badge}
                         </div>
                       {/if}
+                      <ProviderExecutionModes capabilities={status?.execution} />
                       {#if prov.key.startsWith('custom:')}
                         {@const currentCustomIcon = providersStore.getCustomProviderIcon(prov.key)}
                         <div
@@ -2917,6 +2960,9 @@
         </div>
         <div class={activeTab === 'images' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
           <ImageSettings />
+        </div>
+        <div class={activeTab === 'video' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+          <VideoSettings />
         </div>
         <div class={activeTab === 'mcp' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
           <McpServersSettings />
@@ -4045,26 +4091,22 @@
         <!-- Teams Tab -->
         <div
           class={activeTab === 'teams'
-            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-8 sm:px-8 lg:px-12 lg:py-10 flex flex-col'
+            ? 'flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-5 sm:px-8 flex flex-col'
             : 'hidden'}
         >
-          <div class="mx-auto flex w-full max-w-7xl flex-1 flex-col pb-16">
-            <div class="mb-12 text-center lg:mb-14">
-              <div
-                class="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-[var(--color-accent)]/10 text-[var(--color-accent)] shadow-xl shadow-[var(--color-accent)]/5"
-              >
-                <Users size={40} />
-              </div>
-              <h3 class="text-2xl font-black text-[var(--color-text-primary)]">
+          <div class="mx-auto flex w-full max-w-5xl flex-1 flex-col pb-8">
+            <div class="mb-5">
+              <h3 class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]">
+                <Users size={18} class="text-[var(--color-accent)]" />
                 Team Collaboration
               </h3>
-              <p class="text-sm text-[var(--color-text-muted)] mt-2">
+              <p class="text-xs leading-5 text-[var(--color-text-muted)] mt-1">
                 The host controls what guests can see, submit, and which models are available
               </p>
             </div>
 
             <div
-              class="mx-auto mb-8 w-full max-w-5xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4"
+              class="mb-5 w-full border-b border-[var(--color-border)] pb-3"
             >
               <SettingsSwitch
                 checked={showTeamSidebarShortcut}
@@ -4077,16 +4119,16 @@
 
             {#if collaborationStore.activeCollab}
               <!-- ── ACTIVE SESSION ── -->
-              <div class="mx-auto w-full max-w-5xl space-y-8">
+              <div class="w-full space-y-5">
                 <!-- Invite links -->
                 <div
-                  class="relative rounded-3xl border border-[var(--color-accent)]/30 bg-[var(--color-surface-2)] p-8 shadow-2xl"
+                  class="rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                 >
                   <div
-                    class="absolute -top-3 left-6 flex items-center gap-1.5 px-4 py-1 rounded-full bg-[var(--color-accent)] text-[10px] font-black uppercase tracking-widest text-[var(--color-surface-0)] shadow-lg"
+                    class="mb-4 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]"
                   >
                     <span
-                      class="h-1.5 w-1.5 rounded-full bg-[var(--color-surface-0)]"
+                      class="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]"
                       aria-hidden="true"
                     ></span>
                     {collaborationStore.activeCollab.relayEnabled
@@ -4235,7 +4277,7 @@
               <!-- ── NOT HOSTING ── -->
               {#if collaborationStore.joinedSessions.length}
                 <div
-                  class="mx-auto mb-10 w-full max-w-5xl rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 lg:p-8"
+                  class="mb-5 w-full border-b border-[var(--color-border)] pb-5"
                 >
                   <div class="mb-5">
                     <h4 class="text-sm font-bold text-[var(--color-text-primary)]">
@@ -4248,7 +4290,7 @@
                   </div>
                   <div class="space-y-3">
                     {#each collaborationStore.joinedSessions as team (team.sessionId)}<div
-                        class="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-4"
+                        class="flex items-center gap-3 rounded-md border border-transparent p-3 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                       >
                         <div class="min-w-0 flex-1">
                           <div class="truncate text-xs font-bold text-[var(--color-text-primary)]">
@@ -4273,23 +4315,28 @@
                   </div>
                 </div>
               {/if}
-              <div class="mx-auto grid w-full max-w-5xl grid-cols-1 gap-8 md:grid-cols-2">
+              <div class="grid w-full grid-cols-1 gap-5 md:grid-cols-2">
                 <div
-                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 text-center transition-all hover:border-[var(--color-accent)]/30 lg:p-8"
+                  class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                 >
                   <div
-                    class="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-success-bg)] text-[var(--color-success)]"
+                    class="mb-3 text-[var(--color-success)]"
                   >
-                    <Zap size={24} />
+                    <Zap size={20} />
                   </div>
-                  <h4 class="mb-3 text-base font-bold">Team session</h4>
-                  <p class="mb-6 text-xs leading-5 text-[var(--color-text-muted)]">
+                  <h4 class="mb-1 text-sm font-semibold">Team session</h4>
+                  <p class="mb-4 text-xs leading-5 text-[var(--color-text-muted)]">
                     Generate invite links for teammates to watch or co-pilot your active AI session
                     in real time.
                   </p>
+                  <label class="mb-4 block text-xs text-[var(--color-text-secondary)]">
+                    Your name shown to teammates
+                    <input bind:value={teamHostName} maxlength="80" placeholder="Host name"
+                      class="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" />
+                  </label>
 
                   <div
-                    class="mb-6 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-5 text-left"
+                    class="mb-4 flex-1 border-t border-[var(--color-border)] pt-4"
                   >
                     <div class="mb-4 flex items-start justify-between gap-4">
                       <div>
@@ -4356,56 +4403,77 @@
                       !hostWorkspacePaths.some((path) => path.trim())}
                     class="btn btn-primary w-full py-3 mt-auto font-bold rounded-xl disabled:opacity-50"
                   >
-                    {collaborationStore.loading ? 'Starting...' : 'Start Collaboration'}
+                    {collaborationStore.loading ? 'Sharing…' : 'Share session'}
                   </button>
                 </div>
 
                 <div
-                  class="flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-7 text-center transition-all hover:border-[var(--color-accent)]/30 lg:p-8"
+                  class="flex flex-col rounded-lg border border-transparent p-5 transition-colors hover:border-[var(--color-border-bright)] focus-within:border-[var(--color-border-bright)]"
                 >
                   <div
-                    class="mx-auto mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--color-info-bg)] text-[var(--color-info)]"
+                    class="mb-3 text-[var(--color-info)]"
                   >
-                    <Keyboard size={24} />
+                    <Keyboard size={20} />
                   </div>
-                  <h4 class="mb-3 text-base font-bold">Connect to a team</h4>
-                  <p class="mb-6 text-xs leading-5 text-[var(--color-text-muted)]">
+                  <h4 class="mb-1 text-sm font-semibold">Connect to a team</h4>
+                  <p class="mb-4 text-xs leading-5 text-[var(--color-text-muted)]">
                     Enter the host's eight-character code. The host's join policy decides whether
                     you are admitted automatically and which access profile you receive.
                   </p>
-                  <div class="mt-auto space-y-4 text-left">
+                  <form
+                    class="mt-auto space-y-3"
+                    onsubmit={(event) => {
+                      event.preventDefault();
+                      if (!collaborationStore.loading)
+                        void collaborationStore.joinSession(teamJoinCode, teamGuestName || 'Guest');
+                    }}
+                  >
                     <input
                       bind:value={teamGuestName}
+                      aria-label="Your display name"
                       placeholder="Your display name"
-                      class="min-h-12 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-sm outline-none focus:border-[var(--color-accent)]"
+                      class="min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
                     />
                     <input
                       bind:value={teamJoinCode}
+                      aria-label="Team join code"
+                      aria-invalid={!!collaborationStore.joinError}
+                      aria-describedby={collaborationStore.joinError ? 'team-join-error' : undefined}
+                      oninput={() => collaborationStore.clearJoinError()}
+                      autocomplete="off"
+                      spellcheck="false"
                       maxlength="8"
                       placeholder="JOIN CODE"
-                      class="min-h-12 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-3 text-center font-mono text-lg font-bold uppercase tracking-[0.2em] outline-none focus:border-[var(--color-accent)]"
+                      class="min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 font-mono text-base font-semibold uppercase tracking-[0.15em] outline-none focus:border-[var(--color-accent)]"
                     />
+                    {#if collaborationStore.joinError}
+                      <p
+                        id="team-join-error"
+                        role="alert"
+                        class="text-xs leading-5 text-[var(--color-error)]"
+                      >
+                        {collaborationStore.joinError}
+                      </p>
+                    {/if}
                     <button
-                      type="button"
-                      disabled={teamJoinCode.trim().length !== 8 || collaborationStore.loading}
-                      onclick={() =>
-                        collaborationStore.joinSession(teamJoinCode, teamGuestName || 'Guest')}
-                      class="btn btn-primary w-full rounded-xl py-3 font-bold disabled:opacity-40"
+                      type="submit"
+                      disabled={!teamJoinCode.trim() || collaborationStore.loading}
+                      class="btn btn-primary w-full rounded-lg py-2.5 font-semibold disabled:opacity-40"
                       >{collaborationStore.loading ? 'Joining…' : 'Request to join'}</button
                     >
                     <p class="text-center text-[10px] text-[var(--color-text-muted)]">
                       Browser guests can still use either signed invite link without installing
                       Koryphaios.
                     </p>
-                  </div>
+                  </form>
                 </div>
               </div>
             {/if}
 
             <!-- ── SECOND SECTION: Share Models ── separate from collaboration;
                its own models-only invite link so it never grants session access. -->
-            <div class="mx-auto mt-12 w-full max-w-5xl border-t border-[var(--color-border)] pt-10">
-              <ModelSharingPanel />
+            <div class="mt-6 w-full border-t border-[var(--color-border)] pt-6">
+              <ModelSharingPanel hostName={collaborationStore.activeCollab?.policy.hostName || teamHostName.trim() || 'Host'} />
             </div>
           </div>
         </div>

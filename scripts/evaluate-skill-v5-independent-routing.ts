@@ -12,7 +12,8 @@ interface IndependentRoutingCase {
   id: string;
   skill: string;
   prompt: string;
-  activation: string[];
+  /** Explicit host pins test personal skills without pretending they are keyword-routed. */
+  pins: string[];
   expectedSelection: boolean;
   expectedSkills: string[];
   forbiddenSkills: string[];
@@ -60,6 +61,7 @@ function parseCase(line: string, lineNumber: number): IndependentRoutingCase {
     expectedSelection: row.expectedSelection,
     expectedSkills: parseStringList(row.expectedSkills, `line ${lineNumber} expectedSkills`),
     forbiddenSkills: parseStringList(row.forbiddenSkills, `line ${lineNumber} forbiddenSkills`),
+    pins: row.pins === undefined ? [] : parseStringList(row.pins, `line ${lineNumber} pins`),
     activePaths: parseStringList(row.activePaths, `line ${lineNumber} activePaths`),
     tags: parseStringList(row.tags, `line ${lineNumber} tags`),
   };
@@ -90,7 +92,11 @@ for (const testCase of cases) {
   if (testCase.expectedSelection && !testCase.expectedSkills.includes(testCase.skill)) {
     validationErrors.push(`${testCase.id} must include its target skill in expectedSkills`);
   }
-  for (const related of [...testCase.expectedSkills, ...testCase.forbiddenSkills]) {
+  for (const related of [
+    ...testCase.expectedSkills,
+    ...testCase.forbiddenSkills,
+    ...testCase.pins,
+  ]) {
     if (!knownSkills.has(related))
       validationErrors.push(`${testCase.id} references unknown ${related}`);
   }
@@ -109,16 +115,28 @@ const failures: Array<{
   forbiddenPresent: string[];
   selected: string[];
   directReasons: Record<string, string>;
+  activation: string[];
 }> = [];
 let expectedSkillChecks = 0;
 let expectedSkillHits = 0;
 let forbiddenSkillChecks = 0;
 let forbiddenSkillAvoided = 0;
 
-for (const testCase of cases) {
+const requestedSkill = process.argv
+  .find((argument) => argument.startsWith('--skill='))
+  ?.slice('--skill='.length);
+if (requestedSkill && !knownSkills.has(requestedSkill)) {
+  throw new Error(`Unknown independent routing skill ${requestedSkill}`);
+}
+const evaluatedCases = requestedSkill
+  ? cases.filter((testCase) => testCase.skill === requestedSkill)
+  : cases;
+
+for (const testCase of evaluatedCases) {
   const contract = createTaskContract(testCase.prompt);
   const resolution = resolveSkills(projectRoot, testCase.prompt, contract, {
     activePaths: testCase.activePaths,
+    pins: testCase.pins,
     contextBudget: 60_000,
   });
   const selected = resolution.selected.map((item) => item.skill.name);
@@ -164,9 +182,10 @@ for (const testCase of cases) {
 const result = {
   schemaVersion: 1,
   corpus: 'skills-v5/independent-routing.jsonl',
-  cases: cases.length,
+  cases: evaluatedCases.length,
+  corpusCases: cases.length,
   coveredSkills: coveredSkills.size,
-  passedCases: cases.length - failures.length,
+  passedCases: evaluatedCases.length - failures.length,
   failedCases: failures.length,
   expectedSkillRecall:
     expectedSkillChecks > 0 ? Number((expectedSkillHits / expectedSkillChecks).toFixed(4)) : 1,

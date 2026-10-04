@@ -95,6 +95,36 @@ describe('ollama adapter', () => {
     expect(messages[2]).toMatchObject({ role: 'tool', content: '5C', tool_name: 'get_weather' });
   });
 
+  test('preserves historical and current images in native images arrays', () => {
+    const wire = ollamaAdapter.buildChatRequest(
+      chatRequest({
+        systemPrompt: '',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image', imageData: 'cGFzdA==', imageMimeType: 'image/png' }],
+          },
+          { role: 'assistant', content: 'Earlier answer' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Compare these' },
+              { type: 'image', imageData: 'bm93', imageMimeType: 'image/jpeg' },
+            ],
+          },
+        ],
+      }),
+      CTX,
+    );
+    expect(wire.body).toMatchObject({
+      messages: [
+        { role: 'user', content: '', images: ['cGFzdA=='] },
+        { role: 'assistant', content: 'Earlier answer' },
+        { role: 'user', content: 'Compare these', images: ['bm93'] },
+      ],
+    });
+  });
+
   test('parseEvent maps content, thinking, and tool calls', () => {
     expect(ollamaAdapter.parseEvent({ message: { content: 'Hello' } })).toMatchObject({
       contentDelta: 'Hello',

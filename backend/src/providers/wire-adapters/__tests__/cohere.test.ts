@@ -81,6 +81,50 @@ describe('cohere adapter', () => {
     });
   });
 
+  test('preserves multimodal content order and each image MIME type', () => {
+    const wire = cohereAdapter.buildChatRequest(
+      chatRequest({
+        model: 'command-a-vision',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Compare' },
+              { type: 'image', imageData: 'cG5n', imageMimeType: 'image/png' },
+              { type: 'text', text: 'with' },
+              { type: 'image', imageData: 'anBlZw==', imageMimeType: 'image/jpeg' },
+            ],
+          },
+        ],
+      }),
+      CTX,
+    );
+    expect(wire.body).toMatchObject({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Compare' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,cG5n' } },
+            { type: 'text', text: 'with' },
+            { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,anBlZw==' } },
+          ],
+        },
+      ],
+    });
+  });
+
+  test('rejects an invalid image instead of sending a text-only request', () => {
+    expect(() =>
+      cohereAdapter.buildChatRequest(
+        chatRequest({
+          messages: [{ role: 'user', content: [{ type: 'image', imageData: '' }] }],
+        }),
+        CTX,
+      ),
+    ).toThrow('without image data');
+  });
+
   test('parseEvent maps typed SSE events into canonical chunks', () => {
     expect(
       cohereAdapter.parseEvent({

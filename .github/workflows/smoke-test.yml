@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to smoke test (for example v0.2.0)'
+        description: 'Release tag to smoke test (for example v0.5.0)'
         required: true
         type: string
       promote:

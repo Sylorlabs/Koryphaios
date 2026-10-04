@@ -1,4 +1,14 @@
-# ADR-009 (proposed): Freebuff integration via @codebuff/sdk — reject the PTY/TUI-scrape path
+# Historical draft: Freebuff SDK feasibility (superseded)
+
+> **Superseded. Do not implement the recommendation below.** The active Freebuff
+> provider uses its real CLI, mandatory Linux bubblewrap, private tmux and signed
+> MCP. Modern Freebuff 0.2.12 loads trusted MCP servers into its own base agents;
+> the Codebuff SDK's pinned store agent cannot be extended that way. Freebuff
+> credentials must never be reused as a Codebuff SDK API key. See
+> [the current implementation and setup](../freebuff-cli.md). The original draft
+> is retained only as historical investigation, not current provider guidance.
+
+## Original proposal: Freebuff integration via @codebuff/sdk — reject the PTY/TUI-scrape path
 
 > Status: **Draft — verdict: NO on PTY path.** SDK path remains the only
 > supportable integration. This document is the evidence ledger for that
@@ -45,7 +55,8 @@
 > translate cleanly into Koryphaios `ProviderEvent`s. It also gives us
 > `overrideTools` to route every native Freebuff file/command tool through
 > Koryphaios's `ToolRegistry` and permission system — something a TUI scraper
-> can never do, because a scraper can only *observe* what the binary already
+> can never do, because a scraper can only _observe_ what the binary already
+
 ---
 
 ## 1. Binary surface — what `freebuff` actually exposes
@@ -131,13 +142,13 @@ error: command-argument value 'chat' is invalid for argument 'command'. Allowed 
 
 Only five entry points exist:
 
-| entry                        | what it does                                             |
-| ---------------------------- | -------------------------------------------------------- |
-| `freebuff`                   | opens TUI, runs interactive chat                         |
-| `freebuff login`             | opens browser device-code auth flow                      |
-| `freebuff --continue [id]`   | opens TUI, optionally resuming a stored conversation     |
-| `freebuff --cwd <dir>`       | opens TUI in that directory                               |
-| `freebuff --help` / `--version` | prints and exits cleanly                              |
+| entry                           | what it does                                         |
+| ------------------------------- | ---------------------------------------------------- |
+| `freebuff`                      | opens TUI, runs interactive chat                     |
+| `freebuff login`                | opens browser device-code auth flow                  |
+| `freebuff --continue [id]`      | opens TUI, optionally resuming a stored conversation |
+| `freebuff --cwd <dir>`          | opens TUI in that directory                          |
+| `freebuff --help` / `--version` | prints and exits cleanly                             |
 
 There is **no `exec`, no `chat`, no `run`, no `agent`, no `print`, no `query`,
 no `headless`, no `acp`, no `stdio`, no `json`, no `stream-json`** subcommand.
@@ -186,13 +197,13 @@ editor mode of a full TUI framework — not a CLI utility.
 
 `grep -nE 'process\.env\.[A-Z_]+' /home/micah/.../launcher.js`:
 
-| Line | Env var                                          | Purpose                                       |
-| ---- | ------------------------------------------------ | --------------------------------------------- |
-| 131  | `CODEBUFF_POSTHOG_API_KEY` / `NEXT_PUBLIC_POSTHOG_API_KEY` | Telemetry (optional)                          |
-| 134  | `CODEBUFF_POSTHOG_HOST` / `NEXT_PUBLIC_POSTHOG_HOST_URL`  | Telemetry host (optional)                     |
+| Line    | Env var                                                              | Purpose                                                                                 |
+| ------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 131     | `CODEBUFF_POSTHOG_API_KEY` / `NEXT_PUBLIC_POSTHOG_API_KEY`           | Telemetry (optional)                                                                    |
+| 134     | `CODEBUFF_POSTHOG_HOST` / `NEXT_PUBLIC_POSTHOG_HOST_URL`             | Telemetry host (optional)                                                               |
 | 229–233 | `<PKG>_BINARY_TARGET`, `CODEBUFF_BINARY_TARGET`, `CLI_BINARY_TARGET` | Override which native binary tarball to fetch (`linux-x64`, `linux-x64-baseline`, etc.) |
-| 725  | `NEXT_PUBLIC_CODEBUFF_APP_URL` (default `https://codebuff.com`) | Releases host                                  |
-| 1132 | `CODEBUFF_LAUNCHER_PID`                          | **Set by the wrapper**, not read by us — exposed to the child |
+| 725     | `NEXT_PUBLIC_CODEBUFF_APP_URL` (default `https://codebuff.com`)      | Releases host                                                                           |
+| 1132    | `CODEBUFF_LAUNCHER_PID`                                              | **Set by the wrapper**, not read by us — exposed to the child                           |
 
 That is the **entire** env-var surface. None of these toggle headless/print
 mode. `FREEBUFF_BINARY_TARGET` exists but only selects an alternate native
@@ -224,7 +235,7 @@ target override, launcher PID). **No operational env vars exist.**
 `strings /home/micah/.config/manicode/freebuff | grep -E '^--[a-z-]+$'` produced
 ~150 candidates, but every single one is from Bun's built-in CLI (its
 runtime help, `--compile-exec-argv`, `--print`, etc.) or from Bun's bundled
-npm/test runner. They are *Bun's* flags, not Freebuff's. The Freebuff CLI is
+npm/test runner. They are _Bun's_ flags, not Freebuff's. The Freebuff CLI is
 parsed by Commander.js (the `error: unknown option '--print'` error format
 is the Commander 12.x default), and the binary rejects every non-Commander
 flag at startup. There is no `--internal-print`, no `--acp`, no
@@ -232,7 +243,7 @@ flag at startup. There is no `--internal-print`, no `--acp`, no
 
 ### 2.4 Codebuff-style protocol flags that DO appear in the binary
 
-These are *client-side protocol negotiation* flags, not output flags:
+These are _client-side protocol negotiation_ flags, not output flags:
 
 - `--headless` (Chrome DevTools Protocol; appears in libuv bundle)
 - kitty keyboard protocol (`?u`, `<u`) — handled by the TUI framework
@@ -243,7 +254,7 @@ These are *client-side protocol negotiation* flags, not output flags:
   what the host supports.
 
 None of these implies a headless mode. They are alt-screen + kitty +
-progress reporting, which is *the opposite* of headless — they make the TUI
+progress reporting, which is _the opposite_ of headless — they make the TUI
 richer.
 ---
 
@@ -254,8 +265,14 @@ The launcher has a deliberate fallback to a source-checkout location:
 ```js
 // index.js
 const sourceLauncherPath = path.join(
-  __dirname, '..', '..', '..', 'cli', 'release-core', 'launcher.js',
-)
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'cli',
+  'release-core',
+  'launcher.js',
+);
 ```
 
 which means "if you're inside the Freebuff monorepo at `<repo>/packages/freebuff/`,
@@ -294,7 +311,7 @@ $bunfs/root/libopentui-xtk56e94.so
 
 `$bunfs/root/` is the path inside Bun-compiled single-file binaries for
 native `.so` libraries. Opentui is an OpenGL/Skia-style native TUI library
-with a Rust core and a TS/JS layer — *not* the Yoga/Ink React reconciler
+with a Rust core and a TS/JS layer — _not_ the Yoga/Ink React reconciler
 that the spec assumed. Concretely, this changes the scraping picture:
 
 - **No React DevTools-style element tree to hook.** Ink emits deterministic
@@ -308,7 +325,7 @@ that the spec assumed. Concretely, this changes the scraping picture:
   tree-sitter-highlighted fragments interleaved with progress spinners
   and a constantly redrawing model picker.
 - **Progress notification protocol via OSC 9;4 / OSC 2026.** The launcher
-  queries `?2026$p`, `?2027$p`, `?2031$p` at startup. These are *terminal*
+  queries `?2026$p`, `?2027$p`, `?2031$p` at startup. These are _terminal_
   progress reporting; the host can render a taskbar/dock progress indicator.
   For a scraper, they are noise that has to be filtered out before any
   semantic extraction can happen.
@@ -365,8 +382,8 @@ Even a perfect scraper cannot:
   run inside the binary. The scraper sees only that the message region
   changed. There is no `MCP server`-style boundary to insert policy.
 - **Enforce Koryphaios permissions.** `kory__bash`, `kory__write_file`,
-  `kory__edit_file` policy requires intercepting the tool *call*, not
-  observing the tool *result*. Once the binary has run `rm -rf`, the
+  `kory__edit_file` policy requires intercepting the tool _call_, not
+  observing the tool _result_. Once the binary has run `rm -rf`, the
   damage is done; a scraper only sees `bubble: "I deleted /tmp/build"`.
 - **Inject sandboxing.** There is no `--sandbox` flag (unlike cursor or
   agy). `kory__bash` goes through `BashSandbox` (which uses Landlock +
@@ -383,15 +400,15 @@ Even a perfect scraper cannot:
 
 ### 5.4 Cost estimate (rough)
 
-| phase                                                          | effort          |
-| -------------------------------------------------------------- | --------------- |
-| node-pty + grid emulator + Opentui-aware decoder (greenfield)  | 1–2 weeks       |
-| Mock provider, screen-diff → ProviderEvent adapter             | 1 week          |
-| Test against 0.0.160 + 1–2 prior versions                     | 1 week          |
-| Permission/sandbox hook shim (impossible — see §5.3)           | blocked         |
-| Ongoing maintenance per upstream release                       | ~2 days each    |
-| Total to first shippable cut                                   | ~3 weeks       |
-| Plus ~2 days/upstream-release maintenance forever             | unbounded       |
+| phase                                                         | effort       |
+| ------------------------------------------------------------- | ------------ |
+| node-pty + grid emulator + Opentui-aware decoder (greenfield) | 1–2 weeks    |
+| Mock provider, screen-diff → ProviderEvent adapter            | 1 week       |
+| Test against 0.0.160 + 1–2 prior versions                     | 1 week       |
+| Permission/sandbox hook shim (impossible — see §5.3)          | blocked      |
+| Ongoing maintenance per upstream release                      | ~2 days each |
+| Total to first shippable cut                                  | ~3 weeks     |
+| Plus ~2 days/upstream-release maintenance forever             | unbounded    |
 
 The SDK path is already implemented by the parallel teammate and uses
 `@codebuff/sdk`'s built-in `overrideTools` hook for permission/tool
@@ -401,22 +418,23 @@ routing. The PTY path would deliver strictly less than the SDK path for
 
 ## 6. Side-by-side: PTY path vs SDK path
 
-| Capability                                   | PTY/TUI-scrape                                                      | @codebuff/sdk                                                                  |
-| -------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Streaming chat**                           | Screen diff every ~100ms; loss of token boundaries                  | Native `PrintModeEvent.text` deltas with token-level granularity                |
-| **Tool execution & permission enforcement**  | **Impossible** — observe post-hoc only                              | `overrideTools` rewrites every native tool call to `kory__*` (write_file → kory__write_file, run_terminal → kory__bash, etc.) — same gating as Claude/Codex |
-| **Sandboxing**                                | **Impossible** — no boundary to insert                              | `kory__bash` uses Landlock + seccomp via `BashSandbox`; `kory__write_file` uses path allowlists |
-| **Structured events**                        | Reconstructed from painted grid; fragile                            | Typed `text`, `tool_call`, `tool_result`, `reasoning_delta`, `finish`, `error` |
-| **Resilience to upstream UI changes**        | **Low** — every Freebuff release can shift pixels and break us      | **High** — SDK is a stable public contract (`registry.npmjs.org/@codebuff/sdk`); the binary can re-skin freely without breaking us |
-| **Token / auth flow**                        | Token must be pasted or scraped from the TUI's login screen         | Read from `~/.config/manicode/credentials.json` (written by `freebuff login`) — no token in Koryphaios source |
-| **Model discovery**                          | Reverse-engineer the model picker; update on every change           | Dynamic via OpenRouter (`openrouter.ai/api/v1/models`) filtered by Codebuff's allowlist — no hardcoding |
-| **Build / maintenance cost**                 | 3 weeks initial + ~2 days per upstream release                      | Already shipped (`backend/src/providers/freebuff.ts`, 1323 lines)               |
-| **Risk profile**                              | High — brittle scraper + no permission enforcement                  | Low — public npm contract + proven override pattern already in use              |
-| **Dependency on the native binary**           | Required at runtime (PTY only works if installed)                   | None — SDK runs in Node; binary is only needed for `freebuff login` once       |
-| **CI smoke-testability**                      | Requires a real terminal; hard to mock                              | Unit-testable with `CodebuffClient` mocked                                    |
-| **Bundle size impact**                        | `node-pty` (~10 MB native) + grid emulator                          | `@codebuff/sdk` (~200 KB JS)                                                  |
-| **Cross-platform**                            | node-pty native modules per arch (linux/darwin/win32 × x64/arm64)  | Pure JS, no native build                                                       |
-| **Stability of upstream**                    | TUI may break any release                                           | SDK pinned at v0.10.7 in `backend/package.json`; upgrade path is documented     |
+| Capability                                  | PTY/TUI-scrape                                                    | @codebuff/sdk                                                                                                                                               |
+| ------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Streaming chat**                          | Screen diff every ~100ms; loss of token boundaries                | Native `PrintModeEvent.text` deltas with token-level granularity                                                                                            |
+| **Tool execution & permission enforcement** | **Impossible** — observe post-hoc only                            | `overrideTools` rewrites every native tool call to `kory__*` (write_file → kory__write_file, run_terminal → kory__bash, etc.) — same gating as Claude/Codex |
+| **Sandboxing**                              | **Impossible** — no boundary to insert                            | `kory__bash` uses Landlock + seccomp via `BashSandbox`; `kory__write_file` uses path allowlists                                                             |
+| **Structured events**                       | Reconstructed from painted grid; fragile                          | Typed `text`, `tool_call`, `tool_result`, `reasoning_delta`, `finish`, `error`                                                                              |
+| **Resilience to upstream UI changes**       | **Low** — every Freebuff release can shift pixels and break us    | **High** — SDK is a stable public contract (`registry.npmjs.org/@codebuff/sdk`); the binary can re-skin freely without breaking us                          |
+| **Token / auth flow**                       | Token must be pasted or scraped from the TUI's login screen       | Read from `~/.config/manicode/credentials.json` (written by `freebuff login`) — no token in Koryphaios source                                               |
+| **Model discovery**                         | Reverse-engineer the model picker; update on every change         | Dynamic via OpenRouter (`openrouter.ai/api/v1/models`) filtered by Codebuff's allowlist — no hardcoding                                                     |
+| **Build / maintenance cost**                | 3 weeks initial + ~2 days per upstream release                    | Already shipped (`backend/src/providers/freebuff.ts`, 1323 lines)                                                                                           |
+| **Risk profile**                            | High — brittle scraper + no permission enforcement                | Low — public npm contract + proven override pattern already in use                                                                                          |
+| **Dependency on the native binary**         | Required at runtime (PTY only works if installed)                 | None — SDK runs in Node; binary is only needed for `freebuff login` once                                                                                    |
+| **CI smoke-testability**                    | Requires a real terminal; hard to mock                            | Unit-testable with `CodebuffClient` mocked                                                                                                                  |
+| **Bundle size impact**                      | `node-pty` (~10 MB native) + grid emulator                        | `@codebuff/sdk` (~200 KB JS)                                                                                                                                |
+| **Cross-platform**                          | node-pty native modules per arch (linux/darwin/win32 × x64/arm64) | Pure JS, no native build                                                                                                                                    |
+| **Stability of upstream**                   | TUI may break any release                                         | SDK pinned at v0.10.7 in `backend/package.json`; upgrade path is documented                                                                                 |
+
 ---
 
 ## 7. Verdict
@@ -464,7 +482,7 @@ Freebuff team for an official headless contract, not to scrape the TUI.
    not depend on `@codebuff/sdk` for the binary (the binary only runs
    for `freebuff login`, which the user does once locally). We depend on
    the SDK for the programmatic surface, which is its explicit purpose.
-   **Fails on framing — the SDK *is* Freebuff's official programmatic
+   **Fails on framing — the SDK _is_ Freebuff's official programmatic
    surface; the CLI is not.**
 3. **"We can scrape it, it's only a TUI."** — True, but the scrape would
    only see what the binary already did, with no boundary to insert
@@ -478,7 +496,7 @@ Freebuff team for an official headless contract, not to scrape the TUI.
 1. **Permission enforcement.** `overrideTools` rewrites every native
    Freebuff tool to `kory__write_file`, `kory__bash`, `kory__edit_file`,
    etc., giving Freebuff the same gating and sandboxing as every other
-   Koryphaios provider. A PTY scraper can only *observe* tools it has
+   Koryphaios provider. A PTY scraper can only _observe_ tools it has
    already executed.
 2. **Stable structured events.** `@codebuff/sdk` ships typed
    `PrintModeEvent`s. A TUI scrape gives us a screen diff that we would
@@ -486,6 +504,7 @@ Freebuff team for an official headless contract, not to scrape the TUI.
 3. **Lowest cost, already shipped.** `backend/src/providers/freebuff.ts`
    is 1,323 lines of working code. The PTY path would be 3 weeks of new
    work for strictly less capability.
+
 ---
 
 ## 10. Anything unexpected
@@ -494,15 +513,15 @@ Freebuff team for an official headless contract, not to scrape the TUI.
   which would have been at least somewhat scrape-friendly via a React
   element tree. Opentui paints into a native Skia/GL canvas with no
   intermediate JSON tree — the scraper sees only ANSI. This makes the
-  PTY path *strictly worse* than the spec estimated.
+  PTY path _strictly worse_ than the spec estimated.
 - The wrapper version (0.0.141) is **separate** from the native child
   version (0.0.160). The wrapper is published as `freebuff@0.0.141` on
   npm, and the wrapper itself downloads `0.0.160` from `codebuff.com`.
   This means the npm tarball is **not** the same thing as the running
   binary; any future PTY approach would need to track two version lines.
 - The CLI parser is **Commander.js** (the `error: unknown option
-  '--print'` and `Allowed choices are login` errors are the exact
-  Commander 12.x default messages). It is *not* a hand-rolled parser, so
+'--print'` and `Allowed choices are login` errors are the exact
+  Commander 12.x default messages). It is _not_ a hand-rolled parser, so
   we know there is no "hidden" command path — Commander rejects
   unknown argv tokens before they reach our code.
 - The wrapper sets `CODEBUFF_LAUNCHER_PID=String(process.pid)` and
@@ -517,7 +536,7 @@ Freebuff team for an official headless contract, not to scrape the TUI.
   reads this file directly (`authToken` + `fingerprintId`). That is
   the supported auth surface for both paths — but only the SDK actually
   uses it programmatically. The PTY path would need to also read this
-  file (or scrape the login flow), which is *more* work than the SDK,
+  file (or scrape the login flow), which is _more_ work than the SDK,
   not less.
 - The README of `codebuff-private` is the same as `codebuff`. The
   Freebuff team intentionally re-uses the Codebuff codebase and

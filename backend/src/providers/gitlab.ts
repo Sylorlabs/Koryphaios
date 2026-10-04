@@ -267,6 +267,7 @@ function httpErrorMessage(status: number, detail: string): { error: string; tran
 }
 
 export class GitLabProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'gitlab' as const;
 
   constructor(readonly config: ProviderConfig) {}

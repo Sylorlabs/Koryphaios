@@ -12,6 +12,7 @@ export type SettingsTab =
   | 'billing'
   | 'experimental'
   | 'images'
+  | 'video'
   | 'mcp';
 
 export type SettingsGroup = 'Intelligence' | 'Workspace' | 'Experience' | 'Operations';
@@ -164,6 +165,24 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     scope: 'This app',
     group: 'Operations',
     keywords: ['image', 'vision', 'generation', 'editing', 'capability'],
+  },
+  {
+    id: 'video',
+    label: 'Video capabilities',
+    description: 'Generate clips through Luma, Kling AI, Prodia, or Replicate.',
+    scope: 'This app',
+    group: 'Operations',
+    keywords: [
+      'video',
+      'clip',
+      'generation',
+      'luma',
+      'kling',
+      'prodia',
+      'replicate',
+      'aspect ratio',
+      'duration',
+    ],
   },
 ] as const;
 

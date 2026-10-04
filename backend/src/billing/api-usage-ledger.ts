@@ -12,7 +12,11 @@ import { getDb } from '../db';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { serverLog } from '../logger';
 
-export type ApiUsageKind = 'image' | 'tts' | 'stt';
+export type ApiUsageKind = 'image' | 'video' | 'tts' | 'stt' | 'embedding';
+
+/** Kept in the same order as the CHECK lists so the DDL never drifts. */
+const API_USAGE_KINDS: ApiUsageKind[] = ['image', 'video', 'tts', 'stt', 'embedding'];
+const UNIT_MEASURES = ['images', 'videos', 'characters', 'minutes', 'tokens'] as const;
 
 export interface ApiUsageEntry {
   id: string;
@@ -24,7 +28,7 @@ export interface ApiUsageEntry {
   /** Rough USD estimate when pricing is known. Never a quote. */
   estimatedCostUsd?: number;
   /** Billable units the estimate is based on. */
-  units?: { measure: 'images' | 'characters' | 'minutes'; amount: number };
+  units?: { measure: (typeof UNIT_MEASURES)[number]; amount: number };
   /** Short human-readable context, e.g. "1024x1024 · high". */
   detail?: string;
   /** Owning chat session when the API call was made from a session turn. */
@@ -160,7 +164,7 @@ function rowToEntry(row: Record<string, unknown>): ApiUsageEntry {
     ['images', 'characters', 'minutes'].includes(row.unit_measure)
   ) {
     entry.units = {
-      measure: row.unit_measure as 'images' | 'characters' | 'minutes',
+      measure: row.unit_measure as (typeof UNIT_MEASURES)[number],
       amount: row.unit_amount,
     };
   }
@@ -230,15 +234,85 @@ function ensureSchema(database: Database): void {
     CREATE TABLE IF NOT EXISTS api_usage (
       id TEXT PRIMARY KEY,
       ts INTEGER NOT NULL,
-      kind TEXT NOT NULL CHECK (kind IN ('image', 'tts', 'stt')),
+      kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'tts', 'stt', 'embedding')),
       provider TEXT NOT NULL,
       model TEXT NOT NULL,
       estimated_cost_usd REAL,
-      unit_measure TEXT CHECK (unit_measure IN ('images', 'characters', 'minutes')),
+      unit_measure TEXT CHECK (unit_measure IN ('images', 'videos', 'characters', 'minutes', 'tokens')),
       unit_amount REAL,
       detail TEXT
     );
   `);
+  widenApiUsageConstraints(database);
+}
+
+/**
+ * `CREATE TABLE IF NOT EXISTS` never touches an existing table, so an install
+ * that predates the video and embedding usage kinds keeps the original CHECK
+ * lists and every video or embedding insert fails at the database layer. Detect
+ * the stale constraint from the stored DDL and rebuild the table in place when
+ * it is missing a kind, preserving all recorded usage.
+ */
+function widenApiUsageConstraints(database: Database): void {
+  let ddl: string | undefined;
+  try {
+    ddl = (
+      database
+        .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'api_usage'`)
+        .get() as { sql?: string } | undefined
+    )?.sql;
+  } catch {
+    return;
+  }
+  if (!ddl) return;
+  const missingKind = API_USAGE_KINDS.find((kind) => !ddl!.includes(`'${kind}'`));
+  const missingUnit = UNIT_MEASURES.find((measure) => !ddl!.includes(`'${measure}'`));
+  if (!missingKind && !missingUnit) return;
+
+  // Session and run attribution live inside the `detail` JSON envelope rather
+  // than in their own columns, so the rebuild copies the ten real columns.
+  const columns = (
+    database.prepare(`PRAGMA table_info(api_usage)`).all() as Array<{ name: string }>
+  ).map((column) => column.name);
+  const copyable = [
+    'id',
+    'ts',
+    'kind',
+    'provider',
+    'model',
+    'estimated_cost_usd',
+    'unit_measure',
+    'unit_amount',
+    'detail',
+  ].filter((column) => columns.includes(column));
+
+  database.transaction(() => {
+    database.run(`
+      CREATE TABLE api_usage_widened (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'tts', 'stt', 'embedding')),
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        estimated_cost_usd REAL,
+        unit_measure TEXT CHECK (unit_measure IN ('images', 'videos', 'characters', 'minutes', 'tokens')),
+        unit_amount REAL,
+        detail TEXT
+      )
+    `);
+    if (copyable.length) {
+      database.run(
+        `INSERT OR IGNORE INTO api_usage_widened (${copyable.join(', ')})
+         SELECT ${copyable.join(', ')} FROM api_usage`,
+      );
+    }
+    database.run(`DROP TABLE api_usage`);
+    database.run(`ALTER TABLE api_usage_widened RENAME TO api_usage`);
+  })();
+  serverLog.info(
+    { addedKind: missingKind ?? null, addedUnitMeasure: missingUnit ?? null },
+    'Widened api_usage kind and unit constraints',
+  );
 }
 
 function withDb(): Database {
@@ -361,7 +435,9 @@ export async function apiUsageTotals(): Promise<ApiUsageTotals> {
     const kindRows = database
       .prepare(`SELECT kind, COUNT(*) AS count FROM api_usage GROUP BY kind`)
       .all() as Array<{ kind: string; count: number }>;
-    const byKind: Record<ApiUsageKind, number> = { image: 0, tts: 0, stt: 0 };
+    const byKind: Record<ApiUsageKind, number> = Object.fromEntries(
+      API_USAGE_KINDS.map((kind) => [kind, 0]),
+    ) as Record<ApiUsageKind, number>;
     for (const row of kindRows) {
       if (row.kind in byKind) byKind[row.kind as ApiUsageKind] = row.count;
     }
@@ -385,7 +461,14 @@ export async function apiUsageTotals(): Promise<ApiUsageTotals> {
       { err: err instanceof Error ? err.message : String(err) },
       'Failed to compute API usage totals',
     );
-    return { totalCount: 0, byKind: { image: 0, tts: 0, stt: 0 }, estimatedCostUsd: undefined };
+    return {
+      totalCount: 0,
+      byKind: Object.fromEntries(API_USAGE_KINDS.map((kind) => [kind, 0])) as Record<
+        ApiUsageKind,
+        number
+      >,
+      estimatedCostUsd: undefined,
+    };
   }
 }
 
@@ -406,12 +489,20 @@ export async function apiUsageDaily(days = 30): Promise<ApiUsageDailyBucket[]> {
     for (const row of rows) {
       let bucket = buckets.get(row.day);
       if (!bucket) {
-        bucket = { day: row.day, byKind: { image: 0, tts: 0, stt: 0 }, estimatedCostUsd: 0 };
+        bucket = {
+          day: row.day,
+          byKind: Object.fromEntries(API_USAGE_KINDS.map((kind) => [kind, 0])) as Record<
+            ApiUsageKind,
+            number
+          >,
+          estimatedCostUsd: 0,
+        };
         buckets.set(row.day, bucket);
       }
-      if (row.kind in bucket.byKind) bucket.byKind[row.kind as ApiUsageKind] += row.count;
-      bucket.estimatedCostUsd = Number(
-        (((bucket.estimatedCostUsd ?? 0) + (row.cost ?? 0)) as number).toFixed(4),
+      const current = bucket;
+      if (row.kind in current.byKind) current.byKind[row.kind as ApiUsageKind] += row.count;
+      current.estimatedCostUsd = Number(
+        (((current.estimatedCostUsd ?? 0) + (row.cost ?? 0)) as number).toFixed(4),
       );
     }
     return [...buckets.values()].map((bucket) => ({

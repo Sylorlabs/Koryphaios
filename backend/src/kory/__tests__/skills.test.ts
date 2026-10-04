@@ -108,7 +108,7 @@ describe('local Koryphaios skills', () => {
   });
   test('seeds the complete instruction-only default library', () => {
     const active = listSkills(root).filter((skill) => skill.state === 'active');
-    expect(active).toHaveLength(181);
+    expect(active).toHaveLength(182);
     expect(active.every((skill) => skill.validation.valid)).toBe(true);
     expect(active.every((skill) => skill.metadata.sourceScope === 'local-only')).toBe(true);
     for (const name of INCOMPATIBLE_EXTERNAL_SKILL_RESOURCES.keys()) {
@@ -116,18 +116,18 @@ describe('local Koryphaios skills', () => {
     }
   });
 
-  test('proves the complete 34 + 47 + 100 definition contract before deployment', () => {
+  test('proves the complete 35 + 47 + 100 definition contract before deployment', () => {
     const audit = auditBundledSkillDefinitions();
     expect(audit).toEqual({
       valid: true,
       errors: [],
-      definitionCount: 181,
-      baseCount: 34,
+      definitionCount: 182,
+      baseCount: 35,
       professionalCount: 47,
       specialistCount: 100,
     });
     const names = BUNDLED_SKILL_DEFINITIONS.map((definition) => definition.name);
-    expect(new Set(names).size).toBe(181);
+    expect(new Set(names).size).toBe(182);
 
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
     const packageVersions = new Map(
@@ -1311,6 +1311,33 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
     expect(pinned.omittedByBudget).not.toContain('web-interface');
   });
 
+  test('never blocks when a mandatory skill exceeds its authored per-skill budget', () => {
+    // Regression: a skill whose lossless minimal core is larger than its authored
+    // `contextBudget` used to throw "Skill resolution blocked before work starts"
+    // on every turn. Minimal is the floor of progressive disclosure, so there is
+    // nothing left to fall back to and the turn must proceed with a warning.
+    const oversized = listSkills(root).find((skill) => skill.name === 'frontend-engineering')!;
+    const revisions = listSkills(root);
+    const underBudget = {
+      ...oversized,
+      metadata: { ...oversized.metadata, contextBudget: 100 },
+    };
+    const contract = createTaskContract('Build a professional accessible web interface');
+    const result = resolveSkills(root, contract.goal, contract, {
+      pins: ['frontend-engineering'],
+      skillRevisions: revisions.map((skill) =>
+        skill.name === oversized.name ? underBudget : skill,
+      ),
+    });
+    expect(result.hierarchyErrors).toEqual([]);
+    expect(result.blocked).toBe(false);
+    const selected = result.selected.find((item) => item.skill.name === 'frontend-engineering')!;
+    expect(selected).toBeDefined();
+    // The advisory note names the skill and keeps the authored budget visible.
+    expect(result.warnings.join(' ')).toContain('frontend-engineering minimal guidance is');
+    expect(result.warnings.join(' ')).toContain('advisory only');
+  });
+
   test('injects exactly the advertised bounded skill representations', () => {
     const taskContract = createTaskContract('Build a professional accessible web interface');
     const compiled = compilePrompt({
@@ -1382,8 +1409,9 @@ Inspect the legacy behavior, preserve the stable skill ID, and record evidence b
       occupiedContextTokenUpperBound: 1_000_000,
     });
     expect(planning).toMatchObject({ budget: 12_345, source: 'planning-default' });
-    // Window-relative default: 10% of a verified window clamped to [8_000, 30_000].
-    expect(deriveSkillContextBudget({ contextWindowTokens: 200_000 }).requestedBudget).toBe(20_000);
+    // Window-relative default: a quarter of the verified window with no fixed
+    // character ceiling, so large-window models are not pinned to 30k chars.
+    expect(deriveSkillContextBudget({ contextWindowTokens: 200_000 }).requestedBudget).toBe(50_000);
     expect(deriveSkillContextBudget({ contextWindowTokens: 32_000 }).requestedBudget).toBe(8_000);
     expect(deriveSkillContextBudget({}).requestedBudget).toBe(30_000);
   });

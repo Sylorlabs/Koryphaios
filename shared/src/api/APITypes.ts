@@ -24,8 +24,9 @@ export interface SendMessageRequest {
   /** Route-aware acceleration chosen in the composer. Codex uses its Fast tier;
    * OpenAI API uses Priority processing. */
   fastMode?: boolean;
-  /** Explicit user decision for models whose adapter cannot carry image input. */
-  imageInputMode?: 'reject' | 'omit';
+  /** Explicit user decision when image support is unconfirmed. Allow retains
+   * image input after the user confirms that the selected model supports it. */
+  imageInputMode?: 'reject' | 'omit' | 'allow';
 }
 
 export interface CreateSessionRequest {

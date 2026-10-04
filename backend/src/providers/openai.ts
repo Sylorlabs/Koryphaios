@@ -2,6 +2,7 @@
 // Also used as base for Groq, OpenRouter, xAI (OpenAI-compatible endpoints).
 
 import OpenAI, { AzureOpenAI } from 'openai';
+import { userConfirmedImageInput } from './attachment-admission';
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 
 import {
@@ -36,6 +37,7 @@ import { promptCacheDiagnostics } from './cache-fabric';
 import { resolvePricing } from '../pricing';
 
 export class OpenAIProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
   protected _client: OpenAI | null = null;
 
   constructor(
@@ -250,6 +252,7 @@ export class OpenAIProvider implements Provider {
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     let messages = this.convertMessages(request);
+    const userConfirmedImages = userConfirmedImageInput(this, request);
 
     // Vision guard: if the model is KNOWN not to support images (live metadata
     // reported vision: false), replace image parts with a text note up front so
@@ -260,7 +263,7 @@ export class OpenAIProvider implements Provider {
         this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
         resolveModel(request.model);
       const supportsVision = liveDef?.vision === true || liveDef?.supportsAttachments === true;
-      if (liveDef?.vision === false && !supportsVision) {
+      if (liveDef?.vision === false && !supportsVision && !userConfirmedImages) {
         messages = stripImageParts(messages);
         providerLog.debug(
           { provider: this.name, model: request.model },
@@ -421,16 +424,13 @@ export class OpenAIProvider implements Provider {
     }
 
     // Only send reasoning_effort if model + selected level supports it.
-    this.applyReasoningControls(
-      params as unknown as Record<string, unknown>,
-      {
-        canReason,
-        effort: reasoningEffort,
-        supported: supportedEfforts,
-        modelDef: liveDef,
-        requestModel: modelDef?.apiModelId ?? request.model,
-      },
-    );
+    this.applyReasoningControls(params as unknown as Record<string, unknown>, {
+      canReason,
+      effort: reasoningEffort,
+      supported: supportedEfforts,
+      modelDef: liveDef,
+      requestModel: modelDef?.apiModelId ?? request.model,
+    });
 
     try {
       // Apply 60-second hard timeout to prevent indefinite hangs
@@ -446,7 +446,11 @@ export class OpenAIProvider implements Provider {
       } catch (err) {
         // Some models reject images only at request time (metadata absent or
         // wrong). Degrade gracefully: drop the images, note it, retry once.
-        if (messagesContainImages(params.messages) && isVisionRejectionError(err)) {
+        if (
+          !userConfirmedImages &&
+          messagesContainImages(params.messages) &&
+          isVisionRejectionError(err)
+        ) {
           providerLog.warn(
             { provider: this.name, model: request.model },
             'Model rejected image input — retrying without attachments',
@@ -542,8 +546,7 @@ export class OpenAIProvider implements Provider {
         // plus `reasoning_details` for encrypted reasoning blocks).
         const reasoningContent =
           (delta as { reasoning_content?: string; reasoning?: string } | undefined)
-            ?.reasoning_content ??
-          (delta as { reasoning?: string } | undefined)?.reasoning;
+            ?.reasoning_content ?? (delta as { reasoning?: string } | undefined)?.reasoning;
         if (reasoningContent) {
           yield { type: 'thinking_delta', thinking: reasoningContent };
         }

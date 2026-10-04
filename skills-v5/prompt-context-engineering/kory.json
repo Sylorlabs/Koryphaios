@@ -138,18 +138,18 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/prompt-engineering",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Message roles and instruction priority, prompt structure, context-window planning, examples and code-managed prompt versioning.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/prompting",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI prompting documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI prompting documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current prompt-as-code guidance, typed dynamic inputs, testing and release discipline for production prompts.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://model-spec.openai.com/2026-08-18.html",
@@ -162,18 +162,18 @@
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform prompting best practices as available 2026-09-19",
+      "versionScope": "Rolling Claude Platform prompting best practices as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current Claude-specific clarity, examples, structural tags, long-context placement and model-generation migration guidance.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform context-window documentation as available 2026-09-19",
+      "versionScope": "Rolling Claude Platform context-window documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "What consumes context, token accounting, context-limit behavior and current compaction/context-awareness mechanics.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-tools",

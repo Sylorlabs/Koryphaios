@@ -852,7 +852,7 @@ function saveMigrationVectors(): ConceptVector[] {
   return [
     {
       name: 'v1 inventory migrates to v2 with stable ids and equipped item',
-      input: { version: 1, save: { items: ['sword', 'potion'], equippedIndex: 0 } },
+      input: { version: 1, items: ['sword', 'potion'], equippedIndex: 0 },
       expected: {
         ok: true,
         version: 2,
@@ -867,19 +867,17 @@ function saveMigrationVectors(): ConceptVector[] {
       name: 'duplicate v2 ids fail closed',
       input: {
         version: 2,
-        save: {
-          inventory: [
-            { id: 'x', kind: 'sword' },
-            { id: 'x', kind: 'potion' },
-          ],
-          equippedId: 'x',
-        },
+        inventory: [
+          { id: 'x', kind: 'sword' },
+          { id: 'x', kind: 'potion' },
+        ],
+        equippedId: 'x',
       },
       expected: { ok: false, error: 'duplicate-id' },
     },
     {
       name: 'corrupt version is rejected without partial state',
-      input: { version: 99, save: {} },
+      input: { version: 99 },
       expected: { ok: false, error: 'unsupported-version' },
     },
   ];
@@ -1132,12 +1130,20 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'finops-cloud-cost-full-task-1-individual',
     skill: 'finops-cloud-cost',
+    generation: 2,
+    blockers: [
+      'The component vectors do not furnish the billing export/schema/currency reconciliation, complete allocation and unit-economics evidence, driver decomposition, optimization scenarios, or before/after realized-savings and reliability guardrails required by the full task.',
+    ],
     contract: `Reconcile all row costs to invoiceTotal within exact fixture arithmetic. Direct team rows allocate to that team. shared rows allocate by sharedWeights when weights sum to 1; otherwise remain unallocated. unitCost for a team is allocated cost / that team's direct transactions when transactions>0. Return allocated and unitCost objects by team key, unallocated, reconciled. Round unit costs to three decimals.`,
     vectors: finopsAllocationVectors,
   },
   {
     id: 'finops-cloud-cost-full-task-2-individual',
     skill: 'finops-cloud-cost',
+    generation: 2,
+    blockers: [
+      'The component vectors do not furnish reconciled billing history, existing commitment inventory, demand/migration/seasonality scenarios, provider recommendation provenance, or post-purchase reliability and realized-savings evidence required by the full task.',
+    ],
     contract: `maxSafeCommit is min(hourlyEligible)*utilizationFloor, rounded to three decimals. Purchase is allowed only when proposedHourlyCommit<=maxSafeCommit, cashAllowed=true, migrationRisk=false. reasons are sorted among proposed-above-safe,cash-constraint,migration-risk.`,
     vectors: finopsCommitmentVectors,
   },
@@ -1211,6 +1217,7 @@ export const SYSTEMS_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'game-development-full-task-2-individual',
     skill: 'game-development',
+    generation: 2,
     contract: `Load save data atomically. Version 1 has items[] and equippedIndex; migrate to version 2 inventory entries {id:'item-<index>',kind} and equippedId or null. Version 2 must reject duplicate ids and otherwise preserve inventory/equippedId. Unknown version returns {ok:false,error:'unsupported-version'}. Invalid duplicate returns duplicate-id. Successful result includes ok:true,version:2,inventory,equippedId.`,
     vectors: saveMigrationVectors,
   },

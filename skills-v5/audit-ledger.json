@@ -1,8 +1,89 @@
 {
   "schemaVersion": 1,
-  "librarySize": 181,
-  "generatedAt": "2026-09-26T19:05:08.550Z",
+  "librarySize": 182,
+  "generatedAt": "2026-10-03T08:16:05.281Z",
   "records": [
+    {
+      "skill": "computer-use",
+      "cohort": "base",
+      "v5Status": "candidate",
+      "steward": "ChatGPT web — computer-use",
+      "adjacentSkills": [
+        "android-compose",
+        "desktop-electron-tauri",
+        "ios-swiftui",
+        "native-interface",
+        "react-native-expo"
+      ],
+      "sources": [
+        {
+          "url": "https://agentskills.io/specification",
+          "sourceType": "spec",
+          "versionScope": "Agent Skills package and progressive disclosure specification inspected 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 90,
+          "notes": "Used for the portable package structure and progressive disclosure boundary."
+        },
+        {
+          "url": "https://developer.apple.com/documentation/applicationservices/1459186-axisprocesstrustedwithoptions",
+          "sourceType": "official-docs",
+          "versionScope": "Apple Accessibility trust API documentation available 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 60,
+          "notes": "Supports the distinction between host permission and operating system Accessibility consent."
+        },
+        {
+          "url": "https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos",
+          "sourceType": "official-docs",
+          "versionScope": "Apple ScreenCaptureKit capture guidance available 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 60,
+          "notes": "Supports explicit capture capability and target scoped observation rather than assumed desktop capture."
+        },
+        {
+          "url": "https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.invokepattern.invoke?view=windowsdesktop-9.0",
+          "sourceType": "official-docs",
+          "versionScope": "Microsoft UI Automation InvokePattern documentation available 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 60,
+          "notes": "Supports semantic control invocation as distinct from unrestricted global pointer or keyboard injection."
+        },
+        {
+          "url": "https://www.x.org/releases/current/doc/xextproto/security.html",
+          "sourceType": "spec",
+          "versionScope": "Current X.Org X11 Security Extension specification retrieved 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 90,
+          "notes": "Supports explicit treatment of X11 desktop access and window observation as a platform boundary that must be verified rather than inferred."
+        },
+        {
+          "url": "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+          "sourceType": "official-docs",
+          "versionScope": "OWASP prompt injection prevention guidance available 2026-10-03",
+          "verifiedAt": "2026-10-03",
+          "staleAfterDays": 60,
+          "notes": "Supports treating visual and textual application content as untrusted data rather than authority."
+        }
+      ],
+      "routing": {
+        "positive": 5,
+        "negative": 5,
+        "ambiguous": 3,
+        "adversarial": 3
+      },
+      "taskMaturity": {
+        "individual": 2,
+        "scaffold": 0
+      },
+      "fullTaskEvals": 0,
+      "openRegressions": 0,
+      "uplift": null,
+      "freshness": "fresh",
+      "packageVersion": "5.0.0",
+      "packageFingerprint": "0f011718d56c38ea665869e3341dbbd95a9ec437c848959d5ced41017e6c43c0",
+      "nextAction": "run held-out routing and paired full-task V5 evaluation suite",
+      "updatedAt": "2026-10-03T08:15:58.542Z"
+    },
     {
       "skill": "dash-free-writing",
       "cohort": "base",
@@ -61,9 +142,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "e56d3dcf104a3ec15f70c8937d0d55b97bac16f14f89ecd72efadfd924b2f5f2",
+      "packageFingerprint": "219744e4debc4f7f8dcbf9eb60f4ca300d52f9dfac9f16daf1c711b5ae98722f",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "response-style",
@@ -124,9 +205,8 @@
         {
           "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
           "sourceType": "reference-implementation",
-          "versionScope": "openai/skills main",
-          "revision": "49f948faa9258a0c61caceaf225e179651397431",
-          "verifiedAt": "2026-09-01",
+          "versionScope": "openai/skills main SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 30,
           "license": "See upstream repository license",
           "notes": "Concise discovery metadata, progressive disclosure, and task-specific skill boundaries."
@@ -134,9 +214,8 @@
         {
           "url": "https://github.com/openai/plugins/blob/main/plugins/life-science-research/skills/research-router-skill/SKILL.md",
           "sourceType": "reference-implementation",
-          "versionScope": "openai/plugins main",
-          "revision": "1e285826e604f66f7208f7ac4dba0fe8341d1f57",
-          "verifiedAt": "2026-09-01",
+          "versionScope": "openai/plugins main research-router SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 30,
           "license": "See upstream repository license",
           "notes": "Concrete router pattern: normalize the request, select the minimum useful downstream capabilities, and keep narrow requests out of broad routing."
@@ -161,9 +240,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "de7a43224a98b8e522ef6343807dd65d8b44d7d2c5bea7caad04800e0b37563c",
+      "packageFingerprint": "a26aaf54f2ac1a2c343a358eeaa823e0f744ece6f81d55b985b31fd2159cfffa",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "repository-environment-discovery",
@@ -189,10 +268,10 @@
           "notes": "Repository/worktree identity and top-level path resolution semantics."
         },
         {
-          "url": "https://developers.openai.com/codex/guides/agents-md/",
+          "url": "https://developers.openai.com/codex/agent-configuration/agents-md",
           "sourceType": "official-docs",
-          "versionScope": "OpenAI Codex AGENTS.md guidance available on 2026-09-01",
-          "verifiedAt": "2026-09-01",
+          "versionScope": "OpenAI Codex AGENTS.md guidance retrieved on 2026-10-02; redirects to ChatGPT Learn",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 30,
           "notes": "Instruction discovery and precedence for global and repository-scoped AGENTS.md guidance."
         },
@@ -224,9 +303,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "a9e5eb702a34821ea640d8c5876c7327e43042e9a5796f52177a7c01bc0f2bcd",
+      "packageFingerprint": "5b9b65d541669b54ea7d3259329b04e2e61dbed37b58ffb3177a923949f17814",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "research",
@@ -325,9 +404,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "6a3b8ce5a4abb3fb6b3e47dc21aa6096e2e5980cc62c58cb5befcb9acdae41e4",
+      "packageFingerprint": "b6abe9eb0e77c0dbdf21e4c612b03a6d49ae06ea93b34cba5ee2f1107103011f",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "planning",
@@ -389,9 +468,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "2c04e6b48b6f9e9652fba9059fe26dc5db4cb5b97e0648957d84a525e261d4d5",
+      "packageFingerprint": "e03c44fa8b106619ae1c8d2a1cf860781d0dba784938aac32d25bf6bb41f8437",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "plan-mode",
@@ -445,17 +524,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 2,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.3181818181818182,
+        "qualityDelta": 0.3181818181818182,
+        "verificationDelta": -0.045454545454545456
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "83f3d17a755af0648e0b740c4d83f7f7095ee74b703c12f3c34a82ddfa0baf25",
+      "packageFingerprint": "f5536f7ff891b8332cb339e05570dd10c90d3bd8bc0d68c34adfd53c51ac2582",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "implementation",
@@ -525,9 +604,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "1eae8cbd44671f1890dd0ed53ed8ff7a196115d528e9ade68dad313fd64b824d",
+      "packageFingerprint": "7210a0e3ef61940fafd3e739590b155e27be90e9b9abf708ed0a8badde40092e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "debugging",
@@ -578,9 +657,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "5b8c6831e3fa477c97713c50b7b11146e221babf3e651050877c09d50af735af",
+      "packageFingerprint": "fe40f58dc0d25dfbb68e44ef769dca5aa5c28dbdbf1c35a267e96460e1f5eb93",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "verification",
@@ -745,9 +824,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.2",
-      "packageFingerprint": "0453c58416a1705af61b8b59865f82b27945a8b1f3aeca17665d2ea306c0fd5f",
+      "packageFingerprint": "4ea29d3ec0678c7db04772d9b3b23debbc89e07f844170b0ac23b1684a6751da",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "security-review",
@@ -837,9 +916,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "6067f2daa8049af6bc7efbdbce28e736776060ed12d60bc7e42b4c29b13ed2b8",
+      "packageFingerprint": "c2691ee94623b27dfaf816de748289201171dcbf12b12c495c3f21fb88912cbb",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "frontend-engineering",
@@ -929,9 +1008,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "8a7bddb4430f6e31fb307b5a2c60f48112afb3081e3f48ed4a43f4ce33eac250",
+      "packageFingerprint": "8913472cad9a4dd112326dd0a20eca1c330b64d7ede83a7f40895cf406b4a711",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "web-interface",
@@ -1019,9 +1098,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "9767eb7d9737c2b4b63c1097c63c5f8f26f16dec76c6fd30807e0dfce49b4edc",
+      "packageFingerprint": "644dcec1c58ce2721f20b267e70ab19a0d7831e9415ada3663b6378692724f1a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "native-interface",
@@ -1032,6 +1111,7 @@
         "accessibility-practice",
         "android-compose",
         "angular-engineering",
+        "computer-use",
         "data-visualization",
         "desktop-electron-tauri",
         "embedded-interface",
@@ -1095,9 +1175,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "b16dedc19699b62c700722e7da5d2f33bf87a029c20d8d6d753c18eb1186aca6",
+      "packageFingerprint": "82d2307c05b831904e7d5d986b063f046b06fd516e9e01a54e63e0a59198da62",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "terminal-interface",
@@ -1161,9 +1241,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "52b384c16bdf0b51bc11ed6582af5ccaa7c6c3bdf99b6eaff7114bd32b87a0c9",
+      "packageFingerprint": "e0bf3ee1d6d9d0f5f112e1511e3220d5d3f6fc739e824475b745e3867ea2f5f3",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "novel-ui-toolkit",
@@ -1239,9 +1319,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9facfb44de437d535f324e95929ddd52866b0da95271f469b15f2adb7a102b3a",
+      "packageFingerprint": "6fc7e706ce3cd11f718039cb01c2054dc74fb1d936554d144e4fe7c9bc9341fa",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "game-spatial-interface",
@@ -1304,9 +1384,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "da2cc4a0c441fc8edc27a16a1b013a7c9639c1186c05070673c9f9611bdac7dc",
+      "packageFingerprint": "dc8a14985280219d611ad1048cae84e1a6f67cd0c03e406e5ca17ae86a40ad3b",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "embedded-interface",
@@ -1361,9 +1441,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9bb201d73d45df9d166a53da34611af9d2a31af2bd130524b3478279ae5b4250",
+      "packageFingerprint": "93ed8337a84dfeeda761e3593f5a1a7cd59c8628e799189faa89449b03db0198",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "backend-engineering",
@@ -1430,9 +1510,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "3df621ffa36e5f1c54a24b40e2b4c889020c9450d01ea82ab6e1c1e2410c6cc9",
+      "packageFingerprint": "d7d8d46171293f4d15964ea447be76e9f95736cec9e0497300e76fa5427c95c6",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "in-process-backend",
@@ -1491,9 +1571,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "05c43c1916cdb76c354de74ee6dceafe66c69a33bd2a018cb611d8acc620a6a1",
+      "packageFingerprint": "2a3a8964f326753643a220c120d5a1b25c136b31d838ccb1dca6faa3a6e4e8f7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "local-service-backend",
@@ -1560,9 +1640,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "42ae5d12676b8bc2fb793668398ed03f6e893dba6ba1507122f4d0fb57328e49",
+      "packageFingerprint": "1db509d0b68b5a12737dbab6839d959b394f8c515f0509ab4dade1bd39848c31",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "network-service-backend",
@@ -1625,17 +1705,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.75,
-        "qualityDelta": 0.75,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.7142857142857143,
+        "qualityDelta": 0.7142857142857143,
+        "verificationDelta": -0.047619047619047616
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "aba7d9244f374be6e9e3fc658659d98061a07698f25e1692f736092ff31b9b0e",
+      "packageFingerprint": "5e5ea61ea15fda124757cda0ed6d8e7e1e8ee99a375218b4ef850c93aa148d7d",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "distributed-backend",
@@ -1696,9 +1776,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "606ef14a5a148316bc30bf4935c2d05a23301dea3cd29c74d4b20c21b263b2eb",
+      "packageFingerprint": "cd79fcd06e4c15b0aceb947540779563be03ea1666b03640a6846bdf7c47b8cb",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "compiler-runtime-backend",
@@ -1759,9 +1839,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "d65b3e632f7946689518dbd6d7486dfed2f7b7744695e852ea2a1d433c1ea0e0",
+      "packageFingerprint": "d6cf926cfd74a712b599af914c2f1049de41514157c83c6a417951070f68c154",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "testing-engineering",
@@ -1840,9 +1920,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "0c27e8a82dd6ac8fd0fce417f0c4df5093ec99fc026360f3d04ac1d6b0dec161",
+      "packageFingerprint": "e5d6f92a05fa667f32a7472280fcb05c8a371181705f485794be76d682857640",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "deterministic-contract-testing",
@@ -1952,9 +2032,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "74a94bcbd4121d48671f1f832a98567720e7e11e2161f19d04d9d99caa1be235",
+      "packageFingerprint": "631caebc70751bf57d37eedd01e61255cb5bc3ef719f2eea6c943569df099cb0",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "property-fuzz-differential-testing",
@@ -2055,9 +2135,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "b7e28f997682cf91855fbdd0131d2a0091298055b06597cd25947b5401ccaab1",
+      "packageFingerprint": "f6d77f1d8bbe89bf8d2e3bf69a4de58f84b98d193f92867e9ad1d0f858b48f51",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "integration-fault-testing",
@@ -2127,9 +2207,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "8e24f5fc4866136cdde261b441ef8d4d8ef0b19b008d507272dab151ee5aa6d2",
+      "packageFingerprint": "7a24e52577baaca4bd79b8601ff1df278395023c4f508cf08fb7dd08c2abd9db",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "interface-usability-testing",
@@ -2202,9 +2282,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "849071668b45bb55448e45f4d30738466e2b47226b8cc573a6bc3d699f24861a",
+      "packageFingerprint": "4179cbb534f72e5009aad637e0a4e6c8a82b7ca4d824e96a68128debccfa71eb",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "performance-testing",
@@ -2283,9 +2363,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "1281cb92af565493391393946b90cd157db0978a5ec83bdd0d61e63aacfc5abb",
+      "packageFingerprint": "2903b9c6bbf55c44b4a1584b59f58f80fddfde18f398b46ff9689d074e822a6e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "simulation-device-testing",
@@ -2415,9 +2495,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "e830f61a8653cace61e25d686010ee96d85e4e6912c7496deb8e3b842d16c5b0",
+      "packageFingerprint": "03417000f208411ea0e2f1672c12ac653e51a4f2d1cc7a630dd20b5e32c85671",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "data-analysis",
@@ -2475,9 +2555,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "21cd955543d31a6efbb45d7a1b7825fcb7b92fe2763afcd492ce9dddc625d538",
+      "packageFingerprint": "f2dd65dae3a84369a2f1a683e530ac33dbe3bf77d25f157c35f41d442ce7ec8c",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "documents-communication",
@@ -2561,9 +2641,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "d66f57cefa110c44775dd8b97408a86f4cc56c41f83d59b6934e0d61663676d9",
+      "packageFingerprint": "47f232516349614a90fe93a8b67399d67d9853b88fa910fb18569aeb01820605",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "skill-authoring-evaluation",
@@ -2611,9 +2691,8 @@
         {
           "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
           "sourceType": "reference-implementation",
-          "versionScope": "openai/skills main",
-          "revision": "49f948faa9258a0c61caceaf225e179651397431",
-          "verifiedAt": "2026-09-01",
+          "versionScope": "openai/skills main SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 30,
           "license": "See upstream repository license",
           "notes": "Skill concision, deterministic helpers, validation, and iterative evaluation patterns."
@@ -2680,9 +2759,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.2.6",
-      "packageFingerprint": "2a84b78024fae4715e7a2d99ed4c99adc0607a18b3db1243d1da4194641e2feb",
+      "packageFingerprint": "33c008fc9efff73bb0d58b43689d6af009e1723e4c9569da77a5c4c1fe559d9d",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "human-experience",
@@ -2766,9 +2845,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "5f3e054e16ec7ef32dc54bc18dc0fb171b49eb0b7089ad99ccbf47df47977288",
+      "packageFingerprint": "43678ddb1fefa349cc0f2ef9b314638ecd0149c12f44b6cee86e92d139674d0f",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "user-research",
@@ -2851,9 +2930,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "fb7b0f749fa942a7e2f67f8b6d00ed1c05edd690847d996959a421ca7601ec5b",
+      "packageFingerprint": "eea30ff8ff79a5100ac4cf17528c02359d713bf67bff7595d748999c39777ddd",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "interaction-design",
@@ -2925,9 +3004,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "1687eeeec6014f7f1e7f83e2a3a946b959c1ac539e4692525c15fd4114fd58a2",
+      "packageFingerprint": "ea18d588008dcd9b6e990349b1e0ee79d9afdfd04b79cce8ba40d0fb6dae3766",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "information-architecture",
@@ -3002,9 +3081,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "bea4ac59d580c77e81503486458f42ee968e4ad7ed705cbeeb748ba5cd7b7b94",
+      "packageFingerprint": "3a860d009a4aa9442d21816183e65a872c69f4c897d52a833cc42d20f66ada7b",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "visual-interface-design",
@@ -3096,9 +3175,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "af43b5b0faefe40e11a7466dfa822e887e8dee944c1957bb9e0247c38b76aaac",
+      "packageFingerprint": "53380effc983a70d5b74b050a5af085d18a735bfadcbbd5c2f80c39c304f22bc",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "content-error-design",
@@ -3175,14 +3254,14 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "a189de175f3ab4861e7e839bd5539315cd514a8a50867c880d959a6727fec428",
+      "packageFingerprint": "03e741da136e7f0f3a95a8791f55badb4a011e5eee9b65ed478b16c06e467df7",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "accessibility-practice",
       "cohort": "professional",
-      "v5Status": "blocked",
+      "v5Status": "qualified",
       "steward": "ChatGPT web — accessibility-practice",
       "adjacentSkills": [
         "accessibility-verification",
@@ -3260,17 +3339,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.8,
-        "qualityDelta": 0.7725,
+        "passRateDelta": 0.7619047619047619,
+        "qualityDelta": 0.7357142857142857,
         "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "3c434e92ecc3e2b2cad2acb19b8aacf72dbbf6011058620e6784a96dd7896f42",
-      "nextAction": "1 recorded regression case(s) remain open.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "packageFingerprint": "40659827b63f06a69b154ec71a6d5f723ea22fdcac05784d5d426a44be193e5d",
+      "nextAction": "monitor regressions, usage signals, and source freshness",
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "usability-evaluation",
@@ -3346,14 +3425,14 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "e79ae2c1a065833cc4b2214d5a5d639672b26cf4e7bd87f357565d9460d6d5bb",
+      "packageFingerprint": "22e421ed4e6cb05a121858d5988998ef6db0a0313bee68fc20a90dbda1d94f61",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "developer-experience",
       "cohort": "professional",
-      "v5Status": "blocked",
+      "v5Status": "qualified",
       "steward": "ChatGPT web — developer-experience",
       "adjacentSkills": [
         "accessibility-practice",
@@ -3440,17 +3519,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.9,
-        "qualityDelta": 0.925,
-        "verificationDelta": 0.15
+        "passRateDelta": 0.8571428571428571,
+        "qualityDelta": 0.8809523809523809,
+        "verificationDelta": 0.14285714285714285
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "b05e2f28bb16158fa5d90f6d9b17cd24352d60a4e9eccc86076f6ee69e3a5c7e",
-      "nextAction": "1 recorded regression case(s) remain open.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "packageFingerprint": "ba9e5f51c6b5d36a5d6c8a2f5b74a5ccb260977b195e34a8aac24cd069cb954f",
+      "nextAction": "monitor regressions, usage signals, and source freshness",
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "architecture-planning",
@@ -3517,9 +3596,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "99a59b52b2cbafcf8c7a744382292668c64c47cbd994969f5eae4a506d80484b",
+      "packageFingerprint": "e811cafe8dda7c11cdfbc8d97f8d7f8729ceabe819a6e210dce984fb3c2aaa36",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "migration-planning",
@@ -3592,9 +3671,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "474ef78c370c66cc9d85073e3a0f925c954889937900866ef8cbb36244a40d12",
+      "packageFingerprint": "19feb95b43a1aa580221695ddfd844d25e74efc06eb38e4e2940849bfee4943e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "release-planning",
@@ -3659,9 +3738,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "fbccd8817546633e3e1c6b7b6ed4954c91f8849672dbc770d2c8fa1bf0b3df48",
+      "packageFingerprint": "9e28999bbc06688147b8751f582411e8070e840b1cc2e3e40bd606b8782c4d50",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "feature-implementation",
@@ -3724,9 +3803,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "813fbf89a497a76c19875e0022505c5f276fdf807380556be1fa6b84cf75b080",
+      "packageFingerprint": "89e4fb89e1bc0ec286d877ba9acc3f6411c0226eef36e91090aadf5718fc47c2",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "refactor-implementation",
@@ -3789,9 +3868,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "ad50fdc83fe5d2aed034f7b6d2fc71daa779ed8174cf6defd21bbeda58b0ab71",
+      "packageFingerprint": "ba10396e063f480eebd6c514f901e51ed642d5d2a4e3c4cfbc0b3bb30b1bc0c4",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "integration-implementation",
@@ -3865,9 +3944,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "6c42d53f38ce2a2d65414a14969f17d85edef77cac99b8d376ceeda95f6cd404",
+      "packageFingerprint": "7a45a8cafbe00581b141cb49be93cd93e012417ded2024dca2abf229f18522a1",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "deterministic-debugging",
@@ -3910,9 +3989,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "6bcf095f3bda1f0dbf9ec3cb86e6d58007bdf80fe1cfda9732500ce6b237e009",
+      "packageFingerprint": "295e80bfbc0e065c5c13ec8a7b7692c395e7386a9628246531346a792c62e46f",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "concurrency-debugging",
@@ -3963,9 +4042,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "50c87a60ac0d6afff83f3dc5644f90bdf65f69511f547d3eb7a5011a137285c1",
+      "packageFingerprint": "1234c8fd2489aa1abd21757d20b2af235e6e6b73749212c1a7c72c84013a879f",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "distributed-debugging",
@@ -4016,9 +4095,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "d6b8f581cf746bd10c97c6821f1f2fec9b769808d99a377affee6c8e3588f774",
+      "packageFingerprint": "3353a7ffbc648769155d68f475baa4a9221ba66ac18aafa70f697e8fa79c30b0",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "performance-debugging",
@@ -4072,9 +4151,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "05030a5565a0f15c4f279fdea04f8f5540f0c3b64cee3e0c04d4e15fec369c38",
+      "packageFingerprint": "1c6c22c5f4c0ad175ec0bb27fa83c12aafaab799e694b5f7c396642f944a9050",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "hardware-runtime-debugging",
@@ -4150,9 +4229,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "d46eb35d96467424a41c083dbcf5de5ea3fefa137794afad437dafefa85c9526",
+      "packageFingerprint": "0736672c7c21f0e252d3407deccf1e442bb29947b861a4cc25b650b5a36f6a0c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "functional-verification",
@@ -4228,9 +4307,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "2fc2d942a8ca17b40efbb645dbf90a0051486bdab384759f23bad7bc99968c81",
+      "packageFingerprint": "bd8431c75b07f908c60c9e7758a78767b2550d781be569d70bfd5e99beac97a3",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "visual-verification",
@@ -4316,9 +4395,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "e93f80adb4f1a77cece632082d2f8922edba99301c9712442230f5112d7ec33e",
+      "packageFingerprint": "0cfa0f86e89f3132a96665d64e58bf8fa1a66d143acc504d83b17c75305484f1",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "accessibility-verification",
@@ -4395,9 +4474,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "c30ec40386fddba754890b6ef19ef71f05d75eb348f269c5f66adc8b95101329",
+      "packageFingerprint": "522765606ecfa5dedb4a4007ff12696b6cdd7bf5410761e35c3d5038f4625aab",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "reliability-verification",
@@ -4480,9 +4559,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "241669de672bfb6e27f1a8cb414c770951651f73a399f486313151c2bf676593",
+      "packageFingerprint": "439f1ff8bedaf42041f93d2baede88acd399892e6f8bcc1d50bd66f62f6f830f",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "security-verification",
@@ -4573,9 +4652,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "d4fcb8b3fe4e36bc5ac9e6fe2e5d269ef52859b2c944a8963d1aedad35654b54",
+      "packageFingerprint": "87d5e6eab8c23fe56694fd6d699be81aba749a9a109853d31b4e442b1f81e80d",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "performance-verification",
@@ -4648,9 +4727,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "50765f103a998e0a9179e70c0238ebd61cfe561741436cdd8bfaee297aae54a2",
+      "packageFingerprint": "1693ea153a9dda163ac40d6273fd38f9cfb580ae26a4ede00b3b6914338fabb5",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "technical-communication",
@@ -4735,9 +4814,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "96976a717bdc8768c42573ebcce4477c75d5b724ccada3f7c27fffded89f4aee",
+      "packageFingerprint": "6aa61cc6077c275e20cb0d70d7c12ec2f9f8bc444d5319f446f2f1cc59536b70",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "executive-communication",
@@ -4813,9 +4892,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "7e068755bec403dfe0b316e86715c59beaa63d7a3aa7621025a05afa86259f68",
+      "packageFingerprint": "92becfdf9d4b56fdfd119091feda2c5d029025c4c2018b0ed1c41cd04764db94",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "instructional-communication",
@@ -4899,9 +4978,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "f5845ac5811cc5c15d3ab1dd918b1635069b232a821792411bb59f5443f722ae",
+      "packageFingerprint": "9e374973a2e90a4f49139d4a097e952caeaa66d98492a0474798f74656861246",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "reference-communication",
@@ -4994,9 +5073,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "2ffeaa9fefc2d8f24a9f2f039688b771234732dc1532e6100ca07671ea2cdc96",
+      "packageFingerprint": "1b1011ff5f1e2467433efe691ea34746c6e228b4afb79be50056f2b927eff5be",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:01.720Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "application-security",
@@ -5084,9 +5163,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "39090d97b4ffbb1fe1129260c6dfaefd68f647b2a365027a3bb71fede6343674",
+      "packageFingerprint": "86e87fb065e2895c035918a2a4dd9075643ab097fd4feb97b8ef1e425c329ea1",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "infrastructure-security",
@@ -5167,9 +5246,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "126a3cc1f0c5dc51495203e1306275ca3fea6fc92aa4818252e6babe78e05230",
+      "packageFingerprint": "9f7c772117aac3b58bd31eb1ed7700c301c17b063480e9687d37f926f1203638",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "authorization-security",
@@ -5236,9 +5315,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.2",
-      "packageFingerprint": "20089cd9a9cfa1e23e3d3d96e3cf4c9c2cc8ba6205acbf790c4d9ec73f8dd2d7",
+      "packageFingerprint": "5d9c9a73b8e264ed932d1cac380832ac0941d131db3d6d9c45d67605b1d4abc7",
       "nextAction": "2 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "supply-chain-security",
@@ -5347,9 +5426,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "cb42325289a38552bab8c5da37cfc126650d587416ad7fd27a027eccbc92e2d7",
+      "packageFingerprint": "de8bee2d2f72673355d19e5c254a2b89e07c4aefcb31c2c0a3fa23faaaba4ae4",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "privacy-engineering",
@@ -5408,9 +5487,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "814ffb71b6e2b35ed2c8da042f81f4f7ed6cf15565c514be4e04fe47e7d973f1",
+      "packageFingerprint": "2b5d36b1c235757d308c9e2a3dbc3697ed432c4a94c0edb9ef38383008087a32",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "embedded-device-security",
@@ -5472,17 +5551,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.75,
-        "qualityDelta": 0.78,
+        "passRateDelta": 0.7142857142857143,
+        "qualityDelta": 0.7428571428571429,
         "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "6d895a723e8bcc7c3ef345dd0c0ac71e9d6a0be33b7f9ac76f2da1f1f29cb6b4",
+      "packageFingerprint": "630b23917f6adc96d6d88763628011fe4862ce7c13838f2afc4ab3f14bdf48da",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "language-runtime-security",
@@ -5549,9 +5628,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "fa9027699ffd7a06516a8d3c6cd60eae52a0fab45e8f9e32d26fe934d4c4386b",
+      "packageFingerprint": "66d925afa2e168a5e7d6800ab898e854f941902f5db35613fdaf9d16250bb02a",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "exploratory-data-analysis",
@@ -5592,17 +5671,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.3333333333333333,
+        "qualityDelta": 0.3333333333333333,
+        "verificationDelta": -0.047619047619047616
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "9d94ab2c70fe3d8757b53c6d08661971068228f25a73e55e3570c0851427d65e",
+      "packageFingerprint": "c707e87c228b9970352e86c5d97dee1151ec101747cb733f69c26ed60220ce5a",
       "nextAction": "Candidate regressed against the matched no-skill baseline.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "statistical-inference",
@@ -5652,9 +5731,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "65f7852c3a78a94987d2102bfdef3c22443b328180c683ab34889884709b5193",
+      "packageFingerprint": "0dd7818e4af75dd7f878e2c67607a39f248cc607071290e4184736d54f94a7b9",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "experimental-analysis",
@@ -5735,9 +5814,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "26d70afc06b3ebe5a4a73d4093b37b4e46a5c0015b50889d05c376bc94d4a579",
+      "packageFingerprint": "99a3ea7474390763ba485cd58cd8ada1337d3e7b583ee6823942dfc8d4c551c8",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "operational-data-analysis",
@@ -5803,9 +5882,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "3e39f8590c006983fb642dedebfe9ea001885abcb6acd72236f4269e555f0b98",
+      "packageFingerprint": "e5a2aba81702630e8ef85790ea087fb508d7a4cdf4d5537ab00c165fe1192e27",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "data-visualization",
@@ -5871,9 +5950,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "bfe0a5e61140a9c4720bbf3f3d63c8188ca99cf3b762048d008866b4011eb816",
+      "packageFingerprint": "1bc0bda93f0c3f35743ca7b012301ea37f1d1123122e721fa7972bddcabcaa60",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "ml-evaluation",
@@ -5978,9 +6057,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "a2b66a8f813578a3e42b37c8186fcbee9b65b41e651a99c7f8e3f1d003aeb56d",
+      "packageFingerprint": "395927e3319f5acf7fb522013873277c8b7b433151c047e45993478c4be25b00",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "factual-research",
@@ -6079,9 +6158,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "e5e09124a5a4a57c9379ec833742c0abe4627941059413d07e18f3662b0a7c49",
+      "packageFingerprint": "7621905d77ca5ac496ea2095f5c93e2429de5a749f05e3bf722df1732c98acc0",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "literature-research",
@@ -6195,9 +6274,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "b3ddeb311b860ec2eddc464deaa3b587d38984882e27a6cb31a78a509a7e60df",
+      "packageFingerprint": "f5d838b3610aef9af97d9ed414279678b6714684c6a9a593ce0e811bde555bd7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "market-competitive-research",
@@ -6275,9 +6354,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "4152bed6ede8ac02fb61c9aad89d5342c0c866ec92ad0c89095bc02ab7aa8ee3",
+      "packageFingerprint": "a6a7e62d20f2dfedf34e167909d18d9abf5504a115c7b0b21aa5cd665b53e813",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "repository-research",
@@ -6360,9 +6439,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "6d1e8120f2cb57054be458979c8107e50b071a589056d4c128f089ae1bccef85",
+      "packageFingerprint": "b65126d18f0badc1a58fc7ce03b7be064dfa0a68d6c839d42f7f5da7d94fcdec",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "typescript-javascript-engineering",
@@ -6449,9 +6528,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "8271e319462c3657bfd7b776c6e975ab8446c3d0ae9677a6978bc5604ee84874",
+      "packageFingerprint": "ed3e259740b4bd0393b9177711e9358a357d11142ab0fb5ca58c86ef783d5d2a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "python-engineering",
@@ -6530,9 +6609,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "af6dc8352c29d218ab7bfdba58ceaab4b11b7068b1fe059ffdb1e1fd16d08776",
+      "packageFingerprint": "1f70b37452355efc64fb8dfa2323f4c69f75f78dc3488499ce6454ead859e839",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "rust-engineering",
@@ -6619,9 +6698,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "d07911a6ce73015cb0d7911336a43577e77c5f7cf27639f93a69dc4bdddd4ffc",
+      "packageFingerprint": "9c31e7fc3e227d869b8f1cb9099efe0dac32c554d49d283d21eda423d7d6c56a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "go-engineering",
@@ -6700,9 +6779,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "aa49b689cd87460afa1b03ca35051849126230e53620b85e381806e33d919291",
+      "packageFingerprint": "bdd3d5df41b901087060df70d3c25fb35811b6557db1800477846478145128fe",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "java-jvm-engineering",
@@ -6781,9 +6860,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "62312ff3afcecddeae5b9772da40c02dd315d979030aa07341d1ba8cc5874cb7",
+      "packageFingerprint": "9a4eca199e53d6daddb8db644fa1acecc161f0dccd4242f5cbfd58d92d34ff88",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "kotlin-engineering",
@@ -6862,9 +6941,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "efcf13d4492f7c61feaefe207449be8577d16f5e2121954b3e01b114cdf1c1a1",
+      "packageFingerprint": "2234128088ce9e893d70ac215e4abd69c8e5388a2ad1e16293f23c1357d7c132",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "swift-engineering",
@@ -6943,9 +7022,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "932738cd567de63319b1d17824f293a446d40528839bc5b921b63672635c5e29",
+      "packageFingerprint": "43ea0f3cd0f7fdb9479a060ec5b1ed8b8669dd3a224bf1eabfed9f413716c3e1",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "c-cpp-systems-engineering",
@@ -7048,9 +7127,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "c5eca5549976545aa6648bb071a350e60ddf5a06c814e7e47f657fe3c96cec2b",
+      "packageFingerprint": "1a8c55975510061cbf65980219eda9847a86457385308f519b0592a9add42aee",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "csharp-dotnet-engineering",
@@ -7129,9 +7208,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "cab232efd27498e97a2fe156f3b6fca2dea6f8292826e10e56ac81288be0b344",
+      "packageFingerprint": "e2188a4548c04431da62dc82d4735026d295ffad18a8430d414e7d539df76c5e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "ruby-engineering",
@@ -7218,9 +7297,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "bd22569cbc4a148c07387b7c8a445d8b1d4479f32948500da28ffcf62870b9ff",
+      "packageFingerprint": "4939a4fe71f130647dccda44642f4a861006f5e81cf9c2decf2e52e8a80bb4c7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "php-engineering",
@@ -7307,9 +7386,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "c9fb1e74c1c82b92aff76de5e0573e1badf7663c47021c50631eb83ba286fbc2",
+      "packageFingerprint": "43e2fe27e3587aa289371a90fa8dd8016523b2f66786ff5a8656c16de854ba0c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "shell-cli-engineering",
@@ -7354,9 +7433,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "88dd2d4d41072a77c8cd834c33a3a5ca3fff44c885a8458915aa39ca6416c4fc",
+      "packageFingerprint": "9b65f18eb468d3c9da1a1a0e3c420b7fddea05051d750058b973fe5cd6777d27",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "react-engineering",
@@ -7429,9 +7508,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9be75b1eba62dde34b896acfd2228bdafb62865e0c066ce7847213bf128ca17d",
+      "packageFingerprint": "782180db633fd21d73573c9277fd446699bbbb7282d96c898ecd7402384170db",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "svelte-engineering",
@@ -7520,9 +7599,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "5041937a460e5eec34927ae07a81efb6583b254842486212c9f667482348ed98",
+      "packageFingerprint": "4cc0dc93820e442973bf1b3f74c2d735b4b047e4a2b290d0975adfa8b000024e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "vue-engineering",
@@ -7603,9 +7682,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "429dcd5a2822d7faacd6f42723ba7c48f559171b2ef8b32443bd01a945069b6f",
+      "packageFingerprint": "6c29c77700974185cf94ecb9a7527046d459c059af9d06622c64e2928afcad86",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "angular-engineering",
@@ -7678,9 +7757,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "f9a6a0d8f6fea7e2ba4e0ce421072913c8164fae3e163d018f9aff9e076ca006",
+      "packageFingerprint": "a32feb4f147f5d38ed07ff1ff47e554b6459f6383e88f306ec49fa573e3edf65",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "nextjs-engineering",
@@ -7741,14 +7820,14 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "2d54852725b9686d9742590dc9934eee4ae08b5162da1c5e5f2fbd1856a4aeec",
+      "packageFingerprint": "9dd1253e1625e6bee832837ccae77552d1819f9d95d9a6b9f8744c5bd40f5b0e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "nodejs-runtime",
       "cohort": "specialist-v4",
-      "v5Status": "blocked",
+      "v5Status": "evaluating",
       "steward": "ChatGPT web — nodejs-runtime",
       "adjacentSkills": [
         "backend-engineering",
@@ -7803,22 +7882,22 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.45,
-        "qualityDelta": 0.4225,
+        "passRateDelta": 0.42857142857142855,
+        "qualityDelta": 0.41428571428571426,
         "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "56259a4b63e70019c226451d5bc7b4d6ec5c986256413ca7a66c70159b8378bb",
+      "packageFingerprint": "dfc713041597c220cee837410f3a30308fc85719d6ebe1075bf5dfd63dc1aa97",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "bun-deno-runtime",
       "cohort": "specialist-v4",
-      "v5Status": "blocked",
+      "v5Status": "evaluating",
       "steward": "ChatGPT web — bun-deno-runtime",
       "adjacentSkills": [
         "backend-engineering",
@@ -7865,17 +7944,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.30434782608695654,
-        "qualityDelta": 0.30434782608695654,
-        "verificationDelta": -0.043478260869565216
+        "passRateDelta": 0.5294117647058824,
+        "qualityDelta": 0.5294117647058824,
+        "verificationDelta": 0.058823529411764705
       },
       "freshness": "fresh",
-      "packageVersion": "5.1.0",
-      "packageFingerprint": "67c21c67ceae5f1f86161f9df96325c04a74b212d01215188d6719059610ca56",
-      "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "packageVersion": "5.1.2",
+      "packageFingerprint": "77b5eca49909ad21e190ede4c74e49f617bf5190b664312583e96d0488dcfcaa",
+      "nextAction": "At least one blind review with persisted evaluator provenance is required.",
+      "updatedAt": "2026-10-03T08:08:29.483Z"
     },
     {
       "skill": "ios-swiftui",
@@ -7884,6 +7963,7 @@
       "steward": "ChatGPT web — ios-swiftui",
       "adjacentSkills": [
         "android-compose",
+        "computer-use",
         "desktop-electron-tauri",
         "native-interface",
         "react-native-expo",
@@ -7942,9 +8022,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "4c53096fd259ef63d27a0c1d9651f492deaab693096b151987d924432a83825c",
+      "packageFingerprint": "675f9eaf6139cad0bcfac86543cf4ff1ad0056d641c8fd5b628480879d4e33e0",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "android-compose",
@@ -7952,6 +8032,7 @@
       "v5Status": "evaluating",
       "steward": "ChatGPT web — android-compose",
       "adjacentSkills": [
+        "computer-use",
         "desktop-electron-tauri",
         "ios-swiftui",
         "native-interface",
@@ -8011,9 +8092,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "c2333ee39528ab4e9bf66fdced9cd35b2df5ffdeb46468d1c9b5c21c6e5d9454",
+      "packageFingerprint": "ee38bad33de9fc47e99b5fcaa458af138a635bcedd485e4f65175828d27c4417",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "react-native-expo",
@@ -8022,6 +8103,7 @@
       "steward": "ChatGPT web — react-native-expo",
       "adjacentSkills": [
         "android-compose",
+        "computer-use",
         "desktop-electron-tauri",
         "ios-swiftui",
         "native-interface",
@@ -8080,9 +8162,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "85f2201da6e2782e92e9c7f986bfc35e69864d251ac9eaf2b4e4baa5c235959d",
+      "packageFingerprint": "5609210402532f23eddee85224e9bfbf23a86a603dadd1d3b8a50a9b29d04e6c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "desktop-electron-tauri",
@@ -8092,6 +8174,7 @@
       "adjacentSkills": [
         "android-compose",
         "application-security",
+        "computer-use",
         "ios-swiftui",
         "native-interface",
         "react-native-expo",
@@ -8158,9 +8241,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "35931debbfa4860baadc4a7f795d980a1179899dad94b0f0dbc15f5164065e14",
+      "packageFingerprint": "2e17545a1ecd3386ddf6d028385d31b8e4971ebe7e24a0a812e397d232bf4d0c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "relational-data-modeling",
@@ -8215,9 +8298,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "b4759810a9d75a3f16d884466ebb90e2b6aeab6f4833889e4713a0c033c4b801",
+      "packageFingerprint": "c6882fc04692a0659d0d29c92f6efbfc5a4329cb1dd9c24774603eac569403df",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "postgres-engineering",
@@ -8307,9 +8390,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "96d808cd6c4fed7012bff06f17e2ef929dd4c5b0c19a99da57e914cc6ff15841",
+      "packageFingerprint": "aa35209b851b0cb159a9467b6cd6fc3464764f8bb26fb23213ce6a715252f2be",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "mysql-engineering",
@@ -8383,9 +8466,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "bd3bb9bcdff9b09d45761b37aea69d08167363db6e6848a3747577358d6a5629",
+      "packageFingerprint": "732ade96ac38a6192dd3b0cd275c792f6958a619eec1375828f31c5afd0b42d9",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "sqlite-engineering",
@@ -8427,9 +8510,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "665093c73ac6c34a5d0114d6af043352c9acc0dd32345e28fbb8940efd9bebe9",
+      "packageFingerprint": "690b94d77abed8d9c4d1bf0d2c84f06c57515787f7e7270c7a1342637ce0efdd",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "redis-engineering",
@@ -8481,9 +8564,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "dfe51b84b3745da72d86851d7d0256a762a3183cce6080d5a8208f43c6e1dccf",
+      "packageFingerprint": "6d8589c79db966baf7533ebea4cb552c37a618540c57cfe0a0951b37d41303ba",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "mongodb-engineering",
@@ -8567,9 +8650,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "71e5716180cf81a4fafa6e29a8cad26fe98a55f06a1696d8b32b8ca856e64ef5",
+      "packageFingerprint": "d16a489ab14b1755784f050e79ddaed02e7d1065c837d57840f87ee44449380c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "search-indexing",
@@ -8622,9 +8705,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "0821c71945cf867dd429464d618d6106d05557f307ca933925a15385416fb9e2",
+      "packageFingerprint": "3ec0f62463f0e952d07fab8ca3d247441bd18058415662d0470f77154ed058f8",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "vector-search-systems",
@@ -8701,9 +8784,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "230e835720984983e37e9ca66e70026d8b6aaf5176d5f48a3c137e17937ccbd8",
+      "packageFingerprint": "d030c17a9ebada0267e7469374ff89f0395360741a98ef5a69b668ecbab9487d",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "data-pipeline-engineering",
@@ -8769,9 +8852,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "5c17821b9733c8e94656d5638fd1bb1375fffe57a91aa86623884228f7371188",
+      "packageFingerprint": "ad4a4c83c0fbf77b5ed86124ff242399e6d4064054c2afa299037abbeeedd916",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "stream-processing",
@@ -8813,9 +8896,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "aecd92026f8ed00099a1fdd4fd6f4de3826d2a7f3a458f5b39128ec98c054791",
+      "packageFingerprint": "49a44dd8d0627be4cd3ab77a59dd70ee482a7ac32554017d60da7e418022024b",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "analytics-engineering",
@@ -8889,9 +8972,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.4",
-      "packageFingerprint": "0afff483797f2c4fd599a39a63f3c62cf73c4fba8dad087ac76e7f0139facde4",
+      "packageFingerprint": "b35690a5c8e3565a3120081dbd9f08540e6d047dd74f2a9f9fff4f6ca2b0c984",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "database-performance",
@@ -8957,9 +9040,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "43ae8a2891253c010233df86a9d223187a2ce1ef8dd81cd3584d0d76fdb32f3c",
+      "packageFingerprint": "3ee2d6f7e1edd207d928dca59b79a500c81080f36dce271eda0e85cda442f518",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "aws-cloud",
@@ -9005,15 +9088,15 @@
           "url": "https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets.html",
           "sourceType": "official-docs",
           "versionScope": "Rolling CloudFormation change-set guidance as available 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Reviewable stack changes and replacement visibility; a change set predicts changes but does not guarantee successful execution."
         },
         {
           "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html",
           "sourceType": "official-docs",
-          "versionScope": "Rolling CloudTrail concepts as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling CloudTrail concepts as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Audit/event-history/trail concepts. Event History is limited to 90 days of management events per account/Region and is not a durable organization audit archive."
         },
@@ -9021,7 +9104,7 @@
           "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/doc-history.html",
           "sourceType": "official-docs",
           "versionScope": "AWS Security Reference Architecture living guidance; latest major document-history update 2026-06-30",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Fresh security adjacency guard. June 2026 update removed older CloudTrail Lake recommendations; do not reuse stale Lake-centric guidance for new customers."
         }
@@ -9043,11 +9126,11 @@
         "qualityDelta": 0.36363636363636365,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "56c15172c155eab03e108e858af3a88003f6f331d9521415b994199d13a64f15",
+      "packageFingerprint": "d2164f2af2bbb70bbfe00cad9c81cba404a5d40c20f26fc1cb1aea17a3ab1584",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "gcp-cloud",
@@ -9084,7 +9167,7 @@
           "url": "https://docs.cloud.google.com/iam/docs/best-practices-service-accounts",
           "sourceType": "official-docs",
           "versionScope": "Rolling Google Cloud service-account security guidance as available 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Avoid service-account keys where possible; scope impersonation/attachment and workload identities deliberately."
         },
@@ -9114,11 +9197,11 @@
         "qualityDelta": 0.41818181818181815,
         "verificationDelta": 0.045454545454545456
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "141d4d4a4d6e76a02cefd88c3b73b3163914ae61c7c00c8699320575206dcdc0",
+      "packageFingerprint": "9d5c36f4a0226109dbedc8bcdb63a49b3e5602b40143f541892a4a137217d8bb",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:01.720Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "azure-cloud",
@@ -9195,9 +9278,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "f78d656b7e4b6aabc3fdf0be2b319f04dd75f754d5ece2b6043e293ed6a8d9d8",
+      "packageFingerprint": "1b5a6bfa9fed79cba4cb7a785e2fab619df7c5b0da7e5d9932fa4b856e7ac075",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "kubernetes-operations",
@@ -9268,9 +9351,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "da08c7b3df6c9f9d557e0e54995338ab97334abd3f270408e2a1f586e7175ff6",
+      "packageFingerprint": "7849ffdfa4e9845b8ee3dc7aa9cf035150c4f906d62e7ff3b0011a5eb32bfc42",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "container-engineering",
@@ -9344,17 +9427,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.3333333333333333,
+        "qualityDelta": 0.3333333333333333,
+        "verificationDelta": -0.047619047619047616
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9cea03bc6ecf16c82b1ba59fb286d15a650096836872b1791da8f0a86d6a4eba",
+      "packageFingerprint": "70fc1be53cd602e166ccb65a01bd266eb7037b34bcff31e1bafdae64693624df",
       "nextAction": "Candidate regressed against the matched no-skill baseline.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "terraform-iac",
@@ -9374,7 +9457,7 @@
           "url": "https://developer.hashicorp.com/terraform/language/backend",
           "sourceType": "official-docs",
           "versionScope": "Terraform v1.16.x, labeled latest in HashiCorp documentation as of 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Current Terraform language/backend baseline and CLI-version context."
         },
@@ -9428,16 +9511,16 @@
         "qualityDelta": 0.4444444444444444,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "7b13fc916a4570d4b7c3fa8e3e162c88a9a1f3966bc6afe461d3069fa1df0a62",
+      "packageFingerprint": "1b28cdf48bd42123100b9413eacdad1c48a9503d404efba2677548554e712e30",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "cicd-engineering",
       "cohort": "specialist-v4",
-      "v5Status": "evaluating",
+      "v5Status": "qualified",
       "steward": "ChatGPT web — cicd-engineering",
       "adjacentSkills": ["mlops", "release-planning", "supply-chain-security", "verification"],
       "sources": [
@@ -9445,7 +9528,7 @@
           "url": "https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments",
           "sourceType": "official-docs",
           "versionScope": "Rolling GitHub Actions deployment/environment documentation as available 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Environment protection rules, reviewers, deployment branches/tags, secrets and deployment gating behavior."
         },
@@ -9453,7 +9536,7 @@
           "url": "https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-cloud-providers",
           "sourceType": "official-docs",
           "versionScope": "Rolling GitHub Actions OIDC guidance as available 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Short-lived federated cloud credentials and identity-claim scoping for deployment workflows."
         },
@@ -9461,7 +9544,7 @@
           "url": "https://docs.gitlab.com/ci/environments/protected_environments/",
           "sourceType": "official-docs",
           "versionScope": "Rolling GitLab protected-environment documentation as available 2026-09-05",
-          "verifiedAt": "2026-09-05",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 21,
           "notes": "Protected environments and Allowed to deploy permission boundary for deployment jobs."
         },
@@ -9491,11 +9574,11 @@
         "qualityDelta": 0.41500000000000004,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "d95089bcca3b1dad3b6c71ef77b188b7730737638737e1eff227c92fafc52f07",
-      "nextAction": "refresh authoritative sources before qualification",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "packageFingerprint": "f723bca59072fc63357e791fabf55da79b05e824b563068948686e8e547b292f",
+      "nextAction": "monitor regressions, usage signals, and source freshness",
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "observability-sre",
@@ -9556,9 +9639,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "fbbf311999c579dc0331704c4b68eb60699b6ae247f58c686bc022753147385d",
+      "packageFingerprint": "01a5f2a2d8517fcf1e73d70e9b2b07422905ef4218c3cd390b23f2e6ec0fa593",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "incident-response",
@@ -9619,9 +9702,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "166786fdb77336c68d996468ebfc98f1f09e06fc11afb31db77b5af008eaf29e",
+      "packageFingerprint": "c6e94432e65cc28daf919e52b9cfcd1570731f14398aea6d76a5b1ce40392695",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "linux-systems",
@@ -9714,9 +9797,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "042dc758847464b46c69d7915e15fabd1242c4e37dba16405c46fa546e86c574",
+      "packageFingerprint": "009e9507844466e418c55d71073aef54926e13dc509fecdf0c01c1cdc9795519",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "networking-systems",
@@ -9815,9 +9898,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "1960cf8963768af5c195c64d82dedef11b432e19d5946b39d7cd80523ae6bd75",
+      "packageFingerprint": "39e5791ff202a6908814a0ae1dd099c0f4c9e264b115bd620a35fcf0c9e3fe5a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "edge-cdn",
@@ -9845,7 +9928,7 @@
           "url": "https://developers.cloudflare.com/cache/concepts/default-cache-behavior/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare default cache behavior updated 2026-09-03",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current Cloudflare cacheability/default behavior including request methods, Cache-Control and Set-Cookie interactions."
         },
@@ -9853,7 +9936,7 @@
           "url": "https://developers.cloudflare.com/cache/how-to/cache-keys/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare cache-key documentation updated 2026-08-28",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current default/custom cache-key composition and cache-sharding implications."
         },
@@ -9861,7 +9944,7 @@
           "url": "https://developers.cloudflare.com/cache/how-to/purge-cache/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare purge documentation updated 2026-08-14",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Targeted purge options and current recommendation to prefer granular single-file/key-aware purge over routine purge-all."
         },
@@ -9869,7 +9952,7 @@
           "url": "https://developers.cloudflare.com/cache/concepts/revalidation/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare revalidation documentation updated 2026-06-26",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current asynchronous stale-while-revalidate and validator behavior; this changed in 2026 and must not be inferred from older examples."
         },
@@ -9877,7 +9960,7 @@
           "url": "https://developers.cloudflare.com/cache/how-to/tiered-cache/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare Tiered Cache documentation updated 2026-08-14",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Lower/upper-tier origin request topology and origin shielding semantics."
         },
@@ -9885,7 +9968,7 @@
           "url": "https://developers.cloudflare.com/cache/concepts/cache-responses/",
           "sourceType": "official-docs",
           "versionScope": "Cloudflare cache-response documentation updated 2026-09-04",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current CF-Cache-Status and Age evidence, including tiered-cache age interpretation."
         }
@@ -9909,9 +9992,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "2b647ecfaa6e82066df1dcbb1cb4a5a5cc8985d1c9907d46a931ba084a2b670c",
+      "packageFingerprint": "340130ad61f9f327250087287fb8396e5267c65c7c0ac98d1636362cc89a748a",
       "nextAction": "At least one run recorded an integrity failure.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "serverless-platforms",
@@ -9930,64 +10013,64 @@
         {
           "url": "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Lambda developer guide as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Lambda developer guide as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current Lambda compute/runtime families, duration/concurrency/environment-state distinctions and managed-function behavior; do not assume standard Lambda limits apply to Durable Functions or Managed Instances."
         },
         {
           "url": "https://docs.aws.amazon.com/lambda/latest/dg/invocation-retries.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Lambda retry documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Lambda retry documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current direct, asynchronous and indirect invocation retry ownership; duplicate-safe side effects are required because retries can follow partial execution."
         },
         {
           "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Lambda execution-environment lifecycle as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Lambda execution-environment lifecycle as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Init/invoke/freeze/reuse, cold starts, transient /tmp and background-callback reuse implications for standard and durable functions."
         },
         {
           "url": "https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Lambda concurrency documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Lambda concurrency documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current standard Lambda concurrency/scaling controls; verify compute type because Managed Instances use a different multi-concurrency model."
         },
         {
           "url": "https://docs.aws.amazon.com/lambda/latest/dg/with-sqs.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Lambda SQS event-source documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Lambda SQS event-source documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current polling, batching, duplicate-delivery, visibility timeout, scaling and partial-batch implications for SQS-triggered functions."
         },
         {
           "url": "https://docs.cloud.google.com/run/docs/tips/function-retries",
           "sourceType": "official-docs",
-          "versionScope": "Google Cloud Run event-driven function retry documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Google Cloud Run event-driven function retry documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Retry policy belongs to Eventarc/Pub/Sub trigger path and event-driven functions must be designed for redelivery/idempotency."
         },
         {
           "url": "https://developers.cloudflare.com/workers/platform/limits/",
           "sourceType": "official-docs",
-          "versionScope": "Cloudflare Workers limits as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "Cloudflare Workers limits as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "Current Workers CPU/memory/subrequest/connection/duration and post-response limits; an isolate may handle many concurrent requests, unlike standard Lambda's one-invocation-per-environment model."
         },
         {
           "url": "https://developers.cloudflare.com/workers/runtime-apis/context/",
           "sourceType": "official-docs",
-          "versionScope": "Cloudflare Workers Context documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Cloudflare Workers Context documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current waitUntil lifecycle; floating asynchronous work can be canceled and waitUntil is bounded after the response/disconnect."
         }
@@ -10009,11 +10092,11 @@
         "qualityDelta": 0.4444444444444444,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "ee4f61d42aa64fcb85b31f96c72e937ff2c6722866d4ffdf650dcbd858ec2862",
+      "packageFingerprint": "94520e499806f7ec47a79b3118cd02ba539684deea44138677d55002668aac35",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "llm-application-engineering",
@@ -10055,32 +10138,32 @@
         {
           "url": "https://developers.openai.com/api/docs/guides/structured-outputs",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI structured-output documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI structured-output documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current schema-constrained output, refusal, streaming and provider-specific structured-response mechanics."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/function-calling",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI function/tool-calling documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI function/tool-calling documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "JSON-Schema function definitions and strict-mode behavior; application authorization remains outside the model/tool proposal."
         },
         {
           "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview",
           "sourceType": "official-docs",
-          "versionScope": "Rolling Claude Platform tool-use documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling Claude Platform tool-use documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Client tool input_schema and tool_use/tool_result round-trip semantics plus server/client execution boundary."
         },
         {
           "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
           "sourceType": "official-docs",
-          "versionScope": "Rolling Claude Platform prompt-caching documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling Claude Platform prompt-caching documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Prompt-prefix caching as latency/cost optimization with current 5-minute default and optional 1-hour lifetime; not durable application memory."
         },
@@ -10112,9 +10195,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "06b3704c66e3920e657ee91829f2ec6722b859c0e80446b312c506adb84b155f",
+      "packageFingerprint": "66f60525c18f13b2a7bc2dc04ab6503b009139e9e9e4834775d15f4803018901",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "agentic-systems",
@@ -10133,16 +10216,16 @@
         {
           "url": "https://openai.github.io/openai-agents-python/",
           "sourceType": "reference-implementation",
-          "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current agents, tools, guardrails, handoffs/agents-as-tools, sessions, human-in-the-loop and tracing primitives."
         },
         {
           "url": "https://openai.github.io/openai-agents-python/multi_agent/",
           "sourceType": "reference-implementation",
-          "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "LLM-directed versus code-directed orchestration plus current manager-as-tool and handoff patterns."
         },
@@ -10182,9 +10265,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.2",
-      "packageFingerprint": "1f77f68b82324db4f76665fc511dae947ae48f48ba3c52cc5099127ec016e309",
+      "packageFingerprint": "5edc5c82241e4043dbd356a51578c8cca5ffea87313830063508be00f9cdc80c",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "prompt-context-engineering",
@@ -10201,16 +10284,16 @@
         {
           "url": "https://developers.openai.com/api/docs/guides/prompt-engineering",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI prompt-engineering documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Message roles and instruction priority, prompt structure, context-window planning, examples and code-managed prompt versioning."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/prompting",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI prompting documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI prompting documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current prompt-as-code guidance, typed dynamic inputs, testing and release discipline for production prompts."
         },
@@ -10225,16 +10308,16 @@
         {
           "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
           "sourceType": "official-docs",
-          "versionScope": "Rolling Claude Platform prompting best practices as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling Claude Platform prompting best practices as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current Claude-specific clarity, examples, structural tags, long-context placement and model-generation migration guidance."
         },
         {
           "url": "https://platform.claude.com/docs/en/build-with-claude/context-windows",
           "sourceType": "official-docs",
-          "versionScope": "Rolling Claude Platform context-window documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling Claude Platform context-window documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "What consumes context, token accounting, context-limit behavior and current compaction/context-awareness mechanics."
         },
@@ -10266,9 +10349,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "f925247a930e499a7677683175d0b67cb0ca7ea8aac486157a814c879094d43c",
+      "packageFingerprint": "870167f4843e106ff1f8fcd8edffedb6cc463e8309b292406dde5ba4821933e5",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "rag-retrieval-systems",
@@ -10286,16 +10369,16 @@
         {
           "url": "https://developers.openai.com/api/docs/guides/retrieval",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current vector-store ingestion, chunking, attribute filtering, ranking options, hybrid weights and deletion consistency behavior."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/tools-file-search",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI file-search documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI file-search documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Hosted retrieval integration, result inclusion, metadata filtering and max-result quality/latency tradeoffs."
         },
@@ -10351,9 +10434,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "0bfe483dbfacfa4881aa0a10b82cc635e1ab9dad6ca894fc4bc63e6ff0eafd9a",
+      "packageFingerprint": "dfa6040538ff37883ef429c0e258e4f279848a1bb35e3b6dab0b912651e6b85a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "llm-evaluation",
@@ -10390,23 +10473,23 @@
           "url": "https://developers.openai.com/api/docs/guides/evaluation-best-practices",
           "sourceType": "official-docs",
           "versionScope": "Rolling OpenAI evaluation best-practices documentation inspected 2026-09-06",
-          "verifiedAt": "2026-09-06",
+          "verifiedAt": "2026-09-26",
           "staleAfterDays": 14,
           "notes": "Task-specific eval design, representative datasets, automation, human calibration, continuous evaluation and model-judge practices; not a platform-retirement authority."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/graders",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI grader documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI grader documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current deterministic/text/model grader types, grader-prompt iteration, calibration examples and reward/grader-hacking cautions."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/agent-evals",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Trace grading, workflow-level evidence, datasets and repeatable eval runs for agent systems."
         },
@@ -10452,11 +10535,11 @@
         "qualityDelta": 0.8,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "e2a474e3b2dc1e51df220be96a1c90d696fa694291361708b438e8d49bc14f97",
+      "packageFingerprint": "f6bb7b8871c4ad23349e6aa6d2920e5a90713bfc9b1f3cca75c3cdc9171e95d7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "fine-tuning-training",
@@ -10495,42 +10578,42 @@
         {
           "url": "https://developers.openai.com/api/docs/guides/fine-tuning-best-practices",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "Current platform wind-down notice, data quality/quantity, train/test separation, prompt inclusion, hyperparameter iteration and training-example token limits."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/supervised-fine-tuning",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "Eval-first SFT workflow, representative datasets, base-model comparison, checkpoints, overfitting and provider safety checks."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/direct-preference-optimization",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI DPO documentation as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "Rolling OpenAI DPO documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "Current preference-pair objective and constraints, beta semantics, SFT-before-DPO guidance and safety checks."
         },
         {
           "url": "https://developers.openai.com/api/docs/guides/rft-use-cases",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "RFT suitability, eval-first requirement, base-model learning signal, grader robustness and reward-hacking considerations."
         },
         {
           "url": "https://developers.openai.com/api/docs/deprecations",
           "sourceType": "official-docs",
-          "versionScope": "OpenAI deprecations page as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "OpenAI deprecations page retrieved on 2026-10-02; self-serve fine-tuning and base-model lifetime sections inspected",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 3,
-          "notes": "Authoritative current self-serve fine-tuning wind-down dates and fine-tuned-model shutdown/deprecation schedule."
+          "notes": "Current self-serve training eligibility restrictions and 2027-01-06 new-job cutoff remain documented; inference ends with underlying base-model deprecation. No account eligibility or live training was verified."
         },
         {
           "url": "https://huggingface.co/docs/transformers/en/peft",
@@ -10566,11 +10649,11 @@
         "qualityDelta": 0.4,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "6f0ce0df1a81e34b43d611445ae824fb59d0ab35ecceeda91f65cbede0ada143",
+      "packageFingerprint": "581716c32db23bb224303f4e07518345aca58b13d677d4f73946fdda7a44232b",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "embedding-systems",
@@ -10608,24 +10691,24 @@
         {
           "url": "https://developers.openai.com/api/docs/guides/embeddings",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI embeddings documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI embeddings documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current embedding models, dimensions and supported shortening behavior."
         },
         {
           "url": "https://developers.openai.com/api/reference/resources/embeddings/methods/create",
           "sourceType": "official-docs",
-          "versionScope": "Rolling OpenAI embeddings API reference as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling OpenAI embeddings API reference as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current per-input/batch token limits, dimensions parameter, batching and response identity."
         },
         {
           "url": "https://ai.google.dev/gemini-api/docs/embeddings",
           "sourceType": "official-docs",
-          "versionScope": "Rolling Gemini API embeddings documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling Gemini API embeddings documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current Gemini embedding-2 multimodal behavior, output dimensions, normalization and task-instruction differences versus embedding-001."
         },
@@ -10665,9 +10748,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "4e2846472e2aaf3826f307e3ba57c431fcbf92aedd0227c7494e67133d61b276",
+      "packageFingerprint": "260c13b9de83e06ed6e90b2aae76968e7e57d5cb44ea6f8a5cf42609e34381ad",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "computer-vision",
@@ -10771,9 +10854,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "30f54339724c8190b562e5725be974e7367bd5b76d5f1daa1959eed7a3648641",
+      "packageFingerprint": "d083fbc768bb999191de6ba9b3c7d2a940628b0bf292616f8eed50957a9d3552",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "speech-audio-ai",
@@ -10812,16 +10895,16 @@
         {
           "url": "https://developers.openai.com/api/docs/models/gpt-transcribe",
           "sourceType": "official-docs",
-          "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current file/streaming transcription model behavior, hints and supported transcription surfaces."
         },
         {
           "url": "https://developers.openai.com/api/docs/models",
           "sourceType": "official-docs",
-          "versionScope": "OpenAI model catalog as available 2026-09-17",
-          "verifiedAt": "2026-09-17",
+          "versionScope": "OpenAI model catalog as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 7,
           "notes": "Current realtime, transcription and speech-generation model families; verify aliases and deprecations before migrations."
         },
@@ -10875,11 +10958,11 @@
         "qualityDelta": 0.5,
         "verificationDelta": 0
       },
-      "freshness": "stale",
+      "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "a302f81e13e34ce6524bef19efc71ae5d220b64a1848c0ab5200132028b5988d",
+      "packageFingerprint": "d9bac80e0744dedc38e2790e8b16ef40a7786112bff7f2c74ec4f7d38aa041f3",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "recommendation-ranking",
@@ -10975,9 +11058,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "c5340e73482c02002dfb132ae61808a7c7d9acaa7e528dda49264fb04cefb459",
+      "packageFingerprint": "93155694a271f9623584901698f6d15e55b5df201508634498451c21a85281a6",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "mlops",
@@ -10997,8 +11080,8 @@
         {
           "url": "https://mlflow.org/docs/latest/ml/model-registry",
           "sourceType": "reference-implementation",
-          "versionScope": "MLflow 3.15.2 latest documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "Rolling MLflow model-registry documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current model registry versioning, lineage, aliases/tags, model signatures and production workflow semantics."
         },
@@ -11006,7 +11089,7 @@
           "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/online-serving-types",
           "sourceType": "official-docs",
           "versionScope": "Google Cloud Feature Store online serving documentation updated 2026-09-01",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current online-serving modes and deprecation-sensitive feature-store behavior; verify platform product naming/version before implementation."
         },
@@ -11014,7 +11097,7 @@
           "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/serve-feature-values",
           "sourceType": "official-docs",
           "versionScope": "Google Cloud Feature Store serving documentation updated 2026-09-02",
-          "verifiedAt": "2026-09-19",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Latest-value/entity semantics, sync requirements and feature timestamps for online serving."
         },
@@ -11046,9 +11129,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "6f9bea666955a874351fca24ea4f82115f5124c5f8702f529e96dd4d9670dff3",
+      "packageFingerprint": "485b8ea5ca926bae32a5f3c69e7c8c677707359a5c7a778e75a4d5025f3ad65e",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "ai-safety-evaluation",
@@ -11159,9 +11242,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "7746142253e9b3270a88ae584c8f612d3e73bffccf9e44e4c524fe6a8492a6e6",
+      "packageFingerprint": "223042cc2e6de761e87f086930f8791bd06222302735577168722dfef3b4453c",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "api-contract-design",
@@ -11228,9 +11311,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.7",
-      "packageFingerprint": "1a9dcf2175ecb1287abf5bd9d86af9488d60918c41e14439a95279e39fb8665a",
+      "packageFingerprint": "24b2f5470f0648da48884b5cabf72eb53677da365d56bd1a9b9978d02ae4f401",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "http-rest-engineering",
@@ -11296,9 +11379,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "bbad32bbf80232b19474952dd07c675d4afe9001dc65e12a972da8881acc29a9",
+      "packageFingerprint": "450dcc184883bd58f6d734dedeaa7d5fd130378e64ce1f7566e527c1c46425de",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "graphql-engineering",
@@ -11349,9 +11432,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "a23c9095c519e7ea91faa2b5670f85823c71ea8655c6a0ac5ac95847c73366b5",
+      "packageFingerprint": "b28a0c45441068b8293cab184b2e91c471c8e210bc5f63051fd31a562627e892",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "grpc-protobuf",
@@ -11433,9 +11516,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "62c80461b2859442a357d4aa1d3193d4bb14b222d01382c92946e4119a5cbfef",
+      "packageFingerprint": "0a9738e9de2885e202666af655e2be36264c92aaaa75fb81a300f5b2f20cfcbb",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "event-driven-architecture",
@@ -11501,9 +11584,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "e0ddee9a7d369d5e48ef8f5752eb2dc478f97dc0153fa5169a20e3ab64775aa0",
+      "packageFingerprint": "66d8cced82cb9694420afd82851ea6e1d6ea7fb8e0ff9f9b38db24788a90fcec",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "oauth-oidc",
@@ -11572,9 +11655,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "059af8bc991363dd293bd236124c4cda62cd6d02f4b4e77e2a2d7d93bfca845d",
+      "packageFingerprint": "921e23efe448e8d90f9082dbff772bb4261f8f19c5727134da0e63755aa1dfdb",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "webhook-integration",
@@ -11617,14 +11700,14 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "f429f8225a9f54cc4ae27aa8a8a399167bd4ee30db6f480a64d1ab07a7a70c4a",
+      "packageFingerprint": "bc24edb30bd85015415cdb9d92f81a89e5bef5fc4251db3f76e59f0dbab03301",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "payment-integration",
       "cohort": "specialist-v4",
-      "v5Status": "blocked",
+      "v5Status": "evaluating",
       "steward": "ChatGPT web — payment-integration",
       "adjacentSkills": [
         "application-security",
@@ -11686,17 +11769,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.38095238095238093,
+        "qualityDelta": 0.38095238095238093,
+        "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "afd38d3b4d23c326a78895551afd2da626b884ab5c68449e1d99739acd1678ce",
+      "packageFingerprint": "221a1ffbf8a96459e547fcedc4fa3b35b64cb8e699573db47d3d60b584483e16",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "email-delivery",
@@ -11770,9 +11853,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "8eab5430607f4ca174adaa182b5ee0de6601e2c541faecadaf905080c75ea207",
+      "packageFingerprint": "21e57dfad6fc0a9c9a34f5ea06189aaca8d999b996038dd3a49e5f3cf210ae9e",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "realtime-systems",
@@ -11816,9 +11899,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "e0d290fdb19752408fe41ed7fde1dc1f000f84279819fe64cee8eb266b2e7a24",
+      "packageFingerprint": "885de5d983ce9fbeb36517569b23d7b29f31538bf0d77f77777022403ccb1217",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "applied-cryptography",
@@ -11892,9 +11975,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9fc10425aa5ee561dcc5ec7349eab67939a317d2d71c0e2b246c88a05b2e7c9c",
+      "packageFingerprint": "7e9516e06130d75fd4e5fa3afefaf0711e1861b82e849b7a9a13e2c513788f2f",
       "nextAction": "Observed pass rate is below 80%.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "secrets-key-management",
@@ -11955,9 +12038,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "0fd4348af9448ac0036e6eeb4ef7265594222d97832fee7d34eebdb50e72a5f1",
+      "packageFingerprint": "e1f0da9408c8575f8617a6fa646d073028c4d383f921a61955c0ed2c4313db96",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "web-security",
@@ -12032,9 +12115,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "23847ce7b521e13093a206772b9b9b0dc05ec65b2797da74ef7e525b221428d8",
+      "packageFingerprint": "3e891334e2a48c07830d703503b6a13318e5deb7f3b43c687545fc88d2ace301",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "cloud-security",
@@ -12099,9 +12182,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "e423fec146897336d699b7db02cabd3ba98385af08d23cb54b642a4cdbf8ea04",
+      "packageFingerprint": "74629cc80e76198ab9c5748320f89b85be01a1c62c35daf0fe9600b4f8c852e2",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "secure-authentication",
@@ -12177,9 +12260,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.1",
-      "packageFingerprint": "53288f5d67918b57388dacb142623c17b44f69849507402290661c9b90e46ec1",
+      "packageFingerprint": "035df32f28978b707a804ffc400e9a1449bf7f362362109ceb8b1b04924be90b",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "threat-modeling-practice",
@@ -12246,9 +12329,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "175ba470b97bc770bc77343b75c54e17d4b62412535ce8c2fada3b455ae506c2",
+      "packageFingerprint": "3b8a40de0ccb49e0663838a8d05c2fcafa606ebf1bf7fbbf1d3993b07d10c3e0",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "product-management",
@@ -12342,9 +12425,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "b92d3b683fead53c4f64986f26598142d3a944f8524016a2ed00669bd43e179b",
+      "packageFingerprint": "4e5e403873e50b8b12088701363a4519cbca75cfdda297ae5e241cf093f835b3",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "product-analytics",
@@ -12410,9 +12493,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "55bb1f302df19e0b6424f40aea40e03dd17c86d2d9755e07e4c99de584a7d6e1",
+      "packageFingerprint": "6e3aba4b4c0cd07b6519b13f1672dcca7e63d5e8cf7c22c6b23e0a5a7f40264c",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "experimentation-ab-testing",
@@ -12473,22 +12556,22 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.3333333333333333,
+        "qualityDelta": 0.3333333333333333,
+        "verificationDelta": -0.047619047619047616
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "ead15bb6f02529ac27cac536857888329e76a4908192ddd78615ade083d415bd",
+      "packageFingerprint": "4051dc392d765611cff9adee40685551863daa7f82411213c2a558c173cdbe13",
       "nextAction": "Candidate regressed against the matched no-skill baseline.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "market-strategy",
       "cohort": "specialist-v4",
-      "v5Status": "blocked",
+      "v5Status": "evaluating",
       "steward": "ChatGPT web — market-strategy",
       "adjacentSkills": [
         "market-competitive-research",
@@ -12525,22 +12608,22 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.4,
-        "qualityDelta": 0.39,
+        "passRateDelta": 0.38095238095238093,
+        "qualityDelta": 0.37142857142857144,
         "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "6300100470972859bfa9d86a8b6d155c8a703036f95145fbe6d5b9872f74a54d",
+      "packageFingerprint": "6e807150f6c8536ef50ae6b5e071f64013d1923f2fbe501c1a728c96500b39a7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "pricing-monetization",
       "cohort": "specialist-v4",
-      "v5Status": "blocked",
+      "v5Status": "evaluating",
       "steward": "ChatGPT web — pricing-monetization",
       "adjacentSkills": [
         "market-competitive-research",
@@ -12585,17 +12668,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.42105263157894735,
-        "qualityDelta": 0.42105263157894735,
+        "passRateDelta": 0.4,
+        "qualityDelta": 0.4,
         "verificationDelta": 0
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "3d247e8c6eb5fe7c923211a48a7f54442e540b4d80fbb94359c9e5f96d459a91",
+      "packageFingerprint": "15b13d526c0e963f33b28081bade8d56e5e09d446eb26b622811eccf6b360339",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "startup-operations",
@@ -12649,9 +12732,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "9bfe5ff283a861286a241c0cdf2a0702e097625003bec07c5a77d73cb5d51446",
+      "packageFingerprint": "89bae4eeef00ad948f6d1d38513402d4cb635e2005204a64d650e75e38854304",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "sales-engineering",
@@ -12696,9 +12779,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "3b01fd0936f552f28b8d7307a4ab688346d8485e103460f7b1a0eeec6e5316b9",
+      "packageFingerprint": "c3e50b84fb7a3a455d2d7e17014f18e1cbdb2a7d933aaff2cec479846613f17a",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "customer-success",
@@ -12756,9 +12839,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "65b73dd22f1d369923e1e2b19fd5829947a69eced3c89b91bf6419db97f5369d",
+      "packageFingerprint": "461b8a50c13c47554ecd7b2fe1129f10a612a9e33b487fe914bc288d5eb22917",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "growth-engineering",
@@ -12803,17 +12886,17 @@
         "scaffold": 0
       },
       "fullTaskEvals": 2,
-      "openRegressions": 1,
+      "openRegressions": 0,
       "uplift": {
-        "passRateDelta": 0.35,
-        "qualityDelta": 0.35,
-        "verificationDelta": -0.05
+        "passRateDelta": 0.3333333333333333,
+        "qualityDelta": 0.3333333333333333,
+        "verificationDelta": -0.047619047619047616
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "f2311d290d0b4da3fcee84fc98074507a15be21297e177c3293ced0de4613cef",
+      "packageFingerprint": "cfc1c36dbe175b4683dc08ab8481e788a66d3e8f1edcb40badabc50a1bc39de1",
       "nextAction": "Candidate regressed against the matched no-skill baseline.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "finops-cloud-cost",
@@ -12857,24 +12940,24 @@
         {
           "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/cost-optimization-hub.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Cost Optimization Hub documentation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Cost Optimization Hub documentation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current consolidated rightsizing/idle/commitment recommendations, deduplication and pricing-discount-aware savings estimates."
         },
         {
           "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/coh-estimated-monthly-savings.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Estimated monthly savings are normalized approximations and actual savings depend on future usage; aggregation uses amortized cost and recommendation interactions."
         },
         {
           "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/sp-recommendations.html",
           "sourceType": "official-docs",
-          "versionScope": "AWS Savings Plans recommendations as available 2026-09-19",
-          "verifiedAt": "2026-09-19",
+          "versionScope": "AWS Savings Plans recommendations as available 2026-10-02",
+          "verifiedAt": "2026-10-02",
           "staleAfterDays": 14,
           "notes": "Current recommendation inputs and projected coverage/utilization; recommendations depend on historical usage/current inventory and are not a forecast of future demand."
         }
@@ -12898,9 +12981,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "bd7bfd713f7ca8d4c9e1a15ab5009f617fe3217781496100f69108fb9047158b",
+      "packageFingerprint": "f56d115b7ce6c4b0b54d39cfeb10ea0eaec87159c233b5875e7f89667ee82651",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-03T01:18:58.572Z"
     },
     {
       "skill": "image-generation-practice",
@@ -12954,9 +13037,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "307fcce36a6dd267d3e31e6398a207e49f65f6f57e9e5a6f0ed42c09bb8a4fab",
+      "packageFingerprint": "0d62b3c1a51e03763a42ef9216bfbbea491a724dcd1415d96e15840456bb9790",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "video-production",
@@ -13014,9 +13097,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "c958fbde668f279488a88382169e23218928eea61a1e7009534c64bc2de0383f",
+      "packageFingerprint": "553a0b97b5b7f59df1a91d1a67d080c0f7d7875eff2fc95e19e1570be4c345e9",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "audio-production",
@@ -13082,9 +13165,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.0.0",
-      "packageFingerprint": "dba01044f3ed8302661d32f8a52d6df10f7d53017ae130fea125265ca393428c",
+      "packageFingerprint": "efeb5f0bf032ade0b31e9ca88b64907c4d11b943215c11de4f3c4f484f009918",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "three-d-graphics",
@@ -13133,9 +13216,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "4e65dbcc5e1e84bba585e2795f22d61cb742f593464d03d78616d5a6f0ecf101",
+      "packageFingerprint": "96041c4cf8bef1b9c643df5db759a92a3566d3b1ebbc62066c7b5fe0c25691c7",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "game-development",
@@ -13207,9 +13290,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "969de3a73b56dbb7b8a2f11ebfdf8bd32d175d292986390e839ad9250e26ce4f",
+      "packageFingerprint": "fffb89d600c48d393239f30765454b1a0afbe196b0a209840d3cb637395012d3",
       "nextAction": "1 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "embedded-firmware",
@@ -13259,9 +13342,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "2faf57a21dca95a2feec24790c6548bca803453f31404cc830f1e68a88f66b35",
+      "packageFingerprint": "26705497303f0daedb1f6dc5afe178e6c5b2102dae9cce64112016a0afad8930",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "robotics-control",
@@ -13342,9 +13425,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "194d828b08cffdc2c4a39112326711e3056f98ded90a01841817ef0443682d43",
+      "packageFingerprint": "38b3584564d819fba89d5f87960c86014161a1252601769bb4b2e3ae2b09cffc",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "gpu-compute",
@@ -13402,9 +13485,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "d4425788d5003f08806f83ef5ec56a288774345d645ea4b752af2a83b1450826",
+      "packageFingerprint": "529fdd60f6331acd70aa5e256d9b58360c0b8679a1d7021dc111cd581580833b",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-07T04:05:28.525Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "financial-modeling",
@@ -13493,9 +13576,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "9fb05d655d5161efbbeb73ec1ae1f2766aa1e4277de7a0cd17646d138861ab67",
+      "packageFingerprint": "aec6e2c75eecc8a824fe1de95c155ff99af4f7d7f9a422901f47ed5cc5c7ad0c",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "business-case-analysis",
@@ -13573,9 +13656,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "c4d5426744d6a209388b4ee83a8d9889562acd9257b6f0caab4ffe3638ac1438",
+      "packageFingerprint": "3f4591f525c25188a984ec93ff280aa213c9df9bc9132100186d6995129dc877",
       "nextAction": "2 active provenanced blind review(s) failed semantic evaluation.",
-      "updatedAt": "2026-09-16T00:47:45.189Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "contract-analysis",
@@ -13620,9 +13703,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "04f6cc2f91e88ba41b9670f792cd8b4d2df1e061cb100a265d47ee5c0fc3353b",
+      "packageFingerprint": "b63d67299d3295894f5638763d16cbd1ae25ab0f626f78465f93f4d2899e8529",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "project-program-management",
@@ -13676,9 +13759,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "e4151089c1cae8b5f9b93234b04b658876c5022746b028e8930db737e764c4f1",
+      "packageFingerprint": "a59c101a172626d9f42f6f5e54d7dca41d458af59b2e1487d5f7a420c3facca8",
       "nextAction": "monitor regressions, usage signals, and source freshness",
-      "updatedAt": "2026-09-13T22:56:24.726Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "marketing-strategy",
@@ -13736,9 +13819,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.1",
-      "packageFingerprint": "39fa1cb8c29c13ce800f1a067c97c98a13c5d650d8815d421d13dd87362b9c3b",
+      "packageFingerprint": "e44b9181f46e2b79ad270e623248ad60ee1531f921002fe1f9fd1ad8f50c35fc",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-26T19:05:08.550Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     },
     {
       "skill": "procurement-vendor-evaluation",
@@ -13796,9 +13879,9 @@
       },
       "freshness": "fresh",
       "packageVersion": "5.1.0",
-      "packageFingerprint": "2ca924bba5df440b9a5548e77f9dc912c6a110b7638ecf9865213288c246e340",
+      "packageFingerprint": "11103c20a2b4e99b35ea002b8c826aee51e359b18fb4bd028f5c0553cf0eafa2",
       "nextAction": "At least one blind review with persisted evaluator provenance is required.",
-      "updatedAt": "2026-09-15T22:16:03.287Z"
+      "updatedAt": "2026-10-02T23:56:39.519Z"
     }
   ]
 }

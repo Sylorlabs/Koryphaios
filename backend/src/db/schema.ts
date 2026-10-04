@@ -878,6 +878,116 @@ export const noteLinks = sqliteTable(
   }),
 );
 
+/** Explicit associations are authoritative data, never a Markdown projection.
+ * Keeping them separate prevents a content reparse from deleting user intent. */
+export const noteRelationships = sqliteTable(
+  'note_relationships',
+  {
+    fromNoteId: text('from_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    toNoteId: text('to_note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    projectRoot: text('project_root').notNull(),
+    provenance: text('provenance', { enum: ['user', 'agent', 'import'] })
+      .notNull()
+      .default('user'),
+    type: text('type', {
+      enum: ['related_to', 'supports', 'contradicts', 'depends_on', 'supersedes'],
+    })
+      .notNull()
+      .default('related_to'),
+    status: text('status', { enum: ['proposed', 'accepted', 'rejected'] })
+      .notNull()
+      .default('accepted'),
+    actorJson: text('actor_json').notNull().default('{}'),
+    evidence: text('evidence').notNull().default(''),
+    sourceRevision: integer('source_revision').notNull(),
+    targetRevision: integer('target_revision').notNull(),
+    weight: real('weight').notNull().default(1),
+    revision: integer('revision').notNull().default(1),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.fromNoteId, table.toNoteId] }),
+    index('idx_note_relationships_project_from').on(table.projectRoot, table.fromNoteId),
+    index('idx_note_relationships_project_to').on(table.projectRoot, table.toNoteId),
+    index('idx_note_relationships_to').on(table.toNoteId),
+    index('idx_note_relationships_status').on(table.projectRoot, table.status, table.updatedAt),
+    check(
+      'ck_note_relationships_type',
+      sql`${table.type} IN ('related_to','supports','contradicts','depends_on','supersedes')`,
+    ),
+    check(
+      'ck_note_relationships_status',
+      sql`${table.status} IN ('proposed','accepted','rejected')`,
+    ),
+    check('ck_note_relationships_actor', sql`json_valid(${table.actorJson})`),
+    check('ck_note_relationships_self', sql`${table.fromNoteId} <> ${table.toNoteId}`),
+    check('ck_note_relationships_weight', sql`${table.weight} > 0 AND ${table.weight} <= 1`),
+    check('ck_note_relationships_revision', sql`${table.revision} >= 1`),
+    check('ck_note_relationships_source_revision', sql`${table.sourceRevision} >= 1`),
+    check('ck_note_relationships_target_revision', sql`${table.targetRevision} >= 1`),
+    check(
+      'ck_note_relationships_provenance',
+      sql`${table.provenance} IN ('user', 'agent', 'import')`,
+    ),
+    check('ck_note_relationships_evidence', sql`length(${table.evidence}) <= 2000`),
+  ],
+);
+
+/** Append-only lifecycle snapshots populated by SQLite triggers. No endpoint FK:
+ * deleting a note must not erase its relationship audit trail. */
+export const noteRelationshipHistory = sqliteTable(
+  'note_relationship_history',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    fromNoteId: text('from_note_id').notNull(),
+    toNoteId: text('to_note_id').notNull(),
+    projectRoot: text('project_root').notNull(),
+    revision: integer('revision').notNull(),
+    action: text('action').notNull(),
+    snapshotJson: text('snapshot_json').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('idx_note_relationship_history_pair').on(
+      table.projectRoot,
+      table.fromNoteId,
+      table.toNoteId,
+      table.id,
+    ),
+  ],
+);
+
+export const noteSemanticIndexState = sqliteTable('note_semantic_index_state', {
+  projectRoot: text('project_root').primaryKey(),
+  providerIdentity: text('provider_identity').notNull(),
+  cursor: text('cursor').notNull().default(''),
+  optedInAt: integer('opted_in_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+export const noteSemanticVectors = sqliteTable(
+  'note_semantic_vectors',
+  {
+    projectRoot: text('project_root').notNull(),
+    noteId: text('note_id')
+      .notNull()
+      .references(() => notes.id, { onDelete: 'cascade' }),
+    providerIdentity: text('provider_identity').notNull(),
+    revision: integer('revision').notNull(),
+    contentHash: text('content_hash').notNull(),
+    vectorJson: text('vector_json').notNull(),
+    indexedAt: integer('indexed_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectRoot, table.noteId] }),
+    index('idx_note_semantic_vectors_provider').on(table.projectRoot, table.providerIdentity),
+  ],
+);
+
 // File attachments for notes
 export const noteAttachments = sqliteTable('note_attachments', {
   id: text('id').primaryKey(),

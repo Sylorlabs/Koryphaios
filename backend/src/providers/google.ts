@@ -5,6 +5,8 @@
 import type { ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import { type Provider, type ProviderEvent, type StreamRequest, resolveModel } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';
+import { userConfirmedImageInput } from './attachment-admission';
+import { mediaInputAdmissionError } from './media-input';
 import { withRetry } from './utils';
 import { isModelListCacheFresh, mergeModelLists, modelFromRemoteId } from './model-list-cache';
 import { applyModelsDevMetadata, warmModelsDevCache, modelsDevKeysFor } from './models-dev';
@@ -75,6 +77,8 @@ export function formatGoogleProviderError(err: unknown, modelId: string, provide
 }
 
 export class GoogleProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
+  readonly mediaInputKinds = ['audio', 'video'] as const;
   // 'aistudio' is the AI Studio brand of the same Gemini (generativelanguage)
   // API — behaves exactly like 'google', just a distinct, unambiguous
   // API-key-only provider entry so users never hit the gcloud OAuth path.
@@ -264,7 +268,10 @@ export class GoogleProvider implements Provider {
 
     const client = new GoogleGenAI(clientOptions as ConstructorParameters<typeof GoogleGenAI>[0]);
 
-    // Gemini content parts: either text or inlineData (image). The SDK's
+    const mediaError = mediaInputAdmissionError(this, request.messages);
+    if (mediaError) throw new Error(mediaError);
+
+    // Gemini content parts: either text or inlineData (image, audio, video). The SDK's
     // Part type is a strict union; we build a compatible shape explicitly.
     type GeminiPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 
@@ -281,6 +288,8 @@ export class GoogleProvider implements Provider {
                   text?: string;
                   imageData?: string;
                   imageMimeType?: string;
+                  mediaData?: string;
+                  mediaMimeType?: string;
                 }>
               )
                 .map((b): GeminiPart | null => {
@@ -294,6 +303,9 @@ export class GoogleProvider implements Provider {
                         data: b.imageData,
                       },
                     };
+                  }
+                  if ((b.type === 'audio' || b.type === 'video') && b.mediaData && b.mediaMimeType) {
+                    return { inlineData: { mimeType: b.mediaMimeType, data: b.mediaData } };
                   }
                   return null;
                 })
@@ -348,7 +360,16 @@ export class GoogleProvider implements Provider {
           ),
         );
         const msg = err instanceof Error ? err.message : String(err);
-        if (hasImages && /image|vision|multimodal|inline_?data/i.test(msg)) {
+        const userConfirmedImages = userConfirmedImageInput(this, request);
+        const hasMedia = request.messages.some(
+          (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'audio' || b.type === 'video'),
+        );
+        if (
+          hasImages &&
+          !hasMedia &&
+          !userConfirmedImages &&
+          /image|vision|multimodal|inline_?data/i.test(msg)
+        ) {
           for (const m of contents) {
             m.parts = m.parts.map((p): GeminiPart =>
               'inlineData' in p

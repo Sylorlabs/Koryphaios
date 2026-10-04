@@ -46,6 +46,8 @@ export {
 } from './files';
 export { WebSearchTool, WebFetchTool } from './web';
 export { ViewImageTool } from './image';
+export { GenerateVideoTool } from './video';
+export { ForgetTool, RecallTool, RememberTool } from './external-memory';
 export { AskUserTool, AskManagerTool, DelegateToWorkerTool } from './interaction';
 export { SendAgentMessageTool, RequestManagerRelayTool, ListAgentMessagesTool } from './messaging';
 export { DelegateToJulesTool } from './jules';

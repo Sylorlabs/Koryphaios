@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedEntryLocal } from '$lib/types';
 
@@ -13,7 +13,13 @@ vi.mock('$lib/utils/clipboard', () => ({
   copyText: (...args: unknown[]) => mocks.copyText(...args),
 }));
 vi.mock('$lib/stores/sessions.svelte', () => ({
-  sessionStore: { activeSessionId: 'session-1', fetchMessages: vi.fn() },
+  sessionStore: {
+    activeSessionId: 'session-1',
+    sessions: [
+      { id: 'session-1', workingDirectory: '/source', gitWorkspace: { path: '/checkout' } },
+    ],
+    fetchMessages: vi.fn(),
+  },
 }));
 vi.mock('$lib/stores/websocket.svelte', () => ({
   wsStore: {
@@ -35,6 +41,7 @@ vi.mock('$lib/stores/toast.svelte', () => ({
 }));
 
 import FeedEntry from './FeedEntry.svelte';
+import { apiFetch } from '$lib/api.svelte';
 import { EXPAND_ANCHOR_EVENT } from '$lib/utils/expand-anchor';
 
 const OUTPUT = 'diff --git a/x.ts b/x.ts\nindex 1..2 100644\n+++ b/x.ts';
@@ -75,6 +82,50 @@ describe('FeedEntry tool output panel', () => {
     mocks.copyText.mockResolvedValue(undefined);
   });
 
+  it('routes relative images through the session checkout without using the source path', async () => {
+    const { container } = renderEntry({
+      ...toolResultEntry(),
+      type: 'content',
+      text: '![Preview](images/result.png)',
+      metadata: {},
+    });
+    await waitFor(() => expect(container.querySelector('img')).not.toBeNull());
+    const image = container.querySelector('img');
+    const url = new URL(image!.getAttribute('src')!, 'http://localhost');
+    expect(url.searchParams.get('path')).toBe('images/result.png');
+    expect(url.searchParams.get('sessionId')).toBe('session-1');
+    expect(url.searchParams.get('project')).toBe('/source');
+  });
+
+  it('renders uploaded and generated media in the conversation', async () => {
+    const createObjectURL = vi.fn(() => 'blob:media-fixture');
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal('URL', Object.assign(class extends URL {}, { createObjectURL, revokeObjectURL }));
+    try {
+      const user = renderEntry({
+        ...toolResultEntry(), type: 'user_message', text: 'Describe these files',
+        metadata: { attachments: [
+          { type: 'file', name: 'clip.mp4', mimeType: 'video/mp4', data: 'Y2xpcA==' },
+          { type: 'file', name: 'speech.mp3', mimeType: 'audio/mpeg', data: 'c3BlZWNo' },
+        ] },
+      });
+      await waitFor(() => expect(user.container.querySelector('video')).toBeTruthy());
+      expect(user.container.querySelector('audio')).toBeTruthy();
+      user.unmount();
+
+      vi.mocked(apiFetch).mockResolvedValueOnce(Response.json({ ok: true, data: {
+        videoBase64: 'Y2xpcA==', mimeType: 'video/mp4', prompt: 'A cat surfing',
+      } }));
+      const generated = renderEntry(toolResultEntry({ toolResult: {
+        name: 'generate_video', output: JSON.stringify({ historyId: 'clip-1' }), isError: false,
+      } }));
+      await waitFor(() => expect(generated.container.querySelector('video')).toBeTruthy());
+      expect(screen.getByText('A cat surfing')).toBeTruthy();
+      generated.unmount();
+      expect(revokeObjectURL).toHaveBeenCalledTimes(3);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('opens flat details with the command, line count, and copy action', async () => {
     const { container } = renderEntry(toolResultEntry());
 
@@ -108,9 +159,11 @@ describe('FeedEntry tool output panel', () => {
 
   it('keeps long tool logs clipped and bounded', async () => {
     const output = 'x'.repeat(8_000);
-    const { container } = renderEntry(toolResultEntry({
-      toolResult: { name: 'bash', output, isError: false },
-    }));
+    const { container } = renderEntry(
+      toolResultEntry({
+        toolResult: { name: 'bash', output, isError: false },
+      }),
+    );
     await fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     const log = container.querySelector('pre.tool-output-pre');
     expect(log?.textContent).toBe(`${output.slice(0, 4_000)}\n\n…output clipped`);
@@ -119,10 +172,16 @@ describe('FeedEntry tool output panel', () => {
 
   it('does not treat nested action keys as row selection', async () => {
     const onSelect = vi.fn();
-    render(FeedEntry, { props: {
-      entry: toolResultEntry(), isSelected: false, isExpanded: false,
-      onSelect, onToggleGroup: vi.fn(), onDelete: vi.fn(),
-    } });
+    render(FeedEntry, {
+      props: {
+        entry: toolResultEntry(),
+        isSelected: false,
+        isExpanded: false,
+        onSelect,
+        onToggleGroup: vi.fn(),
+        onDelete: vi.fn(),
+      },
+    });
     await fireEvent.keyDown(screen.getByRole('button', { name: 'Details' }), { key: 'Enter' });
     expect(onSelect).not.toHaveBeenCalled();
     await fireEvent.keyDown(screen.getByRole('row'), { key: 'Enter' });

@@ -74,6 +74,7 @@ function eventText(event: NotionSessionEventRecord): string {
 }
 
 export class NotionProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name: ProviderName = 'notion';
   readonly config: ProviderConfig;
 

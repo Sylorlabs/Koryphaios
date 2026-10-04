@@ -904,6 +904,13 @@ export class CustomProvider implements Provider {
   streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     return this.inner.streamResponse(request);
   }
+
+  get imageInputTransport(): Provider['imageInputTransport'] {
+    return this.inner.imageInputTransport;
+  }
+  get mediaInputKinds(): Provider['mediaInputKinds'] {
+    return this.inner.mediaInputKinds;
+  }
 }
 
 /** Derive a stable provider id from a user-supplied label. */

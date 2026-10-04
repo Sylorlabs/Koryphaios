@@ -16,6 +16,8 @@ import {
   ValidationError,
 } from '../../errors/types';
 import { SESSION } from '../../constants';
+import { GitWorkspace } from '../../kory/git-workspace';
+import { getRequestProjectRoot } from '../../runtime/request-project';
 import { timeTravelDegradedResponse, withSessionRecoveryGuard } from './session-recovery-guard';
 import {
   eraseSessionsCoordinated,
@@ -63,12 +65,27 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       }
       let session;
       try {
-        session = await sessions.create(
-          'local-user',
-          body.title,
-          body.parentId,
-          body.workingDirectory,
-        );
+        // A revision choice always creates an isolated, persistent checkout.
+        // Never switch a directory which another chat/provider may be using.
+        const workspace = body.git
+          ? await new GitWorkspace(getRequestProjectRoot(request)).create(body.git)
+          : undefined;
+        try {
+          session = await sessions.create(
+            'local-user',
+            body.title,
+            body.parentId,
+            workspace?.repositoryPath ?? body.workingDirectory,
+            workspace,
+          );
+        } catch (error) {
+          if (workspace) {
+            throw new ConflictError(
+              `The isolated repository was created at ${workspace.path}, but its chat could not be saved. Your branch ${workspace.branch} is preserved; open that folder to recover it.`,
+            );
+          }
+          throw error;
+        }
       } finally {
         creationLease.release();
       }
@@ -89,6 +106,13 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         title: t.Optional(t.String()),
         parentId: t.Optional(t.String()),
         workingDirectory: t.Optional(t.String()),
+        git: t.Optional(
+          t.Object({
+            ref: t.String({ minLength: 1, maxLength: 1024 }),
+            expectedHash: t.Optional(t.String({ pattern: '^[a-fA-F0-9]{40,64}$' })),
+            branch: t.String({ minLength: 1, maxLength: 255 }),
+          }),
+        ),
       }),
     },
   )

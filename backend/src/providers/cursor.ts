@@ -26,6 +26,7 @@ import {
   type StreamRequest,
 } from './types';
 import { getCliBridge, getKoryphaiosCursorHome } from './cli-bridges';
+import { mcpConfigCandidates } from './cli-config-paths';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import {
   assertPrivateValuesAbsentFromArgv,
@@ -277,6 +278,7 @@ function dedupeById(models: ModelDef[]): ModelDef[] {
 }
 
 export class CursorProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'cursor' as const;
   private cachedModels: ModelDef[] | null = null;
   private modelsFetchedAt = 0;
@@ -452,20 +454,25 @@ export class CursorProvider implements Provider {
         // MCP: write the kory server config so the CLI gets kory__ tools.
         const mcpConfigs = cursorBridge?.buildMcpConfig(bridgeCtx);
         if (mcpConfigs && mcpConfigs.length > 0) {
-          const mcpConfigPath = join(cursorHome, 'mcp.json');
-          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-          const existing = existsSync(mcpConfigPath)
-            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-            : {};
-          existing.mcpServers = existing.mcpServers ?? {};
-          for (const srv of mcpConfigs) {
-            existing.mcpServers[srv.name] = {
-              command: srv.command,
-              args: srv.args,
-              env: srv.env,
-            };
+          // cursor-agent is not installed on the authoring host, so whether it
+          // resolves mcp.json against CURSOR_CONFIG_DIR itself or against a
+          // ~/.cursor directory inside it is unmeasured. Write every candidate
+          // so a turn can never silently end up with no kory__* tools.
+          for (const mcpConfigPath of mcpConfigCandidates(cursorHome, '.cursor')) {
+            if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+            const existing = existsSync(mcpConfigPath)
+              ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+              : {};
+            existing.mcpServers = existing.mcpServers ?? {};
+            for (const srv of mcpConfigs) {
+              existing.mcpServers[srv.name] = {
+                command: srv.command,
+                args: srv.args,
+                env: srv.env,
+              };
+            }
+            writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
           }
-          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
         }
         // Rules: write .cursorrules with the Kory session rules.
         const ruleFiles = cursorBridge?.buildRules(bridgeCtx);
@@ -503,10 +510,17 @@ export class CursorProvider implements Provider {
       HOME: cursorHome,
       USERPROFILE: cursorHome,
     });
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [cursorHome]) : null;
+    // The soft jail replaces HOME, and cursor-agent resolves its config
+    // relative to $HOME. Expose the dot-directory itself so `$HOME/.cursor`
+    // resolves to the staged home that holds the kory MCP config. Additive:
+    // CURSOR_CONFIG_DIR still points at the staged home either way.
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [join(cursorHome, '.cursor')])
+      : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
+          homeDir: jail?.env.HOME,
           configDirs: [cursorHome, ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : [])],
           // The CLI child is the inference transport — it must reach the
           // model endpoint. See inferenceSandboxPolicy.

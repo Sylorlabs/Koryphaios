@@ -4,7 +4,15 @@
 // Koryphaios never holds the credential — it shells out to the locally installed CLI.
 //
 // Headless interface:
-//   agy --print "<prompt>" --model "<model>" --mode accept-edits --sandbox --log-file <path>
+//   agy --input-format stream-json --output-format stream-json --model "<model>"
+//       --sandbox --log-file <path>
+//
+// Tool authority: Koryphaios does NOT use `--mode` for this. agy ignores
+// `--mode` in print/stream-json mode ("Print mode: --mode <x> is not supported
+// headless"). Each turn instead writes agy's real permission engine — the
+// `permissions.{deny,ask,allow}` lists and `toolPermission` in the managed
+// home's settings.json — where anything not explicitly allowed is soft-denied
+// because headless runs cannot prompt. See antigravity-permissions.ts.
 //
 // Streaming sources (agy ≥1.0.16 writes only glog server logs to --log-file, so
 // the SSE parser below is a legacy fallback for older builds):
@@ -50,6 +58,7 @@ import {
   wrapCommand,
 } from '../collaboration/sandbox-runner';
 import { getCliBridge, getKoryphaiosAntigravityHome } from './cli-bridges';
+import { buildAntigravityHooks, buildAntigravitySettings } from './antigravity-permissions';
 import {
   fetchAntigravityQuota,
   fetchAntigravityQuotaGroups,
@@ -66,6 +75,7 @@ import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,
   safeProviderFailureMessage,
+  providerStreamFailure,
 } from './provider-diagnostics';
 import {
   ensureManagedCliDirectory,
@@ -461,6 +471,9 @@ export function modelDefFromCliName(line: string): ModelDef {
     apiModelId: cliName,
     contextWindow: 0,
     maxOutputTokens: 0,
+    // Modern Gemini models are multimodal. Keep that model capability separate
+    // from the CLI adapter's unverified image transport.
+    ...(/^gemini-[2-9]\d*[.-]/i.test(cliName) ? { vision: true } : {}),
     supportsAttachments: false,
     supportsStreaming: true,
   };
@@ -656,11 +669,14 @@ export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
       };
       result?: {
         status?: string;
+        error?: unknown;
         usage?: {
           input_tokens?: number;
           output_tokens?: number;
           cache_read_tokens?: number;
         };
+        /** Headless turns auto-deny anything needing approval. */
+        denied_actions?: Array<{ action?: string; display_name?: string } | string> | null;
       };
     };
     if (envelope.event === 'step_update') {
@@ -682,11 +698,46 @@ export function parseAntigravityStreamLine(line: string): ProviderEvent[] {
           tokensCacheRead: Number(usage.cache_read_tokens ?? 0),
         });
       }
-      if (envelope.result?.status && envelope.result.status !== 'SUCCESS') {
+      // Headless runs cannot prompt, so agy soft-denies anything requiring
+      // approval and reports it here. Surfacing it keeps a refusal visible
+      // instead of letting the turn simply end with no explanation.
+      const denied = envelope.result?.denied_actions;
+      if (Array.isArray(denied) && denied.length > 0) {
+        const names = denied
+          .map((entry) =>
+            entry && typeof entry === 'object'
+              ? String(
+                  (entry as Record<string, unknown>).display_name ??
+                    (entry as Record<string, unknown>).action ??
+                    'unknown',
+                )
+              : String(entry),
+          )
+          .slice(0, 10);
         events.push({
           type: 'error',
-          error: `Antigravity ended with status ${envelope.result.status}`,
+          error: `Antigravity denied ${names.join(', ')} — use the kory__ tools instead of native ${names.length === 1 ? 'tool' : 'tools'}.`,
         });
+      }
+      if (envelope.result?.status && envelope.result.status !== 'SUCCESS') {
+        const error = envelope.result.error ?? `Turn ended with status ${envelope.result.status}`;
+        // agy renders upstream HTTP failures as prose, e.g. "UNAVAILABLE
+        // (code 503)". Recover the status before the bounded display redaction
+        // so the registry can retry temporary failures and shrink context.
+        const status =
+          typeof error === 'string'
+            ? /\b(?:code|status|HTTP)\s*[:=]?\s*(\d{3})\b/i.exec(error)?.[1]
+            : undefined;
+        const failure = providerStreamFailure('antigravity', 'stream', error, {
+          ...(status ? { status: Number(status) } : {}),
+        });
+        if (failure.diagnostic.transient) {
+          failure.event.error = safeProviderFailureMessage('antigravity', {
+            ...failure.diagnostic,
+            category: 'provider_failure',
+          });
+        }
+        events.push(failure.event);
       }
       return events;
     }
@@ -772,6 +823,7 @@ function parseLogChunk(chunk: string, debug = false): ParsedLogEvents {
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export class AntigravityProvider implements Provider {
+  readonly imageInputTransport = 'file' as const;
   readonly name = 'antigravity' as const;
 
   constructor(readonly config: ProviderConfig) {}
@@ -925,10 +977,9 @@ export class AntigravityProvider implements Provider {
     const logPath = logArtifact.path;
 
     // ── Wire kory MCP server, hooks, and rules into the isolated agy home ──
-    // Antigravity imports .claude/ config (mcpServers, hooks) and reads
-    // AGENTS.md as always-on rules. Writing these before each turn ensures the
-    // CLI discovers the kory__ tool catalog, the PreToolUse enforcement
-    // layer, and Kory's session rules on startup.
+    // Antigravity reads .gemini/config/{mcp_config,hooks}.json and AGENTS.md.
+    // Writing these before each turn ensures the CLI discovers the kory__ tool
+    // catalog, the PreToolUse enforcement layer, and Kory's session rules.
     const agyBridge = getCliBridge('antigravity');
     const bridgeGrantLease =
       !researchOnly && request.sessionId
@@ -951,17 +1002,96 @@ export class AntigravityProvider implements Provider {
       !researchOnly && bridgeCtx.sessionId
         ? bridgeGrantLease!.grant(['mcp:catalog', 'mcp:execute']).directory
         : null;
+    const researchRoot = researchOnly
+      ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-'))
+      : null;
+    const cwd = researchRoot ?? request.workingDirectory?.trim();
     ensureManagedCliDirectory(agyHome);
-    if (!researchOnly)
+    if (!researchOnly) {
+      // ── Enforce Koryphaios's policy inside agy's own permission engine ──
+      // agy reads $GEMINI_DIR/antigravity-cli/settings.json, which the managed
+      // ANTIGRAVITY_HOME relocates, so this is the real gate: headless turns
+      // soft-deny anything not explicitly allowed, with no hook support
+      // required. `--mode` is NOT a control (agy ignores it in print mode), and
+      // the previous `.claude/hooks.json` was never loaded — that is not an agy
+      // customization root and its shape/vocabulary were Claude Code's. Fail
+      // closed instead of spawning an agent whose native tools Koryphaios has
+      // not actually constrained.
       try {
-        // MCP: write .claude.json with the kory server so the CLI gets kory__ tools.
+        const settingsPath = join(agyHome, '.gemini', 'antigravity-cli', 'settings.json');
+        const settingsDir = join(agyHome, '.gemini', 'antigravity-cli');
+        ensureManagedCliDirectory(settingsDir);
+        let existingSettings: Record<string, unknown> = {};
+        if (existsSync(settingsPath)) {
+          healManagedCliFile(settingsPath);
+          try {
+            existingSettings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+          } catch {
+            existingSettings = {};
+          }
+        }
+        // Koryphaios owns the permission-bearing keys; unrelated user settings
+        // in the staged home (theme, trusted workspaces) are preserved.
+        const enforced = buildAntigravitySettings({ workspacePath: cwd });
+        writeManagedCliFile(
+          settingsPath,
+          JSON.stringify({ ...existingSettings, ...enforced }, null, 2),
+        );
+
+        // Redirector: name the kory__ equivalent so a refused native call is
+        // recovered by the agent instead of retried or abandoned. Global hooks
+        // location, so a turn never writes into the user's checkout.
+        const hookScript = process.env.KORY_HOOK_BRIDGE_SCRIPT;
+        if (!hookScript) {
+          throw new Error('KORY_HOOK_BRIDGE_SCRIPT is not configured');
+        }
+        if (!bridgeGrantDirectory) {
+          throw new Error('Antigravity turn has no authenticated bridge grant');
+        }
+        const hooksDir = join(agyHome, '.gemini', 'config');
+        ensureManagedCliDirectory(hooksDir);
+        const hooksPath = join(hooksDir, 'hooks.json');
+        if (existsSync(hooksPath)) healManagedCliFile(hooksPath);
+        writeManagedCliFile(
+          hooksPath,
+          buildAntigravityHooks({
+            hookScript,
+            authFile: bridgeGrantLease!.grant(['hook:pre-tool']).path,
+          }),
+        );
+      } catch (enforcementErr) {
+        attachmentScope.cleanup();
+        promptArtifact.cleanup();
+        yield {
+          type: 'error',
+          error:
+            'Antigravity: refusing to start the turn because Koryphaios could not apply its permission policy to the CLI.',
+        };
+        providerLog.error(
+          { err: enforcementErr, provider: 'antigravity' },
+          'Antigravity permission enforcement failed closed',
+        );
+        return;
+      }
+
+      try {
+        // MCP: agy reads $GEMINI_DIR/config/mcp_config.json. It does NOT read
+        // .claude.json (nor .agents/mcp.json), which is why the kory__ catalog
+        // never used to appear. `agy mcp list` reports servers from this file.
         const mcpConfigs = agyBridge?.buildMcpConfig(bridgeCtx);
         if (mcpConfigs && mcpConfigs.length > 0) {
-          const mcpConfigPath = join(agyHome, '.claude.json');
+          const mcpConfigDir = join(agyHome, '.gemini', 'config');
+          ensureManagedCliDirectory(mcpConfigDir);
+          const mcpConfigPath = join(mcpConfigDir, 'mcp_config.json');
           if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-          const existing = existsSync(mcpConfigPath)
-            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-            : {};
+          let existing: { mcpServers?: Record<string, unknown> } = {};
+          if (existsSync(mcpConfigPath)) {
+            try {
+              existing = JSON.parse(readFileSync(mcpConfigPath, 'utf-8'));
+            } catch {
+              existing = {};
+            }
+          }
           existing.mcpServers = existing.mcpServers ?? {};
           for (const srv of mcpConfigs) {
             existing.mcpServers[srv.name] = {
@@ -971,14 +1101,6 @@ export class AntigravityProvider implements Provider {
             };
           }
           writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
-        }
-        // Hooks: write .claude/hooks.json for PreToolUse enforcement.
-        const hookConfigs = agyBridge?.buildHooks(bridgeCtx);
-        if (hookConfigs && hookConfigs.length > 0 && agyBridge) {
-          const hooksJson = agyBridge.serializeHooks(hookConfigs);
-          const hooksDir = join(agyHome, '.claude');
-          ensureManagedCliDirectory(hooksDir);
-          writeManagedCliFile(join(hooksDir, 'hooks.json'), hooksJson);
         }
         // Rules: write AGENTS.md with the Kory session rules.
         const ruleFiles = agyBridge?.buildRules(bridgeCtx);
@@ -990,18 +1112,16 @@ export class AntigravityProvider implements Provider {
       } catch (wiringErr) {
         providerLog.warn(
           { err: wiringErr, provider: 'antigravity' },
-          'Failed to wire kory MCP/hooks/rules for Antigravity',
+          'Failed to wire kory MCP/rules for Antigravity',
         );
       }
+    }
 
-    const researchRoot = researchOnly
-      ? mkdtempSync(join(tmpdir(), 'kory-web-research-agy-'))
-      : null;
-    const cwd = researchRoot ?? request.workingDirectory?.trim();
-    // Mode selection: only the critic role uses planning (read-only) mode.
-    // The manager and worker roles always get accept-edits — never guess
-    // read-only from the user's message text. A question like "what tools
-    // do you have?" should not silently strip the agent's write capability.
+    // No `--mode` here on purpose. agy logs "Print mode: --mode <x> is not
+    // supported headless" and continues in the default mode, so the flag never
+    // constrained anything. Plan/read-only posture is enforced by the
+    // permission rules written above, which do apply headlessly, and by the
+    // session policy applied to kory__ bridge calls.
     const args = [
       '--input-format',
       'stream-json',
@@ -1009,9 +1129,7 @@ export class AntigravityProvider implements Provider {
       'stream-json',
       '--model',
       cliModel,
-      ...(request.harnessRole === 'critic' || request.permissionMode === 'plan'
-        ? ['--mode', 'plan', '--sandbox']
-        : ['--mode', 'accept-edits', '--sandbox']),
+      '--sandbox',
       '--log-file',
       logPath,
       ...(convId ? ['--conversation', convId] : []),
@@ -1029,6 +1147,9 @@ export class AntigravityProvider implements Provider {
       HOME: agyHome,
       USERPROFILE: agyHome,
       ANTIGRAVITY_HOME: agyHome,
+      // The soft jail replaces HOME. agy resolves auth, permissions, hooks and
+      // MCP via GEMINI_DIR, so keep that root on the prepared managed config.
+      GEMINI_DIR: join(agyHome, '.gemini'),
       ...(userBus
         ? {
             DBUS_SESSION_BUS_ADDRESS: userBus.address,
@@ -1036,11 +1157,19 @@ export class AntigravityProvider implements Provider {
           }
         : {}),
     });
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [agyHome]) : null;
+    // The soft jail replaces HOME with an empty temp dir, and agy resolves its
+    // GeminiDir from HOME — ANTIGRAVITY_HOME does NOT relocate it. Exposing
+    // only `agyHome` here linked it as <jailHome>/antigravity-home, which agy
+    // never looks at, so the child found no OAuth token and every turn fell
+    // into the browser sign-in flow and failed auth. Link the `.gemini`
+    // directory itself, which is what `$HOME/.gemini` must resolve to: that
+    // carries the credential, the enforced permission settings, the hooks, and
+    // the MCP registration in one shot.
+    const jail = request.sandbox ? buildSoftJail(baseEnv, [join(agyHome, '.gemini')]) : null;
     // The isolated home carries symlinks to the real ~/.gemini OAuth material,
     // so the real config dir must be visible read-only inside the jail or the
     // links dangle and agy reports "Please sign in". homeDir keeps bwrap HOME
-    // on the isolated home (where .claude.json/MCP wiring was just written)
+    // on the isolated home (where .gemini/config/MCP wiring was just written)
     // instead of defaulting to the project directory.
     const realGeminiDir = join(homedir(), '.gemini');
     const wrapped = request.sandbox
@@ -1049,6 +1178,7 @@ export class AntigravityProvider implements Provider {
           homeDir: agyHome,
           configDirs: [
             agyHome,
+            ...(jail?.env.HOME ? [jail.env.HOME] : []),
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),
             promptArtifact.directory,
             logArtifact.directory,
@@ -1062,10 +1192,10 @@ export class AntigravityProvider implements Provider {
         })
       : { command: bin, args };
     assertPrivateValuesAbsentFromArgv(wrapped.args, [prompt, request.systemPrompt]);
-    // Point the CLI at the isolated home so it discovers the kory MCP server,
-    // hooks, and rules we just wrote. Antigravity reads .claude/ config from
-    // the user home, so we redirect HOME to the isolated dir.
-    const agyEnv = { ...(jail?.env ?? baseEnv) };
+    // agy's OS-keyring login also depends on HOME. Keep it on the managed
+    // home; the soft jail still supplies scrubbed env and private temp/XDG
+    // roots, and the OS sandbox confines both writable config trees.
+    const agyEnv = { ...(jail?.env ?? baseEnv), HOME: agyHome, USERPROFILE: agyHome };
     const child = spawnWithPrivateArtifactCleanup(
       () =>
         spawn(wrapped.command, wrapped.args, {
@@ -1133,6 +1263,7 @@ export class AntigravityProvider implements Provider {
     let logOffset = 0;
     let totalContentEvents = 0;
     let emittedStdout = false;
+    let streamError: ProviderEvent | undefined;
     // Primary live source: agy's own brain transcript (responses + tools).
     const transcriptTail = newTranscriptTail(() => stdout, convId);
     // Reasoning source: the trajectory store (proto field 20.3 of model steps).
@@ -1225,6 +1356,10 @@ export class AntigravityProvider implements Provider {
       const stdoutEvents = drainStdout();
       if (stdoutEvents.length > 0) emittedStdout = true;
       for (const event of stdoutEvents) {
+        if (event.type === 'error') {
+          streamError ??= event;
+          continue;
+        }
         if (event.type === 'content_delta') totalContentEvents++;
         yield event;
       }
@@ -1241,6 +1376,10 @@ export class AntigravityProvider implements Provider {
         const finalStdoutEvents = drainStdout(true);
         if (finalStdoutEvents.length > 0) emittedStdout = true;
         for (const event of finalStdoutEvents) {
+          if (event.type === 'error') {
+            streamError ??= event;
+            continue;
+          }
           if (event.type === 'content_delta') totalContentEvents++;
           yield event;
         }
@@ -1263,6 +1402,11 @@ export class AntigravityProvider implements Provider {
 
         if (request.signal?.aborted) return;
 
+        if (streamError) {
+          yield streamError;
+          return;
+        }
+
         if (result.code === -1) {
           yield { type: 'error', error: 'Antigravity: failed to launch the agy CLI process.' };
           return;
@@ -1270,13 +1414,13 @@ export class AntigravityProvider implements Provider {
 
         const text = stdout.trim();
         if (result.code !== 0 && totalContentEvents === 0) {
-          const diagnostic = safeProviderDiagnostic('antigravity', 'stderr', stderr, {
+          const failure = providerStreamFailure('antigravity', 'stderr', stderr, {
             exitCode: result.code,
           });
-          providerLog.warn(diagnostic, 'Antigravity CLI exited unsuccessfully');
+          providerLog.warn(failure.diagnostic, 'Antigravity CLI exited unsuccessfully');
           yield {
-            type: 'error',
-            error: safeProviderFailureMessage('antigravity', diagnostic, {
+            ...failure.event,
+            error: safeProviderFailureMessage('antigravity', failure.diagnostic, {
               authenticationAction: 'Run "agy auth", then reconnect.',
             }),
           };

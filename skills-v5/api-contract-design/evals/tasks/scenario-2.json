@@ -68,7 +68,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use contract tests and runnable examples for success, invalid/denied, pagination, retries, concurrent modification, compatibility, and deprecation."
+      "assertion": "Use contract tests and runnable examples for both supported request styles, stable cursor traversal under concurrent inserts, invalid/tampered/expired cursors, enum forward compatibility, deprecation telemetry/removal conditions, and the supplied older-client behavior. Do not invent unrelated authorization-denial or idempotency cases unless the contract under test introduces them."
     },
     {
       "id": "anti-pattern-resistance",

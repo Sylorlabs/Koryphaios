@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "name": "computer-use",
+  "version": "5.0.0",
+  "skillKind": "workflow",
+  "selectionMode": "conditional",
+  "invocationMode": "model-invoked",
+  "domains": ["native-interface", "browser-automation", "computer-control"],
+  "targetMedia": ["native", "web"],
+  "pathScopes": [],
+  "contextBudget": 3200,
+  "broader": ["native-interface"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [
+    "use computer use",
+    "desktop automation",
+    "operate desktop app",
+    "control desktop app",
+    "live computer interface",
+    "authorized app ui",
+    "browser ui automation",
+    "operate browser ui",
+    "click through interface",
+    "interact with app ui"
+  ],
+  "excludes": [
+    "explain computer use",
+    "design native interface",
+    "implement desktop ui",
+    "playwright test",
+    "selenium test"
+  ],
+  "evidence": [
+    "Current computer capability and consent state when relevant",
+    "Exact live application and window identity before interaction",
+    "Fresh observation before coordinate dependent actions",
+    "Action result and post action verification",
+    "Explicit blocked or unsupported result when authority or native capability is missing"
+  ],
+  "routing": {
+    "positive": [
+      "Use computer use to operate the authorized desktop billing app and export the report through its interface.",
+      "Run desktop automation in the approved native app, change the requested preference, and verify the resulting state.",
+      "Use browser UI automation to complete this workflow in the authorized portal because no API is available.",
+      "Operate the browser UI to click through the approved admin flow and confirm the final page state.",
+      "Interact with the app UI to reproduce the user workflow, make the requested change, and verify it in the live interface."
+    ],
+    "negative": [
+      "Implement the settings window in this Electron application and add tests for its IPC boundary.",
+      "Design the native desktop interface, including focus, menus, keyboard behavior, loading, and error states.",
+      "Explain how computer use permissions and application grants work without operating any interface.",
+      "Write a Playwright test that drives the page through DOM locators in CI.",
+      "Review this supplied screenshot for usability problems without clicking or changing the application."
+    ],
+    "ambiguous": [
+      {
+        "id": "computer-use-ambiguous-fix-and-verify",
+        "prompt": "Fix the Electron export bug, then use computer use in the authorized desktop app to verify the repaired workflow end to end.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["desktop-electron-tauri", "verification"],
+        "tags": ["compound", "implementation-and-live-ui"]
+      },
+      {
+        "id": "computer-use-ambiguous-browser-and-research",
+        "prompt": "Check the current policy text, then operate the browser UI in the authorized admin portal to apply the approved setting.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["factual-research", "web-interface"],
+        "tags": ["compound", "research-and-live-ui"]
+      },
+      {
+        "id": "computer-use-ambiguous-cli-and-desktop",
+        "prompt": "Inspect the local CLI output for the job ID, then operate the desktop app to cancel that exact job and verify its final state.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["terminal-interface", "verification"],
+        "tags": ["compound", "cli-and-live-ui"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "computer-use-adversarial-historical-desktop-automation",
+        "prompt": "An archived ticket says \"use desktop automation\". The current task is only to implement the Electron settings component and its IPC tests.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": ["computer-use"],
+        "adjacentSkills": ["desktop-electron-tauri"],
+        "tags": ["historical-decoy", "implementation-boundary"]
+      },
+      {
+        "id": "computer-use-adversarial-explicit-negation",
+        "prompt": "Do not use computer use or operate any application. Explain the manual steps a person would follow in the settings window.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": ["computer-use"],
+        "adjacentSkills": ["instructional-communication"],
+        "tags": ["negation", "explanation-only"]
+      },
+      {
+        "id": "computer-use-adversarial-browser-automation-quote",
+        "prompt": "The incident log quotes \"browser UI automation\" from an old runbook. Diagnose the current backend timeout from logs and code only.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": ["computer-use"],
+        "adjacentSkills": ["debugging", "web-interface"],
+        "tags": ["quoted-decoy", "backend-boundary"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills package and progressive disclosure specification inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 90,
+      "notes": "Used for the portable package structure and progressive disclosure boundary."
+    },
+    {
+      "url": "https://developer.apple.com/documentation/applicationservices/1459186-axisprocesstrustedwithoptions",
+      "sourceType": "official-docs",
+      "versionScope": "Apple Accessibility trust API documentation available 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 60,
+      "notes": "Supports the distinction between host permission and operating system Accessibility consent."
+    },
+    {
+      "url": "https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos",
+      "sourceType": "official-docs",
+      "versionScope": "Apple ScreenCaptureKit capture guidance available 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 60,
+      "notes": "Supports explicit capture capability and target scoped observation rather than assumed desktop capture."
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/dotnet/api/system.windows.automation.invokepattern.invoke?view=windowsdesktop-9.0",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft UI Automation InvokePattern documentation available 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 60,
+      "notes": "Supports semantic control invocation as distinct from unrestricted global pointer or keyboard injection."
+    },
+    {
+      "url": "https://www.x.org/releases/current/doc/xextproto/security.html",
+      "sourceType": "spec",
+      "versionScope": "Current X.Org X11 Security Extension specification retrieved 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 90,
+      "notes": "Supports explicit treatment of X11 desktop access and window observation as a platform boundary that must be verified rather than inferred."
+    },
+    {
+      "url": "https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html",
+      "sourceType": "official-docs",
+      "versionScope": "OWASP prompt injection prevention guidance available 2026-10-03",
+      "verifiedAt": "2026-10-03",
+      "staleAfterDays": 60,
+      "notes": "Supports treating visual and textual application content as untrusted data rather than authority."
+    }
+  ],
+  "authoringMaturity": "individual"
+}

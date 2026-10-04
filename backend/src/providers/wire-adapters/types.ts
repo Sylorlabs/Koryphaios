@@ -64,6 +64,8 @@ export type WireAdapterStreamFormat = 'jsonl' | 'sse';
 
 export interface WireAdapter {
   id: string;
+  /** Declare image conversion explicitly; unknown adapters remain text-only. */
+  imageInputTransport?: 'native' | 'none';
   /** Human label shown in the settings override dropdown. */
   label: string;
   /** One-line description shown under the dropdown. */

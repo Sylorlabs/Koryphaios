@@ -682,7 +682,7 @@ export function getCorsHeaders(origin?: string | null): Record<string, string> {
   const headers: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, PATCH',
     'Access-Control-Allow-Headers':
-      'Content-Type, Authorization, X-Requested-With, X-Koryphaios-Project, X-Kory-Client-Id, X-Kory-Mutation-Id, X-Kory-Note-Revision',
+      'Content-Type, Authorization, X-Requested-With, X-Koryphaios-Project, X-Koryphaios-Session, X-Kory-Client-Id, X-Kory-Mutation-Id, X-Kory-Note-Revision',
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
@@ -700,10 +700,10 @@ export function getSecurityHeaders(): Record<string, string> {
     'X-Frame-Options': 'DENY',
     'X-XSS-Protection': '1; mode=block',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Permissions-Policy': 'geolocation=(), microphone=(self), camera=()',
     'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     'Content-Security-Policy':
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://geistfont.vercel.app; img-src 'self' data: blob:; connect-src 'self' ws: wss:",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://geistfont.vercel.app; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' ws: wss:",
   };
 }
 

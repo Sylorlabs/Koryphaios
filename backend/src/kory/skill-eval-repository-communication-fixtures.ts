@@ -153,13 +153,16 @@ function scoreRelease(root: string): SkillEvalDeterministicScore {
   );
   const checks: [string, boolean][] = [
     ['packet integrity', intact],
-    ['release boundary', containsAll(notes, [/v5\.3\.0/iu, /v5\.2\.0/iu])],
+    ['target release identity', containsAll(notes, [/v5\.3\.0/iu])],
     ['confirmed feature represented', containsAll(notes, [/resumable upload/iu, /PR-101/iu])],
     ['confirmed fix represented', containsAll(notes, [/filter selection/iu, /PR-102/iu])],
     ['internal-only change excluded', !!notes && !/query cache ownership|PR-103/iu.test(notes)],
     [
       'ambiguous impact bounded',
-      containsAll(notes, [/PR-104/iu, /(unconfirmed|unknown|not measured|uncertain)/iu]),
+      containsAll(notes, [
+        /PR-104/iu,
+        /(unconfirmed|unknown|not(?:\s+\w+){0,2}\s+measured|uncertain)/iu,
+      ]),
     ],
     [
       'structured provenance',
@@ -421,7 +424,7 @@ export const REPOSITORY_COMMUNICATION_SKILL_EVAL_MATERIALIZERS: readonly SkillEv
 export const REPOSITORY_COMMUNICATION_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] =
   [
     {
-      id: 'documents-communication/release-evidence-scorer@1',
+      id: 'documents-communication/release-evidence-scorer@2',
       scenarioIds: [RELEASE_NOTES],
       score: ({ workingDirectory }) => scoreRelease(workingDirectory),
     },

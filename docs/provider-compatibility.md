@@ -16,16 +16,16 @@ These levels describe individual claims, not a whole-provider certification. The
 
 ## Adapter matrix
 
-| Provider      | Binary / transport                                             | Cited local coverage                                                                | Version boundary                                                           | Supported versions |
-| ------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------ |
-| `claude`      | `claude`, print / stream-json                                  | Availability plumbing; private system-prompt file in source                         | Unknown                                                                    | Unknown            |
-| `codex`       | `codex exec --json`; app-server model discovery                | Synthetic native-event display and retry/auth classification                        | Unknown                                                                    | Unknown            |
-| `codex-auth`  | Managed Codex app-server account/model state and CLI execution | Mocked account/model activation                                                     | Unknown                                                                    | Unknown            |
-| `grok`        | `grok`, headless JSON plus session telemetry                   | Final-output parser and research capability restrictions                            | Unknown                                                                    | Unknown            |
-| `antigravity` | `agy`, stream-json input/output                                | Malformed-line rejection and synthetic final usage; private-input gate in source    | Unknown                                                                    | Unknown            |
-| `cursor`      | `cursor-agent`, print / stream-json                            | Model-list parser and mocked cache lifecycle; streaming is source evidence only     | Unknown                                                                    | Unknown            |
-| `devin`       | `devin`, prompt-file / export                                  | Export preference, stdout fallback and model-list parsing                           | Unknown                                                                    | Unknown            |
-| `freebuff`    | Ink TUI via tmux, log.jsonl, Linux bubblewrap                  | Synthetic bundled-picker extraction/rejection; version-sensitive source assumptions | Source references 0.0.162; no qualified range                              | Unknown            |
+| Provider      | Binary / transport                                                                                  | Cited local coverage                                                                                             | Version boundary                                    | Supported versions |
+| ------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------ |
+| `claude`      | `claude`, print / stream-json                                                                       | Availability plumbing; private system-prompt file in source                                                      | Unknown                                             | Unknown            |
+| `codex`       | `codex exec --json`; app-server model discovery                                                     | Synthetic native-event display and retry/auth classification                                                     | Unknown                                             | Unknown            |
+| `codex-auth`  | Managed Codex app-server account/model state and CLI execution                                      | Mocked account/model activation                                                                                  | Unknown                                             | Unknown            |
+| `grok`        | `grok`, headless JSON plus session telemetry                                                        | Final-output parser and research capability restrictions                                                         | Unknown                                             | Unknown            |
+| `antigravity` | `agy`, stream-json input/output                                                                     | Malformed-line rejection and synthetic final usage; private-input gate in source                                 | Unknown                                             | Unknown            |
+| `cursor`      | `cursor-agent`, print / stream-json                                                                 | Model-list parser and mocked cache lifecycle; streaming is source evidence only                                  | Unknown                                             | Unknown            |
+| `devin`       | `devin`, prompt-file / export                                                                       | Export preference, stdout fallback and model-list parsing                                                        | Unknown                                             | Unknown            |
+| `freebuff`    | Real OpenTUI via private tmux, root log.jsonl, mandatory Linux bubblewrap (native or Docker/Colima) | Native 0.2.12 source/settings compatibility plus real confined runtime/MCP probes; account inference is separate | Unknown (source reference: qualified native 0.2.12) | Unknown            |
 
 The registry's standard and managed CLI harness sets define this inventory's scope. Managed `codex-auth` is included despite using a different account lifecycle. Kimi Code consumes CLI-owned credentials through its API adapter; Kilo's `kilo-cli.ts` implements an HTTP gateway adapter; Codebuff uses its separate API-key SDK. Those are not subprocess CLI adapters in this catalog. The provider conformance suite derives its CLI external-suite classification from this manifest and reports concrete evidence paths/levels plus version and live-verification status. Its dedicated Chatbase request, stream, and error coverage is documented below.
 
@@ -54,21 +54,21 @@ without a credential), so that list is a deployment inventory and never a
 per-key entitlement claim; the credential is validated by `verifyConnection()`
 and by the first real completion instead:
 
-| Read | Auth | Endpoint | Supplies |
-| --- | --- | --- | --- |
-| Served models | public | `/api/v1/models` | the model ids this deployment serves (gates the picker) |
-| Capability catalog | public | `/api/v1/ai/cline/models` | `context_length`, `top_provider.max_completion_tokens`, USD pricing, input modalities, `supported_parameters` |
-| Curated sets | public | `/api/v1/ai/cline/recommended-models` | recommended and promotional free model ids used to order the picker |
+| Read               | Auth   | Endpoint                              | Supplies                                                                                                      |
+| ------------------ | ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Served models      | public | `/api/v1/models`                      | the model ids this deployment serves (gates the picker)                                                       |
+| Capability catalog | public | `/api/v1/ai/cline/models`             | `context_length`, `top_provider.max_completion_tokens`, USD pricing, input modalities, `supported_parameters` |
+| Curated sets       | public | `/api/v1/ai/cline/recommended-models` | recommended and promotional free model ids used to order the picker                                           |
 
-Per-model reasoning *values* are reported by no endpoint, so they are resolved
+Per-model reasoning _values_ are reported by no endpoint, so they are resolved
 from three real sources, in precedence order, and the first one that speaks for
 a model wins:
 
-| Order | Source | Covers |
-| --- | --- | --- |
-| 1 | Cline's own live catalog `supported_parameters` | whether a model accepts `reasoning_effort` / `include_reasoning` at all |
-| 2 | Cline's published catalog, generated into [cline-catalog.generated.ts](../backend/src/providers/cline-catalog.generated.ts) by `bun run scripts/generate-cline-catalog.ts` | the exact tier list for Cline-specific and vendor-specific models |
-| 3 | the shared models.dev enrichment chain ([models-dev.ts](../backend/src/providers/models-dev.ts)) | the upstream lab's own entry for anything 1 and 2 miss |
+| Order | Source                                                                                                                                                                     | Covers                                                                  |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 1     | Cline's own live catalog `supported_parameters`                                                                                                                            | whether a model accepts `reasoning_effort` / `include_reasoning` at all |
+| 2     | Cline's published catalog, generated into [cline-catalog.generated.ts](../backend/src/providers/cline-catalog.generated.ts) by `bun run scripts/generate-cline-catalog.ts` | the exact tier list for Cline-specific and vendor-specific models       |
+| 3     | the shared models.dev enrichment chain ([models-dev.ts](../backend/src/providers/models-dev.ts))                                                                           | the upstream lab's own entry for anything 1 and 2 miss                  |
 
 Step 3 is what keeps this from being hardcoded per provider: Cline is
 registered in the same `GATEWAY_FALLBACK_PROVIDERS` set as the other multi-lab
@@ -90,23 +90,23 @@ Verified against `api.cline.bot` with a real key. Discovery returned 458 models
 through the registry, all carrying a real context window and max output tokens,
 432 priced, 292 vision, and 259 with a real reasoning ladder.
 
-| Behavior | Result |
-| --- | --- |
-| Served-model route | `/api/v1/models` is public; HTTP 200 with or without a credential |
-| Capability route | `/api/v1/ai/cline/models` is public and returns 460 rows of real metadata |
-| Content streaming | `content_delta` works |
-| Tool calling | `tool_use_start` / `tool_use_stop` with parsed arguments, `finish_reason: tool_use` |
-| Reasoning deltas | `delta.reasoning` streams real reasoning text (OpenRouter shape), as does `delta.reasoning_content` |
-| Reasoning control | `reasoning_effort` reaches the wire only for a tier the model declares; an undeclared tier is dropped without a 400 |
-| Usage accounting | arrives on the **same chunk as `finish_reason`**, with `prompt_tokens_details.cached_tokens` and `completion_tokens_details.reasoning_tokens` |
-| Insufficient credit (402) | surfaces as a provider error, never a successful empty completion |
-| Credential check | `verifyConnection` succeeds against the served-model route for a valid key |
+| Behavior                  | Result                                                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Served-model route        | `/api/v1/models` is public; HTTP 200 with or without a credential                                                                             |
+| Capability route          | `/api/v1/ai/cline/models` is public and returns 460 rows of real metadata                                                                     |
+| Content streaming         | `content_delta` works                                                                                                                         |
+| Tool calling              | `tool_use_start` / `tool_use_stop` with parsed arguments, `finish_reason: tool_use`                                                           |
+| Reasoning deltas          | `delta.reasoning` streams real reasoning text (OpenRouter shape), as does `delta.reasoning_content`                                           |
+| Reasoning control         | `reasoning_effort` reaches the wire only for a tier the model declares; an undeclared tier is dropped without a 400                           |
+| Usage accounting          | arrives on the **same chunk as `finish_reason`**, with `prompt_tokens_details.cached_tokens` and `completion_tokens_details.reasoning_tokens` |
+| Insufficient credit (402) | surfaces as a provider error, never a successful empty completion                                                                             |
+| Credential check          | `verifyConnection` succeeds against the served-model route for a valid key                                                                    |
 
 Two provider behaviors were found only by that live run and fixed:
 
 1. **Usage on the finish chunk.** Cline attaches `usage` to the chunk that
    carries `finish_reason` rather than sending a trailing usage-only chunk. The
-   shared reader only looked at usage on choice-less chunks, so *every* Cline
+   shared reader only looked at usage on choice-less chunks, so _every_ Cline
    turn reported zero tokens — silently breaking the context meter and billing.
    [openai.ts](../backend/src/providers/openai.ts) now reads `usage` whenever it
    is present, independent of `choices`, and emits `complete` only once even
@@ -159,7 +159,7 @@ this entry stays `preview`.
 
 ## Version boundaries and gaps
 
-Freebuff's 0.0.162 reference comes from repository guidance and adapter comments. Its bundled-picker fixtures use fabricated `9.8.7` and `10.0.0` strings; neither is release evidence. Upgrades require revalidating the actual picker, startup keystrokes, `.agents/mcp.json` loading, and `log.jsonl` shapes. Linux bubblewrap is mandatory because native tools remain enabled inside a disposable checkout. The real session workspace is exposed through the scoped Kory MCP bridge. Local synthetic tests cannot establish the live TUI, confinement, account, or bridge workflow end to end.
+Freebuff's current runtime pins native 0.2.12 (distinct from npm launcher 0.0.173). Its account-aware model catalog is CLI-owned; Kory exposes `freebuff/cli-default` without guessed models or vision support. Real Docker/Colima probes exercise bubblewrap confinement, private tmux, credential-free TUI startup and signed MCP calls. These are not account inference verification. Keychain-backed CLI logins use only the precisely addressed Freebuff-owned item through normal OS consent. Upgrades require revalidating actual model selection, private-workspace `--trust-agents`, composer readiness, `.agents/mcp.json` and root completion/error log shapes. Native tools remain enabled only in a disposable Linux bubblewrap workspace; authoritative work uses scoped Kory MCP. See [setup and explicit live Notes probe](freebuff-cli.md).
 
 For all other entries, the cited evidence establishes no numeric CLI release boundary. Model IDs, MCP protocol revisions, SDK package versions, and arbitrary version-looking fixture strings must not be substituted for a CLI version. Unknown must remain explicit until attributable release evidence exists.
 

@@ -1,7 +1,7 @@
 // Session management store — Svelte 5 runes
 // Handles CRUD, rename, search, date grouping, message history
 
-import type { Session, SessionAgentOverrides } from '@koryphaios/shared';
+import type { Session, SessionAgentOverrides, CreateGitWorkspaceRequest } from '@koryphaios/shared';
 import { toastStore } from './toast.svelte';
 import { projectStore } from './project.svelte';
 import { resolveSessionSelection } from './session-selection';
@@ -345,7 +345,7 @@ async function newChat(_opts: { shift?: boolean } = {}): Promise<string | null> 
 }
 
 async function createSession(
-  opts: { workingDirectory?: string | null } = {},
+  opts: { workingDirectory?: string | null; git?: CreateGitWorkspaceRequest } = {},
 ): Promise<string | null> {
   if (createSessionPromise) return createSessionPromise;
   createSessionPromise = createSessionRequest(opts);
@@ -357,7 +357,7 @@ async function createSession(
 }
 
 async function createSessionRequest(
-  opts: { workingDirectory?: string | null } = {},
+  opts: { workingDirectory?: string | null; git?: CreateGitWorkspaceRequest } = {},
 ): Promise<string | null> {
   try {
     const workingDirectory = opts.workingDirectory ?? null;
@@ -365,15 +365,19 @@ async function createSessionRequest(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...(opts.git && workingDirectory ? { 'X-Koryphaios-Project': workingDirectory } : {}),
       },
       body: JSON.stringify({
         title: 'New Session',
         ...(workingDirectory ? { workingDirectory } : {}),
+        ...(opts.git ? { git: opts.git } : {}),
       }),
     });
     const text = await res.text();
     if (!res.ok) {
-      toastStore.error(friendlyHttpError(res.status, 'create session'));
+      toastStore.error(
+        responseDetail(parseResponseBody(text)) || friendlyHttpError(res.status, 'create session'),
+      );
       return null;
     }
     let data: { ok?: boolean; data?: Session };

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { wsStore } from '$lib/stores/websocket.svelte';
   import { theme } from '$lib/stores/theme.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -91,6 +91,7 @@
     type NativeSlashCommand,
   } from '$lib/stores/native-commands.svelte';
   import { runStateStore } from '$lib/stores/run-state.svelte';
+  import { type SettingsTab } from '$lib/utils/settings-catalog';
 
   let showSettings = $state(false);
   let showAgents = $state(false);
@@ -111,7 +112,7 @@
   >();
   let lastIdleEscapeAt = 0;
   let zenMode = $state(false);
-  let settingsInitialTab = $state<'providers' | 'agent' | 'experimental' | undefined>(undefined);
+  let settingsInitialTab = $state<SettingsTab | undefined>(undefined);
   let settingsInitialAgentSection = $state<'permissions' | undefined>(undefined);
   let inputRef = $state<HTMLTextAreaElement>();
   let projectFileInput = $state<HTMLInputElement>();
@@ -373,6 +374,16 @@
     },
     { command: 'clear', label: 'Clear Feed', description: 'Clear the current visible feed.' },
     { command: 'settings', label: 'Open Settings', description: 'Open the settings drawer.' },
+    {
+      command: 'computer-use',
+      label: 'Computer Use',
+      description: 'Open computer-use permissions, app grants, and platform status.',
+    },
+    {
+      command: 'computer-use status',
+      label: 'Computer Use Status',
+      description: 'Check native computer-use availability without discovering apps.',
+    },
     { command: 'theme', label: 'Theme Picker', description: 'Open theme selection.' },
     { command: 'sidebar', label: 'Toggle Sidebar', description: 'Show or hide the sidebar.' },
     { command: 'zen', label: 'Toggle Zen', description: 'Enter or exit zen mode.' },
@@ -818,13 +829,46 @@
     inputRef?.focus();
   }
 
+  let composerFilesRequest = 0;
+
+  function composerWorkspaceKey(): string {
+    const sessionId = sessionStore.activeSessionId;
+    const session = sessionStore.sessions.find((item) => item.id === sessionId);
+    return JSON.stringify([
+      sessionId,
+      session?.workingDirectory ?? projectStore.requestPath,
+      session?.gitWorkspace?.path,
+    ]);
+  }
+
+  $effect(() => {
+    const authenticated = authStore.isAuthenticated;
+    // Track execution context, not just source project: two chats can use
+    // different checkouts of the same project.
+    composerWorkspaceKey();
+    untrack(() => {
+      composerFilesRequest++;
+      composerProjectFiles = [];
+      gitStore.resetForContext();
+      if (authenticated || isDemoMode) {
+        void refreshComposerFileMentions();
+        void gitStore.refreshStatus();
+      }
+    });
+  });
+
   async function refreshComposerFileMentions(query = ''): Promise<string[]> {
-    const fromContent = extractProjectFiles(currentProjectContent);
+    const key = composerWorkspaceKey();
+    const request = ++composerFilesRequest;
+    const isCurrent = () => request === composerFilesRequest && key === composerWorkspaceKey();
+    const session = sessionStore.sessions.find((item) => item.id === sessionStore.activeSessionId);
+    const fromContent = session?.gitWorkspace ? [] : extractProjectFiles(currentProjectContent);
     try {
       const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
       const res = await apiFetch(apiUrl(`/api/workspace/files${qs}`));
       if (res.ok) {
         const data = await res.json();
+        if (!isCurrent()) return [];
         if (data.ok && Array.isArray(data.data)) {
           composerProjectFiles = [...new Set([...fromContent, ...data.data])].sort((a, b) =>
             a.localeCompare(b),
@@ -839,6 +883,7 @@
       );
       // Workspace listing unavailable — use imported project content only
     }
+    if (!isCurrent()) return [];
     composerProjectFiles = fromContent;
     return composerProjectFiles;
   }
@@ -932,6 +977,29 @@
     if (root === 'clear') {
       wsStore.clearFeed();
       toastStore.success('Current feed cleared');
+      return true;
+    }
+
+    if (root === 'computer-use') {
+      if (parts.length > 2) {
+        toastStore.error('Usage: /computer-use [status]');
+        return true;
+      }
+      if (parts[1] === 'status') {
+        try {
+          const response = await apiFetch(apiUrl('/api/v1/computer-use/status'));
+          const payload = (await response.json()) as { ok?: boolean; data?: { platform?: string; available?: boolean; capabilities?: string[]; limitations?: string[] }; error?: string };
+          if (!response.ok || !payload.ok || !payload.data) throw new Error(payload.error || 'Computer-use status unavailable');
+          const state = payload.data.available ? 'available' : 'unavailable';
+          toastStore.info(`${payload.data.platform ?? 'host'}: ${state}. Capabilities: ${(payload.data.capabilities ?? []).join(', ') || 'none'}. ${(payload.data.limitations ?? [])[0] ?? ''}`);
+        } catch (error) {
+          toastStore.error(error instanceof Error ? error.message : 'Computer-use status unavailable');
+        }
+        return true;
+      }
+      settingsInitialTab = 'agent';
+      settingsInitialAgentSection = 'permissions';
+      showSettings = true;
       return true;
     }
 
@@ -1485,6 +1553,13 @@
         settingsInitialAgentSection = undefined;
         showSettings = true;
         break;
+      // The per-chat tracked-price popover links straight into the billing
+      // section, so Settings has to be requestable with a specific pane.
+      case 'open_settings_billing':
+        settingsInitialTab = 'billing';
+        settingsInitialAgentSection = undefined;
+        showSettings = true;
+        break;
       case 'toggle_palette':
         showCommandPalette = !showCommandPalette;
         break;
@@ -1674,7 +1749,9 @@
   let composerFileMentions = $derived(
     composerProjectFiles.length > 0
       ? composerProjectFiles
-      : extractProjectFiles(currentProjectContent),
+      : sessionStore.sessions.find((item) => item.id === sessionStore.activeSessionId)?.gitWorkspace
+        ? []
+        : extractProjectFiles(currentProjectContent),
   );
   let connectedProviders = $derived(
     wsStore.providers.filter((provider) => provider.connectionState === 'verified').length,

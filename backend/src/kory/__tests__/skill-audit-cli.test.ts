@@ -1,9 +1,43 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadV5SkillPackages } from '../skill-packages';
 
 describe('skill audit CLI output', () => {
+  test('independent routing covers personal host pins and rejects implicit personal selection', () => {
+    const projectRoot = resolve(import.meta.dir, '../../../..');
+    const skillsHome = mkdtempSync(resolve(projectRoot, '.tmp-independent-routing-'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          resolve(projectRoot, 'scripts/evaluate-skill-v5-independent-routing.ts'),
+          '--summary',
+          '--skill=response-style',
+        ],
+        {
+          cwd: projectRoot,
+          env: { ...process.env, KORYPHAIOS_SKILLS_HOME: skillsHome },
+          encoding: 'utf8',
+          maxBuffer: 2_000_000,
+          timeout: 45_000,
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.coveredSkills).toBe(182);
+      expect(report.corpusCases).toBe(187);
+      expect(report.cases).toBe(2);
+      expect(report.failedCases).toBe(0);
+      expect(report.expectedSkillRecall).toBe(1);
+      expect(report.forbiddenSkillAvoidance).toBe(1);
+    } finally {
+      rmSync(skillsHome, { recursive: true, force: true });
+    }
+  }, 50_000);
+
   test('emits complete piped JSON before the readiness exit and keeps summaries consistent', () => {
     const script = resolve(
       import.meta.dir,

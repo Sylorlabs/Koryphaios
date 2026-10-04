@@ -139,8 +139,8 @@
     {
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/content-and-copy/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "rampstackco/claude-skills main content-and-copy skill as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "rampstackco/claude-skills main content-and-copy skill at ac2b078f5025 as inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community pattern source for explicit reader/goal/voice, editing by priority, clarity, and cutting generic filler. Its editorial/marketing framework is outside this interface-language skill and is not imported as a default."

@@ -521,6 +521,7 @@ export function estimateOccupiedContextTokenUpperBound(messages: readonly unknow
               type: string;
               text?: string;
               imageData?: string;
+              mediaData?: string;
               data?: string;
             };
             if (typed.type === 'image') {
@@ -535,6 +536,12 @@ export function estimateOccupiedContextTokenUpperBound(messages: readonly unknow
                 1024,
                 Math.min(4096, Math.ceil(approxBytes / 1024) * 256 + 1024),
               );
+              continue;
+            }
+            if (typed.type === 'audio' || typed.type === 'video') {
+              // Conservative payload-size estimate until the provider reports
+              // actual modality usage; never tokenize the base64 as prose.
+              blockTokens += Math.max(1024, Math.ceil(((typed.mediaData?.length ?? 0) * 3) / 16));
               continue;
             }
             if (typed.type === 'text' && typeof typed.text === 'string') {

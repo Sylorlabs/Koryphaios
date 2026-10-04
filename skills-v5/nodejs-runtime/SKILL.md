@@ -38,7 +38,8 @@ Use this skill when the Node runtime itself, process lifecycle, streams, modules
 - Exercise stream producer faster than consumer, downstream failure, partial output, and cancellation for changed stream pipelines.
 - Verify signal-driven shutdown closes owned handles and reaches expected process termination without leaking work.
 - For child-process changes, cover nonzero exit, spawn failure, signal termination, and partial stdout or stderr consumption.
-- Measure event-loop or memory behavior only with a representative workload when making runtime performance claims.
+- Measure event-loop or memory behavior only with a representative workload when making runtime performance claims. Before/after comparisons must execute the same logical work, input, concurrency, and measurement window unless the changed workload itself is the intended intervention; replacing CPU work with a timer or otherwise changing the exercised cost does not prove offloading improved that workload.
+- Keep reported latency, CPU, memory, and event-loop numbers traceable to the retained measurement artifact. If a profile, trace, or heap artifact is cited as evidence, retain that artifact or explicitly mark the claim as unavailable; do not restate figures that differ from the source evidence.
 
 ## Completion evidence
 

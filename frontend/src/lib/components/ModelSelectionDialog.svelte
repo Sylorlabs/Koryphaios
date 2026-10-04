@@ -3,13 +3,15 @@
   import Search from 'lucide-svelte/icons/search';
   import Check from 'lucide-svelte/icons/check';
   import { fade, scale } from 'svelte/transition';
-  import type { ProviderName, ModelDef } from '@koryphaios/shared';
+  import { onDestroy } from 'svelte';
+  import type { ModelDef } from '@koryphaios/shared';
   import SettingsToggle from './SettingsToggle.svelte';
 
   interface Props {
-    providerName: ProviderName;
-    availableModels: ModelDef[];
+    providerName: string;
+    availableModels: (Pick<ModelDef, 'id' | 'name'> & Partial<ModelDef>)[];
     selectedModels: string[];
+    mode?: 'provider' | 'sharing';
     emptyMessage?: string;
     onSave: (selected: string[], hideSelector: boolean) => void;
     onClose: () => void;
@@ -19,6 +21,7 @@
     providerName,
     availableModels = [],
     selectedModels = [],
+    mode = 'provider',
     emptyMessage,
     onSave,
     onClose,
@@ -28,6 +31,34 @@
   let localSelected = $state<string[]>([]);
   let dontAskAgain = $state(false);
   let initialized = $state(false);
+  let dialogRef = $state<HTMLDivElement>();
+  const previouslyFocused = typeof document === 'undefined' ? null : document.activeElement as HTMLElement | null;
+  onDestroy(() => {
+    if (previouslyFocused?.isConnected) previouslyFocused.focus();
+  });
+  $effect(() => {
+    dialogRef?.querySelector<HTMLInputElement>('input')?.focus();
+  });
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab' || !dialogRef) return;
+    const controls = [...dialogRef.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')];
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
 
   // Snapshot the catalog once when it first arrives. After init, background
   // catalog refreshes must never rewrite the user's in-progress picks — that
@@ -39,7 +70,7 @@
     if ((availableModels || []).length === 0) return;
     const ids = new Set((availableModels || []).map((m) => m.id));
     localSelected =
-      (selectedModels || []).length > 0
+      mode === 'sharing' || (selectedModels || []).length > 0
         ? (selectedModels || []).filter((id) => ids.has(id))
         : [...ids];
     initialized = true;
@@ -67,15 +98,28 @@
     }
   }
 
+  let hasSearch = $derived(searchQuery.trim().length > 0);
+  let visibleSelectedCount = $derived(
+    filteredModels.reduce((count, m) => (selectedModelIds.has(m.id) ? count + 1 : count), 0),
+  );
+
+  // Select All / Select None always act on what the list is showing. With an
+  // active search that means only the matching rows change, so narrowing a
+  // query can't silently drop (or enable) models the user never looked at.
+  // Rows are walked in catalog order so the saved selection stays stable.
   function selectAll() {
-    const allIds = (availableModels || []).map((m) => m.id);
-    if (localSelected.length !== allIds.length || allIds.some((id) => !selectedModelIds.has(id))) {
-      localSelected = allIds;
+    const visibleIds = new Set(filteredModels.map((m) => m.id));
+    const next: string[] = [];
+    for (const m of availableModels || []) {
+      if (visibleIds.has(m.id) || selectedModelIds.has(m.id)) next.push(m.id);
     }
+    localSelected = next;
   }
 
   function selectNone() {
-    if (localSelected.length > 0) localSelected = [];
+    if (localSelected.length === 0) return;
+    const visibleIds = new Set(filteredModels.map((m) => m.id));
+    localSelected = localSelected.filter((id) => !visibleIds.has(id));
   }
 
   function handleSave() {
@@ -91,11 +135,16 @@
 </script>
 
 <div
-  class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+  class="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+  role="presentation"
+  onmousedown={(event) => { if (event.target === event.currentTarget) onClose(); }}
   transition:fade={{ duration: 200 }}
 >
   <div
-    class="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden border"
+    bind:this={dialogRef}
+    onkeydown={handleKeydown}
+    tabindex="-1"
+    class="relative w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl shadow-2xl overflow-hidden border"
     style="background: var(--color-surface-1); border-color: var(--color-border-bright);"
     role="dialog"
     aria-modal="true"
@@ -116,7 +165,7 @@
           {providerName} Models
         </h3>
         <p class="text-[11px]" style="color: var(--color-text-muted);">
-          Select which models you want to enable for this provider.
+          {mode === 'sharing' ? 'Only selected models are advertised to guests and accepted by the host.' : 'Select which models you want to enable for this provider.'}
         </p>
       </div>
       <button
@@ -137,6 +186,7 @@
           type="text"
           placeholder="Search models..."
           bind:value={searchQuery}
+          aria-label="Search models"
           class="input pl-10 h-10 text-sm"
           style="padding-left: 40px;"
         />
@@ -153,21 +203,25 @@
           >
         </div>
         <span class="text-[10px] font-medium" style="color: var(--color-text-muted);">
-          {localSelected.length} of {(availableModels || []).length} selected
+          {#if hasSearch}
+            {visibleSelectedCount} of {filteredModels.length} shown selected · {localSelected.length} total
+          {:else}
+            {localSelected.length} of {(availableModels || []).length} selected
+          {/if}
         </span>
       </div>
     </div>
 
     <!-- List -->
-    <div class="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
-      <div class="space-y-1">
+    <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
+      <div>
         {#if (availableModels || []).length === 0}
           <p
             class="px-3 py-8 text-center text-xs flex flex-col items-center gap-2"
             style="color: var(--color-text-muted);"
           >
             <span
-              class="inline-block w-4 h-4 border-2 border-white/20 border-t-white/60 rounded-full animate-spin"
+              class="inline-block w-4 h-4 border-2 border-[var(--color-border)] border-t-[var(--color-text-secondary)] rounded-full animate-spin"
             ></span>
             Loading models...
           </p>
@@ -179,24 +233,25 @@
           {#each filteredModels as model (model.id)}
             <button
               type="button"
-              class="w-full flex items-center justify-between p-3 rounded-xl transition-all border
-                   {selectedModelIds.has(model.id)
-                ? 'bg-[var(--color-accent)]/5 border-[var(--color-accent)]/30'
-                : 'bg-transparent border-transparent hover:bg-[var(--color-surface-2)]'}"
+              role="checkbox"
+              aria-checked={selectedModelIds.has(model.id)}
+              aria-label={model.name}
+              class="w-full flex items-center justify-between px-3 py-2.5 rounded-md transition-colors border border-transparent bg-transparent hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:border-[var(--color-accent)]"
               onclick={() => toggleModel(model.id)}
             >
-              <div class="flex items-center gap-3">
+              <div class="flex min-w-0 items-center gap-3">
                 <div
-                  class="w-5 h-5 rounded-md border flex items-center justify-center transition-colors
+                  class="w-5 h-5 shrink-0 rounded border flex items-center justify-center transition-colors
                           {selectedModelIds.has(model.id)
                     ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
-                    : 'border-white/10'}"
+                    : 'border-[var(--color-border-bright)] bg-[var(--color-surface-0)]'}"
+                  aria-hidden="true"
                 >
                   {#if selectedModelIds.has(model.id)}
-                    <Check size={14} class="text-white" />
+                    <Check size={14} class="text-[var(--color-on-accent)]" />
                   {/if}
                 </div>
-                <div class="flex flex-col items-start">
+                <div class="flex min-w-0 flex-col items-start text-left">
                   <span
                     class="text-sm font-medium"
                     style="color: {selectedModelIds.has(model.id)
@@ -205,7 +260,7 @@
                   >
                     {model.name}
                   </span>
-                  <span class="text-[10px] opacity-40">{model.id}</span>
+                  <span class="max-w-full break-all text-[10px] text-[var(--color-text-muted)]">{model.id}</span>
                   {#if model.supportsFastMode || (model.reasoningLevels?.length ?? 0) > 0}
                     <!-- Capability chips mirror what Hoplite's own picker exposes:
                          a fast tier only where the model actually has one, and the
@@ -242,6 +297,7 @@
       class="px-6 py-4 border-t bg-[var(--color-surface-0)] flex flex-col gap-4"
       style="border-color: var(--color-border);"
     >
+      {#if mode === 'provider'}
       <div class="flex items-center justify-between gap-4">
         <div class="flex min-h-10 min-w-0 items-center gap-2 px-2">
           <SettingsToggle
@@ -262,6 +318,9 @@
           Skip & Enable All
         </button>
       </div>
+      {:else}
+        <p class="text-xs text-[var(--color-text-muted)]">Changes apply when you save shared providers.</p>
+      {/if}
 
       <div class="flex gap-3">
         <button type="button" class="btn btn-secondary flex-1" onclick={onClose}>Cancel</button>
@@ -269,7 +328,7 @@
           type="button"
           class="btn btn-primary flex-1"
           onclick={handleSave}
-          disabled={(localSelected || []).length === 0}
+          disabled={mode === 'provider' && (localSelected || []).length === 0}
         >
           Done
         </button>

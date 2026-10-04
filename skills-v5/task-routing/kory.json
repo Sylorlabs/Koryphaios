@@ -123,9 +123,8 @@
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "openai/skills main",
-      "revision": "49f948faa9258a0c61caceaf225e179651397431",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "openai/skills main SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+      "verifiedAt": "2026-10-02",
       "staleAfterDays": 30,
       "license": "See upstream repository license",
       "notes": "Concise discovery metadata, progressive disclosure, and task-specific skill boundaries."
@@ -133,9 +132,8 @@
     {
       "url": "https://github.com/openai/plugins/blob/main/plugins/life-science-research/skills/research-router-skill/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "openai/plugins main",
-      "revision": "1e285826e604f66f7208f7ac4dba0fe8341d1f57",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "openai/plugins main research-router SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+      "verifiedAt": "2026-10-02",
       "staleAfterDays": 30,
       "license": "See upstream repository license",
       "notes": "Concrete router pattern: normalize the request, select the minimum useful downstream capabilities, and keep narrow requests out of broad routing."

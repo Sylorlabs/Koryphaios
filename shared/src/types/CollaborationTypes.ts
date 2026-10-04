@@ -33,6 +33,8 @@ export interface CollaborationAccessTier {
 }
 
 export interface CollaborationPolicy {
+  /** User-chosen public display name; never an account/login identifier. */
+  hostName?: string;
   sessionName: string;
   /** Host-selected workspace roots exposed to this collaboration session. */
   workspacePaths: string[];
@@ -137,6 +139,7 @@ export const DEFAULT_COLLABORATION_TIERS: CollaborationAccessTier[] = [
 ];
 
 export const DEFAULT_COLLABORATION_POLICY: CollaborationPolicy = {
+  hostName: 'Host',
   sessionName: 'Team session',
   workspacePaths: [],
   modelCatalog: [],
@@ -150,3 +153,18 @@ export const DEFAULT_COLLABORATION_POLICY: CollaborationPolicy = {
   showAgentStatus: true,
   showParticipants: true,
 };
+
+export interface SharedTeamFolder {
+  id: string;
+  name: string;
+}
+
+/** Only folder names leave the host. Absolute roots remain local authority. */
+export function sharedTeamFolders(paths: readonly string[]): SharedTeamFolder[] {
+  return paths.slice(0, 24).flatMap((path, index) => {
+    const name = path.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop()?.trim();
+    return name && name !== '.' && name !== '..'
+      ? [{ id: `workspace-${index + 1}`, name: name.slice(0, 160) }]
+      : [];
+  });
+}

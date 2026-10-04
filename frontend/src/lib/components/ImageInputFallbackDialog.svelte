@@ -1,21 +1,47 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import ImageOff from 'lucide-svelte/icons/image-off';
   import ScanSearch from 'lucide-svelte/icons/scan-search';
+  import ShieldCheck from 'lucide-svelte/icons/shield-check';
   import X from 'lucide-svelte/icons/x';
   import SettingsSwitch from './SettingsSwitch.svelte';
 
   interface Props {
     modelLabel: string;
     imageCount: number;
+    modelSupportsVision?: boolean;
     mode: 'model-switch' | 'send';
+    onallow: (remember: boolean) => void;
     oncontinue: (remember: boolean) => void;
     onchoosemodel: () => void;
     oncancel: () => void;
   }
 
-  let { modelLabel, imageCount, mode, oncontinue, onchoosemodel, oncancel }: Props = $props();
+  let {
+    modelLabel,
+    imageCount,
+    modelSupportsVision = false,
+    mode,
+    onallow,
+    oncontinue,
+    onchoosemodel,
+    oncancel,
+  }: Props = $props();
   let remember = $state(false);
   let dialogRef = $state<HTMLDivElement>();
+  const previouslyFocused =
+    typeof document === 'undefined' ? null : (document.activeElement as HTMLElement | null);
+
+  onDestroy(() => {
+    if (previouslyFocused?.isConnected) previouslyFocused.focus();
+  });
+
+  const imageLabel = $derived(imageCount === 1 ? 'image' : 'images');
+  const actionDescription = $derived(
+    mode === 'send'
+      ? 'Send this message with images. You’re confirming image support for this model.'
+      : 'Select this model and keep the images. You’re confirming its image support.',
+  );
 
   $effect(() => {
     dialogRef?.querySelector<HTMLButtonElement>('[data-primary]')?.focus();
@@ -43,7 +69,7 @@
 </script>
 
 <div
-  class="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md"
+  class="fixed inset-0 z-[130] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
   role="presentation"
   onmousedown={(event) => {
     if (event.target === event.currentTarget) oncancel();
@@ -51,7 +77,7 @@
 >
   <div
     bind:this={dialogRef}
-    class="w-full max-w-lg overflow-hidden rounded-2xl border border-[var(--color-border-bright)] bg-[var(--color-surface-1)] shadow-2xl"
+    class="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-xl border border-[var(--color-border-bright)] bg-[var(--color-surface-0)] shadow-2xl"
     role="alertdialog"
     aria-modal="true"
     aria-labelledby="image-input-fallback-title"
@@ -59,29 +85,38 @@
     tabindex="-1"
     onkeydown={handleKeydown}
   >
-    <header
-      class="flex items-start gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-5 py-4"
-    >
-      <span
-        class="mt-0.5 rounded-xl border border-amber-400/30 bg-amber-400/10 p-2 text-amber-300"
-        aria-hidden="true"
-      >
-        <ImageOff size={20} />
-      </span>
+    <header class="flex items-start gap-4 px-6 py-5">
+      <div class="mt-0.5 shrink-0 text-[var(--color-warning)]" aria-hidden="true">
+        <ImageOff size={22} strokeWidth={1.8} />
+      </div>
       <div class="min-w-0 flex-1">
-        <h2 id="image-input-fallback-title" class="text-base font-semibold text-[var(--color-text-primary)]">
-          This model can't receive the image
+        <p
+          class="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+        >
+          Image input
+        </p>
+        <h2
+          id="image-input-fallback-title"
+          class="mt-1 text-lg font-semibold text-[var(--color-text-primary)]"
+        >
+          Confirm image support
         </h2>
-        <p id="image-input-fallback-description" class="mt-1 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+        <p
+          id="image-input-fallback-description"
+          class="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]"
+        >
           <span class="font-medium text-[var(--color-text-primary)]">{modelLabel}</span>
-          has no verified image transport in Koryphaios. {imageCount === 1
-            ? 'One image is in this conversation.'
-            : `${imageCount} images are in this conversation.`}
+          {modelSupportsVision
+            ? 'supports vision, but image delivery through this provider is unconfirmed.'
+            : 'hasn’t reported image support. Its capability information may be incomplete.'}
+          There {imageCount === 1 ? 'is' : 'are'}
+          {imageCount}
+          {imageLabel} in this conversation.
         </p>
       </div>
       <button
         type="button"
-        class="rounded-lg p-2 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        class="shrink-0 p-1 text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         aria-label="Cancel image input choice"
         onclick={oncancel}
       >
@@ -89,53 +124,102 @@
       </button>
     </header>
 
-    <div class="space-y-4 p-5">
-      <div class="grid gap-2">
-        <button
-          data-primary
-          type="button"
-          class="flex w-full items-center gap-3 rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-4 py-3 text-left text-[var(--color-text-primary)] transition-colors hover:bg-[var(--color-accent)]/16 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          onclick={onchoosemodel}
-        >
-          <ScanSearch size={19} class="shrink-0 text-[var(--color-accent)]" />
-          <span>
-            <span class="block text-sm font-semibold">Choose a vision model</span>
-            <span class="mt-0.5 block text-xs text-[var(--color-text-muted)]"
-              >Keep the draft and images, then pick a model that reports image support.</span
-            >
+    <div class="border-y border-[var(--color-border)]">
+      <button
+        data-primary
+        type="button"
+        class="group flex w-full items-start gap-4 px-6 py-4 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none"
+        onclick={() => onallow(remember)}
+      >
+        <ShieldCheck
+          size={20}
+          class="mt-0.5 shrink-0 text-[var(--color-accent)]"
+          strokeWidth={1.8}
+        />
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-semibold text-[var(--color-text-primary)]">
+            This model supports images
           </span>
-        </button>
-        <button
-          type="button"
-          class="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          onclick={() => oncontinue(remember)}
+          <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]">
+            {actionDescription}
+          </span>
+        </span>
+        <span
+          class="mt-0.5 text-xs font-medium text-[var(--color-accent)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
         >
+          Use images
+        </span>
+      </button>
+
+      <button
+        type="button"
+        class="group flex w-full items-start gap-4 border-t border-[var(--color-border)] px-6 py-4 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none"
+        onclick={onchoosemodel}
+      >
+        <ScanSearch
+          size={20}
+          class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
+          strokeWidth={1.8}
+        />
+        <span class="min-w-0 flex-1">
+          <span class="block text-sm font-semibold text-[var(--color-text-primary)]"
+            >Choose a vision model</span
+          >
+          <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]">
+            Keep the draft and images, then choose a model with verified image transport.
+          </span>
+        </span>
+        <span
+          class="mt-0.5 text-xs font-medium text-[var(--color-text-secondary)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
+          Change model
+        </span>
+      </button>
+
+      <button
+        type="button"
+        class="group flex w-full items-start gap-4 border-t border-[var(--color-border)] px-6 py-4 text-left transition-colors hover:bg-[var(--color-surface-2)] focus-visible:bg-[var(--color-surface-2)] focus-visible:outline-none"
+        onclick={() => oncontinue(remember)}
+      >
+        <ImageOff
+          size={20}
+          class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]"
+          strokeWidth={1.8}
+        />
+        <span class="min-w-0 flex-1">
           <span class="block text-sm font-semibold text-[var(--color-text-primary)]">
             Continue without {imageCount === 1 ? 'the image' : 'images'}
           </span>
-          <span class="mt-0.5 block text-xs text-[var(--color-text-muted)]">
-            {mode === 'send'
-              ? 'Send this turn as text only. Images stay visible in the transcript.'
-              : 'Use this model, but omit images from its provider context.'}
+          <span class="mt-1 block text-xs leading-relaxed text-[var(--color-text-muted)]">
+            {mode === 'send' ? 'Send text only.' : 'Use this model with text only.'}
+            {imageCount === 1 ? 'The image stays' : 'Images stay'} visible in the transcript.
           </span>
-        </button>
-      </div>
+        </span>
+        <span
+          class="mt-0.5 text-xs font-medium text-[var(--color-text-secondary)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
+          Continue
+        </span>
+      </button>
+    </div>
 
+    <div class="px-6 py-4">
       <SettingsSwitch
         checked={remember}
-        label="Don't ask again"
-        description="For models without verified vision, automatically continue without image input. You can undo this from the notice after sending."
+        label="Remember my choice"
+        description="Image support is remembered for this model. Text-only skips future image prompts."
         compact
+        flat
         onchange={() => {
           remember = !remember;
         }}
       />
     </div>
 
-    <footer class="border-t border-[var(--color-border)] bg-[var(--color-surface-0)] px-5 py-3">
+    <footer class="flex justify-end border-t border-[var(--color-border)] px-6 py-3">
       <button
         type="button"
-        class="w-full rounded-lg px-3 py-2 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        class="px-2 py-1 text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
         onclick={oncancel}
       >
         Cancel and keep editing

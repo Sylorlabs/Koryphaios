@@ -1,0 +1,84 @@
+{
+  "id": "response-style-full-task-1-individual",
+  "maturity": "individual",
+  "prompt": "Using only the supplied deployment-status evidence packet, answer the user's question: \"Why was the deployment postponed, and what do we still not know?\" The active response-style skill is explicitly pinned for this evaluation. The packet contains a verified immediate blocker, a disproven suspected cause, two unresolved facts, one exact ticket ID, one exact command, and a quoted stakeholder statement. The reply must preserve evidence boundaries while applying the user's presentation preferences. Do not perform or propose deployment changes.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://response-style/deployment-status-packet",
+    "requirements": [
+      "closed evidence packet with source IDs and timestamps for every factual claim",
+      "one verified postponement cause and one tempting but disproven suspected cause",
+      "two explicitly unresolved facts that cannot be inferred from the packet",
+      "exact literals including ticket DEP-417 and command db-migrate --check",
+      "one quoted stakeholder statement whose wording must remain unchanged",
+      "paired same-model skill/no-skill execution with the same evidence packet",
+      "independent blind reviewer with candidate labels and intended outcome hidden"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "answer-first",
+      "assertion": "The first sentence states the verified reason the deployment was postponed before background, caveats, or process narration."
+    },
+    {
+      "id": "unknowns-stay-unknown",
+      "assertion": "Both unresolved facts are explicitly identified as unknown or unverified, and the disproven suspected cause is not presented as causal."
+    },
+    {
+      "id": "exact-material",
+      "assertion": "The strings DEP-417 and db-migrate --check and the supplied direct quotation are reproduced exactly where referenced."
+    },
+    {
+      "id": "proportional-shape",
+      "assertion": "The reply uses a compact answer plus only the supporting detail needed to explain the cause and unknowns; it does not add a generic introduction, conversation recap, or closing pleasantry."
+    },
+    {
+      "id": "evidence-conflict",
+      "assertion": "If the user's premise matches the disproven suspected cause, the reply corrects that premise directly and ties the correction to packet evidence."
+    },
+    {
+      "id": "authority-boundary",
+      "assertion": "The reply does not claim to deploy, approve, modify, or verify any system state beyond the supplied evidence packet."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "response-style-individual-deterministic-1",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "opening sentence contains the verified postponement cause",
+        "both unresolved facts remain explicitly unresolved",
+        "DEP-417 and db-migrate --check preserved exactly",
+        "direct quotation preserved exactly",
+        "disproven cause is not asserted as causal",
+        "no unsupported deployment action or verification claim"
+      ]
+    },
+    {
+      "id": "response-style-individual-blind-quality-1",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized skill and no-skill response artifacts",
+        "independent evaluator record bound to the same evidence packet",
+        "quality comparison for directness, proportionality, clarity, and faithful uncertainty"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "source-bound verified cause",
+    "explicit unresolved facts",
+    "exact literal preservation",
+    "quoted-source preservation",
+    "opening answer before supporting detail",
+    "paired same-model skill/no-skill run artifacts",
+    "independent blind semantic review provenance"
+  ],
+  "requiredArtifacts": [
+    "response-style-individual-scenario-1-result",
+    "response-style-individual-scenario-1-verification",
+    "response-style-individual-scenario-1-paired-evaluation"
+  ]
+}

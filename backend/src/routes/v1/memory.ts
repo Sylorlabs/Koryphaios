@@ -26,6 +26,12 @@ import {
   writeProjectMemoryDocument,
   normalizeMemorySettings,
 } from '../../memory/unified-memory';
+import {
+  externalMemoryAdd,
+  externalMemoryForget,
+  externalMemorySearch,
+  externalMemoryStatus,
+} from '../../memory/external-memory';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { AuthenticationError, ValidationError, InternalError } from '../../errors/types';
@@ -297,6 +303,10 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
         autosaveDelayMs: t.Optional(t.Number()),
         documentSizeLimitEnabled: t.Optional(t.Boolean()),
         maxDocumentBytes: t.Optional(t.Number()),
+        externalMemoryEnabled: t.Optional(t.Boolean()),
+        externalMemoryProvider: t.Optional(t.String({ maxLength: 64 })),
+        externalMemoryScope: t.Optional(t.String({ maxLength: 200 })),
+        externalMemoryInContext: t.Optional(t.Boolean()),
       }),
     },
   )
@@ -305,6 +315,62 @@ export const memoryRoutes = new Elysia({ prefix: '/api/memory' })
     saveMemorySettings(getRequestProjectRoot(request), DEFAULT_MEMORY_SETTINGS);
     return { ok: true, data: DEFAULT_MEMORY_SETTINGS };
   })
+
+  // External long-term memory (Mem0 / Letta). Local memory files remain the
+  // source of truth; these mirror and recall through an optional provider.
+  .get('/external/providers', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+    const settings = loadMemorySettings(getRequestProjectRoot(request));
+    return { ok: true, data: externalMemoryStatus(settings) };
+  })
+  .post(
+    '/external/memories',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const settings = loadMemorySettings(getRequestProjectRoot(request));
+      const records = await externalMemoryAdd(settings, body);
+      return { ok: true, data: records };
+    },
+    {
+      body: t.Object({
+        text: t.String({ minLength: 1, maxLength: 8000 }),
+        provider: t.Optional(t.String({ maxLength: 64 })),
+        scope: t.Optional(t.String({ maxLength: 200 })),
+      }),
+    },
+  )
+  .post(
+    '/external/search',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const settings = loadMemorySettings(getRequestProjectRoot(request));
+      const records = await externalMemorySearch(settings, body);
+      return { ok: true, data: records };
+    },
+    {
+      body: t.Object({
+        query: t.String({ minLength: 1, maxLength: 8000 }),
+        provider: t.Optional(t.String({ maxLength: 64 })),
+        scope: t.Optional(t.String({ maxLength: 200 })),
+        limit: t.Optional(t.Integer({ minimum: 1, maximum: 100 })),
+      }),
+    },
+  )
+  .post(
+    '/external/forget',
+    async ({ request, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) throw new AuthenticationError('Unauthorized');
+      const settings = loadMemorySettings(getRequestProjectRoot(request));
+      const removed = await externalMemoryForget(settings, body);
+      return { ok: true, data: { removed } };
+    },
+    {
+      body: t.Object({
+        ids: t.Array(t.String({ minLength: 1, maxLength: 128 }), { minItems: 1, maxItems: 100 }),
+        provider: t.Optional(t.String({ maxLength: 64 })),
+      }),
+    },
+  )
 
   // Context & Stats
   .get(

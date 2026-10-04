@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -23,6 +31,58 @@ const scorers = [
   ...AUTH_SECRETS_SECURITY_SKILL_EVAL_SCORERS,
   ...PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS,
 ];
+
+test('embedded-device-security accepts bounded simulation labels as emulator evidence', async () => {
+  const scenario = { id: 'embedded-device-security-full-task-1-individual' } as never;
+  const root = mkdtempSync(join(tmpdir(), 'kory-device-simulation-label-'));
+  roots.push(root);
+  const materializer = materializers.find((item) => item.matches(scenario))!;
+  const scorer = scorers.find((item) =>
+    item.scenarioIds.includes((scenario as { id: string }).id),
+  )!;
+  await materializer.materialize(root, scenario);
+  mkdirSync(join(root, '.kory-eval'), { recursive: true });
+  writeFileSync(
+    join(root, '.kory-eval', 'boot-config.json'),
+    `${JSON.stringify(
+      {
+        productionKeyHash: 'prod-key-hash-2026',
+        product: 'device-x',
+        minimumVersion: 7,
+        bootloaderVerifiesSignature: true,
+        bootloaderVerifiesProduct: true,
+        rollbackStateProtected: true,
+        recoveryRequiresAuthorization: true,
+        debugFuseObserved: true,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  writeFileSync(
+    join(root, '.kory-eval', 'boot-evidence.json'),
+    `${JSON.stringify(
+      {
+        serialBootLog: 'board observed',
+        negativeImages: ['unsigned', 'wrong-product'],
+        powerCutRecovery: 'simulation',
+        evidenceBoundary: 'board evidence plus bounded simulation; physical enforcement not proven',
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const score = await scorer.score({
+    scenario,
+    experiment: {} as never,
+    workingDirectory: root,
+    observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+  });
+  expect(score.passed).toBe(true);
+  expect(score.integrityFailure).toBe(false);
+});
+
 for (const [skill, fixed, corpus] of [
   ['secure-authentication', 'src/auth-policy.ts', 'evidence/auth-corpus.json'],
   ['oauth-oidc', 'src/oauth-policy.ts', 'evidence/oauth-corpus.json'],

@@ -22,6 +22,8 @@
     description?: string;
     placeholder?: string;
     compact?: boolean;
+    dense?: boolean;
+    searchable?: boolean;
     disabled?: boolean;
     allowCustom?: boolean;
     customLabel?: string;
@@ -36,6 +38,8 @@
     description,
     placeholder = 'Select…',
     compact = false,
+    dense = false,
+    searchable = false,
     disabled = false,
     allowCustom = false,
     customLabel = 'Custom',
@@ -49,8 +53,16 @@
   let triggerEl = $state<HTMLButtonElement>();
   let menuEl = $state<HTMLDivElement>();
   let menuStyle = $state('');
+  let query = $state('');
   const listboxId = `kory-select-${++nextKorySelectId}`;
   const selected = $derived(options.find((option) => option.value === value));
+  const visibleOptions = $derived(
+    searchable && query.trim()
+      ? options.filter((option) =>
+          `${option.label} ${option.value}`.toLowerCase().includes(query.trim().toLowerCase()),
+        )
+      : options,
+  );
 
   function updatePosition() {
     if (!triggerEl || !menuEl) return;
@@ -75,12 +87,12 @@
   }
 
   function selectedIndex() {
-    const index = options.findIndex((option) => option.value === value && !option.disabled);
+    const index = visibleOptions.findIndex((option) => option.value === value && !option.disabled);
     return index >= 0
       ? index
       : Math.max(
           0,
-          options.findIndex((option) => !option.disabled),
+          visibleOptions.findIndex((option) => !option.disabled),
         );
   }
 
@@ -88,8 +100,12 @@
     if (disabled) return;
     open = !open;
     if (open) {
+      query = '';
       activeIndex = selectedIndex();
-      void tick().then(updatePosition);
+      void tick().then(() => {
+        updatePosition();
+        if (searchable) menuEl?.querySelector<HTMLInputElement>('[data-select-search]')?.focus();
+      });
     }
   }
 
@@ -98,6 +114,7 @@
     open = false;
     customMode = false;
     void onchange(option.value);
+    triggerEl?.focus();
   }
   function showCustomInput() {
     customMode = true;
@@ -112,28 +129,30 @@
     void onchange(next);
   }
   function handleKeydown(event: KeyboardEvent) {
-    if (disabled || options.length === 0) return;
+    if (disabled) return;
     if (event.key === 'Escape') {
       if (!open) return;
       event.preventDefault();
       event.stopPropagation();
       open = false;
+      triggerEl?.focus();
       return;
     }
+    if (visibleOptions.length === 0) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       if (!open) {
         open = true;
         activeIndex = selectedIndex();
         void tick().then(updatePosition);
-      } else if (options[activeIndex]) choose(options[activeIndex]);
+      } else if (visibleOptions[activeIndex]) choose(visibleOptions[activeIndex]);
       return;
     }
     if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
       open = true;
       void tick().then(updatePosition);
-      const available = options
+      const available = visibleOptions
         .map((option, index) => ({ option, index }))
         .filter(({ option }) => !option.disabled);
       activeIndex = (event.key === 'Home' ? available[0] : available.at(-1))?.index ?? 0;
@@ -146,8 +165,8 @@
       const delta = event.key === 'ArrowDown' ? 1 : -1;
       let next = activeIndex;
       do {
-        next = (next + delta + options.length) % options.length;
-      } while (options[next]?.disabled && next !== activeIndex);
+        next = (next + delta + visibleOptions.length) % visibleOptions.length;
+      } while (visibleOptions[next]?.disabled && next !== activeIndex);
       activeIndex = next;
     }
   }
@@ -186,16 +205,22 @@
     aria-expanded={open}
     aria-controls={open ? listboxId : undefined}
     aria-describedby={description ? `${listboxId}-description` : undefined}
-    aria-activedescendant={open && options[activeIndex]
+    aria-activedescendant={open && visibleOptions[activeIndex]
       ? `${listboxId}-option-${activeIndex}`
       : undefined}
     onkeydown={handleKeydown}
     onclick={toggleOpen}
-    class="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] text-left text-[var(--color-text-primary)] outline-none transition-all hover:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:opacity-50 {compact
+    class="flex w-full items-center justify-between gap-3 border border-[var(--color-border)] bg-[var(--color-surface-1)] text-left text-[var(--color-text-primary)] outline-none transition-all hover:border-[var(--color-accent)]/50 focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-surface-1)] disabled:opacity-50 {dense
+      ? 'rounded min-h-7 px-2 py-1 text-xs'
+      : 'rounded-xl'} {!dense && compact
       ? 'min-h-9 px-3 py-2 text-xs'
-      : 'min-h-11 px-4 py-3 text-sm'}"
+      : !dense
+        ? 'min-h-11 px-4 py-3 text-sm'
+        : ''}"
   >
-    <span class="min-w-0 flex-1 truncate">{selected?.label ?? placeholder}</span>
+    <span class="min-w-0 flex-1 truncate"
+      >{selected?.label ?? (allowCustom && value ? value : placeholder)}</span
+    >
     <ChevronDown
       size={15}
       class="shrink-0 text-[var(--color-text-muted)] transition-transform {open
@@ -218,9 +243,30 @@
       role="listbox"
       aria-label={label}
       style={menuStyle}
-      class="fixed z-[120] max-h-72 min-w-56 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1.5 shadow-2xl shadow-black/40"
+      class="fixed z-[120] max-h-72 min-w-56 overflow-y-auto border border-[var(--color-border)] bg-[var(--color-surface-2)] {dense
+        ? 'rounded p-1 shadow-lg'
+        : 'rounded-xl p-1.5 shadow-2xl shadow-black/40'}"
     >
-      {#each options as option, index (option.value)}
+      {#if searchable}
+        <div class="sticky top-0 bg-[var(--color-surface-2)] p-1">
+          <input
+            data-select-search
+            aria-label={`Search ${label}`}
+            placeholder="Search…"
+            bind:value={query}
+            oninput={() => (activeIndex = 0)}
+            onkeydown={(event) => {
+              if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key))
+                handleKeydown(event);
+            }}
+            class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+          />
+        </div>
+        {#if !visibleOptions.length}<p class="px-2 py-2 text-xs text-[var(--color-text-muted)]">
+            No matches
+          </p>{/if}
+      {/if}
+      {#each visibleOptions as option, index (option.value)}
         <button
           id={`${listboxId}-option-${index}`}
           type="button"
@@ -230,8 +276,9 @@
           disabled={option.disabled}
           onmouseenter={() => (activeIndex = index)}
           onclick={() => choose(option)}
-          class="flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors disabled:opacity-40 {index ===
-          activeIndex
+          class="flex w-full items-start gap-3 text-left transition-colors disabled:opacity-40 {dense
+            ? 'rounded-sm px-2 py-1.5'
+            : 'rounded-lg px-3 py-2.5'} {index === activeIndex
             ? 'bg-[var(--color-surface-3)]'
             : ''}"
         >

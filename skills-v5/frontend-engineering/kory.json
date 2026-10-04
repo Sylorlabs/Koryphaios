@@ -124,8 +124,8 @@
     {
       "url": "https://html.spec.whatwg.org/multipage/interaction.html",
       "sourceType": "spec",
-      "versionScope": "WHATWG HTML Living Standard user-interaction section, last updated 2026-09-04 when verified",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "WHATWG HTML Living Standard user-interaction section, last updated 2026-10-03 when verified",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "notes": "Browser-specific interaction, activation, focus, and inertness semantics. Used to reinforce web as a specialized medium rather than the default frontend model."
     },

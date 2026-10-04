@@ -1,7 +1,7 @@
 {
   "id": "security-review-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"review authentication permissions\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is security-review: Assess enforced trust, identity, authorization, secret, isolation, and recovery boundaries. The adjacent accessibility-practice discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"review authentication permissions\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery-sensitive path that must be traced into a reproducible verification handoff rather than assumed. The acceptance boundary is security-review: Assess enforced trust, identity, authorization, secret, isolation, and recovery boundaries. The adjacent accessibility-practice discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce evidence-backed findings plus concrete success, negative-path, denied-side-effect, and recovery verification cases with execution status explicit. No live exploit target is required, so do not invent executed proof. A finding without an explicit verification boundary is insufficient.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://security-review/multitenant-reporting-pr",
@@ -31,7 +31,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Threat and trust-boundary map."
+      "assertion": "Provide a concrete security-verification handoff covering representative same-tenant success, cross-tenant denial, denied side effects, and recovery-sensitive cases, while labeling those cases unexecuted unless runtime evidence is actually available."
     },
     {
       "id": "anti-pattern-resistance",
@@ -52,9 +52,9 @@
         "Exploit prerequisites, trust boundary, impact, confidence, and severity rationale",
         "False-positive self-check plus remediation and verification boundary",
         "Hierarchy boundary and selected specialist rationale",
-        "Representative success, negative-path, and recovery verification",
+        "Concrete success, negative-path, denied-side-effect, and recovery verification handoff with execution status explicit",
         "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
+        "representative negative/recovery verification cases without unsupported execution claims",
         "source/version boundary when facts can drift"
       ]
     },
@@ -75,9 +75,9 @@
     "Exploit prerequisites, trust boundary, impact, confidence, and severity rationale",
     "False-positive self-check plus remediation and verification boundary",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification",
+    "Concrete success, negative-path, denied-side-effect, and recovery verification handoff with execution status explicit",
     "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
+    "representative success plus negative/recovery verification cases without unsupported execution claims",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],

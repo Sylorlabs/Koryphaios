@@ -13,7 +13,9 @@
 
   // The thinking bulb clips through a document-scoped `url(#...)` reference, so
   // a fixed id is shared by every status icon on screen and breaks as soon as
-  // one of them unmounts. Scope the clip path to this instance.
+  // one of them unmounts. `$props.id()` mints a unique id per component instance
+  // and, unlike a random string, is stable across SSR hydration so the server
+  // and client agree on the reference.
   const bulbClipId = $props.id();
 </script>
 

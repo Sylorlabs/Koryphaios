@@ -1000,6 +1000,27 @@ export class WorkspaceManager {
       this.git.withLock(async () => {
         const resolution = this.resolutions.get(taskId);
         if (!resolution) return reconcileError(`No pending resolution for ${taskId}`);
+        // Shutdown may retain a dirty checkout when its recovery commit failed.
+        // Do not report a successful branch-only merge while ignoring those files.
+        const retained = this.worktrees.get(taskId);
+        if (retained) {
+          if (
+            resolution.branchName !== retained.branchName ||
+            resolution.destinationBranch !== retained.destinationBranch
+          ) {
+            return reconcileError(
+              'Recovery metadata does not match the retained checkout; nothing was removed.',
+            );
+          }
+          await this.validateWorktree(taskId);
+          if (!(await this.commitPendingWorktreeChanges(retained, ['--no-verify']))) {
+            return reconcileError(
+              'Recovery worktree is still present; its pending changes could not be committed. Nothing was removed.',
+            );
+          }
+          const released = await this.releaseWorktree(taskId, { keepBranch: true });
+          if (!released.success) return reconcileError(released.message);
+        }
 
         // The manifest is local state a tampered process could edit, and both
         // names are interpolated into refspecs. Re-validate before use.
@@ -1468,10 +1489,23 @@ export class WorkspaceManager {
     for (const [taskId, worktree] of [...this.worktrees]) {
       try {
         if (!(await this.commitPendingWorktreeChanges(worktree, ['--no-verify']))) {
+          // Never remove a worktree whose changes were not committed. The
+          // branch alone cannot preserve uncommitted files, so leave both the
+          // checkout and its manifest entry in place for recovery on restart.
+          this.resolutions.set(taskId, {
+            taskId,
+            taskName: worktree.taskName,
+            branchName: worktree.branchName,
+            destinationBranch: worktree.destinationBranch,
+            conflicts: [],
+            reason: 'incomplete',
+            recordedAt: Date.now(),
+          });
           koryLog.warn(
-            { taskId },
-            'Could not commit pending worktree changes before shutdown; branch retained as-is',
+            { taskId, path: worktree.path },
+            'Could not commit pending worktree changes before shutdown; worktree retained for recovery',
           );
+          continue;
         }
         const result = await this.releaseWorktree(taskId, { keepBranch: true });
         if (!result.success) {

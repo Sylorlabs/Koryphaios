@@ -42,6 +42,11 @@ export interface MemorySettings {
   autosaveDelayMs: number;
   documentSizeLimitEnabled: boolean;
   maxDocumentBytes: number;
+  /** Mirror long-term memories to an external store (Mem0 or Letta). */
+  externalMemoryEnabled: boolean;
+  externalMemoryProvider: string;
+  externalMemoryScope: string;
+  externalMemoryInContext: boolean;
 }
 
 export interface MemoryState {
@@ -95,6 +100,10 @@ export const DEFAULT_SETTINGS: MemorySettings = {
   autosaveDelayMs: 1500,
   documentSizeLimitEnabled: true,
   maxDocumentBytes: 1_000_000,
+  externalMemoryEnabled: false,
+  externalMemoryProvider: '',
+  externalMemoryScope: '',
+  externalMemoryInContext: false,
 };
 
 // ============================================================================

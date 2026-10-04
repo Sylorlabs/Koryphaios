@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "property-fuzz-differential-testing",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

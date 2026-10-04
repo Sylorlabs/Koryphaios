@@ -11,6 +11,9 @@
 
 import { serverLog } from '../logger';
 import { resolveRelayJoinCode } from './relay-client';
+import { RelayJoinError } from './join-code';
+import { modelSharingRelayUrl } from './relay-url';
+import { parseSharedProviderCatalog } from './inference-input';
 import type { SharedProviderCatalog } from '@koryphaios/shared';
 import type { ProviderEvent } from '../providers/types';
 
@@ -34,6 +37,9 @@ export class RelayGuestClient {
   private readonly streams = new Map<string, PendingStream>();
   private catalogListeners = new Set<(c: SharedProviderCatalog) => void>();
   private connectedResolve: (() => void) | null = null;
+  private connectedReject: ((error: Error) => void) | null = null;
+  private admitted = false;
+  private requireModelOnly = false;
 
   get hostCatalog(): SharedProviderCatalog | null {
     return this.catalog;
@@ -54,44 +60,56 @@ export class RelayGuestClient {
    *  shares a Collaborator/YOLO link to grant remote-provider access, since
    *  the default Viewer tier can't use shared providers). Resolves once the WS
    *  is open; the catalog arrives shortly after via `onCatalog`. */
-  async connect(codeOrUrl: string, displayName: string): Promise<void> {
+  async connect(codeOrUrl: string, displayName: string, requireModelOnly = false): Promise<void> {
+    this.admitted = false;
+    this.requireModelOnly = requireModelOnly;
     let inviteUrl: URL;
     if (codeOrUrl.includes('://')) {
-      inviteUrl = new URL(codeOrUrl.trim());
+      inviteUrl = modelSharingRelayUrl(codeOrUrl.trim());
     } else {
+      this.requireModelOnly = true;
+      if (process.env.RELAY_URL) modelSharingRelayUrl(process.env.RELAY_URL);
       const resolved = await resolveRelayJoinCode(codeOrUrl.trim());
-      inviteUrl = new URL(resolved.inviteUrl);
+      if (resolved.tierId !== 'models')
+        throw new RelayJoinError('This is a team-session code. Enter a model-sharing code instead.', 'WRONG_SHARING_CODE', 400);
+      inviteUrl = modelSharingRelayUrl(resolved.inviteUrl);
     }
     const token =
       inviteUrl.searchParams.get('token') || inviteUrl.hash.replace(/^#?token=/, '') || '';
-    if (!token) throw new Error('Invite did not yield a token');
+    if (!token || token.length > 8192)
+      throw new RelayJoinError('Not a valid model-sharing invitation.', 'INVALID_MODEL_INVITE', 400);
     const wsBase = `${inviteUrl.origin.replace(/^http/, 'ws')}/ws`;
     const url = `${wsBase}?token=${encodeURIComponent(token)}&name=${encodeURIComponent(displayName)}`;
 
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
       this.ws = ws;
-      this.connectedResolve = resolve;
+      this.connectedResolve = () => { clearTimeout(timeout); resolve(); };
+      this.connectedReject = (error) => { clearTimeout(timeout); reject(error); };
       const timeout = setTimeout(() => {
         ws.close();
         reject(new Error('Relay guest connection timed out'));
       }, 10_000);
 
       ws.addEventListener('open', () => {
-        clearTimeout(timeout);
         log.info('Connected to host relay as provider client');
-        resolve();
       });
-      ws.addEventListener('message', (e) => this.handleMessage(String(e.data)));
+      ws.addEventListener('message', (e) => { if (this.ws === ws) this.handleMessage(String(e.data)); });
       ws.addEventListener('error', () => {
+        if (this.ws !== ws) return;
         clearTimeout(timeout);
         reject(new Error('Relay guest WS error'));
       });
       ws.addEventListener('close', () => {
+        if (this.ws !== ws) return;
+        clearTimeout(timeout);
+        this.connectedReject?.(new Error('The shared-model connection was closed'));
         // Fail any in-flight streams so callers don't hang.
         for (const stream of this.streams.values()) stream.fail('Host connection closed');
         this.streams.clear();
-        this.ws = null;
+        if (this.ws === ws) this.ws = null;
+        this.admitted = false;
+        this.catalog = null;
       });
     });
   }
@@ -104,9 +122,19 @@ export class RelayGuestClient {
       log.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed relay guest frame; skipping');
       return;
     }
+    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
     switch (msg.type) {
       case 'provider-catalog': {
-        this.catalog = msg.catalog as SharedProviderCatalog;
+        if (!this.admitted) return;
+        const catalog = parseSharedProviderCatalog(msg.catalog);
+        if (!catalog) {
+          this.connectedReject?.(new Error('The host returned an invalid model catalog'));
+          this.disconnect();
+          return;
+        }
+        this.catalog = catalog;
+        if (this.requireModelOnly && this.catalog?.providers)
+          this.catalog = { hostName: this.catalog.hostName, providers: this.catalog.providers.filter((provider) => !provider.agentic) };
         for (const fn of this.catalogListeners) {
           try {
             fn(this.catalog);
@@ -118,13 +146,24 @@ export class RelayGuestClient {
         return;
       }
       case 'init': {
-        // Some hosts send the catalog inside init.policy; ignore otherwise.
+        const tier = msg.tier as { id?: string; permissions?: { useRemoteProviders?: boolean } } | undefined;
+        if (this.requireModelOnly && (tier?.id !== 'models' || tier.permissions?.useRemoteProviders !== true)) {
+          this.connectedReject?.(new RelayJoinError('This invitation does not grant model-only access.', 'WRONG_MODEL_INVITE', 400));
+          this.disconnect();
+          return;
+        }
+        this.admitted = true;
         this.connectedResolve?.();
         return;
       }
       case 'inference-event': {
         const stream = this.streams.get(String(msg.requestId));
-        if (stream && msg.event) stream.push(msg.event as ProviderEvent);
+        const event = msg.event as ProviderEvent | undefined;
+        if (this.requireModelOnly && event && ['file_edit', 'tool_executed', 'cli_commands'].includes(event.type)) {
+          stream?.fail('The remote host sent a host-tool event on an inference-only connection.');
+          return;
+        }
+        if (stream && event) stream.push(event);
         return;
       }
       case 'inference-done': {
@@ -135,6 +174,11 @@ export class RelayGuestClient {
       case 'inference-error': {
         const stream = this.streams.get(String(msg.requestId));
         stream?.fail(String(msg.error ?? 'Remote inference failed'));
+        return;
+      }
+      case 'host-disconnected': {
+        for (const stream of this.streams.values()) stream.fail('The model-sharing host disconnected.');
+        this.streams.clear();
         return;
       }
     }
@@ -151,6 +195,7 @@ export class RelayGuestClient {
     payload: Record<string, unknown>,
     signal?: AbortSignal,
   ): AsyncGenerator<ProviderEvent> {
+    if (signal?.aborted) throw new Error('Cancelled');
     const requestId = nextRequestId();
     const queue: ProviderEvent[] = [];
     let finished = false;
@@ -205,13 +250,27 @@ export class RelayGuestClient {
     } finally {
       signal?.removeEventListener('abort', onAbort);
       this.streams.delete(requestId);
+      // An agent loop may stop consuming before the host completes. Release
+      // the host's request slot and quota work rather than leaving it running.
+      if (!finished) {
+        try {
+          this.send({ type: 'inference-cancel', requestId });
+        } catch {
+          // A disconnected transport cannot deliver cancellation.
+        }
+      }
     }
   }
 
   disconnect(): void {
+    this.connectedReject?.(new Error('Shared-model connection ended'));
+    this.admitted = false;
+    this.connectedResolve = null;
+    this.connectedReject = null;
     this.ws?.close();
     this.ws = null;
     this.catalog = null;
+    for (const stream of this.streams.values()) stream.fail('Shared-model connection ended');
     this.streams.clear();
   }
 }

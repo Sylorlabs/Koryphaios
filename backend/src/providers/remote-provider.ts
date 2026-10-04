@@ -14,6 +14,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join, isAbsolute } from 'node:path';
 import type { ModelDef, ProviderConfig, ProviderName } from '@koryphaios/shared';
 import type { Provider, ProviderEvent, StreamRequest } from './types';
+import { userConfirmedImageInput } from './attachment-admission';
 import { relayGuestClient } from '../collaboration/relay-guest-client';
 import {
   scanProject,
@@ -55,7 +56,10 @@ export async function applyRemoteFileEdit(
     try {
       current = await readFile(dest, 'utf-8');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Remote provider: local file not found for splice');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Remote provider: local file not found for splice',
+      );
       return 'not-found'; // no local file to splice into
     }
     const oldStr = event.fileOldContent as string;
@@ -87,6 +91,8 @@ export interface RemoteProviderInit {
 }
 
 export class RemoteProvider implements Provider {
+  // The relay preserves image blocks. The host validates its own adapter.
+  readonly imageInputTransport = 'native' as const;
   readonly name: ProviderName;
   readonly config: ProviderConfig;
   readonly agentic: boolean;
@@ -128,6 +134,12 @@ export class RemoteProvider implements Provider {
       return;
     }
 
+    // Only the exact guest-side route may authorize the corresponding host
+    // route. Passing the guest provider id unchanged would lose the correction.
+    const imageOverride = userConfirmedImageInput(this, request)
+      ? { imageInputOverride: { provider: this.hostProvider, model: request.model } }
+      : {};
+
     // Pure-inference (API) providers: the host never sees the client's files.
     if (!this.agentic) {
       const payload = {
@@ -139,6 +151,7 @@ export class RemoteProvider implements Provider {
         maxTokens: request.maxTokens,
         temperature: request.temperature,
         reasoningLevel: request.reasoningLevel,
+        ...imageOverride,
         harnessRole: request.harnessRole,
         promptManifestHash: request.promptManifestHash,
         taskContractHash: request.taskContractHash,
@@ -188,6 +201,7 @@ export class RemoteProvider implements Provider {
       maxTokens: request.maxTokens,
       temperature: request.temperature,
       reasoningLevel: request.reasoningLevel,
+      ...imageOverride,
       harnessRole: request.harnessRole,
       promptManifestHash: request.promptManifestHash,
       taskContractHash: request.taskContractHash,

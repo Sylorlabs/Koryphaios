@@ -138,18 +138,18 @@
     {
       "url": "https://developers.openai.com/api/docs/models/gpt-transcribe",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-09-19",
+      "versionScope": "OpenAI GPT-Transcribe model documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current file/streaming transcription model behavior, hints and supported transcription surfaces.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/models",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI model catalog as available 2026-09-17",
+      "versionScope": "OpenAI model catalog as available 2026-10-02",
       "staleAfterDays": 7,
       "notes": "Current realtime, transcription and speech-generation model families; verify aliases and deprecations before migrations.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.cloud.google.com/speech-to-text/docs/streaming-recognize",

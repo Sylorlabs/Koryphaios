@@ -393,6 +393,8 @@ export interface ProviderInfo {
   iconPath?: string;
   /** Authenticated custom-provider icon asset and presentation metadata. */
   customIcon?: CustomProviderIconConfig;
+  /** Supported agent execution locations, including explicit unavailable modes. */
+  execution?: import('../provider-execution').ProviderExecutionCapabilities;
   /** Where the provider executes work */
   deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
   /** Short UI description of provider behavior */

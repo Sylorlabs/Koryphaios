@@ -40,6 +40,7 @@
           preview.revisions +
           preview.attachments +
           preview.links +
+          preview.relationships +
           preview.bases +
           preview.drafts
       : 0,
@@ -277,7 +278,8 @@
                 ['Notes', preview.notes],
                 ['History', preview.revisions],
                 ['Attachments', preview.attachments],
-                ['Links', preview.links],
+                ['Document links', preview.links],
+                ['Relationships', preview.relationships],
                 ['Bases', preview.bases],
                 ['Drafts', preview.drafts],
               ] as item}
@@ -316,7 +318,7 @@
             <div>
               <p class="text-sm font-semibold">Vault restored</p>
               <p class="mt-1 text-xs" style="color: var(--color-text-muted);">
-                Added {restored.restoredNotes.toLocaleString()} notes, {restored.restoredAttachments.toLocaleString()} attachments, {restored.restoredBases.toLocaleString()} Bases, and {restored.restoredDrafts.toLocaleString()} draft branches.
+                Added {restored.restoredNotes.toLocaleString()} notes, {restored.restoredAttachments.toLocaleString()} attachments, {restored.restoredLinks.toLocaleString()} document links, {restored.restoredRelationships.toLocaleString()} relationships, {restored.restoredBases.toLocaleString()} Bases, and {restored.restoredDrafts.toLocaleString()} draft branches.
               </p>
             </div>
           </div>

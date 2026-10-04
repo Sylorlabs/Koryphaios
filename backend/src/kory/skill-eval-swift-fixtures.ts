@@ -126,6 +126,23 @@ function regressionText(root: string, path: string, required: RegExp[]): boolean
   }
 }
 
+function swiftRegressionBody(root: string, path: string, required: RegExp[]): boolean {
+  try {
+    const source = readFileSync(join(root, path), 'utf8');
+    const code = source.replace(/\/\*[\s\S]*?\*\//gu, ' ').replace(/\/\/.*$/gmu, ' ');
+    const hasTestBody = /@Test\b|\bfunc\s+test\w*\s*\(|\bXCTAssert\w*\s*\(|#expect\s*\(/u.test(code);
+    return (
+      hasTestBody &&
+      required.every((pattern) => {
+        pattern.lastIndex = 0;
+        return pattern.test(code);
+      })
+    );
+  } catch {
+    return false;
+  }
+}
+
 function scoreActor(root: string): SkillEvalDeterministicScore {
   const runtime = runSwift(
     root,
@@ -140,7 +157,8 @@ enum FraudFailure: Error { case deniedByService }
     async let second = account.withdraw(70) { try await Task.sleep(for: .milliseconds(20)); return true }
     let pair = try await (first, second)
     let successes = [pair.0, pair.1].filter { $0 }.count
-    if successes != 1 || await account.currentBalance() != 30 { fatalError("reentrant overdraft invariant") }
+    let finalBalance = await account.currentBalance()
+    if successes != 1 || finalBalance != 30 { fatalError("reentrant overdraft invariant") }
 
     let denied = Account(balance: 90)
     if try await denied.withdraw(40, fraudCheck: { false }) { fatalError("fraud denial accepted") }
@@ -162,7 +180,7 @@ enum FraudFailure: Error { case deniedByService }
 }
 `,
   );
-  const regression = regressionText(root, 'Tests/AccountRegression.swift', [
+  const regression = swiftRegressionBody(root, 'Tests/AccountRegression.swift', [
     /concurrent|reentran|reservation/iu,
     /denial|error|cancel/iu,
   ]);
@@ -298,7 +316,7 @@ export const SWIFT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializ
 
 export const SWIFT_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'swift-engineering/actor-reentrancy-reservation-scorer@1',
+    id: 'swift-engineering/actor-reentrancy-reservation-scorer@2',
     scenarioIds: [ACTOR],
     score: ({ workingDirectory }) => scoreActor(workingDirectory),
   },

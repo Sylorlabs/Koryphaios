@@ -6,7 +6,7 @@ import {
   buildSoftJail,
   inferenceSandboxPolicy,
 } from '../sandbox-runner';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SANDBOX_PRESETS, DEFAULT_SANDBOX_POLICY, tightenSandbox } from '@koryphaios/shared';
@@ -139,6 +139,68 @@ describe('sandbox runner (native OS wrap)', () => {
         expect(profile).toContain(writable);
         expect(profile).not.toContain(readonly);
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('soft jail links nested paths that a basename symlink cannot express', () => {
+    // The configDirs shorthand links basename(dir), so <staged>/.local/share
+    // becomes <jailHome>/share while the CLI resolves <jailHome>/.local/share.
+    // Devin lost its credentials this way and reported "Not logged in" on every
+    // turn. homeLinks takes an explicit jail-relative path.
+    const root = mkdtempSync(join(tmpdir(), 'kory-jail-links-'));
+    mkdirSync(join(root, '.local/share'), { recursive: true });
+    const jail = buildSoftJail({ PATH: process.env.PATH ?? '' }, [root], {
+      '.local/share': join(root, '.local/share'),
+    });
+    // The configDirs shorthand alone would NOT have produced that path.
+    const shorthand = buildSoftJail({ PATH: process.env.PATH ?? '' }, [
+      join(root, '.local/share'),
+    ]);
+    try {
+      expect(existsSync(join(jail.env.HOME!, '.local/share'))).toBe(true);
+      expect(jail.env.HOME).not.toBe(process.env.HOME);
+
+      // Documents the trap: basename('.local/share') is 'share', so the CLI
+      // resolves <jailHome>/.local/share and finds nothing.
+      expect(existsSync(join(shorthand.env.HOME!, 'share'))).toBe(true);
+      expect(existsSync(join(shorthand.env.HOME!, '.local/share'))).toBe(false);
+    } finally {
+      jail.cleanup();
+      shorthand.cleanup();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('soft jail ignores home links whose source is missing', () => {
+    const jail = buildSoftJail({ PATH: process.env.PATH ?? '' }, [], {
+      '.local/share': join(tmpdir(), 'kory-definitely-absent-dir-xyz'),
+    });
+    try {
+      expect(existsSync(join(jail.env.HOME!, '.local/share'))).toBe(false);
+    } finally {
+      jail.cleanup();
+    }
+  });
+
+  test('seatbelt rules quote resolved paths so symlinked temp dirs stay writable', () => {
+    // macOS resolves `/var` → `/private/var`, so a rule built from the ambient
+    // tmpdir() never matches and the CLI's own private artifacts (prompt, log)
+    // become unwritable — agy fails with "opening log file: ... not permitted".
+    const root = mkdtempSync(join(tmpdir(), 'kory-sandbox-canonical-'));
+    const logDir = join(root, 'run-log');
+    mkdirSync(logDir, { recursive: true });
+    try {
+      const profile = buildSeatbeltProfile({
+        cwd: root,
+        configDirs: [logDir],
+        policy: { ...SANDBOX_PRESETS.balanced },
+      });
+      const resolved = realpathSync(logDir);
+      expect(profile).toContain(`(subpath ${JSON.stringify(resolved)})`);
+      // The literal spelling is the symlinked one, so it must not be the only rule.
+      if (resolved !== logDir) expect(profile).not.toContain(`(subpath ${JSON.stringify(logDir)})`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

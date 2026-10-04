@@ -246,6 +246,7 @@ describe('voice settings', () => {
       'groq',
       'deepgram',
       'assemblyai',
+      'lmnt',
       'local',
       'lmstudio',
       'llamacpp',

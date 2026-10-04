@@ -351,7 +351,7 @@ describe('SessionSidebar session controls', () => {
     expect(mocks.sessionStore.deleteAllSessions).not.toHaveBeenCalled();
   });
 
-  it('anchors the tracked-spend popover to the viewport so it cannot be clipped by the sidebar', async () => {
+  it('lifts the tracked-spend popover out of the sidebar so no window can cover it', async () => {
     const paidSession = { ...session, id: 'session-paid', totalCost: 3.386 };
     mocks.sessionStore.sessions = [paidSession];
     mocks.sessionStore.groupedSessions = [{ label: 'Today', sessions: [paidSession] }];
@@ -368,20 +368,49 @@ describe('SessionSidebar session controls', () => {
         },
       }),
     } as Response);
-    const { container } = render(SessionSidebar);
+    const onAction = vi.fn();
+    render(SessionSidebar, { props: { onAction } });
 
     const costButton = screen.getByRole('button', { name: /Billing detail for/i });
-    await fireEvent.mouseEnter(costButton.parentElement as HTMLElement);
+    await fireEvent.mouseEnter(costButton);
     await Promise.resolve();
 
-    const popover = container.querySelector('.cost-billing-popover') as HTMLElement;
+    const popover = document.body.querySelector('.cost-billing-popover') as HTMLElement;
     expect(popover).toBeTruthy();
-    expect(popover.getAttribute('role')).toBe('tooltip');
     // Viewport-anchored placement instead of `absolute left-0`, which overflowed
     // the scrollable sidebar and got cut off on the right.
     expect(popover.style.left).toMatch(/^\d+px$/);
     expect(popover.style.top).toMatch(/^\d+px$/);
     expect(popover.className).not.toContain('left-0');
+    // The chat row isolates and the sidebar nav is promoted by `will-change`, so
+    // staying inside the component's subtree would let the chat column paint
+    // over the card no matter how high its own z-index was.
+    expect(document.body.lastElementChild).toBe(popover);
+  });
+
+  it('sends the user to the billing settings section from the tracked price', async () => {
+    const paidSession = { ...session, id: 'session-paid', totalCost: 3.386 };
+    mocks.sessionStore.sessions = [paidSession];
+    mocks.sessionStore.groupedSessions = [{ label: 'Today', sessions: [paidSession] }];
+    mocks.sessionStore.filteredSessions = [paidSession];
+    mocks.billingApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, summary: { hasMeteredUsage: true, providers: [] } }),
+    } as Response);
+    const onAction = vi.fn();
+    render(SessionSidebar, { props: { onAction } });
+
+    const costButton = screen.getByRole('button', { name: /Billing detail for/i });
+    await fireEvent.mouseEnter(costButton);
+    await Promise.resolve();
+
+    const popover = document.body.querySelector('.cost-billing-popover') as HTMLElement;
+    expect(popover).toBeTruthy();
+    await fireEvent.click(popover);
+
+    expect(onAction).toHaveBeenCalledWith('open_settings_billing');
+    // Opening Settings invalidates the anchor, so the card must not linger.
+    expect(document.body.querySelector('.cost-billing-popover')).toBeNull();
   });
 
   it('never scrolls the session tree sideways, so rows cannot be sheared off the left edge', () => {

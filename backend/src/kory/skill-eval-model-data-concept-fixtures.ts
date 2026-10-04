@@ -369,13 +369,15 @@ export const MODEL_DATA_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'computer-vision-full-task-1-individual',
     skill: 'computer-vision',
-    contract: `Filter evaluation leakage before metrics. A sample leaks when group appears in trainGroups or duplicateOf references any sample id in the same corpus; keep only the first member of a duplicate family, treating duplicateOf!=null as leakage. Return eligibleIds/leakageIds in input order. precision=TP/(TP+FP), recall=TP/(TP+FN), zero for empty denominator, rounded to three decimals. runtimeReady requires latencyMs<=latencyBudgetMs and memoryMb<=memoryBudgetMb. Do not let near-duplicate burst frames cross evaluation boundaries.`,
+    generation: 2,
+    contract: `Filter evaluation leakage before metrics. A sample leaks when group appears in trainGroups or duplicateOf references any sample id in the same corpus; keep only the first member of a duplicate family, treating duplicateOf!=null as leakage. Return eligibleIds/leakageIds in input order. Derive TP, FP, and FN from the eligible samples' boolean truth and predicted fields, then return precision=TP/(TP+FP) and recall=TP/(TP+FN), zero for an empty denominator, rounded to three decimals. runtimeReady requires latencyMs<=latencyBudgetMs and memoryMb<=memoryBudgetMb. Do not let near-duplicate burst frames cross evaluation boundaries.`,
     vectors: detectorVectors,
   },
   {
     id: 'computer-vision-full-task-2-individual',
     skill: 'computer-vision',
-    contract: `A sample leaks when parent appears in trainParents or duplicateOf is non-null. For eligible samples, exclude uncertain pixels entirely. Treat truth/pred values as binary mask pixels. Aggregate intersection and union over all eligible known pixels; IoU=intersection/union or 1 when union=0. tinyRecall is true-positive tiny samples / truth-positive tiny samples using whether any known truth pixel=1 and any known predicted pixel=1; 0 if no tiny positive samples. Round to three decimals. runtimeReady requires exportLatencyMs<=latencyBudgetMs.`,
+    generation: 2,
+    contract: `A sample leaks when parent appears in trainParents or duplicateOf is non-null. Return eligibleIds and leakageIds in input order. For eligible samples, exclude uncertain pixels entirely. Treat truth/pred values as binary mask pixels. Aggregate intersection and union over all eligible known pixels; IoU=intersection/union or 1 when union=0. tinyRecall is true-positive tiny samples / truth-positive tiny samples using whether any known truth pixel=1 and any known predicted pixel=1; 0 if no tiny positive samples. Return exactly eligibleIds, leakageIds, iou, tinyRecall, and runtimeReady. Round metrics to three decimals. runtimeReady requires exportLatencyMs<=latencyBudgetMs.`,
     vectors: segmentationVectors,
   },
   {

@@ -251,6 +251,9 @@ function projectionContentText(content: unknown): string {
         const mime = typeof value.imageMimeType === 'string' ? value.imageMimeType : 'image';
         return `[${mime} attachment retained in canonical history]`;
       }
+      if (value.type === 'audio' || value.type === 'video') {
+        return `[${value.mediaMimeType ?? value.type} attachment retained in canonical history]`;
+      }
       return safeJson(value);
     })
     .join('\n');

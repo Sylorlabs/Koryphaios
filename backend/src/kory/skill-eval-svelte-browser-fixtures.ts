@@ -369,12 +369,30 @@ interface SvelteResultArtifact {
   broaderSkill?: string;
   nearNeighbor?: string;
   sharedControl?: string;
+  status?: string;
+  reason?: string;
+  authored_evidence?: {
+    success_path?: string;
+    failure_recovery_path?: string;
+    browser_observations?: unknown[];
+  };
 }
 
 interface SvelteVerificationArtifact {
   evidenceType?: string;
   checks?: string[];
   negativeRecovery?: string[];
+  status?: string;
+  environment?: {
+    reactivity?: string;
+    exact_versions?: string;
+    execution_boundary?: string;
+  };
+  scenarios?: Array<{
+    name?: string;
+    steps?: string[];
+    expect?: string[];
+  }>;
 }
 
 interface BrowserCheck {
@@ -573,6 +591,46 @@ function artifactsReady(root: string, scenario: 1 | 2): { passed: boolean; detai
           'error-retry-focus',
           'component-destroy',
         ];
+  if (scenario === 1) {
+    const verificationText = JSON.stringify(verification ?? {}).toLowerCase();
+    const resultText = JSON.stringify(result ?? {}).toLowerCase();
+    const canonicalChecks = expectedChecks.every((item) => verification?.checks?.includes(item));
+    const semanticChecks = [
+      /prop[^\n]*update|selection survives/iu,
+      /selection[^\n]*(remove|disappear)|removed selection/iu,
+      /keyboard[^\n]*focus|focus[^\n]*keyboard/iu,
+      /loading[^\n]*empty[^\n]*error|loading, empty, error/iu,
+      /narrow[^\n]*viewport|390/iu,
+      /destroy|destruction/iu,
+    ].every((pattern) => pattern.test(verificationText));
+    const canonicalMetadata =
+      result?.svelteVersion === svelteVersion() &&
+      result.reactivityGeneration === 'runes' &&
+      result.executionBoundary === 'browser-only' &&
+      result.sharedControl === 'KorySelect.svelte';
+    const authoredMetadata =
+      /svelte\s*5|runes/iu.test(verification?.environment?.reactivity ?? '') &&
+      /browser|hydration|render/iu.test(verification?.environment?.execution_boundary ?? '') &&
+      typeof result?.authored_evidence?.success_path === 'string' &&
+      typeof result?.authored_evidence?.failure_recovery_path === 'string' &&
+      Array.isArray(result.authored_evidence.browser_observations);
+    const recoveryReady =
+      (verification?.negativeRecovery?.length ?? 0) >= 1 ||
+      /failure_recovery|recovery/iu.test(resultText);
+    const passed =
+      Boolean(result && verification) &&
+      (canonicalMetadata || authoredMetadata) &&
+      (canonicalChecks || semanticChecks) &&
+      recoveryReady;
+    return {
+      passed,
+      detail: passed
+        ? verification?.evidenceType === 'real-browser'
+          ? 'complete authored browser evidence contract'
+          : 'complete authored verification plan; host real-browser execution remains required'
+        : 'missing or incomplete result/verification artifacts',
+    };
+  }
   const passed =
     result?.svelteVersion === svelteVersion() &&
     result.reactivityGeneration === 'runes' &&
@@ -960,7 +1018,7 @@ export const SVELTE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureM
 
 export const SVELTE_BROWSER_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'svelte-engineering/derived-state-real-browser-scorer@1',
+    id: 'svelte-engineering/derived-state-real-browser-scorer@2',
     scenarioIds: [SCENARIO_STATE],
     score: ({ workingDirectory }) => scoreState(workingDirectory),
   },

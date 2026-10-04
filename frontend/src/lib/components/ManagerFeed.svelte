@@ -19,6 +19,7 @@
   import VirtualList from './VirtualList.svelte';
   import type { FeedEntryLocal } from '$lib/types';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
+  import { estimateFeedHeight as estimateRowHeight } from '$lib/utils/estimate-row-height';
   import { welcomePreferencesStore } from '$lib/stores/welcome-preferences.svelte';
 
   let feedContainer = $state<HTMLDivElement>();
@@ -195,26 +196,7 @@
   });
 
   function estimateFeedHeight(entry: FeedEntryLocal): number {
-    switch (entry.type) {
-      case 'user_message':
-        return 60;
-      case 'content':
-        return 120;
-      case 'tool_call':
-      case 'tool_result':
-      case 'tool_group':
-        return 80;
-      // Sub-agent groups render as a clamped summary, never as a full
-      // transcript dump, so a flat estimate stays close to the real height.
-      case 'agent_group':
-        return 44;
-      default:
-        return 100;
-    }
-  }
-
-  function scrollFeedToBottom(behavior: ScrollBehavior = 'instant') {
-    autoScrollCtl.jumpToBottom(behavior === 'smooth' ? 'smooth' : 'instant');
+    return estimateRowHeight(entry);
   }
 
   function toggleGroup(id: string) {
@@ -304,7 +286,7 @@
                 </h2>
 
                 <p
-                  class="mb-5 max-w-2xl text-sm leading-relaxed"
+                  class="mb-8 max-w-2xl text-sm leading-relaxed"
                   style="color: var(--color-text-secondary);"
                 >
                   Choose a starting point, or write a task below.
@@ -314,7 +296,7 @@
                   {#each suggestions as suggestion (suggestion.id)}
                     {@const Icon = suggestion.icon}
                     <div
-                      class="group relative flex flex-col items-start px-2 py-3 text-left transition-colors hover:bg-[var(--color-surface-2)]"
+                      class="group relative flex flex-col items-start px-2 py-4 text-left transition-colors hover:bg-[var(--color-surface-2)]"
                     >
                       {#if editingSuggestionId !== suggestion.id}
                         <button

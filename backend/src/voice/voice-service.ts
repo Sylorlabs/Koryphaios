@@ -16,6 +16,8 @@ import {
 import { getContext } from '../context';
 import { ValidationError } from '../errors/types';
 import { serverLog } from '../logger';
+import { requireCapabilityConfig } from '../providers/capability-service';
+import { getCapabilityAdapter } from '../providers/capabilities';
 import { PROJECT_ROOT } from '../runtime/paths';
 
 const KORY_LOCAL_PROVIDER = 'kory-local';
@@ -158,6 +160,38 @@ const PROVIDERS: Array<Omit<VoiceProviderDescriptor, 'configured'>> = [
     models: [
       { id: 'universal-3-5-pro', name: 'Universal 3.5 Pro', capability: 'stt' },
       { id: 'universal-2', name: 'Universal 2', capability: 'stt' },
+    ],
+  },
+  {
+    // LMNT is text-to-speech only: its published API is speech synthesis,
+    // speech sessions, voices, and accounts, with no transcription endpoint.
+    id: 'lmnt',
+    name: 'LMNT',
+    capabilities: ['tts'],
+    local: false,
+    supportsDiscovery: true,
+    models: [
+      { id: 'blizzard', name: 'Blizzard 2', capability: 'tts' },
+      { id: 'aurora', name: 'Aurora', capability: 'tts' },
+    ],
+    voices: [
+      { id: 'leah', name: 'Leah' },
+      { id: 'ava', name: 'Ava' },
+      { id: 'jess', name: 'Jess' },
+      { id: 'jess-nova', name: 'Jess Nova' },
+      { id: 'ben', name: 'Ben' },
+      { id: 'nicole', name: 'Nicole' },
+      { id: 'morgan', name: 'Morgan' },
+      { id: 'ari', name: 'Ari' },
+      { id: 'sarah', name: 'Sarah' },
+      { id: 'alloy', name: 'Alloy' },
+      { id: 'nova', name: 'Nova' },
+      { id: 'ember', name: 'Ember' },
+      { id: 'olivia', name: 'Olivia' },
+      { id: 'phoenix', name: 'Phoenix' },
+      { id: 'shimmer', name: 'Shimmer' },
+      { id: 'atlas', name: 'Atlas' },
+      { id: 'sage', name: 'Sage' },
     ],
   },
   {
@@ -479,13 +513,75 @@ function mergeDiscoveredVoiceModels(
   return [...(descriptor.models ?? []), ...discovered];
 }
 
+/**
+ * LMNT uses `X-API-Key` plus a required `lmnt-version` pin rather than a bearer
+ * token, and streams raw audio bytes from a different path than the
+ * OpenAI-compatible `/audio/speech` route.
+ */
+async function synthesizeLmnt(
+  modelId: string,
+  request: SynthesisRequest,
+): Promise<SynthesisPayload> {
+  const { adapter, config } = requireCapabilityConfig('lmnt');
+  if (!adapter.synthesize) {
+    throw new ValidationError('LMNT speech synthesis is not available in this build.');
+  }
+  const voice = request.voiceId?.trim();
+  if (!voice) {
+    throw new ValidationError('Select an LMNT voice before synthesizing speech.');
+  }
+  const result = await adapter.synthesize({
+    config,
+    model: modelId,
+    text: request.text,
+    voice,
+    speed: request.speed,
+    signal: AbortSignal.timeout(120_000),
+  });
+  return { audioBase64: result.dataBase64, mimeType: result.mimeType };
+}
+
+/**
+ * Merge voices discovered from an adapter's live catalog (e.g. LMNT voice
+ * clones) into the curated list. Curated entries win; unknown discovered voices
+ * are appended so a newly cloned voice is selectable immediately.
+ */
+async function mergeDiscoveredVoiceIds(
+  provider: string,
+  curated: VoiceProviderDescriptor['voices'],
+): Promise<VoiceProviderDescriptor['voices']> {
+  const known = new Set((curated ?? []).map((voice) => voice.id));
+  if (!known.size) return curated ?? [];
+  // Only dedicated capability adapters own a live voice catalog; the
+  // OpenAI-compatible providers below are reached through the generic
+  // /audio/speech contract and have nothing to discover.
+  if (!getCapabilityAdapter(provider)?.listVoices) return curated ?? [];
+  try {
+    const { adapter, config } = requireCapabilityConfig(provider);
+    const discovered = await adapter.listVoices!(config);
+    const extra = discovered.filter((id) => !known.has(id)).map((id) => ({ id, name: id }));
+    return extra.length ? [...(curated ?? []), ...extra] : curated;
+  } catch (err: unknown) {
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err), provider },
+      'Voice catalog discovery failed',
+    );
+    return curated ?? [];
+  }
+}
+
 export async function listVoiceProviders(): Promise<VoiceProviderDescriptor[]> {
   const configs = providerConfigs();
-  const builtIns = PROVIDERS.map((provider) => ({
-    ...provider,
-    configured: providerIsConfigured(provider.id, configs[provider.id]),
-    models: mergeDiscoveredVoiceModels(provider),
-  }));
+  const builtIns = await Promise.all(
+    PROVIDERS.map(async (provider) => ({
+      ...provider,
+      configured: providerIsConfigured(provider.id, configs[provider.id]),
+      models: mergeDiscoveredVoiceModels(provider),
+      ...(provider.voices
+        ? { voices: await mergeDiscoveredVoiceIds(provider.id, provider.voices) }
+        : {}),
+    })),
+  );
   const custom: VoiceProviderDescriptor[] = Object.entries(configs)
     .filter(([id, config]) => id.startsWith('custom:') && providerIsConfigured(id, config))
     .map(([id]) => ({
@@ -790,7 +886,9 @@ export async function synthesizeCloud(request: SynthesisRequest): Promise<Synthe
   const payload =
     provider === 'deepgram'
       ? await synthesizeDeepgram(modelId, request)
-      : await synthesizeOpenAICompatibleSpeech(provider, modelId, request);
+      : provider === 'lmnt'
+        ? await synthesizeLmnt(modelId, request)
+        : await synthesizeOpenAICompatibleSpeech(provider, modelId, request);
   await recordApiUsage({
     kind: 'tts',
     provider,

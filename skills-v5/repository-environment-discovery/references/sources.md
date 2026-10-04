@@ -16,9 +16,9 @@ Read this file when changing repository-identification, worktree-preservation, o
 
 ## OpenAI Codex AGENTS.md discovery
 
-- Source: https://developers.openai.com/codex/guides/agents-md/
-- Verified: 2026-09-01
-- Relevant contract: Codex constructs an instruction chain, including global and project-scoped `AGENTS.md`/override guidance with defined precedence. Discovery should identify the instructions applicable to the actual files in scope before edits.
+- Source: https://developers.openai.com/codex/agent-configuration/agents-md (redirects to https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+- Verified: 2026-10-02 by retrieving the current documentation.
+- Relevant contract: Codex builds its instruction chain once per run/session. Global override guidance takes precedence over the global default; project discovery walks from the project root to the current directory, selecting at most one nonempty override/default/fallback file per directory. Deeper guidance appears later. The default combined limit is 32 KiB. Discovery should identify applicable instructions and truncation before edits; these are Codex semantics, not an automatic claim about every client.
 
 ## AGENTS.md convention
 

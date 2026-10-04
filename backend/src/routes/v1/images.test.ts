@@ -112,6 +112,11 @@ describe('image generation routes', () => {
       'google',
       'aistudio',
       'openrouter',
+      // Media-first providers reached through their capability adapters.
+      'luma',
+      'klingai',
+      'prodia',
+      'replicate',
       'local',
       'lmstudio',
       'llamacpp',

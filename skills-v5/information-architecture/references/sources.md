@@ -22,4 +22,4 @@ GOV.UK also publishes numerical child-topic guidance for its own topic taxonomy.
 - W3C WAI Page Structure Tutorial: official W3C guidance verified 2026-09-04; recheck within 120 days.
 - WCAG 2.2, Guideline 2.4 Navigable and 3.2.3 Consistent Navigation: https://www.w3.org/TR/WCAG22/#navigable. Relevant success criteria inspected 2026-09-06; recheck within 180 days or after a new Recommendation.
 - GOV.UK Taxonomy principles: official publication verified 2026-09-04; recheck within 120 days.
-- Rampstack `information-architecture`: GitHub `main` inspected 2026-09-04; repository license is MIT. Recheck within 30 days.
+- Rampstack `information-architecture`: GitHub `main` at `e5bc67519991` inspected 2026-10-03; repository license is MIT. Recheck within 30 days.

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "interaction-design",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["ux", "interaction"],
@@ -132,11 +132,11 @@
     {
       "url": "https://github.com/magnus919/agent-skills/blob/main/product-design-and-ux/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "magnus919/agent-skills main as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "magnus919/agent-skills main product-design-and-ux skill at aebc684075f5 as inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
-      "notes": "Pattern source for separating observable interaction behavior from visual implementation, explicit state/recovery contracts, and evidence-backed handoff."
+      "notes": "Pattern source for observable interaction behavior, explicit state/recovery contracts, multi-role handoffs through the intended human outcome, and AI interaction uncertainty/human control. Upstream specialist routing remains community-specific."
     }
   ],
   "authoringMaturity": "individual"

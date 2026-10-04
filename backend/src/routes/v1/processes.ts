@@ -10,6 +10,7 @@ import {
 } from '../../process-supervisor/database';
 import { serializeProcess } from '../../process-supervisor/serialize';
 import { getContext } from '../../context';
+import { getRequestWorkspaceRoot } from '../../runtime/request-project';
 import {
   AuthenticationError,
   ConflictError,
@@ -93,9 +94,14 @@ export const processRoutes = new Elysia({ prefix: '/api/processes' })
       }
       // This user/API surface is always a manual service. Provenance is
       // server-assigned and cannot be forged in the request body.
-      const process = await withActiveProcessSession(body.sessionId, () =>
-        processSupervisor.startManualProcess(body),
-      );
+      const process = await withActiveProcessSession(body.sessionId, async () => {
+        // The explicit process owner wins over any active-chat request header.
+        const headers = new Headers(request.headers);
+        headers.set('x-koryphaios-session', body.sessionId);
+        const cwd =
+          body.cwd ?? (await getRequestWorkspaceRoot(new Request(request.url, { headers })));
+        return processSupervisor.startManualProcess({ ...body, cwd });
+      });
       return {
         ok: true,
         process: await serializeProcess(process),

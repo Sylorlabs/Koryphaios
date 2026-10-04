@@ -139,26 +139,26 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/embeddings",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI embeddings documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI embeddings documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current embedding models, dimensions and supported shortening behavior.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/reference/resources/embeddings/methods/create",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI embeddings API reference as available 2026-09-19",
+      "versionScope": "Rolling OpenAI embeddings API reference as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current per-input/batch token limits, dimensions parameter, batching and response identity.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://ai.google.dev/gemini-api/docs/embeddings",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Gemini API embeddings documentation as available 2026-09-19",
+      "versionScope": "Rolling Gemini API embeddings documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current Gemini embedding-2 multimodal behavior, output dimensions, normalization and task-instruction differences versus embedding-001.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/task-types",

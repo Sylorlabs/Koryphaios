@@ -11,7 +11,25 @@ export interface FreebuffBundledModel {
 export interface FreebuffBundledCatalog {
   cliVersion: string;
   models: FreebuffBundledModel[];
+  /** Modern pickers are server/account owned, not a list of bundled model IDs. */
+  selectionMode?: 'cli-managed';
 }
+
+/** A selection policy, NOT an upstream model ID or a claim of account access. */
+export const FREEBUFF_CLI_DEFAULT_MODEL_ID = 'freebuff/cli-default';
+
+// 0.2.12 embeds this public catalog protocol but holds the fetched catalog only
+// in memory. Older static picker objects still exist as fallback implementation
+// details: they must never be advertised as the modern account's available models.
+const DYNAMIC_CATALOG_ANCHORS = [
+  '"x-freebuff-catalog-protocol"',
+  '"/api/v1/freebuff/models"',
+  '"freebuff_catalog_stale"',
+  'recommendedKey:',
+  'fallbackKey:',
+  'freebuffModelKey',
+  'freebuffCatalogReasoningEfforts',
+];
 
 const VERSION_ANCHOR = 'CODEBUFF_CLI_VERSION:"';
 const ACCESS_TIER_ANCHOR = '!=="limited")return ';
@@ -330,11 +348,32 @@ function findCatalogRegion(bundle: Buffer): {
  * in the installed Freebuff executable. The parser intentionally recognizes
  * Freebuff's catalog semantics (full/limited access tier function plus model
  * objects) instead of treating every provider/model string in the binary as a
- * selectable model.
+ * selectable model. Modern builds instead expose an honest CLI-managed default;
+ * only the authenticated CLI can resolve its dynamic account catalog and handle.
  */
 export function parseFreebuffBundledCatalog(bundle: Uint8Array): FreebuffBundledCatalog {
   const buffer = Buffer.isBuffer(bundle) ? bundle : Buffer.from(bundle);
   const cliVersion = parseVersion(buffer);
+  if (DYNAMIC_CATALOG_ANCHORS.every((anchor) => buffer.includes(Buffer.from(anchor, 'ascii')))) {
+    return {
+      cliVersion,
+      selectionMode: 'cli-managed',
+      models: [
+        {
+          id: FREEBUFF_CLI_DEFAULT_MODEL_ID,
+          name: 'Freebuff CLI default',
+          // The dynamic selection can change after catalog refresh. No capability
+          // can honestly be asserted before the CLI has resolved its selection.
+          multimodal: false,
+        },
+      ],
+    };
+  }
+  if (buffer.includes(Buffer.from('"x-freebuff-catalog-protocol"', 'ascii'))) {
+    throw new Error(
+      'Freebuff dynamic catalog protocol is not recognized; reconnect with a supported CLI',
+    );
+  }
   const { region, fullMenuSymbol } = findCatalogRegion(buffer);
   const menu = resolveArraySymbol(region, fullMenuSymbol);
   const symbols = modelSymbolsFromArray(region, menu);
@@ -377,6 +416,97 @@ export async function discoverFreebuffBundledCatalog(
     cache.delete(signature);
     throw error;
   }
+}
+
+const MODEL_SETTING_STRINGS = [
+  'mode',
+  'freebuffModel',
+  'freebuffModelKey',
+  'freebuffModelDefaultMigration',
+  'freebucksIntroSeenAt',
+] as const;
+const MODEL_SETTING_BOOLEANS = [
+  'adsEnabled',
+  'alwaysUseALaCarte',
+  'fallbackToALaCarte',
+  'hasSubmittedFirstPrompt',
+] as const;
+const MODEL_SETTING_MAPS = ['freebuffReasoningEfforts', 'freebuffCatalogReasoningEfforts'] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Preserve CLI-owned selection exactly, including modern stable catalog keys,
+ * legacy migration stamps and per-model reasoning/billing preferences. Read only
+ * the profile's settings.json; never merge credentials, environment or BYOK
+ * connection stores. Callers must write this result to the private turn HOME
+ * with mode 0600 and delete it at turn cleanup. No settings values are logged.
+ *
+ * No model setting is synthesized for CLI default: the CLI owns migration,
+ * account availability, recommendation and stale-handle recovery. Legacy explicit
+ * selection is retained for the old bundled picker only; the caller must check
+ * that selection against its discovered catalog before calling this function.
+ */
+export function buildFreebuffTurnSettings(
+  source: unknown,
+  selectedModel: string,
+): Record<string, unknown> {
+  if (!isRecord(source)) throw new Error('Freebuff settings must be a JSON object');
+  if (source.byokConnection !== undefined && source.byokConnection !== null) {
+    throw new Error(
+      'Freebuff BYOK selection cannot be transported by this CLI adapter; select a Freebuff-managed model in the CLI first',
+    );
+  }
+  if (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID && !MODEL_ID_PATTERN.test(selectedModel)) {
+    throw new Error('Freebuff model selection is invalid');
+  }
+  const settings: Record<string, unknown> = {};
+  for (const key of MODEL_SETTING_STRINGS) {
+    if (!Object.hasOwn(source, key)) continue;
+    if (typeof source[key] !== 'string')
+      throw new Error(`Freebuff settings field ${key} must be a string`);
+    settings[key] = source[key];
+  }
+  for (const key of MODEL_SETTING_BOOLEANS) {
+    if (!Object.hasOwn(source, key)) continue;
+    if (typeof source[key] !== 'boolean')
+      throw new Error(`Freebuff settings field ${key} must be a boolean`);
+    settings[key] = source[key];
+  }
+  for (const key of MODEL_SETTING_MAPS) {
+    if (!Object.hasOwn(source, key)) continue;
+    const value = source[key];
+    if (!isRecord(value) || Object.values(value).some((entry) => typeof entry !== 'string')) {
+      throw new Error(`Freebuff settings field ${key} must be a string map`);
+    }
+    // Copy without normalizing keys/efforts or sharing mutable profile state.
+    settings[key] = Object.fromEntries(Object.entries(value));
+  }
+  if (selectedModel !== FREEBUFF_CLI_DEFAULT_MODEL_ID) {
+    settings.freebuffModel = selectedModel;
+    // This is the CLI's own legacy set-selection behavior. Leaving a modern
+    // key here would silently override the explicitly requested legacy model.
+    delete settings.freebuffModelKey;
+  }
+  return settings;
+}
+
+/**
+ * Actual root-model evidence from the CLI's own SDK logs. Start rows do not
+ * identify the agent; End rows do. Never infer the root from row ordering or an
+ * agent-template name (nested agents may use the same template/model).
+ * Modern values may be opaque CLI model handles: keep them private, do not
+ * advertise them as provider IDs or emit them in diagnostics.
+ */
+export function freebuffSelectedModelFromLogRow(row: Record<string, unknown>): string | null {
+  if (typeof row.msg !== 'string' || !row.msg.startsWith('End agent ')) return null;
+  const data = row.data;
+  if (!isRecord(data) || data.agentId !== 'main-agent') return null;
+  if (typeof data.model !== 'string' || !data.model.trim() || /[\x00-\x1f\x7f]/.test(data.model))
+    return null;
+  return data.model;
 }
 
 export function resetFreebuffBundledCatalogCacheForTests(): void {

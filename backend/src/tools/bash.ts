@@ -2,6 +2,7 @@
 // Uses Bun's spawn for process execution with command validation.
 
 import { resolve, relative, isAbsolute } from 'path';
+import { realpathSync } from 'node:fs';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import {
   validateBashCommand,
@@ -147,7 +148,13 @@ function wrapDetachedBunProcess(proc: Bun.Subprocess): SpawnedProc {
   };
 }
 
-function spawnSandboxedCommand(command: string, cwd: string): SpawnedProc {
+function spawnSandboxedCommand(
+  command: string,
+  cwd: string,
+  authorizedRoot: string,
+  requiredWorkspaceRoot?: string,
+  blockNetwork = true,
+): SpawnedProc {
   if (!osSandboxEnabled()) {
     throw new Error('Sandboxed command cannot run without kernel path confinement');
   }
@@ -160,11 +167,12 @@ function spawnSandboxedCommand(command: string, cwd: string): SpawnedProc {
     // without confinement is exactly the bypass the old path allowed.
     // OS sandbox enabled: run the command through a confined shell.
     const shell = requireBash();
-    const roots = defaultAllowedRoots(cwd);
+    const roots = defaultAllowedRoots(authorizedRoot);
     const { proc, cleanup } = spawnOsSandboxed([shell.command, ...shell.args, command], {
       allowedRoots: roots,
+      requiredWorkspaceRoot,
       cwd,
-      blockNetwork: true,
+      blockNetwork,
       blockSubprocesses: false,
     });
     return wrapChildProcess(proc, cleanup);
@@ -179,11 +187,12 @@ function spawnSandboxedCommand(command: string, cwd: string): SpawnedProc {
     throw new Error(`Command not found: ${argv[0]}`);
   }
 
-  const roots = defaultAllowedRoots(cwd);
+  const roots = defaultAllowedRoots(authorizedRoot);
   const { proc, cleanup } = spawnOsSandboxed([resolved, ...argv.slice(1)], {
     allowedRoots: roots,
+    requiredWorkspaceRoot,
     cwd,
-    blockNetwork: true,
+    blockNetwork,
     blockSubprocesses: false,
   });
   return wrapChildProcess(proc, cleanup);
@@ -311,7 +320,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
     };
 
     // 1. Resolve and Validate Working Directory
-    const requestedCwd = workingDirectory
+    let requestedCwd = workingDirectory
       ? isAbsolute(workingDirectory)
         ? workingDirectory
         : resolve(ctx.workingDirectory, workingDirectory)
@@ -408,17 +417,29 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       }
     }
 
-    // Check if requested path is inside project
-    const isInsideProject = isWithinRoot(ctx.workingDirectory, requestedCwd);
+    // The host-owned grant is separate from the requested cwd. Resolve the
+    // actual directory, not just its spelling, before checking containment.
+    const authorizedRoot = ctx.requiredWorkspaceRoot ?? ctx.workingDirectory;
+    let isInsideProject = false;
+    try {
+      const canonicalRoot = realpathSync(authorizedRoot);
+      requestedCwd = realpathSync(requestedCwd);
+      isInsideProject =
+        isWithinRoot(canonicalRoot, requestedCwd) &&
+        (!ctx.requiredWorkspaceRoot || canonicalRoot === ctx.requiredWorkspaceRoot);
+    } catch {
+      // A missing, dangling or inaccessible cwd is never a valid grant.
+    }
 
     // Resolve effective sandbox flags. Prefer the granular sandboxOptions
     // populated from agent settings; fall back to the legacy boolean for
     // callers that haven't been wired through the resolver yet.
     const sandbox = ctx.sandboxOptions;
-    const effectiveSandboxed = sandbox ? sandbox.isSandboxed : ctx.isSandboxed;
-    const enforcePathConfinement = sandbox
-      ? sandbox.pathConfinement && sandbox.isSandboxed
-      : ctx.isSandboxed;
+    const preferenceSandboxed = sandbox ? sandbox.isSandboxed : ctx.isSandboxed;
+    const effectiveSandboxed = Boolean(ctx.requiredWorkspaceRoot) || preferenceSandboxed;
+    const enforcePathConfinement =
+      Boolean(ctx.requiredWorkspaceRoot) ||
+      (sandbox ? sandbox.pathConfinement && sandbox.isSandboxed : ctx.isSandboxed);
 
     // Only enforce project root check if sandboxed (and path confinement enabled)
     if (enforcePathConfinement && !isInsideProject) {
@@ -646,7 +667,13 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       // `bash -c <string>` path is also used for explicitly authorized
       // unsandboxed manager commands that legitimately need shell features.
       proc = effectiveSandboxed
-        ? spawnSandboxedCommand(limitedCommand, requestedCwd)
+        ? spawnSandboxedCommand(
+            limitedCommand,
+            requestedCwd,
+            authorizedRoot,
+            ctx.requiredWorkspaceRoot,
+            Boolean(preferenceSandboxed),
+          )
         : spawnUnsandboxedCommand(limitedCommand, requestedCwd);
 
       const timeoutPromise = new Promise<never>(

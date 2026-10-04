@@ -222,6 +222,7 @@ function harness(options: HarnessOptions = {}) {
   let blockerVerificationCount = 0;
   const verifiedEvidence: string[] = [];
   const kory = {
+    resolveSessionWorkingDirectoryPublic: async () => options.workingDirectory ?? root,
     isSessionRunning: () => sessionRunning,
     hasActiveSessionExecution: () => sessionRunning,
     async cancelSessionWorkers() {

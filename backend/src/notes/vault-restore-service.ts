@@ -35,6 +35,7 @@ import {
   previewVaultArchiveRestore,
   restoreVaultArchive,
   type VaultArchiveInput,
+  type VaultArchiveRelationship,
   type VaultArchiveRestorePlan,
   type VaultArchiveRestoreResult,
   type VaultProjectInventory,
@@ -191,6 +192,7 @@ interface RestoreModel {
   revisions: RestoredRevision[];
   attachments: RestoredAttachment[];
   links: Array<{ fromNoteId: string; toNoteId: string }>;
+  relationships: VaultArchiveRelationship[];
   bases: RestoredBase[];
   drafts: RestoredDraft[];
   files: RestoreFile[];
@@ -631,6 +633,18 @@ function buildRestoreModel(plan: Readonly<VaultArchiveRestorePlan>): RestoreMode
     return { fromNoteId, toNoteId };
   });
 
+  const relationships = (archive.manifest.relationships ?? []).map((record, index) => {
+    const fromNoteId = idMap.get(record.fromNoteId);
+    const toNoteId = idMap.get(record.toNoteId);
+    if (!fromNoteId || !toNoteId || fromNoteId === toNoteId) {
+      throw new ValidationError(`relationships[${index}] has invalid mapped endpoints`);
+    }
+    // Notes and their immutable history retain revision numbers and bytes.
+    // Never rebase relationship evidence onto today's endpoint revisions: an
+    // archived stale relationship must remain stale after moving projects.
+    return { ...record, fromNoteId, toNoteId };
+  });
+
   const bases: RestoredBase[] = archive.manifest.bases.map((record, index) => {
     const id = requireString(record.id, `bases[${index}].id`, { max: 512 });
     const name = requireString(record.name, `bases[${index}].name`, { max: 120 });
@@ -808,7 +822,7 @@ function buildRestoreModel(plan: Readonly<VaultArchiveRestorePlan>): RestoreMode
     perNoteDrafts.set(draft.noteId, count);
   }
 
-  return { notes, revisions, attachments, links, bases, drafts, files };
+  return { notes, revisions, attachments, links, relationships, bases, drafts, files };
 }
 
 function serializablePlan(plan: VaultArchiveRestorePlan): SerializableVaultRestorePlan {
@@ -1366,6 +1380,31 @@ function insertRestoreRows(
         revision.createdAt,
       );
   }
+  for (const relationship of model.relationships) {
+    database
+      .query(
+        `INSERT INTO note_relationships (
+      from_note_id, to_note_id, project_root, type, status, actor_json, provenance,
+      evidence, weight, revision, source_revision, target_revision, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        relationship.fromNoteId,
+        relationship.toNoteId,
+        plan.projectRoot,
+        relationship.type,
+        relationship.status,
+        JSON.stringify(relationship.actor),
+        relationship.provenance,
+        relationship.evidence,
+        relationship.weight,
+        relationship.revision,
+        relationship.sourceRevision,
+        relationship.targetRevision,
+        Date.parse(relationship.createdAt),
+        Date.parse(relationship.updatedAt),
+      );
+  }
   for (const link of model.links) {
     database
       .query(`INSERT INTO note_links (from_note_id, to_note_id) VALUES (?, ?)`)
@@ -1472,6 +1511,7 @@ function insertRestoreRows(
     restoredRevisions: model.revisions.length,
     restoredAttachments: model.attachments.length,
     restoredLinks: model.links.length,
+    restoredRelationships: model.relationships.length,
     restoredBases: model.bases.length,
     restoredDrafts: model.drafts.length,
   };

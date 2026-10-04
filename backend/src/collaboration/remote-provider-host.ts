@@ -15,6 +15,8 @@ import { dirname, join, isAbsolute, relative, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { serverLog } from '../logger';
 import { getContext } from '../context';
+import { configuredSecretValues, protectRemoteEvents } from './remote-output';
+import { parseRemoteInferenceInput } from './inference-input';
 import { classifyProviderShare, DEFAULT_SANDBOX_POLICY, tightenSandbox } from '@koryphaios/shared';
 import type {
   SharedProviderCatalog,
@@ -37,7 +39,7 @@ const log = serverLog.child({ module: 'remote-provider-host' });
 // they cannot be served as pure inference to a remote client's filesystem.
 // They are advertised as `agentic: true` (offered in host-side "remote agentic"
 // mode) so the UI can present them honestly.
-const AGENTIC_PROVIDERS = new Set(['claude', 'grok', 'antigravity', 'cursor', 'devin']);
+const AGENTIC_PROVIDERS = new Set(['claude', 'codex', 'codex-auth', 'grok', 'antigravity', 'cursor', 'devin', 'freebuff', 'codebuff']);
 
 export function isAgenticProvider(name: string): boolean {
   return AGENTIC_PROVIDERS.has(name);
@@ -59,7 +61,7 @@ export function setSharedProviders(
       .map(([provider, models]) => [provider, new Set(models)]),
   );
   // Re-advertise whenever the selection changes and we're hosting.
-  broadcastCatalog();
+  refreshSharedCatalogs();
 }
 
 export function getSharedProviders(): string[] {
@@ -86,13 +88,14 @@ export function getSandboxPolicy(): SandboxPolicy {
 
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 
-function buildCatalog(hostName: string): SharedProviderCatalog {
+export function buildSharedCatalog(hostName: string, inferenceOnly = false): SharedProviderCatalog {
   const status = getContext().providers.getStatus();
   const providers: SharedProviderEntry[] = [];
 
   for (const p of status) {
     if (!sharedProviderNames.has(p.name)) continue;
     if (!p.adapterAvailable || !p.enabled) continue;
+    if (inferenceOnly && (isAgenticProvider(p.name) || p.name.startsWith('remote-'))) continue;
     const enabledIds = new Set(p.models);
     const selectedModelIds = sharedModelIds.get(p.name);
     const models = p.allAvailableModels
@@ -119,17 +122,19 @@ function buildCatalog(hostName: string): SharedProviderCatalog {
   return { hostName, providers };
 }
 
-let activeRelay: RelayClient | null = null;
-let activeHostName = 'Host';
+const activeHosts = new Map<RelayClient, string>();
 
-function broadcastCatalog(): void {
-  if (!activeRelay?.isConnected) return;
-  activeRelay.broadcast({ type: 'provider-catalog', catalog: buildCatalog(activeHostName) });
+export function refreshSharedCatalogs(): void {
+  for (const [relay, name] of activeHosts) {
+    if (relay.isConnected)
+      relay.broadcast({ type: 'provider-catalog', catalog: buildSharedCatalog(relay.policy?.hostName || name, relay.policy?.defaultTierId === 'models') });
+  }
 }
 
 // ─── Inference request handling ──────────────────────────────────────────────
 
 const activeRequests = new Map<string, AbortController>();
+const requestWindows = new Map<string, { started: number; count: number }>();
 
 // One temp sandbox per (guest, provider) so a guest's project persists across
 // turns (deltas apply on top). Cleared on session end / disconnect.
@@ -201,7 +206,7 @@ async function cleanupSandbox(guestId: string, provider: string): Promise<void> 
   }
 }
 
-function toStreamRequest(
+export function toRemoteStreamRequest(
   payload: RemoteInferenceRequestPayload,
   signal: AbortSignal,
   sandboxRoot?: string,
@@ -214,6 +219,10 @@ function toStreamRequest(
     maxTokens: payload.maxTokens,
     temperature: payload.temperature,
     reasoningLevel: payload.reasoningLevel,
+    ...(payload.imageInputOverride?.provider === payload.provider &&
+      payload.imageInputOverride.model === payload.model && {
+        imageInputOverride: { provider: payload.provider, model: payload.model },
+      }),
     harnessRole: payload.harnessRole,
     promptManifestHash: payload.promptManifestHash,
     taskContractHash: payload.taskContractHash,
@@ -228,10 +237,26 @@ async function handleInferenceRequest(
   guestId: string,
   tierId: string,
   requestId: string,
-  payload: RemoteInferenceRequestPayload,
+  rawPayload: unknown,
 ): Promise<void> {
   const fail = (error: string) =>
     relay.sendToGuest(guestId, { type: 'inference-error', requestId, error });
+  const payload = parseRemoteInferenceInput(rawPayload);
+  if (!payload) {
+    fail('Invalid model request. Check the messages and generation settings.');
+    return;
+  }
+
+  const tier = relay.policy?.accessTiers.find((t) => t.id === tierId);
+  if (!tier?.permissions.useRemoteProviders) {
+    fail('Your access tier does not permit using shared models.');
+    return;
+  }
+  const inferenceOnly = tierId === 'models';
+  if (inferenceOnly && (isAgenticProvider(payload.provider) || payload.projectSync)) {
+    fail('Model-sharing codes grant inference only. Native agents and host filesystem access are unavailable.');
+    return;
+  }
 
   // Only serve providers the host actually chose to share.
   if (!sharedProviderNames.has(payload.provider)) {
@@ -243,14 +268,20 @@ async function handleInferenceRequest(
     fail(`Model "${payload.model}" is not shared by this host.`);
     return;
   }
+  const advertised = buildSharedCatalog('Host', inferenceOnly).providers.find((provider) => provider.provider === payload.provider);
+  if (!advertised?.models.some((model) => model.id === payload.model)) {
+    fail('This model is not currently available from the host.');
+    return;
+  }
+  // The adapter decides whether a project sandbox is required, not the guest.
+  const agentic = advertised.agentic;
+  if (agentic && !payload.projectSync) {
+    fail('This CLI model requires a guest project in an isolated workspace.');
+    return;
+  }
 
   // The joining guest's tier — the HOST decides what they can do. The sandbox
   // is just a folder; these permissions are the actual control surface.
-  const tier = relay.policy?.accessTiers.find((t) => t.id === tierId);
-  if (!tier?.permissions.useRemoteProviders) {
-    fail('Your access tier does not permit using shared models.');
-    return;
-  }
   // Host's model allowlist for this tier.
   if (!tier.allowedModels.includes('*') && !tier.allowedModels.includes(payload.model)) {
     fail(`The host has not allowed the model "${payload.model}" for your access level.`);
@@ -261,47 +292,92 @@ async function handleInferenceRequest(
   // tier (a tier can only remove capabilities, never add them). File edits go
   // back to the guest (their risk); shell/network run in the host jail.
   const sandbox = tightenSandbox(hostSandboxPolicy, {
-    allowShell: tier.permissions.fullSystemAccess === true,
+    allowShell: tier.id !== 'models' && tier.permissions.fullSystemAccess === true,
     allowEdits: tier.permissions.useTools !== false,
   });
 
   const controller = new AbortController();
-  activeRequests.set(requestId, controller);
+  const requestKey = `${relay.currentSessionId}:${guestId}:${requestId}`;
+  const sessionPrefix = `${relay.currentSessionId}:`;
+  if ([...activeRequests.keys()].filter((key) => key.startsWith(sessionPrefix)).length >= 2) {
+    fail('The host is handling its maximum concurrent model requests. Try again shortly.');
+    return;
+  }
+  const windowKey = String(relay.currentSessionId);
+  let window = requestWindows.get(windowKey);
+  if (!window || Date.now() - window.started >= 60_000) {
+    window = { started: Date.now(), count: 0 };
+    requestWindows.set(windowKey, window);
+  }
+  if (window.count >= 30) {
+    fail('The host model-sharing request limit has been reached. Try again in a minute.');
+    return;
+  }
+  if (activeRequests.has(requestKey)) {
+    fail('This inference request is already running.');
+    return;
+  }
+  activeRequests.set(requestKey, controller);
+  window.count += 1;
+  const timeout = setTimeout(() => controller.abort(), 120_000);
   try {
     // Agentic turn: land the guest's project in a host sandbox first.
     let sandboxRoot: string | undefined;
-    if (payload.agentic && payload.projectSync) {
-      sandboxRoot = await applyProjectSync(guestId, payload.provider, payload.projectSync);
+    if (agentic && payload.projectSync) {
+      sandboxRoot = await applyProjectSync(`${relay.currentSessionId}:${guestId}`, payload.provider, payload.projectSync);
     }
-    const request = toStreamRequest(payload, controller.signal, sandboxRoot);
-    if (payload.agentic) request.sandbox = sandbox;
+    const request = toRemoteStreamRequest(payload, controller.signal, sandboxRoot);
+    request.requiredProvider = payload.provider;
+    if (inferenceOnly) {
+      request.harnessRole = 'critic';
+      request.permissionMode = 'plan';
+      request.maxTokens = Math.min(payload.maxTokens ?? 4096,
+        advertised.models.find((model) => model.id === payload.model)?.maxOutputTokens ?? 8192);
+    }
+    if (agentic) request.sandbox = { ...sandbox, filesystemIsolation: true };
     const stream = getContext().providers.executeWithRetry(request, payload.provider as never);
-    for await (const event of stream) {
+    const registry = getContext().providers;
+    const secrets = configuredSecretValues({
+      ...registry.getConfigs(),
+      executingProvider: registry.get?.(payload.provider as never)?.config,
+    });
+    for await (const event of protectRemoteEvents(stream, secrets)) {
       if (controller.signal.aborted) break;
       // Rewrite host-sandbox file paths → sandbox-relative for the client.
       const outEvent = sandboxRoot ? rebaseFileEdit(event, sandboxRoot) : event;
       if (!outEvent) continue;
       relay.sendToGuest(guestId, { type: 'inference-event', requestId, event: outEvent });
     }
-    relay.sendToGuest(guestId, { type: 'inference-done', requestId });
+    if (controller.signal.aborted)
+      fail('The remote model request was cancelled or reached its time limit.');
+    else relay.sendToGuest(guestId, { type: 'inference-done', requestId });
   } catch (err) {
     relay.sendToGuest(guestId, {
       type: 'inference-error',
       requestId,
-      error: err instanceof Error ? err.message : 'Remote inference failed',
+      error: 'Remote inference failed. The host can check its provider diagnostics.',
     });
   } finally {
-    activeRequests.delete(requestId);
+    clearTimeout(timeout);
+    activeRequests.delete(requestKey);
   }
 }
 
 /** Register the remote-inference handlers on a hosting relay connection.
  *  Returns an unregister function. Call this from hostSession. */
 export function startProviderHost(relay: RelayClient, hostName: string): () => void {
-  activeRelay = relay;
-  activeHostName = hostName;
+  const hostSessionId = relay.currentSessionId;
+  activeHosts.set(relay, hostName);
 
   const unregister = relay.onMessage((msg) => {
+    if (msg.type === 'guest-joined' && msg.guestId) {
+      const tier = relay.policy?.accessTiers.find((item) => item.id === msg.role);
+      if (tier?.permissions.useRemoteProviders)
+        relay.sendToGuest(String(msg.guestId), {
+          type: 'provider-catalog', catalog: buildSharedCatalog(relay.policy?.hostName || hostName, msg.role === 'models'),
+        });
+      return;
+    }
     if (msg.type === 'inference-request') {
       const guestId = String(msg.guestId ?? '');
       const requestId = String(msg.requestId ?? '');
@@ -317,20 +393,32 @@ export function startProviderHost(relay: RelayClient, hostName: string): () => v
       return;
     }
     if (msg.type === 'inference-cancel') {
-      const requestId = String(msg.requestId ?? '');
-      activeRequests.get(requestId)?.abort();
+      const requestKey = `${relay.currentSessionId}:${String(msg.guestId ?? '')}:${String(msg.requestId ?? '')}`;
+      activeRequests.get(requestKey)?.abort();
+      return;
+    }
+    if (msg.type === 'guest-left' && msg.guestId) {
+      const guestPrefix = `${relay.currentSessionId}:${String(msg.guestId)}:`;
+      for (const [key, controller] of activeRequests)
+        if (key.startsWith(guestPrefix)) controller.abort();
     }
   });
 
   // Advertise immediately so already-connected clients learn the catalog.
-  broadcastCatalog();
+  refreshSharedCatalogs();
 
   return () => {
     unregister();
-    for (const controller of activeRequests.values()) controller.abort();
-    activeRequests.clear();
+    requestWindows.delete(String(hostSessionId));
+    for (const [key, controller] of activeRequests) {
+      if (key.startsWith(`${hostSessionId}:`)) {
+        controller.abort();
+        activeRequests.delete(key);
+      }
+    }
     // Remove every guest's project sandbox from disk.
     for (const [key, root] of sandboxes) {
+      if (!key.startsWith(`${hostSessionId}:`)) continue;
       void rm(root, { recursive: true, force: true }).catch((err: unknown) => {
         // Best-effort cleanup during relay disconnect — sandboxes are already deregistered.
         serverLog.debug(
@@ -340,6 +428,6 @@ export function startProviderHost(relay: RelayClient, hostName: string): () => v
       });
       sandboxes.delete(key);
     }
-    if (activeRelay === relay) activeRelay = null;
+    activeHosts.delete(relay);
   };
 }

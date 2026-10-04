@@ -1,24 +1,51 @@
 <script lang="ts">
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
   import Users from 'lucide-svelte/icons/users';
-  import ShieldCheck from 'lucide-svelte/icons/shield-check';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
   import ArrowLeft from 'lucide-svelte/icons/arrow-left';
   import LogOut from 'lucide-svelte/icons/log-out';
-  import Wifi from 'lucide-svelte/icons/wifi';
   const team = $derived(collaborationStore.activeJoinedSession);
+  const selectedFolder = $derived(collaborationStore.activeJoinedFolder);
+  let frame = $state<HTMLIFrameElement>();
+
+  function receiveMetadata(event: MessageEvent) {
+    if (!team || !frame || event.source !== frame.contentWindow) return;
+    if (event.origin !== new URL(team.inviteUrl).origin || event.data?.type !== 'kory-team-metadata') return;
+    collaborationStore.updateJoinedMetadata(team.sessionId, event.data);
+  }
 </script>
 
+<svelte:window onmessage={receiveMetadata} />
+
 {#if team}
-  <div class="flex h-full min-h-0 flex-col" style="background:var(--color-surface-0)">
-    <header class="flex shrink-0 items-center gap-3 border-b px-5 py-3" style="border-color:var(--color-border);background:var(--color-surface-1)">
-      <button type="button" onclick={() => collaborationStore.closeJoinedSession()} class="rounded-xl p-2 transition-colors hover:bg-[var(--color-surface-3)]" style="color:var(--color-text-muted)" title="Back to personal workspace"><ArrowLeft size={16}/></button>
-      <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style="background:color-mix(in srgb,var(--color-accent) 14%,transparent);color:var(--color-accent)"><Users size={17}/></div>
-      <div class="min-w-0 flex-1"><div class="truncate text-sm font-semibold" style="color:var(--color-text-primary)">{team.sessionName}</div><div class="mt-0.5 flex items-center gap-2 text-[10px]" style="color:var(--color-text-muted)"><span class="flex items-center gap-1 text-emerald-400"><Wifi size={10}/> Team workspace</span><span>·</span><span>{team.tierId} access</span><span>·</span><span>Separate from your personal sessions</span></div></div>
-      <div class="hidden items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] sm:flex" style="border-color:var(--color-border);color:var(--color-text-muted)"><ShieldCheck size={12} class="text-emerald-400"/> Host permissions enforced</div>
-      <button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)} class="rounded-xl p-2 text-red-400 transition-colors hover:bg-red-500/10" title="Leave team session"><LogOut size={15}/></button>
+  <div class="flex h-full min-h-0 flex-col bg-[var(--color-surface-0)]">
+    <header class="flex shrink-0 items-center gap-3 border-b border-[var(--color-border)] px-5 py-3">
+      <button type="button" onclick={() => collaborationStore.closeJoinedSession()}
+        class="rounded-md p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+        aria-label="Back to personal workspace"><ArrowLeft size={16} /></button>
+      <Users size={18} class="shrink-0 text-[var(--color-accent)]" />
+      <div class="min-w-0 flex-1">
+        <h2 class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{team.hostName || 'Host'} · {team.sessionName}</h2>
+        <p class="mt-0.5 text-[10px] text-[var(--color-text-muted)]">{team.tierId} access · Hosted workspace</p>
+      </div>
+      <button type="button" onclick={() => collaborationStore.leaveJoinedSession(team.sessionId)}
+        class="rounded-md p-2 text-[var(--color-text-muted)] hover:text-[var(--color-error)]"
+        aria-label="Leave team session"><LogOut size={15} /></button>
     </header>
+    {#if team.sharedFolders?.length}
+      <nav aria-label="Host shared folders" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-5 py-2">
+        {#each team.sharedFolders as folder (folder.id)}
+          <button type="button" onclick={() => collaborationStore.openJoinedSession(team.sessionId, folder.id)}
+            aria-pressed={selectedFolder?.id === folder.id}
+            class="inline-flex items-center gap-2 rounded-md border border-transparent px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-border-bright)] aria-pressed:border-[var(--color-border-bright)]">
+            <FolderOpen size={14} class="text-[var(--color-accent)]" /> {folder.name}
+          </button>
+        {/each}
+      </nav>
+    {/if}
     <div class="relative min-h-0 flex-1">
-      <iframe title={team.sessionName} src={team.inviteUrl} class="absolute inset-0 h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+      <iframe bind:this={frame} title={team.sessionName} src={team.inviteUrl}
+        class="absolute inset-0 h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
     </div>
   </div>
 {/if}

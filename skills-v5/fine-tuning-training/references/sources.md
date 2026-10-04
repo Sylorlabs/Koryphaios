@@ -29,9 +29,9 @@
   - Use: RFT task suitability, eval-first/base-signal requirements, grader robustness and reward-hacking concerns.
   - Verified: 2026-09-17; refresh after 7 days.
 - **OpenAI deprecations**: https://developers.openai.com/api/docs/deprecations
-  - Scope: OpenAI deprecation schedule as available 2026-09-17.
-  - Use: authoritative self-serve fine-tuning wind-down. Current page states new training became unavailable to never-before-fine-tuning organizations on 2026-05-07, further eligibility narrowed on 2026-07-02, and active existing customers lose new-job creation on 2027-01-06; inference remains tied to base-model lifetime. Recheck before every plan.
-  - Verified: 2026-09-17; refresh after 3 days.
+  - Scope: OpenAI deprecation page retrieved 2026-10-02; the self-serve fine-tuning and underlying-model lifetime sections were inspected.
+  - Use: authoritative self-serve fine-tuning wind-down. The retrieved page still states new training became unavailable to never-before-fine-tuning organizations on 2026-05-07, further eligibility narrowed on 2026-07-02, and active existing customers lose new-job creation on 2027-01-06; inference remains tied to base-model lifetime. Recheck before every plan.
+  - Verified: 2026-10-02; refresh after 3 days. This retrieval does not verify any account's eligibility or a live training run. Other entries retain their own verification dates; this is not a blanket source refresh.
 - **Hugging Face Transformers PEFT integration**: https://huggingface.co/docs/transformers/en/peft
   - Scope: rolling Transformers PEFT documentation as available 2026-09-05.
   - Use: adapter-only training/checkpoint behavior, resume/distributed mechanics, base-model resolution and current adapter serving/hotswap semantics.

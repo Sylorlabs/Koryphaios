@@ -18,4 +18,4 @@ The MIT-licensed Rampstack `ux-research` skill has useful decision-first and met
 
 - GOV.UK research-planning, round-planning, and introductory guidance: verified 2026-09-04; recheck within 90 days or after material Service Manual changes.
 - AAPOR Best Practices for Survey Research: verified 2026-09-04; recheck within 120 days or after standards revisions.
-- Rampstack `ux-research`: GitHub `main` inspected 2026-09-04; repository license is MIT. Recheck within 30 days.
+- Rampstack `ux-research`: GitHub `main` at `3d4510a94a76ead80122c691b5c480f92f3fbe40`, inspected 2026-10-03; repository license is MIT. The current skill still carries fixed participant-count, no-show, and incentive heuristics, so Kory continues to treat those as contextual examples rather than transferable evidence. Recheck within 30 days.

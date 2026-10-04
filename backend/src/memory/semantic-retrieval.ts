@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   configuredEmbeddingClient,
   cosineSimilarity,
+  rerankWithVoyage,
   type EmbeddingClient,
 } from './semantic-embeddings';
 
@@ -115,13 +116,17 @@ export async function retrieveMemory(
       batch.forEach(([key], j) => staged.set(key, generated[j]));
     }
     const [queryVector] = await client.embed([query], { signal: controller.signal });
-    const hits = chunks
+    const ranked = chunks
       .map((chunk, i) => ({
         ...chunk,
         score: cosineSimilarity(queryVector, staged.get(keys[i]) ?? cached.get(keys[i])!),
       }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+      .sort((a, b) => b.score - a.score);
+
+    // Second pass over the strongest candidates. Cosine similarity alone
+    // routinely misses exact-token matches, and reranking is the standard fix.
+    // Reranking only the shortlist keeps the extra request small and bounded.
+    const hits = await applyRerank(query, ranked, limit, options.signal);
     for (const [key, vector] of staged) {
       cachedComponents -= vectors.get(key)?.length ?? 0;
       vectors.set(key, vector);
@@ -139,4 +144,37 @@ export async function retrieveMemory(
     clearTimeout(deadline);
     options.signal?.removeEventListener('abort', cancel);
   }
+}
+
+/** How many candidates are worth a reranker round trip. */
+const RERANK_SHORTLIST = 30;
+
+/**
+ * Reorder a semantic shortlist with Voyage when it is connected.
+ *
+ * Returns the original ordering unchanged when Voyage is not configured or the
+ * rerank call fails: reranking is an improvement, never a precondition for
+ * recall.
+ */
+async function applyRerank(
+  query: string,
+  ranked: MemorySearchHit[],
+  limit: number,
+  signal: AbortSignal | undefined,
+): Promise<MemorySearchHit[]> {
+  const shortlist = ranked.slice(0, Math.max(RERANK_SHORTLIST, limit));
+  const rest = ranked.slice(shortlist.length);
+  if (!shortlist.length) return [];
+  const reranked = await rerankWithVoyage(
+    query,
+    shortlist.map((hit) => hit.content),
+    { limit, signal },
+  );
+  if (!reranked?.length) return ranked.slice(0, limit);
+  const scores = new Map(reranked.map((entry) => [entry.index, entry.relevanceScore]));
+  const reordered = [...shortlist.map((hit, index) => ({ hit, index }))]
+    .filter(({ index }) => scores.has(index))
+    .sort((a, b) => scores.get(b.index)! - scores.get(a.index)!)
+    .map(({ hit }) => hit);
+  return [...reordered, ...rest].slice(0, limit);
 }

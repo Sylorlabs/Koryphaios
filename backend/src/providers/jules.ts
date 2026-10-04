@@ -9,6 +9,7 @@ import { type Provider, type ProviderEvent, type StreamRequest } from './types';
 import { JULES_APPROVAL_REQUIRED_ERROR } from './jules-runner';
 
 export class JulesProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'jules' as const;
 
   constructor(readonly config: ProviderConfig) {}

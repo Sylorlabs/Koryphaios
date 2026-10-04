@@ -244,14 +244,10 @@ export const CLI_ADAPTER_COMPATIBILITY = [
     versionBoundary: {
       kind: 'source-reference',
       detail:
-        'AGENTS.md and adapter comments reference 0.0.162. No live validation is established here. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
+        'AGENTS.md and adapter comments reference the qualified native 0.2.12 build. No live validation is established here. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
     },
     evidence: [
-      source(
-        'freebuff-cli',
-        '0.0.162',
-        'Version-sensitive TUI/log assumptions recorded in source.',
-      ),
+      source('freebuff-cli', '0.2.12', 'Version-sensitive TUI/log assumptions recorded in source.'),
       fixture(
         'freebuff-codebuff-contract',
         'discovers picker models and image capabilities from the installed-binary shape',

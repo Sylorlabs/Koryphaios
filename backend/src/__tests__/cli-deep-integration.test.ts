@@ -8,6 +8,7 @@ import {
   KORY_HARNESS_NOTE,
 } from '../providers/cli-bridges';
 import { DevinCliBridge } from '../providers/devin-bridge';
+import { buildAntigravityHooks } from '../providers/antigravity-permissions';
 import {
   buildKoryRules,
   buildKorySkills,
@@ -241,13 +242,28 @@ describe('Hooks config generation', () => {
     delete process.env.KORY_HOOK_BRIDGE_SCRIPT;
   });
 
-  test('Antigravity generates hooks when script is set', () => {
+  test('Antigravity does not emit Claude-shaped hooks', () => {
+    // agy keys hooks by name (not by event), matches tools by regex, and only
+    // parses allow/deny/ask/force_ask. Handing it Claude Code's shape produced a
+    // hooks.json it silently ignored, so the native-tool gate never ran. The
+    // adapter writes the real format via buildAntigravityHooks() instead.
     const bridge = new AntigravityCliBridge();
     process.env.KORY_HOOK_BRIDGE_SCRIPT = '/path/to/hook-bridge.js';
-    const hooks = bridge.buildHooks(ctx);
-    expect(hooks).not.toBeNull();
-    expect(hooks![0].events).toContain('PreToolUse');
+    expect(bridge.buildHooks(ctx)).toBeNull();
     delete process.env.KORY_HOOK_BRIDGE_SCRIPT;
+  });
+
+  test('Antigravity hooks file uses agy\'s schema and decision vocabulary', () => {
+    const hooks = JSON.parse(
+      buildAntigravityHooks({
+        hookScript: '/path/to/kory-hook-bridge.ts',
+        authFile: '/grant/bridge-grant.json',
+      }),
+    );
+    expect(Object.keys(hooks)).toEqual(['kory-permission-gate']);
+    const [group] = hooks['kory-permission-gate'].PreToolUse;
+    expect(group.matcher).toBe('');
+    expect(group.hooks[0].command).toContain('--decision-vocabulary antigravity');
   });
 
   test('serializeHooks produces valid JSON with event keys', () => {

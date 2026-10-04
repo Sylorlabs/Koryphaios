@@ -81,13 +81,14 @@ Write \`.kory-eval/nearby-privacy-evidence.json\` mapping every supplied raw/der
   },
 };
 const nearbyScorer: SkillEvalDeterministicScorer = {
-  id: 'privacy-engineering/nearby-data-minimization-scorer@1',
+  id: 'privacy-engineering/nearby-data-minimization-scorer@2',
   scenarioIds: [NEARBY_PRIVACY],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{NearbySystem,type NearbyPolicy}from'../src/privacy';const p=JSON.parse(readFileSync('.kory-eval/nearby-policy.json','utf8')) as NearbyPolicy;
 test('hidden: aggregate adoption excludes unnecessary direct/precise identifiers',()=>{for(const f of ['email','accountEmail','preciseLocation','preciseLocationHistory','addressBookHashes','stableDeviceId'])expect(p.adoptionFields).not.toContain(f);expect(p.retainStableDeviceId).toBe(false);expect(p.deriveHomeWork).toBe(false);expect(p.retainPreciseLocationMinutes).toBeGreaterThanOrEqual(0);expect(p.retainPreciseLocationMinutes).toBeLessThanOrEqual(60);});
+test('hidden: aggregate adoption cannot reuse the caller account identity as its event identity',()=>{const s=new NearbySystem(p);s.adoption('u1','u1@example.test','device-stable');const first=[...s.analytics];expect(first.length).toBeGreaterThan(0);expect(first.join(' ')).not.toContain('u1');expect(first.join(' ')).not.toContain('u1@example.test');expect(first.join(' ')).not.toContain('device-stable');const before=s.analytics.length;s.adoption('u1','u1@example.test','device-stable');const second=s.analytics.slice(before);expect(second.length).toBe(first.length);expect(second.join('|')).not.toBe(first.join('|'));});
 test('hidden: opt-out defeats stale queued rehydration',()=>{const s=new NearbySystem(p);s.adoption('u1','u1@example.test','device-stable');s.nearby('u1','32.1,-117.1');expect(s.recommendations.has('u1')).toBe(true);s.optOut('u1');s.drainQueue();expect(p.optOutSuppressesFuture).toBe(true);expect(p.deletesPriorDerivedProfile).toBe(true);expect(p.tombstoneQueuedEvents).toBe(true);expect(s.recommendations.has('u1')).toBe(false);expect(s.analytics.join(' ')).not.toContain('u1@example.test');expect(s.analytics.join(' ')).not.toContain('device-stable');expect(p.backupRestoreReappliesSuppression).toBe(true);});
 `,
     );
@@ -182,10 +183,11 @@ test('hidden: stale CDC and 30-day restore cannot rehydrate tombstoned user',()=
 };
 
 const WEB_POLICY = `export interface DashboardWebSpec {
-  richText:{legacyDangerousSinkRemovedOrSanitized:boolean;ordinaryTextEscaped:boolean;htmlSanitizer:boolean;attributeContextSafe:boolean;navigationUrlValidated:boolean};
-  csp:{nonceBased:boolean;unsafeInline:boolean;unsafeEval:boolean;reportOnlyRollout:boolean;frameSrc:string[];connectSrc:string[];primaryXssFix:boolean};
-  csrf:{serverValidatedToken:boolean;originComplement:boolean;fetchMetadataComplement:boolean;sameSiteComplement:boolean};
-  postMessage:{expectedOrigin:string;validateSchema:boolean;validateSource:boolean;outgoingTargetOrigin:string};
+  sourceSinkInventory:Array<{source:string;transform:string;sink:string;control:string}>;
+  richText:{legacyDangerousSinkRemovedOrSanitized:boolean;ordinaryTextEscaped:boolean;htmlSanitizer:boolean;attributeContextSafe:boolean;navigationUrlValidated:boolean;sanitizerPolicy:string;allowedUrlSchemes:string[];eventHandlerAttributesAllowed:boolean};
+  csp:{nonceBased:boolean;unsafeInline:boolean;unsafeEval:boolean;reportOnlyRollout:boolean;frameSrc:string[];connectSrc:string[];primaryXssFix:boolean;directives:string[];noncePropagation:string;reportEndpoint:string;enforcementVerification:string[]};
+  csrf:{serverValidatedToken:boolean;originComplement:boolean;fetchMetadataComplement:boolean;sameSiteComplement:boolean;tokenTransport:'header'|'form-field';sessionBound:boolean;allCookieMutationsCovered:boolean;rejectMissingOrInvalid:boolean};
+  postMessage:{expectedOrigin:string;validateSchema:boolean;validateSource:boolean;outgoingTargetOrigin:string;expectedSourceContext:string;schemaFields:string[];contextCorrelation:boolean};
   returnNavigation:{sameOriginOrRelativeOnly:boolean;externalAllowlist:string[]};
   cookie:{secure:boolean;httpOnly:boolean;sameSite:'Lax'|'Strict'|'None';domain:string|null;path:string};
   tenantAuthorizationOwnedBy:string;
@@ -203,7 +205,7 @@ export interface AnalyticsWebSpec {
   csp:{reporting:boolean;primaryXssFix:boolean};oauthOwnedBy:string;authorizationOwnedBy:string;
 }
 export function corsAllowed(s:AnalyticsWebSpec,origin:string,method:string,headers:string[]):boolean{return s.cors.origins.includes(origin)&&s.cors.methods.includes(method)&&headers.every(h=>s.cors.headers.map(x=>x.toLowerCase()).includes(h.toLowerCase()))&&!s.cors.reflectOrigin&&!s.cors.wildcard}
-export function reportUrl(s:AnalyticsWebSpec,hash:string):string|null{if(s.reportFetch.hashIsDirectUrl)return hash.slice(1);const id=hash.replace(/^#/,'');if(!s.reportFetch.allowPathIdsOnly||!/^[A-Za-z0-9_-]+$/.test(id))return null;return s.reportFetch.allowedOrigin.replace(/\/$/,'')+'/reports/'+id}
+export function reportUrl(s:AnalyticsWebSpec,hash:string):string|null{if(s.reportFetch.hashIsDirectUrl)return hash.slice(1);const id=hash.replace(/^#/,'');if(!s.reportFetch.allowPathIdsOnly||!/^[A-Za-z0-9_-]+$/.test(id))return null;const base=s.reportFetch.allowedOrigin.endsWith('/')?s.reportFetch.allowedOrigin.slice(0,-1):s.reportFetch.allowedOrigin;return base+'/reports/'+id}
 `;
 const WEB_CORPUS = `${JSON.stringify(
   {
@@ -243,7 +245,7 @@ const WEB_CORPUS = `${JSON.stringify(
   2,
 )}\n`;
 const dashboardMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'web-security/dashboard-browser-boundaries@1',
+  id: 'web-security/dashboard-browser-boundaries@2',
   matches: (s) => s.id === DASHBOARD_WEB,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-dashboard-web-security'));
@@ -255,22 +257,23 @@ const dashboardMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Browser dashboard security fixture
 
-Write \`.kory-eval/dashboard-web.json\` as \`DashboardWebSpec\`. The legacy HTML execution sink is removed or passes through a context-appropriate sanitizer; ordinary text is escaped and navigation URLs are validated rather than generically filtered. CSP is strict nonce-based defense in depth with no broad unsafe-inline/eval, has Report-Only→enforcement rollout, and is explicitly not the primary XSS fix.
+Write \`.kory-eval/dashboard-web.json\` as \`DashboardWebSpec\`. Inventory the supplied rich-text, return-navigation, cookie-authenticated mutation, iframe, and postMessage sources through their transforms to concrete sinks/controls. The legacy HTML execution sink is removed or passes through a context-appropriate sanitizer; record the sanitizer policy, allowed URL schemes, and event-handler-attribute behavior. Ordinary text is escaped and navigation URLs are validated rather than generically filtered. CSP is strict nonce-based defense in depth with explicit default/script/style/object/base/framing directives, nonce propagation, reporting endpoint, Report-Only→enforcement checks, no broad unsafe-inline/eval, and is explicitly not the primary XSS fix.
 
-Every cookie-authenticated mutation has a server-validated CSRF token; SameSite, Origin and Fetch Metadata are complementary signals. Payment postMessage accepts only the exact supplied origin, expected source/context and schema; outgoing target origin is exact, never \`*\`. Return navigation is relative/same-origin unless explicitly allowlisted. Session cookie is Secure/HttpOnly, appropriately SameSite, host-only unless a domain is strictly required, and narrow Path. Tenant authorization stays \`authorization-security\`.
+Every cookie-authenticated mutation has a server-validated, session-bound CSRF token with explicit transport and reject behavior; SameSite, Origin and Fetch Metadata are complementary signals. Payment postMessage accepts only the exact supplied origin, expected source/context, correlated transaction context, and explicit schema; outgoing target origin is exact, never \`*\`. Return navigation is relative/same-origin unless explicitly allowlisted. Session cookie is Secure/HttpOnly, appropriately SameSite, host-only unless a domain is strictly required, and narrow Path. Tenant authorization stays \`authorization-security\`.
 `,
     );
   },
 };
 const dashboardScorer: SkillEvalDeterministicScorer = {
-  id: 'web-security/dashboard-browser-boundaries-scorer@2',
+  id: 'web-security/dashboard-browser-boundaries-scorer@3',
   scenarioIds: [DASHBOARD_WEB],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{acceptPaymentMessage,returnUrlAllowed,type DashboardWebSpec}from'../src/web-policy';const s=JSON.parse(readFileSync('.kory-eval/dashboard-web.json','utf8')) as DashboardWebSpec;const c=JSON.parse(readFileSync('evidence/web-corpus.json','utf8')) as any;
-test('hidden: sink/CSP/CSRF defense layers remain distinct',()=>{expect(s.richText.legacyDangerousSinkRemovedOrSanitized).toBe(true);expect(s.richText.ordinaryTextEscaped).toBe(true);expect(s.richText.htmlSanitizer).toBe(true);expect(s.richText.attributeContextSafe).toBe(true);expect(s.richText.navigationUrlValidated).toBe(true);expect(s.csp.nonceBased).toBe(true);expect(s.csp.unsafeInline).toBe(false);expect(s.csp.unsafeEval).toBe(false);expect(s.csp.reportOnlyRollout).toBe(true);expect(s.csp.primaryXssFix).toBe(false);expect(s.csrf.serverValidatedToken).toBe(true);});
-test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m of c.dashboard.messages)expect(acceptPaymentMessage(s,m),m.origin).toBe(m.expected);expect(s.postMessage.outgoingTargetOrigin).toBe(c.dashboard.paymentOrigin);expect(returnUrlAllowed(s,'/tickets/7')).toBe(true);expect(returnUrlAllowed(s,'https://evil.example/phish')).toBe(false);expect(returnUrlAllowed(s,'//evil.example/x')).toBe(false);expect(s.cookie.secure).toBe(true);expect(s.cookie.httpOnly).toBe(true);expect(s.cookie.domain).toBeNull();expect(s.cookie.path.startsWith('/')).toBe(true);expect(s.tenantAuthorizationOwnedBy).toBe('authorization-security');});
+test('hidden: source/sink and sink-specific rendering policy are concrete',()=>{const inventory=JSON.stringify(s.sourceSinkInventory).toLowerCase();for(const term of ['rich','return','mutation','iframe','postmessage'])expect(inventory).toContain(term);expect(s.sourceSinkInventory.length).toBeGreaterThanOrEqual(5);expect(s.richText.legacyDangerousSinkRemovedOrSanitized).toBe(true);expect(s.richText.ordinaryTextEscaped).toBe(true);expect(s.richText.htmlSanitizer).toBe(true);expect(s.richText.attributeContextSafe).toBe(true);expect(s.richText.navigationUrlValidated).toBe(true);expect(s.richText.sanitizerPolicy.length).toBeGreaterThan(8);expect(s.richText.allowedUrlSchemes).toContain('https');expect(s.richText.allowedUrlSchemes).not.toContain('javascript');expect(s.richText.eventHandlerAttributesAllowed).toBe(false);});
+test('hidden: CSP and CSRF protocols are explicit and fail closed',()=>{expect(s.csp.nonceBased).toBe(true);expect(s.csp.unsafeInline).toBe(false);expect(s.csp.unsafeEval).toBe(false);expect(s.csp.reportOnlyRollout).toBe(true);expect(s.csp.primaryXssFix).toBe(false);const directives=s.csp.directives.join(' ').toLowerCase();for(const d of ['default-src','script-src','object-src','base-uri','frame-ancestors'])expect(directives).toContain(d);expect(s.csp.noncePropagation.length).toBeGreaterThan(8);expect(s.csp.reportEndpoint.length).toBeGreaterThan(0);expect(s.csp.enforcementVerification.length).toBeGreaterThanOrEqual(2);expect(s.csrf.serverValidatedToken).toBe(true);expect(s.csrf.sessionBound).toBe(true);expect(s.csrf.allCookieMutationsCovered).toBe(true);expect(s.csrf.rejectMissingOrInvalid).toBe(true);expect(['header','form-field']).toContain(s.csrf.tokenTransport);});
+test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m of c.dashboard.messages)expect(acceptPaymentMessage(s,m),m.origin).toBe(m.expected);expect(s.postMessage.expectedOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.outgoingTargetOrigin).toBe(c.dashboard.paymentOrigin);expect(s.postMessage.expectedSourceContext.length).toBeGreaterThan(0);expect(s.postMessage.schemaFields.length).toBeGreaterThan(0);expect(s.postMessage.contextCorrelation).toBe(true);expect(returnUrlAllowed(s,'/tickets/7')).toBe(true);expect(returnUrlAllowed(s,'https://evil.example/phish')).toBe(false);expect(returnUrlAllowed(s,'//evil.example/x')).toBe(false);expect(s.cookie.secure).toBe(true);expect(s.cookie.httpOnly).toBe(true);expect(s.cookie.domain).toBeNull();expect(s.cookie.path.startsWith('/')).toBe(true);expect(s.tenantAuthorizationOwnedBy).toBe('authorization-security');});
 `,
     );
     const fixed = fixtureTextEquals(workingDirectory, 'src/web-policy.ts', WEB_POLICY);
@@ -291,7 +294,7 @@ test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m
 };
 
 const analyticsMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'web-security/analytics-spa-boundaries@1',
+  id: 'web-security/analytics-spa-boundaries@2',
   matches: (s) => s.id === ANALYTICS_WEB,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-analytics-web-security'));
@@ -431,7 +434,7 @@ The board-observed current image boots; unsigned, corrupt and wrong-product fixt
   },
 };
 const secureBootScorer: SkillEvalDeterministicScorer = {
-  id: 'embedded-device-security/secure-boot-ota-scorer@2',
+  id: 'embedded-device-security/secure-boot-ota-scorer@3',
   scenarioIds: [SECURE_BOOT],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -452,7 +455,7 @@ test('hidden: every power-cut state recovers to authenticated candidate/current'
       Boolean(ev.artifact) &&
       /serial|boot.?log/u.test(ev.text) &&
       /board/u.test(ev.text) &&
-      /emulat/u.test(ev.text) &&
+      /emulat|simulat/u.test(ev.text) &&
       /unsigned/u.test(ev.text) &&
       /wrong-product|wrong product/u.test(ev.text) &&
       /power|cut/u.test(ev.text) &&

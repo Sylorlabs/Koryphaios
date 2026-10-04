@@ -33,6 +33,7 @@ import { providerRoutes } from './routes/v1/providers';
 import { collaborationRoutes } from './routes/collaboration';
 import { authRoutes } from './routes/v1/auth';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
+import { createComputerUseRoutes } from './routes/v1/computer-use';
 import { gitRoutes } from './routes/v1/git';
 import { memoryRoutes } from './routes/v1/memory';
 import { modeRoutes } from './routes/v1/mode';
@@ -50,6 +51,7 @@ import { mcpServerRoutes } from './routes/v1/mcp-servers';
 import { mcpRegistryRoutes } from './routes/v1/mcp-registry';
 import { voiceRoutes } from './routes/v1/voice';
 import { imageRoutes } from './routes/v1/images';
+import { videoRoutes } from './routes/v1/video';
 import { usageRoutes } from './routes/v1/usage';
 import { feedRoutes } from './routes/v1/feed';
 import { agentMessageRoutes } from './routes/v1/agent-messages';
@@ -97,6 +99,7 @@ const baseApp = new Elysia()
   .use(collaborationRoutes)
   .use(authRoutes)
   .use(agentSettingsRoutes)
+  .use(createComputerUseRoutes())
   .use(gitRoutes)
   .use(memoryRoutes)
   .use(modeRoutes)
@@ -114,6 +117,7 @@ const baseApp = new Elysia()
   .use(mcpRegistryRoutes)
   .use(voiceRoutes)
   .use(imageRoutes)
+  .use(videoRoutes)
   .use(usageRoutes)
   .use(agentMessageRoutes)
   .use(appearanceRoutes);

@@ -136,8 +136,8 @@
     {
       "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "secondsky/claude-skills main frontend-design skill at ba827ce5eb67 as inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for explicit purpose, audience, constraints, and intentional design direction; visual prescriptions remain delegated to visual-interface-design."
@@ -145,8 +145,8 @@
     {
       "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/design-review/skills/design-review/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "secondsky/claude-skills main design-review skill at bfdac85b7229 as inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for evidence-based critique, severity, state/responsive coverage, and problems-over-prescriptions; not imported as review authority."

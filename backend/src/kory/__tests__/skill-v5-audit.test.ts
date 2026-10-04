@@ -8,7 +8,6 @@ import {
   V5_SKILL_PACKAGE_CATALOG,
   auditBundledSkillDefinitions,
 } from '../skills';
-import { RESPONSE_STYLE_SKILL_NAME } from '../response-style-skill';
 import {
   getV5AuditLedgerPath,
   loadV5AuditLedger,
@@ -67,7 +66,7 @@ const readyGate = (): SkillPromotionGate => ({
 });
 
 describe('V5 skill audit ledger', () => {
-  test('initializes all 181 stable skills and marks migrated packages as candidates', () => {
+  test('initializes all 182 stable skills and marks migrated packages as candidates', () => {
     const root = mkdtempSync(join(tmpdir(), 'kory-v5-audit-'));
     roots.push(root);
     const definitionAudit = auditBundledSkillDefinitions();
@@ -81,9 +80,9 @@ describe('V5 skill audit ledger', () => {
         now: new Date('2026-09-01T12:00:00Z'),
       },
     );
-    expect(ledger.librarySize).toBe(181);
-    expect(ledger.records).toHaveLength(181);
-    expect(ledger.records.filter((record) => record.cohort === 'base')).toHaveLength(34);
+    expect(ledger.librarySize).toBe(182);
+    expect(ledger.records).toHaveLength(182);
+    expect(ledger.records.filter((record) => record.cohort === 'base')).toHaveLength(35);
     expect(ledger.records.filter((record) => record.cohort === 'professional')).toHaveLength(47);
     expect(ledger.records.filter((record) => record.cohort === 'specialist-v4')).toHaveLength(100);
     for (const skillPackage of V5_SKILL_PACKAGE_CATALOG.packages) {
@@ -250,16 +249,18 @@ describe('V5 skill audit ledger', () => {
       taskMaturity: { individual: 2, scaffold: 0 },
       nextAction: 'run held-out routing and paired full-task V5 evaluation suite',
     });
-    expect(ledger.records.filter((record) => record.v5Status === 'candidate')).toHaveLength(180);
-    // Every bundled skill must ship as a skills-v5 package except the
-    // user-scoped personal skills, which are seeded into the personal library
-    // instead of the bundled catalog and so can never be package candidates.
+    expect(ledger.records.filter((record) => record.v5Status === 'candidate')).toHaveLength(182);
+    // Bundled skills appear as package candidates once a skills-v5 package
+    // exists. Records stay 'unreviewed' when there is no package to qualify:
+    // user-scoped personal skills are seeded into the personal library rather
+    // than the bundled catalog. Every bundled skill with a V5 package is at
+    // least a package candidate.
     expect(
       ledger.records
         .filter((record) => record.v5Status === 'unreviewed')
         .map((record) => record.skill)
         .sort(),
-    ).toEqual([RESPONSE_STYLE_SKILL_NAME]);
+    ).toEqual([]);
 
     const firstSerialized = readFileSync(getV5AuditLedgerPath(root), 'utf8');
     syncV5AuditLedger(root, BUNDLED_SKILL_DEFINITIONS, V5_SKILL_PACKAGE_CATALOG.packages, {

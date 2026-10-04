@@ -126,7 +126,7 @@ export const SendMessageRequestSchema = z.object({
   model: z.string().optional(),
   reasoningLevel: z.string().optional(),
   fastMode: z.boolean().optional(),
-  imageInputMode: z.enum(['reject', 'omit']).optional(),
+  imageInputMode: z.enum(['reject', 'omit', 'allow']).optional(),
   attachments: z
     .array(
       z.object({

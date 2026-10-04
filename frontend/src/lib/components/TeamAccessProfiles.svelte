@@ -334,6 +334,12 @@
         >
       </div>{/if}
 
+    <label class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">
+      Host display name
+      <input value={policy.hostName || 'Host'} maxlength="80"
+        onchange={(event) => collaborationStore.updatePolicy({ hostName: event.currentTarget.value })}
+        class="mt-2 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm normal-case tracking-normal text-[var(--color-text-primary)]" />
+    </label>
     <label
       class="block text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]"
       >Hosted session name<input

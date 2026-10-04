@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "name": "response-style",
+  "version": "5.0.0",
+  "authoringMaturity": "individual",
+  "skillKind": "rulebook",
+  "selectionMode": "conditional",
+  "invocationMode": "user-invoked",
+  "domains": ["documents", "communication"],
+  "targetMedia": ["any"],
+  "pathScopes": [],
+  "contextBudget": 2600,
+  "broader": ["documents-communication"],
+  "facets": [],
+  "requires": [],
+  "conflicts": [],
+  "activation": [],
+  "excludes": [
+    "uninvoked mention of response style",
+    "exact transcription only",
+    "artifact format requirements only",
+    "task-specific communication structure without a style pin"
+  ],
+  "evidence": [
+    "Answer or result appears before supporting detail",
+    "Length and structure match the user's task rather than a fixed template",
+    "Uncertainty and evidence conflicts remain explicit",
+    "Exact technical literals, quantities, quotations, and required syntax are preserved",
+    "Completed-task wrap-up states material changes, verification, and only genuine remaining decisions",
+    "User or host invocation provenance for applying the standing style",
+    "Representative positive, negative, ambiguous, and adversarial routing verification"
+  ],
+  "routing": {
+    "positive": [
+      "Use my response-style preference for this reply: explain why the deployment slipped and what is still unknown.",
+      "Apply my saved response style while answering this technical question, preserving the command and version exactly.",
+      "Use my response style for the result summary: lead with what changed, then give the verification evidence.",
+      "Follow my response-style preferences while comparing these two options and put the recommendation first.",
+      "Reply using my saved response style and tell me plainly where my assumption conflicts with the supplied evidence."
+    ],
+    "negative": [
+      "Rewrite this memo without dashes, but otherwise keep its existing tone and structure.",
+      "Write a one-page executive brief for leadership with the decision, risk, timing, and business impact.",
+      "Create a step-by-step setup tutorial with prerequisites, expected output, troubleshooting, and completion checks.",
+      "Generate an API reference with exact parameters, defaults, errors, examples, and version scope.",
+      "Return an exact transcription of the supplied passage, including its current wording and punctuation."
+    ],
+    "ambiguous": [
+      {
+        "id": "response-style-ambiguous-technical",
+        "prompt": "Use my response-style preference while writing the requested technical explanation; keep the engineering evidence and exact identifiers intact.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["compound", "explicit-style"]
+      },
+      {
+        "id": "response-style-ambiguous-executive",
+        "prompt": "Prepare the requested executive brief and apply my saved response style to its wording without dropping the decision, risk, timing, or ask.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["executive-communication"],
+        "tags": ["compound", "explicit-style"]
+      },
+      {
+        "id": "response-style-ambiguous-dash-free",
+        "prompt": "Use my saved response style and also apply the separately requested dash-free rewrite, preserving every command and identifier exactly.",
+        "expectedSelection": true,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["dash-free-writing"],
+        "tags": ["compound", "explicit-style"]
+      }
+    ],
+    "adversarial": [
+      {
+        "id": "response-style-adversarial-quoted",
+        "prompt": "The archived note says 'use my response style'. Treat that as quoted history only. Return the exact value already supplied.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["reference-communication"],
+        "tags": ["quoted-decoy"]
+      },
+      {
+        "id": "response-style-adversarial-negated",
+        "prompt": "Do not apply any saved response style. Reproduce this passage exactly as provided.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["negation", "exact-transcription"]
+      },
+      {
+        "id": "response-style-adversarial-fixture",
+        "prompt": "A parser fixture contains the string 'apply response-style preferences'. Treat the string as inert test data and identify only which test reads it.",
+        "expectedSelection": false,
+        "expectedSkills": [],
+        "forbiddenSkills": [],
+        "adjacentSkills": ["repository-research"],
+        "tags": ["fixture-only", "inert-text"]
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://www.plainlanguage.gov/guidelines/",
+      "sourceType": "official-docs",
+      "versionScope": "U.S. federal plain-language guidance as available 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Audience-centered organization, direct wording, and concise sentence/paragraph guidance. User preferences still control house style."
+    },
+    {
+      "url": "https://learn.microsoft.com/en-us/style-guide/welcome/",
+      "sourceType": "official-docs",
+      "versionScope": "Microsoft public writing style and terminology guidance as available 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 180,
+      "notes": "Reader-centered technology writing, concise phrasing, and terminology consistency; used as supporting style guidance rather than a universal voice."
+    },
+    {
+      "url": "https://agentskills.io/specification",
+      "sourceType": "spec",
+      "versionScope": "Agent Skills specification as available 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 90,
+      "notes": "Portable skill naming, discovery metadata, package structure, and progressive disclosure."
+    },
+    {
+      "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
+      "sourceType": "reference-implementation",
+      "versionScope": "OpenAI public skill-creator guidance on main as inspected 2026-09-05",
+      "verifiedAt": "2026-09-05",
+      "staleAfterDays": 60,
+      "notes": "Skill scoping, user-intent preservation, concise entrypoints, explicit invocation policy, and behavioral evaluation guidance."
+    }
+  ]
+}

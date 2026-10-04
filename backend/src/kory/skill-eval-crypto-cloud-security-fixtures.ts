@@ -17,6 +17,61 @@ const RELEASE_SIGNATURE = 'applied-cryptography-full-task-2';
 const AWS_CLOUD = 'cloud-security-full-task-1';
 const GCP_CLOUD = 'cloud-security-full-task-2';
 
+const AWS_CLOUD_SPEC_TYPES = `export interface AwsCloudSecuritySpec {
+  humanIdentity: {
+    federatedTemporary: boolean;
+    longLivedKeysRetired: boolean;
+    breakGlassProtectedAndAudited: boolean;
+  };
+  workload: { workloadSpecificIdentity: boolean; inheritsNodeRole: boolean };
+  crossAccount: {
+    trustsWholeSourceAccount: boolean;
+    principalScoped: boolean;
+    resourceScoped: boolean;
+    conditions: string[];
+    kmsExplicit: boolean;
+  };
+  guardrails: {
+    publicAccessBlocked: boolean;
+    preventiveOrganizationPolicy: boolean;
+    prohibitedConfigurationTestDenied: boolean;
+  };
+  audit: {
+    centralized: boolean;
+    primaryCopyProtectedFromWorkloadAdmins: boolean;
+    retentionProtected: boolean;
+  };
+  verification: { allowed: string[]; denied: string[] };
+  liveProviderVerified: boolean;
+  containerPrivilegeOwnedBy: string;
+}
+`;
+
+const GCP_CLOUD_SPEC_TYPES = `export interface GcpCloudSecuritySpec {
+  ci: {
+    workloadIdentityFederation: boolean;
+    longLivedServiceAccountKey: boolean;
+    shortLivedCredentials: boolean;
+    trustMapping: { issuer: string; audience: string; attributes: Record<string, string> };
+  };
+  identities: {
+    ciAndRuntimeSeparate: boolean;
+    ciProjectEditor: boolean;
+    runtimeProjectEditor: boolean;
+    resourceScoped: boolean;
+  };
+  publicAccess: { allUsersRemoved: boolean; anonymousReadDenied: boolean };
+  guardrails: {
+    blockServiceAccountKeyCreation: boolean;
+    restrictUnmanagedPublicExposure: boolean;
+    requiredAuditLogging: boolean;
+  };
+  audit: { centralized: boolean; destinationProtected: boolean; retentionAuthority: string };
+  verification: { allowed: string[]; denied: string[] };
+  liveProviderVerified: boolean;
+}
+`;
+
 function artifactText(root: string, path: string): { artifact: unknown | null; text: string } {
   const artifact = readJsonArtifact<unknown>(root, path);
   return { artifact, text: JSON.stringify(artifact ?? '').toLowerCase() };
@@ -127,7 +182,7 @@ Include every supplied negative case and a migration rule that authenticates old
 };
 
 const encryptedDocumentScorer: SkillEvalDeterministicScorer = {
-  id: 'applied-cryptography/encrypted-document-envelope-scorer@1',
+  id: 'applied-cryptography/encrypted-document-envelope-scorer@2',
   scenarioIds: [ENCRYPTED_DOCUMENT],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -146,7 +201,11 @@ test('hidden: AEAD, authenticated domain binding, and fail-closed parsing are ex
   expect(spec.aead.algorithmIdAuthenticated).toBe(true);
   expect(spec.aead.keyIdAuthenticated).toBe(true);
   expect(spec.aead.authenticationBeforePlaintextUse).toBe(true);
-  for (const field of requiredAad) expect(spec.associatedData).toContain(field);
+  for (const field of requiredAad) {
+    expect(spec.associatedData.some((entry) =>
+      entry === field || entry.startsWith(field + ':') || entry.startsWith(field + ' ')
+    )).toBe(true);
+  }
   expect(spec.serialization.canonicalOrUnambiguous).toBe(true);
   expect(spec.serialization.versioned).toBe(true);
   expect(spec.serialization.validatesLengthsBeforeCrypto).toBe(true);
@@ -170,7 +229,7 @@ test('hidden: negative corpus, migration, and KMS boundary fail closed', () => {
   expect(spec.migration.authenticateBeforeMigration).toBe(true);
   expect(spec.migration.reencryptToExplicitNewVersion).toBe(true);
   expect(spec.migration.fallbackToUnknownAlgorithm).toBe(false);
-  expect(spec.kmsGenerationWrappingRotationOwnedBy).toBe('secrets-key-management');
+  expect(spec.kmsGenerationWrappingRotationOwnedBy.toLowerCase()).toMatch(/^secrets-key-management(?:\\b|[;,:])/);
   expect(spec.evidenceBoundary.toLowerCase()).toMatch(/synthetic|design/);
 });
 `,
@@ -294,7 +353,7 @@ Add a regression proving the supplied semantic manifest produces the same canoni
 };
 
 const releaseSignatureScorer: SkillEvalDeterministicScorer = {
-  id: 'applied-cryptography/offline-release-signature-scorer@2',
+  id: 'applied-cryptography/offline-release-signature-scorer@4',
   scenarioIds: [RELEASE_SIGNATURE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -324,13 +383,13 @@ test('hidden: canonical signed bytes are insertion-order independent and domain 
     const report = artifactText(workingDirectory, '.kory-eval/release-signature.json');
     const bounded =
       Boolean(report.artifact) &&
-      /ed25519|ecdsa|rsa-pss/u.test(report.text) &&
+      /ed25519|ecdsa|rsa-pss/iu.test(report.text) &&
       /domain/u.test(report.text) &&
       /rollback/u.test(report.text) &&
       /expir/u.test(report.text) &&
       /downgrade/u.test(report.text) &&
       /unknown.*algorithm|algorithm.*unknown/u.test(report.text) &&
-      /secrets-key-management/u.test(report.text) &&
+      /secrets[-_ ]?key[-_ ]?management/iu.test(report.text) &&
       /synthetic|local/u.test(report.text) &&
       !/live.*(?:verified|proved)/u.test(report.text);
     const passed = hidden.passed && regression && vectorsPreserved && bounded;
@@ -383,18 +442,19 @@ const AWS_STATE = `${JSON.stringify(
 )}\n`;
 
 const awsCloudMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'cloud-security/aws-org-policy-review@1',
+  id: 'cloud-security/aws-org-policy-review@2',
   matches: (scenario) => scenario.id === AWS_CLOUD,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-cloud-security-aws'));
     writeFixtureFile(destination, 'evidence/aws-state.json', AWS_STATE);
+    writeFixtureFile(destination, 'src/cloud-security-spec.ts', AWS_CLOUD_SPEC_TYPES);
     writeFixtureFile(destination, 'tests/.gitkeep', '');
     writeFixtureFile(
       destination,
       'README.md',
       `# Synthetic AWS cloud-security policy review
 
-Preserve \`evidence/aws-state.json\`; it is synthetic provider-policy evidence, not a live AWS account. Write \`.kory-eval/cloud-security-aws.json\` describing the remediated effective policy and representative allow/deny analysis.
+Preserve \`evidence/aws-state.json\` and \`src/cloud-security-spec.ts\`; the state is synthetic provider-policy evidence, not a live AWS account. Write \`.kory-eval/cloud-security-aws.json\` using the exported \`AwsCloudSecuritySpec\` shape so the remediated effective policy and representative allow/deny analysis are explicit.
 
 Required design: federated short-lived human access; separately protected/audited emergency path; EKS workload-specific temporary identity instead of node-role inheritance; principal/action/resource/condition-scoped cross-account trust; coordinated S3 and KMS permissions; preventive organization/account guardrails including public-access posture; centralized protected audit logs whose primary copy cannot be silently erased by workload/account admins.
 
@@ -405,7 +465,7 @@ Include representative intended allows and cross-account/public/escalation denia
 };
 
 const awsCloudScorer: SkillEvalDeterministicScorer = {
-  id: 'cloud-security/aws-org-policy-review-scorer@1',
+  id: 'cloud-security/aws-org-policy-review-scorer@2',
   scenarioIds: [AWS_CLOUD],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -443,6 +503,9 @@ test('hidden: guardrail/audit/effective-access design includes both allows and d
     );
     const statePreserved =
       readFileSync(join(workingDirectory, 'evidence/aws-state.json'), 'utf8') === AWS_STATE;
+    const specPreserved =
+      readFileSync(join(workingDirectory, 'src/cloud-security-spec.ts'), 'utf8') ===
+      AWS_CLOUD_SPEC_TYPES;
     const report = artifactText(workingDirectory, '.kory-eval/cloud-security-aws.json');
     const bounded =
       Boolean(report.artifact) &&
@@ -452,15 +515,21 @@ test('hidden: guardrail/audit/effective-access design includes both allows and d
       /kms/u.test(report.text) &&
       /cloudtrail|audit/u.test(report.text) &&
       hasBoolean(report.artifact, 'liveProviderVerified', false);
-    const passed = hidden.passed && statePreserved && bounded;
+    const passed = hidden.passed && statePreserved && specPreserved && bounded;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && statePreserved ? 0.8 : hidden.passed ? 0.6 : 0,
+      quality: passed
+        ? 1
+        : hidden.passed && statePreserved && specPreserved
+          ? 0.8
+          : hidden.passed
+            ? 0.6
+            : 0,
       verification: hidden.passed ? 1 : 0,
-      integrityFailure: !statePreserved,
+      integrityFailure: !statePreserved || !specPreserved,
       evidence: [
         `AWS effective-policy design checks: ${hidden.passed ? 'pass' : 'fail'}`,
-        `synthetic provider state preserved: ${statePreserved ? 'yes' : 'no'}`,
+        `synthetic provider state/spec preserved: ${statePreserved && specPreserved ? 'yes' : 'no'}`,
         `provider-evidence boundary: ${bounded ? 'bounded' : 'missing'}`,
         hidden.evidence,
       ],
@@ -486,18 +555,19 @@ const GCP_STATE = `${JSON.stringify(
 )}\n`;
 
 const gcpCloudMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'cloud-security/gcp-wif-policy-review@1',
+  id: 'cloud-security/gcp-wif-policy-review@2',
   matches: (scenario) => scenario.id === GCP_CLOUD,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-cloud-security-gcp'));
     writeFixtureFile(destination, 'evidence/gcp-state.json', GCP_STATE);
+    writeFixtureFile(destination, 'src/cloud-security-spec.ts', GCP_CLOUD_SPEC_TYPES);
     writeFixtureFile(destination, 'tests/.gitkeep', '');
     writeFixtureFile(
       destination,
       'README.md',
       `# Synthetic GCP cloud-security policy review
 
-Preserve the supplied state; no live GCP account is connected. Write \`.kory-eval/cloud-security-gcp.json\` with a remediated policy model and synthetic allow/deny analysis.
+Preserve the supplied state and \`src/cloud-security-spec.ts\`; no live GCP account is connected. Write \`.kory-eval/cloud-security-gcp.json\` using the exported \`GcpCloudSecuritySpec\` shape with a remediated policy model and synthetic allow/deny analysis.
 
 External CI must use Workload Identity Federation with explicit issuer/audience/attribute trust mapping and short-lived credentials; downloaded long-lived service-account keys are removed. CI deploy and Cloud Run runtime identities are separate and resource-scoped; neither may retain project-wide Editor/basic-role power. Remove unintended \`allUsers\` exposure and prove a representative anonymous denial. Constrain Storage and BigQuery access.
 
@@ -508,7 +578,7 @@ Define organization/project guardrails for service-account key creation, unmanag
 };
 
 const gcpCloudScorer: SkillEvalDeterministicScorer = {
-  id: 'cloud-security/gcp-wif-policy-review-scorer@1',
+  id: 'cloud-security/gcp-wif-policy-review-scorer@2',
   scenarioIds: [GCP_CLOUD],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -547,6 +617,9 @@ test('hidden: public exposure, org policy, audit, and denied paths are explicit'
     );
     const statePreserved =
       readFileSync(join(workingDirectory, 'evidence/gcp-state.json'), 'utf8') === GCP_STATE;
+    const specPreserved =
+      readFileSync(join(workingDirectory, 'src/cloud-security-spec.ts'), 'utf8') ===
+      GCP_CLOUD_SPEC_TYPES;
     const report = artifactText(workingDirectory, '.kory-eval/cloud-security-gcp.json');
     const bounded =
       Boolean(report.artifact) &&
@@ -556,15 +629,21 @@ test('hidden: public exposure, org policy, audit, and denied paths are explicit'
       /bigquery/u.test(report.text) &&
       /audit/u.test(report.text) &&
       hasBoolean(report.artifact, 'liveProviderVerified', false);
-    const passed = hidden.passed && statePreserved && bounded;
+    const passed = hidden.passed && statePreserved && specPreserved && bounded;
     return {
       passed,
-      quality: passed ? 1 : hidden.passed && statePreserved ? 0.8 : hidden.passed ? 0.6 : 0,
+      quality: passed
+        ? 1
+        : hidden.passed && statePreserved && specPreserved
+          ? 0.8
+          : hidden.passed
+            ? 0.6
+            : 0,
       verification: hidden.passed ? 1 : 0,
-      integrityFailure: !statePreserved,
+      integrityFailure: !statePreserved || !specPreserved,
       evidence: [
         `GCP WIF/least-privilege/public/audit checks: ${hidden.passed ? 'pass' : 'fail'}`,
-        `synthetic provider state preserved: ${statePreserved ? 'yes' : 'no'}`,
+        `synthetic provider state/spec preserved: ${statePreserved && specPreserved ? 'yes' : 'no'}`,
         `provider-evidence boundary: ${bounded ? 'bounded' : 'missing'}`,
         hidden.evidence,
       ],

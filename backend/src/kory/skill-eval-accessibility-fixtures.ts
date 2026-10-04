@@ -15,6 +15,10 @@ const EDITOR = 'accessibility-practice-full-task-cross-platform-editor';
 const GAME = 'accessibility-practice-full-task-game-system';
 const WEB_VERIFY = 'accessibility-verification-full-task-1';
 const ANDROID_VERIFY = 'accessibility-verification-full-task-2';
+const WEB_VERIFY_RUNTIME_BLOCKER =
+  'Requires a real supported browser plus representative screen-reader runtime for keyboard focus, visible-focus, announcement, and zoom/reflow evidence; the synthetic harness is component evidence only.';
+const ANDROID_VERIFY_RUNTIME_BLOCKER =
+  'Requires a real Android device or emulator plus representative TalkBack and switch-access runtime for semantics, focus, alternate-input, and text-scaling evidence; the synthetic harness is component evidence only.';
 
 const CONTRACT_CORPUS = `${JSON.stringify(
   {
@@ -218,7 +222,8 @@ const gameScorer: SkillEvalDeterministicScorer = {
 };
 
 const webMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'accessibility-verification/web-delete-dialog@2',
+  id: 'accessibility-verification/web-delete-dialog@3',
+  readinessBlockers: [WEB_VERIFY_RUNTIME_BLOCKER],
   matches: (s) => s.id === WEB_VERIFY,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-accessibility-web'));
@@ -228,7 +233,7 @@ const webMaterializer: SkillEvalFixtureMaterializer = {
     writeFixtureFile(
       d,
       'README.md',
-      `# Web dialog accessibility verification fixture\n\nUse the supplied synthetic browser/screen-reader harness and write \`.kory-eval/web-verification.json\` as \`AccessibilityVerification\`. Record keyboard-only focus entry/trap/order/Escape/focus-return, dialog semantics, busy state and injected-error announcement, plus 200% zoom with the long localized name. Rows performed in this fixture must be labeled \`simulated:true\`; set \`liveRuntimeVerified:false\`. Run/record automation separately and keep \`automationControlsVerdict:false\`: scanner output never replaces the manual interaction verdict. Preserve untested real AT/browser combinations.\n`,
+      `# Web dialog accessibility verification fixture\n\nUse the supplied synthetic browser/screen-reader harness and write \`.kory-eval/web-verification.json\` as \`AccessibilityVerification\`. Copy the browser and assistive-technology identity strings exactly from \`evidence/web.json\`; keep capability/context notes in observations rather than appending them to identity fields. Record keyboard-only focus entry/trap/order/Escape/focus-return, dialog semantics, busy state and injected-error announcement, plus 200% zoom with the long localized name. Rows performed in this fixture must be labeled \`simulated:true\`; set \`liveRuntimeVerified:false\`. Run/record automation separately and keep \`automationControlsVerdict:false\`: scanner output never replaces the manual interaction verdict. Preserve untested real AT/browser combinations.\n`,
     );
   },
 };
@@ -259,7 +264,8 @@ const webScorer: SkillEvalDeterministicScorer = {
 };
 
 const androidMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'accessibility-verification/android-notification-settings@1',
+  id: 'accessibility-verification/android-notification-settings@2',
+  readinessBlockers: [ANDROID_VERIFY_RUNTIME_BLOCKER],
   matches: (s) => s.id === ANDROID_VERIFY,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-accessibility-android'));
@@ -269,7 +275,7 @@ const androidMaterializer: SkillEvalFixtureMaterializer = {
     writeFixtureFile(
       d,
       'README.md',
-      `# Android Compose accessibility verification fixture\n\nUse the supplied synthetic Android/TalkBack/switch-input harness and write \`.kory-eval/android-verification.json\` as \`AccessibilityVerification\`. Verify row label/role/checked state, disabled reason, spoken state change without duplicate labels, detail-return focus context, alternate switch traversal, and maximum text scale with long localization. Label fixture interaction rows \`simulated:true\`, set \`liveRuntimeVerified:false\`, preserve untested real device/AT combinations, and reconcile Compose automation without allowing it to control the manual verdict.\n`,
+      `# Android Compose accessibility verification fixture\n\nUse the supplied synthetic Android/TalkBack/switch-input harness and write \`.kory-eval/android-verification.json\` as \`AccessibilityVerification\`. Copy the platform and assistive-technology identity strings exactly from \`evidence/android.json\`; keep switch/capability notes in row evidence rather than appending them to identity fields. Verify row label/role/checked state, disabled reason, spoken state change without duplicate labels, detail-return focus context, alternate switch traversal, and maximum text scale with long localization. Label fixture interaction rows \`simulated:true\`, set \`liveRuntimeVerified:false\`, preserve untested real device/AT combinations, and reconcile Compose automation without allowing it to control the manual verdict.\n`,
     );
   },
 };

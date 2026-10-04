@@ -18,7 +18,7 @@ describe('external full-task environment gates', () => {
       packages.flatMap((skill) => skill.evaluation.tasks.map((task) => task.id)),
     );
     const gatedScenarioIds = EXTERNAL_ENVIRONMENT_GATES.flatMap((gate) => gate.scenarioIds);
-    expect(gatedScenarioIds).toHaveLength(61);
+    expect(gatedScenarioIds).toHaveLength(63);
     expect(new Set(gatedScenarioIds).size).toBe(gatedScenarioIds.length);
     for (const scenarioId of gatedScenarioIds)
       expect(knownScenarios.has(scenarioId), scenarioId).toBe(true);
@@ -79,8 +79,8 @@ describe('external full-task environment gates', () => {
   });
 
   test('gate scorers can never turn unavailable environment evidence into a pass', async () => {
-    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS).toHaveLength(61);
-    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS).toHaveLength(61);
+    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS).toHaveLength(63);
+    expect(EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS).toHaveLength(63);
     for (const scorer of EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS) {
       const score = await scorer.score({
         scenario: {} as never,

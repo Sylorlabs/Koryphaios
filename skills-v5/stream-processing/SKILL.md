@@ -26,12 +26,14 @@ Failure boundaries: Do not claim global order from partition order, commit offse
 - Assume delivery can repeat unless the complete source, processor, state, and sink path proves a stronger guarantee. Make external side effects idempotent or deduplicated at their durable boundary.
 - Align offset or checkpoint advancement with durable effects. Advancing progress before an effect is durable creates loss windows; advancing after can create replay and duplicate windows.
 - Define poison-event handling, backpressure, late-data policy, and replay behavior explicitly so failure does not become infinite retry or silent loss.
+- Bound every retained state class, not only deduplication identities. Define when window aggregates, dedup keys, timers, buffers, and recovery/checkpoint state become final or obsolete, and evict them only after the watermark/replay horizon can no longer require them. If corrections or retractions remain possible, preserve the minimal state needed for that contract instead of silently growing state forever.
 
 ## Observable checks
 
 - Inject duplicate and reordered events and verify the consumer's state and side effects against the declared ordering and idempotency contract.
 - Trigger consumer restart or partition rebalance and verify progress recovery plus any replayed effects.
 - Replay from a known offset or checkpoint and compare resulting state with the expected deterministic outcome where the design promises determinism.
+- Advance event time or the watermark far beyond completed windows and verify aggregate state, dedup state, timers, and buffers converge to a bounded steady state while finalized results remain correct.
 - Send malformed or poison events and verify bounded retry, quarantine, skip, or stop behavior with observable accounting.
 - Create lag or backpressure at representative throughput and measure queue growth, processing latency, and recovery after pressure is removed.
 

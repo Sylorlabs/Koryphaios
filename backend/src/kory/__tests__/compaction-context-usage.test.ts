@@ -7,6 +7,7 @@ import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { Provider, ProviderEvent, StreamRequest } from '../../providers/types';
 import type { CompactionCommit, IMessageStore } from '../../stores/message-store';
 import { db, sessions as sessionRows } from '../../db';
+import { SessionStore } from '../../stores/session-store';
 import { registerLiveModelResolver } from '../../providers/models';
 import { KoryManager } from '../manager';
 import { getContextArchive, usageSnapshotMatchesBoundary } from '../context-archive';
@@ -66,7 +67,11 @@ async function createHarness(options?: { replyTokensOut?: number }): Promise<Har
         type: 'content_delta',
         content: checkpointJson(),
       } satisfies ProviderEvent;
-      yield { type: 'usage_update', tokensIn: 5_000, tokensOut: options?.replyTokensOut ?? 0 } satisfies ProviderEvent;
+      yield {
+        type: 'usage_update',
+        tokensIn: 5_000,
+        tokensOut: options?.replyTokensOut ?? 0,
+      } satisfies ProviderEvent;
     },
   } as unknown as Provider;
 
@@ -106,7 +111,7 @@ async function createHarness(options?: { replyTokensOut?: number }): Promise<Har
     {} as ToolRegistry,
     dir,
     {} as KoryphaiosConfig,
-    undefined,
+    new SessionStore(),
     messageStore,
   );
   return {
@@ -219,9 +224,7 @@ describe('context usage across a compaction', () => {
       // Simulate a concurrent turn that moves the boundary after compaction
       // committed but before the usage snapshot lands.
       const original = harness.boundary();
-      const store = (
-        harness.manager as unknown as { messages: IMessageStore }
-      ).messages;
+      const store = (harness.manager as unknown as { messages: IMessageStore }).messages;
       const racedStore = {
         ...store,
         getActiveBoundary: async () => ({ messageId: 'user-newer', contextRevision: 2 }),

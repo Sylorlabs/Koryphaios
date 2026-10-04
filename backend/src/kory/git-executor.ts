@@ -4,6 +4,9 @@
  * Every git subprocess in the codebase goes through this class. It enforces:
  *
  * - **Async-only**: no `spawnSync` anywhere. The event loop is never blocked.
+ * - **Owned-chat confinement**: Git and all repository-configured helpers run
+ *   inside the mandatory OS write boundary for the independent chat checkout.
+ *   Missing enforcement fails closed; source and sibling writes stay denied.
  * - **Mutex-internal**: callers cannot forget the `gitMutex`. Every call
  *   acquires it automatically, so concurrent consumers (GitManager,
  *   WorkspaceManager, CheckpointStore) are serialized at the git level.
@@ -27,9 +30,13 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ChildProcess } from 'node:child_process';
+import { Readable } from 'node:stream';
 import { gitMutex } from './git-mutex';
 import { koryLog } from '../logger';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { spawnSandboxed } from '../security/os-sandbox';
+import { assertIndependentChatGitDirectory, gitWorkspaceOwnership } from './git-owned-workspace';
 
 /** Default timeout for git operations (30 seconds). */
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -81,6 +88,10 @@ export interface GitExecOptions {
 }
 
 export class GitExecutor {
+  // Pin an established ownership grant even if the cwd is later replaced by a
+  // symlink. The runtime lookup also handles executors created before adoption.
+  private owner: ReturnType<typeof gitWorkspaceOwnership>;
+
   /**
    * @param cwd Working directory for git commands.
    * @param baseEnv Environment variables injected into every command (e.g.
@@ -91,7 +102,11 @@ export class GitExecutor {
   constructor(
     private cwd: string,
     private baseEnv: Record<string, string> = {},
-  ) {}
+  ) {
+    // Function lookup at construction time, not module initialization: the
+    // workspace factory itself imports GitExecutor.
+    this.owner = gitWorkspaceOwnership(cwd);
+  }
 
   /**
    * Run a multi-command Git transaction while holding the global git mutex for
@@ -194,22 +209,45 @@ export class GitExecutor {
   ): Promise<GitExecResult> {
     // Nested calls inside withLock() already own the mutex.
     const release = GitExecutor.holdsLock() ? () => {} : await gitMutex.acquire();
+    let cleanup = () => {};
     try {
-      const proc = Bun.spawn(['git', ...args], {
-        cwd,
-        env,
-        // A dedicated process group lets timeout cleanup reach Git hooks,
-        // credential helpers, transports, and other descendants that may keep
-        // inherited stdout/stderr pipes open after the direct process exits.
-        detached: true,
-        // One-shot Git commands do not need an interactive stdin pipe. Passing
-        // the complete buffer to Bun atomically avoids the FileSink
-        // write/flush/close race (and makes short rev-list/pack/hash commands
-        // deterministic even when Git exits immediately).
-        stdin: stdin !== undefined ? new TextEncoder().encode(stdin) : undefined,
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const owner = this.owner ?? gitWorkspaceOwnership(this.cwd) ?? gitWorkspaceOwnership(cwd);
+      if (owner) this.owner = owner;
+      let proc: GitProcess;
+      if (owner) {
+        assertIndependentChatGitDirectory(owner.checkout);
+        // Host reconciliation may update worker metadata anywhere in its own
+        // chat, but never the source repository, sibling chats, or host state.
+        // This is mandatory even when workspace.sandbox is disabled in policy.
+        const sandbox = spawnSandboxed(['git', ...args], {
+          allowedRoots: [owner.checkout],
+          requiredWorkspaceRoot: owner.checkout,
+          cwd,
+          env,
+          blockNetwork: false,
+          blockSubprocesses: false,
+          stdin: 'pipe',
+          detached: true,
+        });
+        cleanup = sandbox.cleanup;
+        proc = adaptSandboxedProcess(sandbox.proc, stdin);
+      } else {
+        proc = Bun.spawn(['git', ...args], {
+          cwd,
+          env,
+          // A dedicated process group lets timeout cleanup reach Git hooks,
+          // credential helpers, transports, and other descendants that may keep
+          // inherited stdout/stderr pipes open after the direct process exits.
+          detached: true,
+          // One-shot Git commands do not need an interactive stdin pipe. Passing
+          // the complete buffer to Bun atomically avoids the FileSink
+          // write/flush/close race (and makes short rev-list/pack/hash commands
+          // deterministic even when Git exits immediately).
+          stdin: stdin !== undefined ? new TextEncoder().encode(stdin) : undefined,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+      }
 
       // Stream reads, process exit, and the deadline run concurrently. Waiting
       // for either stream before racing the deadline would let a descendant
@@ -306,7 +344,11 @@ export class GitExecutor {
         if (timer !== undefined) clearTimeout(timer);
       }
     } finally {
-      release();
+      try {
+        cleanup();
+      } finally {
+        release();
+      }
     }
   }
 
@@ -374,6 +416,46 @@ export class GitExecutor {
   }
 }
 
+/** Common lifecycle surface for the Bun direct child and Node sandbox child. */
+interface GitProcess {
+  readonly pid: number;
+  readonly exitCode: number | null;
+  exited: Promise<number | null>;
+  stdout: ReadableStream<Uint8Array> | null;
+  stderr: ReadableStream<Uint8Array> | null;
+  kill(signal: NodeJS.Signals): unknown;
+  unref(): unknown;
+}
+
+function adaptSandboxedProcess(child: ChildProcess, stdin?: string): GitProcess {
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.once('exit', resolve);
+    child.once('error', reject);
+  });
+  // Node queues and closes this pipe asynchronously. Never await a write before
+  // starting the command deadline: a helper may refuse to consume its stdin.
+  // EPIPE is expected if a short-lived Git command does not read the input.
+  child.stdin?.on('error', () => {});
+  child.stdin?.end(stdin);
+  return {
+    get pid() {
+      return child.pid ?? 0;
+    },
+    get exitCode() {
+      return child.exitCode;
+    },
+    exited,
+    stdout: child.stdout
+      ? (Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>)
+      : null,
+    stderr: child.stderr
+      ? (Readable.toWeb(child.stderr) as unknown as ReadableStream<Uint8Array>)
+      : null,
+    kill: (signal) => child.kill(signal),
+    unref: () => child.unref(),
+  };
+}
+
 interface TerminationResult {
   escalatedToKill: boolean;
   stopped: boolean;
@@ -384,7 +466,7 @@ interface TerminationResult {
  * direct-process kill is the safest available fallback. Every wait is bounded:
  * cleanup must never keep the global git mutex past the timeout grace window.
  */
-async function terminateProcessTree(proc: Bun.Subprocess): Promise<TerminationResult> {
+async function terminateProcessTree(proc: GitProcess): Promise<TerminationResult> {
   signalProcessTree(proc, 'SIGTERM');
   if (await waitForProcessTreeExit(proc, TERM_GRACE_MS)) {
     return { escalatedToKill: false, stopped: true };
@@ -404,7 +486,7 @@ async function terminateProcessTree(proc: Bun.Subprocess): Promise<TerminationRe
   return { escalatedToKill: true, stopped };
 }
 
-function signalProcessTree(proc: Bun.Subprocess, signal: NodeJS.Signals): void {
+function signalProcessTree(proc: GitProcess, signal: NodeJS.Signals): void {
   if (process.platform !== 'win32' && proc.pid > 0) {
     try {
       // `detached: true` makes the child a process-group leader on POSIX.
@@ -423,7 +505,7 @@ function signalProcessTree(proc: Bun.Subprocess, signal: NodeJS.Signals): void {
   }
 }
 
-async function waitForProcessTreeExit(proc: Bun.Subprocess, timeoutMs: number): Promise<boolean> {
+async function waitForProcessTreeExit(proc: GitProcess, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (isProcessTreeAlive(proc)) {
     const remaining = deadline - Date.now();
@@ -433,7 +515,7 @@ async function waitForProcessTreeExit(proc: Bun.Subprocess, timeoutMs: number): 
   return true;
 }
 
-function isProcessTreeAlive(proc: Bun.Subprocess): boolean {
+function isProcessTreeAlive(proc: GitProcess): boolean {
   if (process.platform !== 'win32' && proc.pid > 0) {
     try {
       process.kill(-proc.pid, 0);

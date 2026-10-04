@@ -9,7 +9,10 @@
 
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
-import { FEATURED_MCP_SERVERS } from '../../mcp/featured-registry';
+import {
+  FEATURED_MCP_SERVERS,
+  type McpAuthRequirement,
+} from '../../mcp/featured-registry';
 import { serverLog } from '../../logger';
 
 const REGISTRY_BASE_URL = 'https://registry.modelcontextprotocol.io';
@@ -28,6 +31,7 @@ interface RegistryPackage {
   runtimeHint?: string;
   transport?: { type: string };
   runtimeArguments?: Array<{ value: string; type?: string }>;
+  packageArguments?: Array<{ value: string; type?: string }>;
   environmentVariables?: Array<{
     name: string;
     description?: string;
@@ -94,83 +98,178 @@ export interface McpRegistrySearchResult {
     description: string;
     isSecret: boolean;
   }>;
+  /** What the user will have to do to make this server work. */
+  auth: McpAuthRequirement;
 }
 
-function pickBestPackage(server: RegistryServer): RegistryPackage | null {
+export function pickBestPackage(server: RegistryServer): RegistryPackage | null {
   if (!server.packages || server.packages.length === 0) return null;
   // Prefer npm (npx) packages since they're the most common and easiest to run.
   const npm = server.packages.find((p) => p.registryType === 'npm');
   return npm ?? server.packages[0];
 }
 
-function pickBestRemote(server: RegistryServer): RegistryRemote | null {
+export function pickBestRemote(server: RegistryServer): RegistryRemote | null {
   if (!server.remotes || server.remotes.length === 0) return null;
-  // Prefer SSE since that's what our add form supports directly.
+  // Prefer streamable-http: it is what hosted MCP servers ship today and what
+  // our client speaks. Genuine `sse` endpoints are the fallback. Preferring
+  // `r.type === 'sse'` first (as this used to) never matched anything, because
+  // the registry labels hosted endpoints `streamable-http`.
+  const streamable = server.remotes.find((r) => r.type === 'streamable-http');
+  if (streamable) return streamable;
   const sse = server.remotes.find((r) => r.type === 'sse');
   return sse ?? server.remotes[0];
 }
 
-function buildCommand(pkg: RegistryPackage): { command: string; args: string[] } | null {
+export function buildCommand(pkg: RegistryPackage): { command: string; args: string[] } | null {
   if (!pkg.identifier) return null;
-  const runtime = pkg.runtimeHint ?? (pkg.registryType === 'npm' ? 'npx' : 'uvx');
+
+  // Per the registry schema, `runtimeArguments` belong to the runtime command
+  // (npx/uvx/docker/dnx) and therefore come BEFORE the identifier, while
+  // `packageArguments` belong to the package binary and come AFTER it. This
+  // function used to append runtimeArguments after the identifier and inject
+  // its own `-y`, producing `npx -y <pkg> -y <pkgArg>`.
   const runtimeArgs = (pkg.runtimeArguments ?? []).map((a) => a.value);
-  if (runtime === 'npx') {
-    return { command: 'npx', args: ['-y', pkg.identifier, ...runtimeArgs] };
+  const packageArgs = (pkg.packageArguments ?? []).map((a) => a.value);
+  const identifier = pkg.identifier;
+
+  switch (pkg.runtimeHint) {
+    case 'npx':
+    case 'dnx': {
+      // npx needs `-y` to skip the install prompt. Most registry entries
+      // already list it in runtimeArguments; only add it when missing.
+      const head = runtimeArgs.includes('-y') ? runtimeArgs : ['-y', ...runtimeArgs];
+      return { command: 'npx', args: [...head, identifier, ...packageArgs] };
+    }
+    case 'uvx':
+      return { command: 'uvx', args: [...runtimeArgs, identifier, ...packageArgs] };
+    case 'docker':
+    case 'podman': {
+      // For OCI packages the identifier is the image reference.
+      const head = runtimeArgs.length > 0 ? runtimeArgs : ['run', '-i', '--rm'];
+      return { command: pkg.runtimeHint, args: [...head, identifier, ...packageArgs] };
+    }
+    default: {
+      // No usable runtime hint. Only npm and pypi can be derived safely;
+      // anything else would spawn a wrong executable, so surface nothing and
+      // let the caller fall back to a remote transport.
+      const inferred =
+        pkg.registryType === 'npm' ? 'npx' : pkg.registryType === 'pypi' ? 'uvx' : null;
+      if (!inferred) return null;
+      if (inferred === 'npx') {
+        const head = runtimeArgs.includes('-y') ? runtimeArgs : ['-y', ...runtimeArgs];
+        return { command: 'npx', args: [...head, identifier, ...packageArgs] };
+      }
+      return { command: 'uvx', args: [...runtimeArgs, identifier, ...packageArgs] };
+    }
   }
-  if (runtime === 'uvx') {
-    return { command: 'uvx', args: [pkg.identifier, ...runtimeArgs] };
-  }
-  // Unknown runtime — surface the raw command as best-effort.
-  return { command: runtime, args: [pkg.identifier, ...runtimeArgs] };
 }
 
-function mapSearchResult(item: RegistryListItem): McpRegistrySearchResult | null {
+export function mapSearchResult(item: RegistryListItem): McpRegistrySearchResult | null {
   const server = item.server;
   if (!server?.name) return null;
 
   const pkg = pickBestPackage(server);
   const remote = pickBestRemote(server);
 
-  // Determine transport: prefer stdio if a package exists, else remote.
-  let transport: 'stdio' | 'sse' = 'stdio';
-  let command: string | null = null;
-  let args: string[] = [];
-  let envVars: McpRegistrySearchResult['envVars'] = [];
-  let url: string | null = null;
-  let headerVars: McpRegistrySearchResult['headerVars'] = [];
+  // Determine transport. A stdio entry is only usable if we can actually build
+  // a runnable command: `transport: 'stdio'` with `command: null` previously
+  // produced an add-form that 422'd with "command is required for stdio".
+  const built = pkg ? buildCommand(pkg) : null;
+  const stdio: {
+    transport: 'stdio';
+    command: string;
+    args: string[];
+    envVars: McpRegistrySearchResult['envVars'];
+  } | null = built
+    ? {
+        transport: 'stdio',
+        command: built.command,
+        args: built.args,
+        envVars: (pkg?.environmentVariables ?? []).map((v) => ({
+          name: v.name,
+          description: v.description ?? '',
+          isRequired: v.isRequired ?? false,
+          isSecret: v.isSecret ?? false,
+          defaultValue: v.default ?? null,
+        })),
+      }
+    : null;
 
-  if (pkg) {
-    const built = buildCommand(pkg);
-    if (built) {
-      command = built.command;
-      args = built.args;
-    }
-    envVars = (pkg.environmentVariables ?? []).map((v) => ({
-      name: v.name,
-      description: v.description ?? '',
-      isRequired: v.isRequired ?? false,
-      isSecret: v.isSecret ?? false,
-      defaultValue: v.default ?? null,
-    }));
+  let transport: 'stdio' | 'sse';
+  let command: string | null;
+  let args: string[];
+  let envVars: McpRegistrySearchResult['envVars'];
+  let url: string | null;
+  let headerVars: McpRegistrySearchResult['headerVars'];
+
+  if (stdio) {
+    // Prefer stdio when it is actually runnable; it needs no network round trip
+    // and the user controls the process.
     transport = 'stdio';
+    command = stdio.command;
+    args = stdio.args;
+    envVars = stdio.envVars;
+    url = null;
+    headerVars = [];
   } else if (remote) {
+    transport = 'sse';
+    command = null;
+    args = [];
+    envVars = [];
     url = remote.url;
     headerVars = (remote.headers ?? []).map((h) => ({
       name: h.name,
       description: h.description ?? '',
       isSecret: h.isSecret ?? false,
     }));
-    // Our add form uses "sse" for any remote HTTP transport.
-    transport = 'sse';
   } else {
-    // No installable package and no remote — skip.
+    // Nothing runnable: no installable package we can drive and no remote.
     return null;
+  }
+
+  const title = server.title ?? server.name;
+  const requiredEnv = envVars.filter((v) => v.isRequired);
+
+  let auth: McpAuthRequirement;
+  if (transport === 'stdio') {
+    if (requiredEnv.length > 0) {
+      const names = requiredEnv.map((v) => v.name).join(', ');
+      auth = {
+        kind: 'env',
+        label: 'Needs a key or connection string',
+        detail: `Enter ${names} when adding this server. Koryphaios stores the value securely and never shows it again.`,
+      };
+    } else {
+      auth = {
+        kind: 'none',
+        label: 'No sign-in',
+        detail: `Runs ${title} locally. No credentials needed.`,
+      };
+    }
+  } else if (headerVars.length > 0) {
+    auth = {
+      kind: 'headers',
+      label: 'Needs a credential',
+      detail: `Paste your ${title} credential into the ${headerVars
+        .map((h) => h.name)
+        .join(', ')} header when adding this server.`,
+    };
+  } else {
+    // A remote endpoint with no declared credential almost always means OAuth.
+    // Discovery decides whether Koryphaios can drive it automatically; if it
+    // cannot, Authorize explains why and asks for app credentials instead.
+    auth = {
+      kind: 'oauth',
+      label: `Sign in with ${title}`,
+      detail: `Koryphaios opens ${title} in your browser so you can approve access. Nothing is shared until you do.`,
+    };
   }
 
   return {
     id: server.name,
     name: server.name,
-    title: server.title ?? server.name,
+    title,
     description: server.description ?? '',
     version: server.version ?? '',
     websiteUrl: server.websiteUrl ?? null,
@@ -181,6 +280,7 @@ function mapSearchResult(item: RegistryListItem): McpRegistrySearchResult | null
     envVars,
     url,
     headerVars,
+    auth,
   };
 }
 

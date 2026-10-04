@@ -22,6 +22,7 @@
   import Target from 'lucide-svelte/icons/target';
   import Settings from 'lucide-svelte/icons/settings';
   import Workflow from 'lucide-svelte/icons/workflow';
+  import ListChecks from 'lucide-svelte/icons/list-checks';
   import Zap from 'lucide-svelte/icons/zap';
   import Pencil from 'lucide-svelte/icons/pencil';
   import MessageCircleQuestion from 'lucide-svelte/icons/message-circle-question';
@@ -41,10 +42,13 @@
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
   import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
   import {
+    forgetTrustedImageModel,
+    hasTrustedImageModel,
     modelHasVerifiedImageInput,
     needsImageInputChoice,
     readRememberedImageInputMode,
     rememberImageInputMode,
+    rememberTrustedImageModel,
     type ImageInputMode,
   } from '$lib/utils/image-input-fallback';
   import {
@@ -64,6 +68,8 @@
   import type { GoalActionRequest } from '$lib/utils/goal-actions';
   import GoalMode from './GoalMode.svelte';
   import ChecklistPanel from './ChecklistPanel.svelte';
+  import { checklistStore } from '$lib/stores/checklists.svelte';
+  import GitWorkspaceControl from './GitWorkspaceControl.svelte';
   import {
     clearComposerDraft,
     loadComposerDraft,
@@ -78,6 +84,8 @@
     saveComposerSessionState,
   } from '$lib/stores/composer-session-state';
   import KorySelect from './KorySelect.svelte';
+  import MediaAttachment from './MediaAttachment.svelte';
+  import { chatMediaKind, chatMediaMimeType, MAX_CHAT_MEDIA_BYTES } from '@koryphaios/shared';
   import { loadLocalFormDraft, saveLocalFormDraft } from '$lib/utils/local-form-drafts';
   import { estimateCacheBreakImpact, formatCompactTokens } from '$lib/utils/cache-break-impact';
 
@@ -87,6 +95,98 @@
     name: string;
     mimeType?: string;
   };
+
+  let mediaFileInputRef: HTMLInputElement;
+  let mediaReadQueue = Promise.resolve();
+
+  async function addMediaFiles(files: File[]) {
+    const sessionId = sessionStore.activeSessionId;
+    const draft = draftKey;
+    for (const file of files) {
+      const mimeType = chatMediaMimeType(file.name, file.type);
+      const kind = chatMediaKind(mimeType);
+      if (!kind) { toastStore.error(`Unsupported media file: ${file.name}`); continue; }
+      if (!file.size) { toastStore.error(`The media file is empty: ${file.name}`); continue; }
+      const existingBytes = attachments.reduce((sum, attachment) => sum + Math.ceil(attachment.data.length * 3 / 4), 0);
+      if (existingBytes + file.size > MAX_CHAT_MEDIA_BYTES) {
+        toastStore.error('Chat media attachments must total 15 MB or less. Choose a smaller clip.');
+        continue;
+      }
+      try {
+        const data = await blobBase64(file);
+        if (sessionStore.activeSessionId !== sessionId || draftKey !== draft) return;
+        attachments = [...attachments, { type: kind === 'image' ? 'image' : 'file', data, name: file.name, mimeType }];
+      } catch (error) {
+        toastStore.error(error instanceof Error ? error.message : `Could not read ${file.name}`);
+      }
+    }
+  }
+
+  function queueMediaFiles(files: File[]) {
+    if (disabled || imageAdmissionPending) return;
+    let pending: Promise<void>;
+    const sessionId = sessionStore.activeSessionId;
+    const draft = draftKey;
+    pending = mediaReadQueue.then(() => {
+      if (sessionStore.activeSessionId !== sessionId || draftKey !== draft) return;
+      return addMediaFiles(files);
+    }).finally(() => pendingAttachmentReads.delete(pending));
+    mediaReadQueue = pending.catch(() => {});
+    pendingAttachmentReads.add(pending);
+  }
+
+  function handleMediaDrop(event: DragEvent) {
+    if (!event.dataTransfer?.files.length) return;
+    event.preventDefault();
+    queueMediaFiles(Array.from(event.dataTransfer.files));
+  }
+
+  async function useAudioTranscript(attachment: Attachment) {
+    if (isTranscribing || imageAdmissionPending) return;
+    isTranscribing = true;
+    const sessionId = sessionStore.activeSessionId;
+    const draft = draftKey;
+    try {
+      const settingsResponse = await apiFetch(apiUrl('/api/voice/settings'));
+      const settingsResult = await settingsResponse.json();
+      if (!settingsResponse.ok || !settingsResult.data?.input) throw new Error('Could not load voice settings.');
+      const settings = settingsResult.data as VoiceSettings;
+      let text: string;
+      if (settings.input.provider === 'kory-local') {
+        const bytes = Uint8Array.from(atob(attachment.data), (char) => char.charCodeAt(0));
+        const context = new AudioContext();
+        try {
+          const decoded = await context.decodeAudioData(bytes.buffer);
+          const mono = new Float32Array(decoded.length);
+          for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+            const samples = decoded.getChannelData(channel);
+            for (let i = 0; i < mono.length; i++) mono[i] += samples[i] / decoded.numberOfChannels;
+          }
+          const result = await invoke<{ text: string }>('transcribe_local_voice', {
+            pcmBase64: await pcm16Base64(resampleTo16Khz(mono, decoded.sampleRate)),
+            language: settings.input.language,
+          });
+          text = result.text;
+        } finally { await context.close(); }
+      } else if (settings.input.provider === 'system') {
+        throw new Error('System speech recognition records the microphone. For audio files, choose Kory Voice or a transcription API in Settings → Voice.');
+      } else {
+        const response = await apiFetch(apiUrl('/api/voice/transcribe'), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ audioBase64: attachment.data, mimeType: attachment.mimeType, language: settings.input.language }),
+        });
+        const result = await response.json();
+        if (!response.ok || !result.data?.text) throw new Error(result.error || 'Transcription failed.');
+        text = result.data.text;
+      }
+      if (!text?.trim()) throw new Error('No speech was detected.');
+      if (sessionStore.activeSessionId !== sessionId || draftKey !== draft || !attachments.includes(attachment)) return;
+      appendTranscription(text);
+      attachments = attachments.filter((item) => item !== attachment);
+    } catch (error) {
+      toastStore.error(error instanceof Error ? error.message : 'Transcription failed.');
+    } finally { isTranscribing = false; }
+  }
 
   interface Props {
     onSend: (
@@ -319,10 +419,12 @@
     sessionId: string;
     imageCount: number;
   } | null>(null);
-  // Non-persistent choices made while switching models authorize exactly the
-  // next send. The separate "Don't ask again" choice is the only durable one.
+  // Non-persistent choices authorize the next send. Only "Remember my choice"
+  // makes a capability correction durable for this exact provider/model.
   let oneShotImageOmitConsents = $state<Set<string>>(new Set());
+  let oneShotImageAllowConsents = $state<Set<string>>(new Set());
   let imageFallbackWarning = $state<{
+    sessionId: string | null;
     mode: 'model-switch' | 'send';
     targetValue: string;
     targetLabel: string;
@@ -389,6 +491,9 @@
   let referenceFolderInputRef = $state<HTMLInputElement>();
   let showReferenceMenu = $state(false);
   let showGoalActions = $state(false);
+  // Checklists stay behind the more-actions menu until asked for, so an unused
+  // list never takes composer space away from the message being written.
+  let showChecklists = $state(false);
 
   // ─── Goal composer (lives above the chat, not in the sidebar) ───────────────
   const goalScopeOptions = [
@@ -873,7 +978,9 @@
 
   let filteredQuickModels = $derived.by(() => {
     const candidates = modelPickerVisionOnly
-      ? availableModels.filter((model) => modelHasVerifiedImageInput(model))
+      ? availableModels.filter(
+          (model) => modelHasVerifiedImageInput(model) || hasImageAllowConsent(model.value),
+        )
       : availableModels;
     const query = modelSearchQuery.trim().toLowerCase();
     if (!query) return candidates;
@@ -1292,6 +1399,28 @@
     return remembered === 'omit' || oneShotImageOmitConsents.has(imageConsentKey(modelValue));
   }
 
+  function hasImageAllowConsent(modelValue: string): boolean {
+    const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
+    return (
+      hasTrustedImageModel(storage, modelValue) ||
+      oneShotImageAllowConsents.has(imageConsentKey(modelValue))
+    );
+  }
+
+  function grantImageAllowConsent(modelValue: string, remember: boolean, oneShot = false) {
+    if (remember) {
+      rememberTrustedImageModel(
+        typeof localStorage === 'undefined' ? undefined : localStorage,
+        modelValue,
+      );
+    } else if (oneShot) {
+      oneShotImageAllowConsents = new Set([
+        ...oneShotImageAllowConsents,
+        imageConsentKey(modelValue),
+      ]);
+    }
+  }
+
   function grantImageOmitConsent(modelValue: string, remember: boolean, oneShot = false) {
     if (remember) {
       rememberImageInputMode(
@@ -1312,6 +1441,14 @@
     const next = new Set(oneShotImageOmitConsents);
     next.delete(key);
     oneShotImageOmitConsents = next;
+  }
+
+  function consumeOneShotImageAllowConsent(modelValue: string) {
+    const key = imageConsentKey(modelValue);
+    if (!oneShotImageAllowConsents.has(key)) return;
+    const next = new Set(oneShotImageAllowConsents);
+    next.delete(key);
+    oneShotImageAllowConsents = next;
   }
 
   function showImageOmitNotice(modelValue: string) {
@@ -1372,6 +1509,7 @@
       };
     }
     consumeOneShotImageOmitConsent(modelValue);
+    consumeOneShotImageAllowConsent(modelValue);
     if (imageInputMode === 'omit') showImageOmitNotice(modelValue);
     clearCurrentDraft();
   }
@@ -1400,6 +1538,41 @@
     );
   }
 
+  function useImagesWithModel(remember: boolean) {
+    const warning = imageFallbackWarning;
+    if (!warning) return;
+    imageFallbackWarning = null;
+    if (
+      warning.sessionId !== sessionStore.activeSessionId ||
+      (warning.mode === 'send' && warning.targetValue !== selectedModel)
+    ) {
+      return;
+    }
+    grantImageAllowConsent(warning.targetValue, remember, !remember);
+    if (remember) {
+      toastStore.success('Image support remembered for this model.', {
+        duration: 8_000,
+        actionLabel: 'Undo',
+        action: () => {
+          forgetTrustedImageModel(
+            typeof localStorage === 'undefined' ? undefined : localStorage,
+            warning.targetValue,
+          );
+        },
+      });
+    }
+    if (warning.mode === 'model-switch') {
+      applyModelSelection(warning.targetValue);
+      if (!remember) toastStore.info('Model selected. Images will be included in the next send.');
+      return;
+    }
+    void dispatchSend(
+      warning.message ?? value.trim(),
+      'allow',
+      warning.historicalImageCount ?? contextImageCount(),
+    );
+  }
+
   function chooseVisionModelFromWarning() {
     imageFallbackWarning = null;
     // The click bubbles through the window-level outside-click handler. Open
@@ -1408,7 +1581,7 @@
   }
 
   async function send() {
-    if (disabled) return;
+    if (disabled || isTranscribing) return;
     // Local slash commands control Koryphaios itself and must remain usable
     // before a provider/model is selected (Goal Mode, Settings, Time Travel,
     // help, and workspace navigation do not require model authority).
@@ -1447,8 +1620,10 @@
       const totalImages = historicalImages + currentImages;
       const model = findModelDef(currentProvider, currentModel);
       const hasOmitConsent = hasImageOmitConsent(selectedModel);
-      if (needsImageInputChoice(totalImages, model, hasOmitConsent)) {
+      const hasAllowConsent = hasImageAllowConsent(selectedModel);
+      if (needsImageInputChoice(totalImages, model, hasOmitConsent || hasAllowConsent)) {
         imageFallbackWarning = {
+          sessionId: sendSessionId,
           mode: 'send',
           targetValue: selectedModel,
           targetLabel: selectedModelLabel,
@@ -1456,6 +1631,10 @@
           historicalImageCount: historicalImages,
           message: trimmed,
         };
+        return;
+      }
+      if (totalImages > 0 && hasAllowConsent) {
+        await dispatchSend(trimmed, 'allow', historicalImages);
         return;
       }
       if (totalImages > 0 && !modelHasVerifiedImageInput(model) && hasOmitConsent) {
@@ -2001,6 +2180,14 @@
         ? new Set([targetConsentKey])
         : new Set();
     }
+    if (
+      oneShotImageAllowConsents.size > 0 &&
+      !(oneShotImageAllowConsents.size === 1 && oneShotImageAllowConsents.has(targetConsentKey))
+    ) {
+      oneShotImageAllowConsents = oneShotImageAllowConsents.has(targetConsentKey)
+        ? new Set([targetConsentKey])
+        : new Set();
+    }
     selectedModel = value;
     showModelPicker = false;
     if (typeof localStorage !== 'undefined') localStorage.setItem(MODEL_STORAGE_KEY, value);
@@ -2040,9 +2227,17 @@
       const imageCount =
         historicalImageCount +
         admissionAttachments.filter((attachment) => attachment.type === 'image').length;
-      if (target && needsImageInputChoice(imageCount, target, hasImageOmitConsent(value))) {
+      if (
+        target &&
+        needsImageInputChoice(
+          imageCount,
+          target,
+          hasImageOmitConsent(value) || hasImageAllowConsent(value),
+        )
+      ) {
         showModelPicker = false;
         imageFallbackWarning = {
+          sessionId: selectionSessionId,
           mode: 'model-switch',
           targetValue: value,
           targetLabel: target.label,
@@ -2154,10 +2349,11 @@
     if (!target.closest('.reference-picker')) showReferenceMenu = false;
     if (!target.closest('.permission-picker')) showPermissionMenu = false;
     if (!target.closest('.agent-mode-picker')) showAgentModeMenu = false;
+    if (!target.closest('.more-actions-picker')) showGoalActions = false;
   }
 
   let canSend = $derived(
-    !disabled && !imageAdmissionPending && (value.trim().length > 0 || attachments.length > 0),
+    !disabled && !isTranscribing && !imageAdmissionPending && (value.trim().length > 0 || attachments.length > 0),
   );
 
   // Dropdown, not a blind cycle button — all three modes stay visible and
@@ -2539,7 +2735,8 @@
 
 <svelte:window onclick={handleClickOutside} />
 
-<div class="command-input px-4 py-3" onpaste={handlePaste}>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="command-input px-4 py-3" onpaste={handlePaste} ondrop={handleMediaDrop} ondragover={(event) => { if (event.dataTransfer?.types.includes('Files')) event.preventDefault(); }}>
   <!-- No project: show error -->
   {#if disabled}
     <div
@@ -2901,6 +3098,15 @@
           </div>
         {/if}
       </div>
+
+      {#if sessionStore.activeSessionId}
+        <GitWorkspaceControl
+          sessionId={sessionStore.activeSessionId}
+          revision={sessionStore.sessions.find((session) => session.id === sessionStore.activeSessionId)?.version ?? 0}
+          placement="composer"
+          busy={isRunning || isWaiting}
+        />
+      {/if}
     </div>
 
     {#if goalDisplayStore.composer && showGoalComposer}
@@ -2971,7 +3177,7 @@
       </div>
     {/if}
 
-    <ChecklistPanel />
+    <ChecklistPanel open={showChecklists} onDismiss={() => (showChecklists = false)} />
     <GoalMode />
 
     {#if workflowStatus}
@@ -3046,7 +3252,7 @@
             {#each attachments as attachment, i}
               <div
                 class="relative group rounded-lg overflow-hidden border"
-                style="border-color: var(--color-border); width: 64px; height: 64px;"
+                style="border-color: var(--color-border); width: {attachment.type === 'image' ? '64px' : 'min(100%, 360px)'};"
               >
                 {#if attachment.type === 'image'}
                   <button
@@ -3059,9 +3265,16 @@
                     <img
                       src={`data:${attachment.mimeType ?? 'image/png'};base64,${attachment.data}`}
                       alt={attachment.name}
-                      class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      class="h-16 w-16 object-cover transition-transform duration-200 group-hover:scale-105"
                     />
                   </button>
+                {:else}
+                  <MediaAttachment data={attachment.data} name={attachment.name} mimeType={attachment.mimeType} />
+                  {#if chatMediaKind(attachment.mimeType) === 'audio'}
+                    <button type="button" class="px-3 pb-2 text-xs text-[var(--color-accent)]" disabled={isTranscribing || imageAdmissionPending}
+                      title="Replace this audio attachment with editable speech-to-text using your Voice settings"
+                      onclick={() => void useAudioTranscript(attachment)}>{isTranscribing ? 'Transcribing…' : 'Use transcript'}</button>
+                  {/if}
                 {/if}
                 <button
                   type="button"
@@ -3099,6 +3312,8 @@
               : ''}"
           ></textarea>
           <div class="absolute bottom-2 right-1 flex items-center gap-0.5 reference-picker">
+            <input type="file" multiple accept="image/*,audio/*,video/*" class="hidden" aria-label="Attach images, audio, or video" bind:this={mediaFileInputRef}
+              onchange={(event) => { queueMediaFiles(Array.from(event.currentTarget.files ?? [])); event.currentTarget.value = ''; }} />
             <input
               type="file"
               multiple
@@ -3114,7 +3329,7 @@
               onchange={handleReferenceFolderInput}
               webkitdirectory
             />
-            <div class="relative">
+            <div class="relative more-actions-picker">
               <button
                 type="button"
                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-colors hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed"
@@ -3122,10 +3337,13 @@
                 onclick={() => (showGoalActions = !showGoalActions)}
                 disabled={disabled || imageAdmissionPending || !!configurationWarning}
                 aria-label="More composer actions"
+                aria-haspopup="menu"
+                aria-expanded={showGoalActions}
                 title="More actions"><Plus size={16} /></button
               >
               {#if showGoalActions}
                 <div
+                  role="menu"
                   class="absolute bottom-full right-0 mb-1 w-48 rounded-lg border shadow-xl z-50 overflow-hidden"
                   style="background: var(--color-surface-2); border-color: var(--color-border);"
                 >
@@ -3153,6 +3371,19 @@
                     >{/if}
                   <button
                     type="button"
+                    role="menuitem"
+                    class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
+                    style="color: var(--color-text-primary);"
+                    onclick={() => {
+                      showGoalActions = false;
+                      showChecklists = true;
+                    }}
+                  >
+                    <ListChecks size={14} />
+                    {checklistStore.active.length > 0 ? 'Checklists' : 'New checklist'}
+                  </button>
+                  <button
+                    type="button"
                     class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-surface-3)]"
                     style="color: var(--color-text-primary);"
                     onclick={() => {
@@ -3170,7 +3401,7 @@
                 style="color: var(--color-text-muted);"
                 onclick={() => (showReferenceMenu = !showReferenceMenu)}
                 disabled={disabled || imageAdmissionPending || !!configurationWarning}
-                title="Reference a file or folder"
+                title="Attach media or reference a file or folder"
               >
                 <Paperclip size={16} />
               </button>
@@ -3179,6 +3410,10 @@
                   class="absolute bottom-full right-0 mb-1 w-40 rounded-lg border shadow-xl z-50 overflow-hidden"
                   style="background: var(--color-surface-2); border-color: var(--color-border);"
                 >
+                  <button type="button" class="w-full text-left px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-surface-3)]"
+                    onclick={() => { showReferenceMenu = false; mediaFileInputRef?.click(); }}>
+                    Attach image, audio, video…
+                  </button>
                   <button
                     type="button"
                     class="w-full text-left px-3 py-2 text-xs hover:bg-[var(--color-surface-3)]"
@@ -3430,8 +3665,12 @@
 {#if imageFallbackWarning}
   <ImageInputFallbackDialog
     modelLabel={imageFallbackWarning.targetLabel}
+    modelSupportsVision={availableModels.find(
+      (model) => model.value === imageFallbackWarning?.targetValue,
+    )?.vision === true}
     imageCount={imageFallbackWarning.imageCount}
     mode={imageFallbackWarning.mode}
+    onallow={useImagesWithModel}
     oncontinue={continueWithoutImageInput}
     onchoosemodel={chooseVisionModelFromWarning}
     oncancel={() => (imageFallbackWarning = null)}

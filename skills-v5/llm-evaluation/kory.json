@@ -149,18 +149,18 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/graders",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI grader documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI grader documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current deterministic/text/model grader types, grader-prompt iteration, calibration examples and reward/grader-hacking cautions.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/agent-evals",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI agent-evaluation documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Trace grading, workflow-level evidence, datasets and repeatable eval runs for agent systems.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://platform.claude.com/docs/en/test-and-evaluate/develop-tests",

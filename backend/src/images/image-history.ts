@@ -257,7 +257,11 @@ export async function saveImageHistory(
 export async function listImageHistory(limit = 24): Promise<ImageHistoryEntry[]> {
   try {
     const rows = withDb()
-      .prepare(`SELECT * FROM image_history ORDER BY ts DESC, id DESC LIMIT ?`)
+      // `ts` is millisecond-resolution, so two images saved in the same
+      // millisecond tie. `id` is a random UUID and ordered them arbitrarily;
+      // SQLite's implicit rowid increases monotonically with insertion, so it
+      // is the honest newest-first tiebreaker and needs no schema change.
+      .prepare(`SELECT * FROM image_history ORDER BY ts DESC, rowid DESC LIMIT ?`)
       .all(Math.max(1, Math.min(limit, 100))) as unknown as ImageHistoryRow[];
     return rows.map(rowToEntry);
   } catch (err: unknown) {
@@ -291,9 +295,9 @@ export async function getImageHistoryEntry(
 export async function deleteImageHistoryEntry(id: string): Promise<boolean> {
   try {
     const database = withDb();
-    const row = database
-      .prepare(`SELECT file FROM image_history WHERE id = ?`)
-      .get(id) as { file: string } | null;
+    const row = database.prepare(`SELECT file FROM image_history WHERE id = ?`).get(id) as {
+      file: string;
+    } | null;
     if (!row) return false;
     // Unlink first: a crash after row loss loses only metadata, while an
     // orphaned image file would never be garbage collected.

@@ -20,6 +20,11 @@
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
+export * from './computer-use';
+export * from './git-workspace';
+export * from './chat-git';
+export * from './provider-execution';
+
 // ============== Agent & Worker Types ==============
 export type { AgentRole, AgentStatus, WorkerDomain, AgentIdentity } from './types/AgentTypes';
 
@@ -85,10 +90,12 @@ export type {
   CollaborationTierPermissions,
   CollaborationAccessTier,
   CollaborationPolicy,
+  SharedTeamFolder,
 } from './types/CollaborationTypes';
 export {
   DEFAULT_COLLABORATION_POLICY,
   DEFAULT_COLLABORATION_TIERS,
+  sharedTeamFolders,
 } from './types/CollaborationTypes';
 export type {
   ProviderShareRisk,
@@ -123,6 +130,9 @@ export {
   providerSupport,
   isProviderCertified,
   isProviderRunnableByTier,
+  isProviderCapabilityOnly,
+  providerCapabilityKinds,
+  capabilityAdapterProviders,
 } from './provider-support';
 export type {
   ProviderSupportTier,
@@ -308,6 +318,9 @@ export type {
   SynthesisRequest,
   SynthesisResult,
 } from './types/VoiceTypes';
+
+// ============== Chat Media ==============
+export { MAX_CHAT_MEDIA_BYTES, chatMediaMimeType, chatMediaKind } from './media';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Backward Compatibility Re-exports

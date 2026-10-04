@@ -21,6 +21,15 @@ export interface ExternalEnvironmentGate {
 
 export const EXTERNAL_ENVIRONMENT_GATES: readonly ExternalEnvironmentGate[] = [
   {
+    skill: 'computer-use',
+    scenarioIds: [
+      'computer-use-full-task-authorized-export',
+      'computer-use-full-task-revocation-race',
+    ],
+    blocker:
+      'Requires a real supported desktop session with the first party computer use adapter, sacrificial authorized and denied targets, native observation and interaction, permission and identity race injection, model image transport, and recorded native action results; fake adapters or source only simulation cannot certify live desktop behavior.',
+  },
+  {
     skill: 'csharp-dotnet-engineering',
     scenarioIds: [
       'csharp-dotnet-engineering-full-task-1-individual',

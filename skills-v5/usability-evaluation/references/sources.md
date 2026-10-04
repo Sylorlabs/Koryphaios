@@ -23,4 +23,4 @@ Rampstack's MIT `usability-testing` package contains strong operational patterns
 - GOV.UK moderated usability testing: official Service Manual guidance verified 2026-09-04; recheck within 90 days.
 - GOV.UK research-session analysis: official Service Manual guidance verified 2026-09-04; recheck within 90 days.
 - Nielsen Norman Group usability heuristics: industry primary-source article checked 2026-09-04; recheck within 120 days.
-- Rampstack `usability-testing`: GitHub `main` inspected 2026-09-04; repository license is MIT. Recheck within 30 days.
+- Rampstack `usability-testing`: GitHub `main` at `e5bc67519991` inspected 2026-10-03; repository license is MIT. Recheck within 30 days.

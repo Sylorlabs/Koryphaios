@@ -56,6 +56,11 @@ Thumbs.db
 # Local agent-tool state
 .workbuddy-ai/
 
+# Personal agent-tool configuration. This is a user-level file that can carry
+# live provider API keys and absolute paths to machine-local plugins; it is not
+# part of the Koryphaios source tree.
+config.json
+
 # IDE
 .vscode/
 .idea/
@@ -71,6 +76,7 @@ audit/current/
 
 # Playwright MCP local artifacts
 backend/.playwright-mcp/
+.playwright-mcp/
 
 # Ephemeral e2e test markers
 PW_AGENTIC_DELETE*

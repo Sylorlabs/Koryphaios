@@ -171,26 +171,26 @@
     {
       "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/cost-optimization-hub.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Cost Optimization Hub documentation as available 2026-09-19",
+      "versionScope": "AWS Cost Optimization Hub documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current consolidated rightsizing/idle/commitment recommendations, deduplication and pricing-discount-aware savings estimates.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.aws.amazon.com/cost-management/latest/userguide/coh-estimated-monthly-savings.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-09-19",
+      "versionScope": "AWS Cost Optimization Hub savings estimation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Estimated monthly savings are normalized approximations and actual savings depend on future usage; aggregation uses amortized cost and recommendation interactions.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.aws.amazon.com/savingsplans/latest/userguide/sp-recommendations.html",
       "sourceType": "official-docs",
-      "versionScope": "AWS Savings Plans recommendations as available 2026-09-19",
+      "versionScope": "AWS Savings Plans recommendations as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current recommendation inputs and projected coverage/utilization; recommendations depend on historical usage/current inventory and are not a forecast of future demand.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     }
   ],
   "authoringMaturity": "individual"

@@ -4,6 +4,7 @@ import { resolve, relative, isAbsolute } from 'node:path';
 import { koryLog, serverLog } from '../logger';
 import { GitExecutor } from './git-executor';
 import { getSafeSubprocessEnv } from '../runtime/safe-env';
+import { gitWorkspaceOwnership, isIndependentChatGitRepository } from './git-owned-workspace';
 
 /** Branch names: alphanumeric, hyphen, underscore, slash (for refs/heads/foo). Max 255 chars. */
 const SAFE_BRANCH_REGEX = /^[a-zA-Z0-9/_.-]{1,255}$/;
@@ -12,15 +13,18 @@ export interface GitFileStatus {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'staged';
   staged: boolean;
+  originalPath?: string;
   additions?: number;
   deletions?: number;
 }
 
 export class GitManager {
   private git: GitExecutor;
+  private owner: ReturnType<typeof gitWorkspaceOwnership>;
 
   constructor(private workingDirectory: string) {
     this.git = new GitExecutor(workingDirectory);
+    this.owner = gitWorkspaceOwnership(workingDirectory);
   }
 
   /** Async git execution via the unified GitExecutor (mutex, timeout, retry). */
@@ -42,6 +46,14 @@ export class GitManager {
   }
 
   isGitRepo(): boolean {
+    const owner = this.owner ?? gitWorkspaceOwnership(this.workingDirectory);
+    if (owner) {
+      this.owner = owner;
+      // Even rev-parse may consult agent-controlled Git configuration. Startup
+      // needs only a filesystem hint; all authoritative runtime queries go
+      // through the mandatory sandbox in GitExecutor, never unrestricted Git.
+      return isIndependentChatGitRepository(owner.checkout);
+    }
     return this.runGitSync(['rev-parse', '--is-inside-work-tree']).success;
   }
 
@@ -49,45 +61,68 @@ export class GitManager {
     if (!this.isGitRepo()) return [];
 
     // 1. Get porcelain status
-    const { success, output: porcelainOutput } = await this.runGit(['status', '--porcelain']);
+    const { success, stdout: porcelainOutput } = await this.git.exec([
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+    ]);
     if (!success) return [];
 
     // 2. Get line stats (numstat)
-    const { output: numstatOutput } = await this.runGit(['diff', 'HEAD', '--numstat']);
-    const { output: stagedNumstatOutput } = await this.runGit(['diff', '--cached', '--numstat']);
-
-    const statsMap = new Map<string, { additions: number; deletions: number }>();
+    const { stdout: numstatOutput } = await this.git.exec(['diff', '--numstat', '-z']);
+    const { stdout: stagedNumstatOutput } = await this.git.exec([
+      'diff',
+      '--cached',
+      '--numstat',
+      '-z',
+    ]);
 
     const parseNumstat = (out: string) => {
-      out.split('\n').forEach((line) => {
-        const [add, del, path] = line.split('\t');
-        if (add && del && path) {
-          statsMap.set(path, {
-            additions: parseInt(add) || 0,
-            deletions: parseInt(del) || 0,
-          });
+      const stats = new Map<string, { additions: number; deletions: number }>();
+      const records = out.split('\0');
+      for (let i = 0; i < records.length; i++) {
+        const record = records[i];
+        const first = record.indexOf('\t');
+        const second = record.indexOf('\t', first + 1);
+        if (first < 0 || second < 0) continue;
+        let path = record.slice(second + 1);
+        if (!path) {
+          // With -z, a rename has separate old/new pathname records.
+          i++;
+          path = records[++i];
         }
-      });
+        if (path)
+          stats.set(path, {
+            additions: Number.parseInt(record.slice(0, first), 10) || 0,
+            deletions: Number.parseInt(record.slice(first + 1, second), 10) || 0,
+          });
+      }
+      return stats;
     };
 
-    parseNumstat(numstatOutput);
-    parseNumstat(stagedNumstatOutput);
+    const unstagedStats = parseNumstat(numstatOutput);
+    const stagedStats = parseNumstat(stagedNumstatOutput);
 
     const files: GitFileStatus[] = [];
-    const lines = porcelainOutput.split('\n').filter(Boolean);
+    const lines = porcelainOutput.split('\0');
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
       const x = line[0];
       const y = line[1];
-      const path = line.slice(3).trim();
-      const stats = statsMap.get(path);
+      const path = line.slice(3);
+      const originalPath =
+        x === 'R' || x === 'C' || y === 'R' || y === 'C' ? lines[++i] : undefined;
 
       if (x !== ' ' && x !== '?') {
         files.push({
           path,
           status: this.mapStatus(x),
           staged: true,
-          ...stats,
+          ...(originalPath && { originalPath }),
+          ...stagedStats.get(path),
         });
       }
 
@@ -96,7 +131,7 @@ export class GitManager {
           path,
           status: this.mapStatus(y),
           staged: false,
-          ...stats,
+          ...unstagedStats.get(path),
         });
       }
     }
@@ -147,13 +182,18 @@ export class GitManager {
   async stageFile(path: string): Promise<boolean> {
     const safePath = this.resolvePathUnderRepo(path);
     if (!safePath) return false;
-    return (await this.runGit(['add', safePath])).success;
+    return (await this.runGit(['add', '--', safePath])).success;
   }
 
   async unstageFile(path: string): Promise<boolean> {
     const safePath = this.resolvePathUnderRepo(path);
     if (!safePath) return false;
-    return (await this.runGit(['reset', 'HEAD', safePath])).success;
+    const renamed = (await this.getStatus()).find(
+      (file) => file.staged && file.path === path && file.originalPath,
+    );
+    const original = renamed?.originalPath ? this.resolvePathUnderRepo(renamed.originalPath) : null;
+    return (await this.runGit(['reset', 'HEAD', '--', safePath, ...(original ? [original] : [])]))
+      .success;
   }
 
   async restoreFile(path: string): Promise<boolean> {
@@ -167,7 +207,36 @@ export class GitManager {
   }
 
   async push(): Promise<{ success: boolean; output: string }> {
-    return this.runGit(['push']);
+    const upstream = await this.runGit(['rev-parse', '--abbrev-ref', '@{upstream}']);
+    if (upstream.success) return this.runGit(['push']);
+    const branch = await this.getBranch();
+    if (!GitManager.validateBranchName(branch) || branch === 'HEAD')
+      return { success: false, output: 'Check out a branch before pushing.' };
+    return this.runGit(['push', '--set-upstream', 'origin', branch]);
+  }
+
+  async getOrigin(): Promise<string | null> {
+    const result = await this.runGit(['remote', 'get-url', 'origin']);
+    return result.success ? result.output.trim() : null;
+  }
+
+  async setOrigin(url: string): Promise<{ success: boolean; output: string }> {
+    // Publication is explicit. Local paths must never point a chat push back
+    // into the source checkout; accept hosted Git transports only.
+    let hosted = false;
+    try {
+      const parsed = new URL(url);
+      hosted =
+        ['https:', 'ssh:'].includes(parsed.protocol) &&
+        !!parsed.hostname &&
+        !parsed.password &&
+        (parsed.protocol !== 'https:' || !parsed.username);
+    } catch {
+      hosted = /^[\w.-]+@[\w.-]+:[^\s]+$/.test(url);
+    }
+    if (!hosted) return { success: false, output: 'Use an HTTPS or SSH Git remote URL.' };
+    const origin = await this.getOrigin();
+    return this.runGit(['remote', origin ? 'set-url' : 'add', 'origin', url]);
   }
 
   async pull(): Promise<{ success: boolean; output: string }> {

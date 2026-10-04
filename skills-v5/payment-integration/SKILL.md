@@ -24,14 +24,17 @@ Failure boundaries: Do not store raw card secrets, compute money in binary float
 
 - Keep money in exact currency-aware units and preserve provider object identity across retries, redirects, webhooks, refunds, and reconciliation.
 - Model payment state as an asynchronous lifecycle. A client redirect or a single HTTP response is not sufficient evidence that funds are durably paid or settled.
+- Treat unknown, transport-failed, or unrecognized provider outcomes as pending/reconciliation states unless authoritative provider evidence proves a stronger state. Never default an ambiguous outcome to captured, paid, or settled.
 - Use provider-supported idempotency for retriable mutations and bind a key to one logical operation. Reusing a key across different parameters is a correctness error.
 - Keep provider state and the internal order or ledger model distinct. Reconcile them explicitly when external events can arrive late, duplicate, or out of order.
+- Persisted local payment state is not automatically terminal. Define which states may still advance or be corrected by later authoritative provider events, and make restart/recovery paths continue that reconciliation rather than returning early solely because a local record exists.
 - Minimize payment-data scope. Do not store raw card secrets when provider-hosted or tokenized mechanisms meet the requirement.
 
 ## Observable checks
 
 - Exercise success, decline, authentication-required, timeout, duplicate submission, and safe retry in the provider's supported test environment.
 - Verify webhook-driven state changes independently from client return flows, including delayed and duplicate events.
+- Restart from persisted pending/reconcile and failed/declined states, then apply later authoritative provider events and verify the state machine converges according to the documented transition policy without issuing a duplicate charge.
 - Test full and partial refunds plus reconciliation against provider-reported objects or reports when those flows are in scope.
 - Confirm idempotency behavior by repeating the same logical mutation with the same key and by rejecting accidental key reuse with changed parameters where the provider supports that check.
 - Treat settlement timing, dispute behavior, fees, taxes, and production risk controls as unverified until the actual provider/account configuration supplies evidence.

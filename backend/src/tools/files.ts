@@ -15,6 +15,7 @@ import type { Dirent } from 'fs';
 import { join, relative, dirname, basename, resolve, isAbsolute, sep } from 'path';
 import type { Tool, ToolContext, ToolCallInput, ToolCallOutput } from './registry';
 import { validatePathAccess } from '../security';
+import { mutateFileConfined } from '../security/confined-file-mutation';
 import { serverLog } from '../logger';
 import { crossAgentEvidenceCache } from '../cache/evidence-cache';
 import { gitBlobMatchesContent, tryResolveGitBlobEvidenceIdentity } from '../cache/git-evidence';
@@ -24,6 +25,25 @@ import { gitBlobMatchesContent, tryResolveGitBlobEvidenceIdentity } from '../cac
 function getAllowedRoots(ctx: ToolContext): string[] {
   if (ctx.allowedPaths?.length) return ctx.allowedPaths;
   return [resolve(ctx.workingDirectory)];
+}
+
+/** All mandatory-root writes (including parent creation) happen in the child,
+ * never in the backend between path validation and the eventual write. */
+async function writeFileContent(
+  ctx: ToolContext,
+  path: string,
+  content: string,
+  createParents = false,
+): Promise<void> {
+  if (ctx.requiredWorkspaceRoot) {
+    await mutateFileConfined(
+      ctx.requiredWorkspaceRoot,
+      { operation: 'write', path, content, createParents },
+      ctx.signal,
+    );
+  } else {
+    await Bun.write(path, content);
+  }
 }
 
 /**
@@ -195,14 +215,14 @@ export class WriteFileTool implements Tool {
     }
 
     try {
-      mkdirSync(dirname(absPath), { recursive: true });
+      if (!ctx.requiredWorkspaceRoot) mkdirSync(dirname(absPath), { recursive: true });
 
       // Stream content to UI in chunks for Cursor-style live preview.
       if (ctx.emitFileEdit) {
         await streamFileToUI(ctx.emitFileEdit, absPath, content, 'create');
       }
 
-      await Bun.write(absPath, content);
+      await writeFileContent(ctx, absPath, content, true);
       const lines = content.split('\n').length;
 
       if (ctx.emitFileComplete) {
@@ -317,7 +337,7 @@ export class EditFileTool implements Tool {
         await streamFileToUI(ctx.emitFileEdit, absPath, new_str, 'edit', old_str);
       }
 
-      await Bun.write(absPath, newContent);
+      await writeFileContent(ctx, absPath, newContent);
 
       if (ctx.emitFileComplete) {
         ctx.emitFileComplete({
@@ -469,7 +489,13 @@ export class BatchEditTool implements Tool {
       if (ctx.emitFileEdit) {
         await streamFileToUI(ctx.emitFileEdit, st.absPath, st.newContent, 'edit', st.oldContent);
       }
-      await Bun.write(st.absPath, st.newContent);
+      try {
+        await writeFileContent(ctx, st.absPath, st.newContent);
+      } catch (err: unknown) {
+        return fail(
+          `Error applying batch edit: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       ctx.emitFileComplete?.({
         path: st.absPath,
         totalLines: st.newContent.split('\n').length,
@@ -964,8 +990,16 @@ export class DeleteFileTool implements Tool {
             durationMs: 0,
           };
         }
-        const { rmdirSync } = await import('fs');
-        rmdirSync(absPath);
+        if (ctx.requiredWorkspaceRoot) {
+          await mutateFileConfined(
+            ctx.requiredWorkspaceRoot,
+            { operation: 'rmdir', path: absPath },
+            ctx.signal,
+          );
+        } else {
+          const { rmdirSync } = await import('fs');
+          rmdirSync(absPath);
+        }
         return {
           callId: call.id,
           name: this.name,
@@ -978,7 +1012,15 @@ export class DeleteFileTool implements Tool {
       const content = await Bun.file(absPath).text();
       const lines = content.split('\n').length;
 
-      unlinkSync(absPath);
+      if (ctx.requiredWorkspaceRoot) {
+        await mutateFileConfined(
+          ctx.requiredWorkspaceRoot,
+          { operation: 'delete', path: absPath },
+          ctx.signal,
+        );
+      } else {
+        unlinkSync(absPath);
+      }
 
       if (ctx.recordChange) {
         ctx.recordChange({
@@ -1062,8 +1104,16 @@ export class MoveFileTool implements Tool {
     }
 
     try {
-      mkdirSync(dirname(absDest), { recursive: true });
-      renameSync(absSrc, absDest);
+      if (ctx.requiredWorkspaceRoot) {
+        await mutateFileConfined(
+          ctx.requiredWorkspaceRoot,
+          { operation: 'move', source: absSrc, destination: absDest },
+          ctx.signal,
+        );
+      } else {
+        mkdirSync(dirname(absDest), { recursive: true });
+        renameSync(absSrc, absDest);
+      }
       return {
         callId: call.id,
         name: this.name,
@@ -1073,7 +1123,7 @@ export class MoveFileTool implements Tool {
       };
     } catch (err: unknown) {
       // renameSync fails across devices — fallback to copy+delete for files
-      if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
+      if (!ctx.requiredWorkspaceRoot && (err as NodeJS.ErrnoException).code === 'EXDEV') {
         try {
           const stat = statSync(absSrc);
           if (stat.isDirectory()) {
@@ -1400,7 +1450,7 @@ export class PatchTool implements Tool {
         content = content.replace(edit.old_str, edit.new_str);
       }
 
-      await Bun.write(absPath, content);
+      await writeFileContent(ctx, absPath, content);
 
       if (ctx.recordChange) {
         ctx.recordChange({

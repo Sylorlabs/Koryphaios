@@ -47,6 +47,16 @@ describe('provider image attachment admission', () => {
     ).toBeNull();
   });
 
+  test('resolves image support through legacy aliases and reasoning variants', () => {
+    const provider = providerWith({
+      supportsAttachments: true,
+      aliases: ['legacy-model-id'],
+      reasoningVariants: { high: 'native-model-high' },
+    });
+    expect(imageAttachmentAdmissionError(provider, 'legacy-model-id', screenshot)).toBeNull();
+    expect(imageAttachmentAdmissionError(provider, 'native-model-high', screenshot)).toBeNull();
+  });
+
   test('fails closed instead of silently flattening a screenshot for an unsupported model', () => {
     expect(
       imageAttachmentAdmissionError(
@@ -55,6 +65,22 @@ describe('provider image attachment admission', () => {
         screenshot,
       ),
     ).toContain('did not send the screenshot rather than silently dropping it');
+  });
+
+  test('honors an explicit image capability correction without stripping pixels', () => {
+    const original = structuredClone(screenshot);
+    expect(
+      imageAttachmentAdmissionError(
+        providerWith({ supportsAttachments: false }),
+        'model-id',
+        screenshot,
+        'allow',
+      ),
+    ).toBeNull();
+    expect(screenshot).toEqual(original);
+    expect(
+      imageAttachmentAdmissionError(providerWith({}), 'model-id', screenshot, 'reject'),
+    ).not.toBeNull();
   });
 
   test('does not reject ordinary text turns when model capability is unknown', () => {

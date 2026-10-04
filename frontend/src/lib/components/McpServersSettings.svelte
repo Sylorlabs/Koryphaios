@@ -3,6 +3,8 @@
   import AlertTriangle from 'lucide-svelte/icons/alert-triangle';
   import Check from 'lucide-svelte/icons/check';
   import Globe from 'lucide-svelte/icons/globe';
+  import KeyRound from 'lucide-svelte/icons/key-round';
+  import LogOut from 'lucide-svelte/icons/log-out';
   import LoaderCircle from 'lucide-svelte/icons/loader-circle';
   import Pencil from 'lucide-svelte/icons/pencil';
   import Plug from 'lucide-svelte/icons/plug';
@@ -21,6 +23,7 @@
     type McpRegistrySearchResult,
   } from '$lib/stores/mcp-servers.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import { toastStore } from '$lib/stores/toast.svelte';
   import KorySelect from './KorySelect.svelte';
   import SettingsPageIntro from './SettingsPageIntro.svelte';
 
@@ -40,6 +43,15 @@
   let testResult = $state<Record<string, McpServerTestResult | null>>({});
   let removeTarget = $state<string | null>(null);
   let envLoading = $state(false);
+  /** Server whose OAuth consent screen is open in the user's browser. */
+  let awaitingConsent = $state<string | null>(null);
+  let consentPollMs = 600;
+  /** Server whose own-app-credential form is open. */
+  let manualClientFor = $state<string | null>(null);
+  let manualClientId = $state('');
+  let manualClientSecret = $state('');
+  /** Local validation message for the credential form. */
+  let manualClientError = $state<string | null>(null);
 
   // ─── View state: "list" | "browse" | "form" ──────────────────────────────
   type McpView = 'list' | 'browse' | 'form';
@@ -129,10 +141,16 @@
       }));
     } else {
       formUrl = result.url ?? '';
-      // Pre-populate header placeholders as comments so the user knows what to set.
+      // Seed a real, editable `Key:` line per header. These used to be written
+      // as `# Key: description` comment lines, which parseHeaders() skips — so
+      // every remote server was added with no auth header at all. The comment
+      // line is kept alongside as documentation; parseHeaders() ignores it.
       if (result.headerVars.length > 0) {
         formHeaders = result.headerVars
-          .map((h) => `# ${h.name}: ${h.description || 'set this value'}`)
+          .flatMap((h) => {
+            const hint = h.description || (h.isSecret ? 'secret value required' : 'set this value');
+            return [`# ${h.name}: ${hint}`, `${h.name}:`];
+          })
           .join('\n');
       }
     }
@@ -203,7 +221,11 @@
       if (Object.keys(env).length) input.env = env;
     } else {
       input.url = formUrl.trim() || undefined;
-      const headers = parseHeaders(formHeaders);
+      // Drop keys the user left blank — an empty `Authorization:` header makes
+      // strict servers 400 instead of reporting a clean 401.
+      const headers = Object.fromEntries(
+        Object.entries(parseHeaders(formHeaders)).filter(([, v]) => v.length > 0),
+      );
       if (Object.keys(headers).length) input.headers = headers;
     }
     return input;
@@ -264,7 +286,138 @@
     removeTarget = null;
   }
 
+  /**
+   * Drive one OAuth consent flow: ask the backend to start it, open the
+   * provider URL in the user's browser, then poll until the loopback redirect
+   * has been exchanged for a token.
+   *
+   * `manualClient` supplies the user's own app credentials for servers that do
+   * not allow automatic registration.
+   */
+  async function handleAuthorize(
+    name: string,
+    manualClient?: { clientId: string; clientSecret?: string },
+  ): Promise<void> {
+    const url = await mcpServersStore.startAuthorization(name, manualClient);
+    if (!url) return;
+    awaitingConsent = name;
+    openExternalUrl(url);
+    const deadline = Date.now() + 5 * 60_000;
+    while (awaitingConsent === name && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, consentPollMs));
+      if (awaitingConsent !== name) break;
+      // completeAuthorization resolves false while the user is still in the
+      // browser; a real failure surfaces as a toast, so keep polling until the
+      // flow succeeds or the deadline passes.
+      if (await mcpServersStore.completeAuthorization(name)) {
+        awaitingConsent = null;
+        return;
+      }
+    }
+    if (awaitingConsent === name) {
+      awaitingConsent = null;
+      await mcpServersStore.cancelAuthorization(name);
+      toastStore.warning('Authorization was not completed');
+    }
+  }
+
+  async function handleDisconnect(name: string): Promise<void> {
+    await mcpServersStore.disconnectAuthorization(name);
+  }
+
+  function openManualClientForm(name: string): void {
+    manualClientFor = name;
+    manualClientId = '';
+    manualClientSecret = '';
+    manualClientError = null;
+    mcpServersStore.clearAuthBlocker(name);
+  }
+
+  function closeManualClientForm(): void {
+    manualClientFor = null;
+    manualClientId = '';
+    manualClientSecret = '';
+    manualClientError = null;
+  }
+
+  /** Start authorization with the credentials the user just entered. */
+  async function submitManualClient(name: string): Promise<void> {
+    const clientId = manualClientId.trim();
+    if (!clientId) {
+      manualClientError = 'Enter the client ID from your app.';
+      return;
+    }
+    // Read both fields before resetting the form — clearing the form first wiped
+    // the secret we were about to send.
+    const clientSecret = manualClientSecret.trim();
+    manualClientError = null;
+    closeManualClientForm();
+    await handleAuthorize(name, { clientId, clientSecret: clientSecret || undefined });
+  }
+
+  /**
+   * Whether to offer the "enter your own app credentials" form.
+   *
+   * Two independent triggers, so the user is never bounced to a browser that
+   * cannot help them:
+   *   • the catalog already knows the provider allows no dynamic registration
+   *   • the backend reported that blocker while trying to authorize
+   * A server that supports dynamic registration satisfies neither, so it is
+   * never asked for credentials it does not need.
+   */
+  function needsManualClient(server: { name: string; auth?: { kind: string } }): boolean {
+    if (server.auth?.kind === 'manual') return true;
+    const blocker = mcpServersStore.authBlocker;
+    return (
+      blocker?.server === server.name && blocker.code === 'dynamic_registration_unavailable'
+    );
+  }
+
+  /** Whether the server is asking for a header credential rather than a sign-in. */
+  function isHeaderAuth(server: { transport: string; auth?: { kind: string } }): boolean {
+    return server.transport !== 'stdio' && server.auth?.kind === 'headers';
+  }
+
+  function authKind(server: {
+    transport: string;
+    auth?: { kind: string };
+    oauth?: { authorized: boolean };
+  }): string {
+    if (server.transport === 'stdio') return 'none';
+    if (server.oauth?.authorized) return 'none';
+    return server.auth?.kind ?? 'unknown';
+  }
+
+  function openExternalUrl(url: string): void {
+    if (typeof window === 'undefined') return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   const formValid = $derived(formName.trim().length > 0);
+
+  /**
+   * How a browse-list entry should present its sign-in requirement. A user
+   * choosing a connector should learn what it will cost them before adding it,
+   * not after hitting a 401.
+   */
+  function authBadge(auth: { kind: string; label: string } | undefined): {
+    text: string;
+    tone: string;
+  } | null {
+    if (!auth || auth.kind === 'none') return null;
+    switch (auth.kind) {
+      case 'oauth':
+        return { text: 'Sign in', tone: 'text-[var(--color-success)]' };
+      case 'env':
+        return { text: 'Needs a key', tone: 'text-[var(--color-warning)]' };
+      case 'headers':
+        return { text: 'Needs a token', tone: 'text-[var(--color-warning)]' };
+      case 'manual':
+        return { text: 'Bring your own app', tone: 'text-[var(--color-warning)]' };
+      default:
+        return { text: 'Sign in', tone: 'text-[var(--color-text-muted)]' };
+    }
+  }
 
   const featuredGroups = $derived.by(() => {
     const groups: Array<{ category: string; servers: McpRegistrySearchResult[] }> = [];
@@ -337,7 +490,39 @@
             <RefreshCw size={16} class="animate-spin" /> Loading MCP servers…
           </section>
         {:else if mcpServersStore.servers.length === 0}
-          <p class="py-2 text-sm text-[var(--color-text-muted)]">No servers configured.</p>
+          <section
+            class="flex flex-col items-center px-4 py-12 text-center"
+            aria-live="polite"
+          >
+            <span
+              class="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-surface-2)] text-[var(--color-text-muted)]"
+            >
+              <Server size={20} />
+            </span>
+            <h4 class="mt-3 text-sm font-semibold text-[var(--color-text-primary)]">
+              No servers configured
+            </h4>
+            <p class="mt-1 max-w-sm text-xs leading-relaxed text-[var(--color-text-muted)]">
+              Add a local stdio process or a remote SSE endpoint to give agents access to external
+              tools.
+            </p>
+            <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onclick={openBrowse}
+                class="flex min-h-9 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              >
+                <Search size={13} /> Browse registry
+              </button>
+              <button
+                type="button"
+                onclick={openAddForm}
+                class="flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+              >
+                <Plus size={13} /> Add manually
+              </button>
+            </div>
+          </section>
         {:else}
           <div class="divide-y divide-[var(--color-border)]">
             {#each mcpServersStore.servers as server (server.name)}
@@ -385,7 +570,135 @@
                       {#if server.protocolVersion}
                         <span>protocol {server.protocolVersion}</span>
                       {/if}
+                      {#if server.oauth?.authorized && !server.oauth.expired}
+                        <span class="text-[var(--color-success)]">
+                          authorized{#if server.oauth.scope} · {server.oauth.scope}{/if}
+                        </span>
+                      {/if}
                     </div>
+                    {#if server.transport !== 'stdio' && authKind(server) !== 'none'}
+                      {@const kind = authKind(server)}
+                      <div
+                        class="mt-3 rounded-xl border p-3 {kind === 'oauth' || kind === 'manual'
+                          ? 'border-[var(--color-warning)]/35 bg-[var(--color-warning-bg)]'
+                          : 'border-[var(--color-border)] bg-[var(--color-surface-2)]'}"
+                      >
+                        <div class="flex items-start gap-2">
+                          <KeyRound size={14} class="mt-0.5 shrink-0 text-[var(--color-text-secondary)]" />
+                          <div class="min-w-0 flex-1">
+                            <p class="text-xs font-semibold text-[var(--color-text-primary)]">
+                              {#if kind === 'oauth'}
+                                Sign-in required
+                              {:else if kind === 'manual'}
+                                Needs your own app
+                              {:else if kind === 'headers'}
+                                Credential required
+                              {:else}
+                                Sign-in required
+                              {/if}
+                            </p>
+                            <p class="mt-1 text-xs leading-relaxed text-[var(--color-text-muted)]">
+                              {server.auth?.detail ?? 'This server needs a credential before it can be used.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {#if manualClientFor === server.name}
+                          <div class="mt-3 space-y-2 rounded-lg border border-[var(--color-border)] p-3">
+                            <p class="text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                              Paste the credentials from the app you created. Koryphaios stores them
+                              in its own secret store, never in your project config.
+                            </p>
+                            <div>
+                              <label
+                                for={`mcp-client-id-${server.name}`}
+                                class="mb-1 block text-[10px] font-medium text-[var(--color-text-secondary)]"
+                              >
+                                Client ID
+                              </label>
+                              <input
+                                id={`mcp-client-id-${server.name}`}
+                                type="text"
+                                bind:value={manualClientId}
+                                placeholder="e.g. 1234567890.987654321"
+                                class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+                              />
+                            </div>
+                            <div>
+                              <label
+                                for={`mcp-client-secret-${server.name}`}
+                                class="mb-1 block text-[10px] font-medium text-[var(--color-text-secondary)]"
+                              >
+                                Client secret (optional)
+                              </label>
+                              <input
+                                id={`mcp-client-secret-${server.name}`}
+                                type="password"
+                                bind:value={manualClientSecret}
+                                placeholder="Only for apps that have one"
+                                class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 font-mono text-xs text-[var(--color-text-primary)] outline-none transition-all placeholder:text-[var(--color-text-muted)] focus-visible:border-[var(--color-accent)]"
+                              />
+                            </div>
+                            {#if manualClientError}
+                              <p class="text-[10px] text-[var(--color-error)]">{manualClientError}</p>
+                            {/if}
+                            <div class="flex items-center justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onclick={closeManualClientForm}
+                                class="flex min-h-8 items-center rounded-lg border border-[var(--color-border)] px-2.5 text-[10px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onclick={() => void submitManualClient(server.name)}
+                                class="flex min-h-8 items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 text-[10px] font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                              >
+                                <KeyRound size={11} /> Authorize
+                              </button>
+                            </div>
+                          </div>
+                        {:else if needsManualClient(server)}
+                          <button
+                            type="button"
+                            onclick={() => openManualClientForm(server.name)}
+                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          >
+                            <KeyRound size={13} /> Enter app credentials
+                          </button>
+                        {:else if kind === 'headers'}
+                          <button
+                            type="button"
+                            onclick={() => startEdit(server)}
+                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          >
+                            <Pencil size={13} /> Add credential
+                          </button>
+                        {:else if kind === 'unknown'}
+                          <button
+                            type="button"
+                            onclick={() => startEdit(server)}
+                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                          >
+                            <Pencil size={13} /> Configure headers
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            disabled={awaitingConsent === server.name}
+                            onclick={() => void handleAuthorize(server.name)}
+                            class="mt-2.5 flex min-h-9 items-center gap-1.5 rounded-xl bg-[var(--color-accent)] px-3 text-xs font-semibold text-[var(--color-surface-1)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {#if awaitingConsent === server.name}
+                              <LoaderCircle size={13} class="animate-spin" /> Waiting for consent…
+                            {:else}
+                              <KeyRound size={13} /> Authorize
+                            {/if}
+                          </button>
+                        {/if}
+                      </div>
+                    {/if}
                     {#if server.lastError}
                       <p class="mt-2 text-xs leading-relaxed text-[var(--color-error)]">
                         {server.lastError}
@@ -461,6 +774,15 @@
                     >
                       <Pencil size={13} /> Edit
                     </button>
+                    {#if server.transport !== 'stdio' && server.oauth?.authorized}
+                      <button
+                        type="button"
+                        onclick={() => void handleDisconnect(server.name)}
+                        class="flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+                      >
+                        <LogOut size={13} /> Disconnect
+                      </button>
+                    {/if}
                     <button
                       type="button"
                       onclick={() => confirmRemove(server.name)}
@@ -590,6 +912,21 @@
                         <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
                           {result.description}
                         </p>
+                        {#if result.auth}
+                          {@const badge = authBadge(result.auth)}
+                          {#if badge}
+                            <div class="mt-2 flex items-start gap-1.5">
+                              <span
+                                class="mt-0.5 shrink-0 rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium {badge.tone}"
+                              >
+                                {badge.text}
+                              </span>
+                              <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                                {result.auth.detail}
+                              </p>
+                            </div>
+                          {/if}
+                        {/if}
                         {#if result.transport === 'stdio' && result.command}
                           <div
                             class="mt-2 truncate rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"
@@ -679,6 +1016,21 @@
                       <p class="mt-2 text-xs leading-relaxed text-[var(--color-text-muted)]">
                         {result.description}
                       </p>
+                      {#if result.auth}
+                        {@const badge = authBadge(result.auth)}
+                        {#if badge}
+                          <div class="mt-2 flex items-start gap-1.5">
+                            <span
+                              class="mt-0.5 shrink-0 rounded-md bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] font-medium {badge.tone}"
+                            >
+                              {badge.text}
+                            </span>
+                            <p class="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                              {result.auth.detail}
+                            </p>
+                          </div>
+                        {/if}
+                      {/if}
                       {#if result.transport === 'stdio' && result.command}
                         <div
                           class="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 font-mono text-[10px] text-[var(--color-text-secondary)]"

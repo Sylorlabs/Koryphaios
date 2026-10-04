@@ -26,4 +26,4 @@ Rampstack's MIT `content-and-copy` package is useful community evidence for defi
 - GOV.UK Design System Error message: official guidance verified 2026-09-04; recheck within 90 days.
 - WCAG 2.2 Recommendation: official W3C specification verified 2026-09-04; recheck within 180 days or after a new Recommendation.
 - Apple HIG Writing: official Apple documentation verified 2026-09-04; recheck within 90 days.
-- Rampstack `content-and-copy`: GitHub `main` inspected 2026-09-04; repository license is MIT. Recheck within 30 days.
+- Rampstack `content-and-copy`: GitHub `main` at `ac2b078f5025` inspected 2026-10-03; repository license is MIT. Recheck within 30 days.

@@ -83,6 +83,7 @@ function modelDefinition(model: CodexAppServerModel): ModelDef | null {
 
 /** ChatGPT-managed Codex provider. The official app-server owns OAuth and tokens. */
 export class CodexAuthProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
   readonly name = 'codex-auth' as const;
   private models: ModelDef[] = [];
   private account: Awaited<

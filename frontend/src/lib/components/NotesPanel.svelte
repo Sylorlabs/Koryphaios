@@ -39,6 +39,7 @@
   import { noteBasesStore } from '$lib/stores/note-bases.svelte';
   import { selectProjectNavigation } from '$lib/utils/project-navigation';
   import NotesQuickSwitcher from './NotesQuickSwitcher.svelte';
+  import NotesNetworkWorkspace from './NotesNetworkWorkspace.svelte';
   import NotesRecoveryDialog, { type NotesRecoveryTab } from './NotesRecoveryDialog.svelte';
   import NotePropertiesPanel from './NotePropertiesPanel.svelte';
   import VirtualList from './VirtualList.svelte';
@@ -174,7 +175,9 @@
   });
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let activeView = $state<'editor' | 'preview' | 'bases' | 'graph' | 'canvas'>('editor');
+  let activeView = $state<'editor' | 'preview' | 'bases' | 'graph' | 'network' | 'canvas'>(
+    'editor',
+  );
   let NotesGraphComponent = $state<Component<{
     onNodeClick: (noteId: string) => void;
   }> | null>(null);
@@ -1246,7 +1249,7 @@
     activeView = 'canvas';
   }
 
-  const viewOrder = ['editor', 'preview', 'bases', 'graph', 'canvas'] as const;
+  const viewOrder = ['editor', 'preview', 'bases', 'graph', 'network', 'canvas'] as const;
   function handleViewTabKeydown(event: KeyboardEvent, current: (typeof viewOrder)[number]) {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -2061,6 +2064,25 @@
           Graph
         </button>
         <button
+          id="notes-tab-network"
+          type="button"
+          role="tab"
+          aria-selected={activeView === 'network'}
+          aria-controls="notes-view-panel"
+          tabindex={activeView === 'network' ? 0 : -1}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style="background: {activeView === 'network'
+            ? 'var(--color-surface-3)'
+            : 'transparent'}; color: {activeView === 'network'
+            ? 'var(--color-text-primary)'
+            : 'var(--color-text-muted)'};"
+          onclick={() => (activeView = 'network')}
+          onkeydown={(event) => handleViewTabKeydown(event, 'network')}
+        >
+          <Share2 size={12} />
+          Network
+        </button>
+        <button
           id="notes-tab-canvas"
           type="button"
           role="tab"
@@ -2429,7 +2451,14 @@
       role="tabpanel"
       aria-labelledby={`notes-tab-${activeView}`}
     >
-      {#if activeView === 'bases'}
+      {#if activeView === 'network'}
+        {#key projectStore.currentPath}
+          <NotesNetworkWorkspace
+            projectPath={projectStore.currentPath}
+            onOpenNote={openNote}
+          />
+        {/key}
+      {:else if activeView === 'bases'}
         {#if NotesBasesComponent}
           <NotesBasesComponent onOpenNote={handleBaseOpenNote} />
         {:else if basesComponentError}

@@ -1,0 +1,85 @@
+{
+  "id": "response-style-full-task-2-individual",
+  "maturity": "individual",
+  "prompt": "Using only the supplied implementation-result packet, answer the user's request: \"Tell me what changed, why, how you tested it, and whether you need anything from me.\" The active response-style skill is explicitly pinned for this evaluation. The packet includes two changed files, one exact test command with passing output, one unavailable platform check, a recommendation with a viable alternative, and a user assumption contradicted by the observed result. Report the completion state faithfully without redoing the implementation.",
+  "environment": {
+    "kind": "synthetic",
+    "startingState": "fixture://response-style/implementation-result-packet",
+    "requirements": [
+      "closed completion packet naming two exact changed file paths and the reason for each change",
+      "one exact verification command with observed passing output",
+      "one platform-specific verification step explicitly unavailable in the evaluation environment",
+      "one recommendation plus a viable alternative with a concrete trade-off",
+      "one user assumption contradicted by observed evidence",
+      "paired same-model skill/no-skill execution with identical completion evidence",
+      "independent blind reviewer with candidate labels and intended outcome hidden"
+    ]
+  },
+  "falsifiableChecks": [
+    {
+      "id": "result-first",
+      "assertion": "The opening sentence states the completed result before implementation detail or process narration."
+    },
+    {
+      "id": "change-and-why",
+      "assertion": "Both changed file paths are named exactly and each is connected to the supplied reason for the change without inventing additional modifications."
+    },
+    {
+      "id": "verification-boundary",
+      "assertion": "The exact passing test command is reported as observed evidence, while the unavailable platform check is clearly labeled unverified rather than implied to have passed."
+    },
+    {
+      "id": "tradeoff-order",
+      "assertion": "The supplied recommendation appears before the viable alternative, and the stated trade-off matches the packet."
+    },
+    {
+      "id": "evidence-based-pushback",
+      "assertion": "The contradicted user assumption is corrected directly and briefly using the observed result, without softening it into agreement or overstating certainty."
+    },
+    {
+      "id": "finish-with-real-open-item",
+      "assertion": "The ending states whether a user decision is genuinely needed and identifies it only if the packet contains one; it does not add a generic offer to help or recap the conversation."
+    }
+  ],
+  "scorers": [
+    {
+      "id": "response-style-individual-deterministic-2",
+      "kind": "deterministic",
+      "weight": 0.75,
+      "evidence": [
+        "result appears before implementation detail",
+        "both exact changed file paths preserved",
+        "passing verification command preserved exactly",
+        "unavailable platform check labeled unverified",
+        "recommendation precedes the alternative",
+        "contradicted assumption corrected from observed evidence",
+        "only genuine remaining user decision reported"
+      ]
+    },
+    {
+      "id": "response-style-individual-blind-quality-2",
+      "kind": "blind-semantic",
+      "weight": 0.25,
+      "evidence": [
+        "randomized skill and no-skill response artifacts",
+        "independent evaluator record bound to the same completion packet",
+        "quality comparison for directness, technical fidelity, proportionality, and task wrap-up"
+      ],
+      "blindTo": ["skill-variant", "expected-outcome"]
+    }
+  ],
+  "requiredEvidence": [
+    "exact changed-file trace",
+    "observed versus unavailable verification boundary",
+    "recommendation and alternative trade-off",
+    "evidence-based correction of the contradicted premise",
+    "genuine remaining-decision boundary",
+    "paired same-model skill/no-skill run artifacts",
+    "independent blind semantic review provenance"
+  ],
+  "requiredArtifacts": [
+    "response-style-individual-scenario-2-result",
+    "response-style-individual-scenario-2-verification",
+    "response-style-individual-scenario-2-paired-evaluation"
+  ]
+}

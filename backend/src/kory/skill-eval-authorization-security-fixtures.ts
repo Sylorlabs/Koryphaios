@@ -137,7 +137,7 @@ Include \`evidenceBoundary\` stating that this is synthetic design evidence and 
 };
 
 const documentApiScorer: SkillEvalDeterministicScorer = {
-  id: 'authorization-security/document-api-policy-design-scorer@1',
+  id: 'authorization-security/document-api-policy-design-scorer@2',
   scenarioIds: [DOCUMENT_API],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -148,6 +148,8 @@ import { decide, fieldAllowed, type DocumentPolicySpec } from '../src/policy-eva
 
 const spec = JSON.parse(readFileSync('.kory-eval/authorization-document-api.json', 'utf8')) as DocumentPolicySpec;
 const d = (role:string, relation:string, action:string, tenantMatch:boolean) => ({ role, relation, action, tenantMatch });
+const mentionsEffect = (values:string[], effect:string) =>
+  values.some((value) => value.toLowerCase().split(/[^a-z]+/u).includes(effect));
 
 test('hidden: default/suspended/cross-tenant paths fail closed', () => {
   expect(spec.defaultDeny).toBe(true);
@@ -181,7 +183,7 @@ test('hidden: worker delegation, revocation, denied non-effects, and audit contr
   expect(spec.revocation.maxStaleSeconds).toBeGreaterThanOrEqual(0);
   expect(spec.revocation.maxStaleSeconds).toBeLessThanOrEqual(300);
   expect(spec.revocation.failClosedWhenPolicyUnavailable).toBe(true);
-  for (const effect of ['mutation','message','file','export']) expect(spec.deniedNonEffects).toContain(effect);
+  for (const effect of ['mutation','message','file','export']) expect(mentionsEffect(spec.deniedNonEffects, effect)).toBe(true);
   expect(spec.audit.protectedDataExcluded).toBe(true);
   expect(spec.audit.securityRelevantDenials).toBe(true);
 });
@@ -301,7 +303,7 @@ Organization support access exists only under an active time-bounded grant, is r
 };
 
 const graphqlScorer: SkillEvalDeterministicScorer = {
-  id: 'authorization-security/graphql-policy-review-scorer@1',
+  id: 'authorization-security/graphql-policy-review-scorer@2',
   scenarioIds: [GRAPHQL],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -312,6 +314,8 @@ import { decide, type GraphqlPolicySpec } from '../src/graphql-policy-evaluator'
 
 const spec = JSON.parse(readFileSync('.kory-eval/authorization-graphql.json','utf8')) as GraphqlPolicySpec;
 const d = (role:string, resource:string, operation:string, field:string, orgMatch:boolean, supportGrant:'active'|'expired'|'revoked'|'none'='none') => ({ role,resource,operation,field,orgMatch,supportGrant });
+const mentionsEffect = (values:string[], effect:string) =>
+  values.some((value) => value.toLowerCase().split(/[^a-z]+/u).includes(effect));
 
 test('hidden: same trusted policy covers direct and indirect GraphQL paths', () => {
   expect(spec.defaultDeny).toBe(true);
@@ -339,7 +343,7 @@ test('hidden: caller identity, overposting, and denial non-effects are explicit'
   expect(spec.backendServiceIdentityAsSubject).toBe(false);
   expect(spec.originatingCallerPreserved).toBe(true);
   for (const field of ['organizationId','ownerId','billingAccountId','role']) expect(spec.overpostDeniedFields).toContain(field);
-  for (const effect of ['mutation','message','token']) expect(spec.deniedNonEffects).toContain(effect);
+  for (const effect of ['mutation','message','token']) expect(mentionsEffect(spec.deniedNonEffects, effect)).toBe(true);
   expect(spec.graphqlMechanicsOwnedBy).toBe('graphql-engineering');
   expect(spec.evidenceBoundary.toLowerCase()).toMatch(/synthetic|design/);
 });

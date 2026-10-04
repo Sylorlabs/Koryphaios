@@ -6,9 +6,17 @@
  * Critic strongly enforces rules and workflow from preferences.md
  */
 
+import { effectiveComputerPolicy, revokeComputerAuthority } from './computer-use/authority';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import type { SessionAgentOverrides } from '@koryphaios/shared';
+import {
+  defaultComputerUseSettings,
+  type ComputerUseSettings,
+  type SessionAgentOverrides,
+} from '@koryphaios/shared';
+import { mergeComputerUseSettings, normalizeComputerUseSettings } from './computer-use/settings';
+import { MIN_SKILL_CONTEXT_BUDGET } from './kory/skills';
+import { stopComputerUse } from './computer-use/control';
 import { wsBroker } from './pubsub';
 import { getSessionAgentOverrides } from './stores/session-agent-overrides';
 import { resolveMemoryRoot } from './memory/unified-memory';
@@ -32,6 +40,8 @@ export const AGENT_SETTINGS_CONFIG = {
 // ============================================================================
 
 export interface AgentSettings {
+  /** Independent, deny-dominant desktop policy; off by default even in YOLO. */
+  computerUse: ComputerUseSettings;
   /** Rule enforcement level - always applied, but critic can be strict/moderate/lenient */
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
 
@@ -150,6 +160,14 @@ export interface AgentSettings {
   /** Persisted default source selection when both personal and project revisions exist. */
   skillCollisionChoices: Record<string, 'personal' | 'project'>;
 
+  /**
+   * Per-turn character budget for injected skill guidance. `null` (the default)
+   * means no user-imposed limit: skill budgeting derives from the authenticated
+   * model context window and whatever capacity the turn actually has left.
+   * Set a number to cap it explicitly.
+   */
+  skillContextBudget: number | null;
+
   /** Composer permission preset. Plan remains supported for persisted legacy
    *  sessions even though the composer exposes planning as a separate mode. */
   permissionMode: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
@@ -226,6 +244,7 @@ export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
 };
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  computerUse: defaultComputerUseSettings(),
   ruleEnforcementLevel: 'strict',
   agentExecutionMode: 'auto',
   preferencesEnabled: true,
@@ -267,6 +286,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   autoCompactThreshold: 80,
   reasoningExpandedByDefault: true,
   skillCollisionChoices: {},
+  skillContextBudget: null,
   permissionMode: 'guarded',
   autonomyLimitsEnabled: false,
   sandbox: { ...DEFAULT_SANDBOX_SETTINGS },
@@ -512,6 +532,10 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
     ...(enableCritic !== undefined && { criticGateEnabled: enableCritic }),
     ...persistedSettings,
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),
+    computerUse: effectiveComputerPolicy(
+      projectRoot,
+      normalizeComputerUseSettings(persistedSettings?.computerUse),
+    ),
   };
 
   let migrated = false;
@@ -585,6 +609,10 @@ export function resolveAgentSettingsLayers(
     ...globalSettings,
     ...workspaceSettings,
     ...sessionOverride,
+    computerUse: [globalSettings, workspaceSettings, sessionOverride].reduce(
+      (settings, layer) => mergeComputerUseSettings(settings, layer?.computerUse),
+      defaultComputerUseSettings(),
+    ),
     managerModelAccess: {
       ...DEFAULT_AGENT_SETTINGS.managerModelAccess,
       ...globalSettings?.managerModelAccess,
@@ -684,6 +712,13 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
   for (const [key, value] of Object.entries(patch)) {
     if (!(key in DEFAULT_AGENT_SETTINGS) || key === 'updatedAt') continue;
     const typedKey = key as keyof AgentSettings;
+    if (typedKey === 'computerUse') {
+      next.computerUse = mergeComputerUseSettings(
+        normalizeComputerUseSettings(next.computerUse),
+        value,
+      );
+      continue;
+    }
     // Deep-merge the nested sandbox object so partial patches keep defaults
     // for any granular toggle the client did not send.
     if (typedKey === 'sandbox' && value && typeof value === 'object' && !Array.isArray(value)) {
@@ -732,6 +767,20 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
           )
           .slice(0, 200),
       );
+      continue;
+    }
+    if (typedKey === 'skillContextBudget') {
+      // `null` means "no user limit" and is a valid choice, not a rejected value.
+      if (value === null) {
+        next.skillContextBudget = null;
+      } else if (
+        typeof value === 'number' &&
+        Number.isFinite(value) &&
+        value >= MIN_SKILL_CONTEXT_BUDGET &&
+        value <= 1_000_000
+      ) {
+        next.skillContextBudget = Math.floor(value);
+      }
       continue;
     }
     if (typedKey === 'toolPermissionsByTier') {
@@ -784,6 +833,16 @@ export function mergeAgentSettings(current: AgentSettings, patch: unknown): Agen
 export function saveAgentSettings(projectRoot: string, settings: AgentSettings): void {
   const config = loadKoryphaiosConfig(projectRoot);
 
+  // Revalidate even direct callers and cancel pending approvals/native actions on policy edits.
+  settings.computerUse = normalizeComputerUseSettings(settings.computerUse);
+  const previousSettings = config.agentSettings as Partial<AgentSettings> | undefined;
+  const previousComputer = normalizeComputerUseSettings(previousSettings?.computerUse);
+  if (
+    JSON.stringify(previousComputer) !== JSON.stringify(settings.computerUse) ||
+    (previousSettings?.permissionMode ?? DEFAULT_AGENT_SETTINGS.permissionMode) !==
+      settings.permissionMode
+  )
+    stopComputerUse();
   // Set updatedAt for the settings object
   settings.updatedAt = Date.now();
 
@@ -798,8 +857,14 @@ export function saveAgentSettings(projectRoot: string, settings: AgentSettings):
  * Reset agent settings to defaults in koryphaios.json
  */
 export function resetAgentSettings(projectRoot: string): AgentSettings {
+  revokeComputerAuthority();
   const config = loadKoryphaiosConfig(projectRoot);
-  const settings = { ...DEFAULT_AGENT_SETTINGS, updatedAt: Date.now() };
+  const settings = {
+    ...DEFAULT_AGENT_SETTINGS,
+    computerUse: defaultComputerUseSettings(),
+    updatedAt: Date.now(),
+  };
+  stopComputerUse();
 
   config.enableCritic = settings.criticGateEnabled;
   config.agentSettings = settings;

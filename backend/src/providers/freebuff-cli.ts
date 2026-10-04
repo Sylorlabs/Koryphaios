@@ -10,29 +10,20 @@
  * ToolRegistry/permission-policy.ts.
  */
 
-import type { ModelDef, ProviderConfig, SandboxPolicy } from '@koryphaios/shared';
+import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
 import { randomBytes } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import {
-  chmodSync,
-  copyFileSync,
-  existsSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from 'node:fs';
-import { promisify } from 'node:util';
-import { basename, dirname, join, resolve } from 'node:path';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { materializeFreebuffCredentials } from './freebuff-credentials';
+import { basename, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { isTransientStreamErrorText } from './provider-diagnostics';
 import { providerLog } from '../logger';
 import {
-  inferenceSandboxPolicy,
-  sandboxCapabilities,
-  wrapCommand,
-} from '../collaboration/sandbox-runner';
-import { PROJECT_ROOT } from '../runtime/paths';
+  createFreebuffTurnRuntime,
+  getFreebuffRuntimeStatus,
+  refreshFreebuffRuntimeStatus,
+} from './freebuff-runtime';
+import { prepareFreebuffBridge } from './freebuff-bridge-runtime';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import { buildProviderCliEnv } from './cli-environment';
 import { getCliBridge } from './cli-bridges';
@@ -42,16 +33,19 @@ import { createGenericModel } from './models';
 import { discoverFreebuffAccounts, type FreebuffAccount } from './auth-utils';
 import {
   discoverFreebuffBundledCatalog,
+  buildFreebuffTurnSettings,
+  freebuffSelectedModelFromLogRow,
+  FREEBUFF_CLI_DEFAULT_MODEL_ID,
   type FreebuffBundledCatalog,
 } from './freebuff-bundled-catalog';
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './types';
+import { userConfirmedImageInput } from './attachment-admission';
 
-const execFileAsync = promisify(execFile);
 const ACCOUNT_PREFIX = 'freebuff-account:';
 const MAX_RUNTIME_MS = 9 * 60_000;
 
 export const FREEBUFF_PTY_UNAVAILABLE_ERROR =
-  'Freebuff requires its real logged-in CLI plus tmux and bubblewrap on Linux. Run "freebuff login", ensure tmux/bwrap are installed, and reconnect.';
+  'Freebuff requires its logged-in CLI and a verified Linux bubblewrap runtime (native Linux or the pinned Docker runtime). Run "freebuff login", configure the runtime, and reconnect.';
 
 const FREEBUFF_IMAGE_MIME_EXTENSIONS = new Map([
   ['image/jpeg', 'jpg'],
@@ -101,14 +95,6 @@ export function freebuffUsageFromLogRow(
   const contextTokenCount = Number(data.contextTokenCount);
   if (!Number.isSafeInteger(contextTokenCount) || contextTokenCount < 1) return null;
   return contextTokenCount;
-}
-
-function which(bin: string): string | null {
-  for (const dir of (process.env.PATH ?? '').split(':')) {
-    const candidate = join(dir, bin);
-    if (dir && existsSync(candidate)) return candidate;
-  }
-  return null;
 }
 
 function nativeFreebuffBinary(profileDir?: string): string | null {
@@ -201,9 +187,8 @@ function materializeFreebuffImages(images: FreebuffPtyImage[], workspace: string
     if (totalBytes > FREEBUFF_MAX_TOTAL_IMAGE_BYTES) {
       throw new Error('Freebuff PTY images exceed the 5 MB combined image limit');
     }
-    // Installed Freebuff 0.0.162 clips attachment-card labels more narrowly
-    // than its current source. Keep the transport basename deliberately short
-    // so readiness can be matched exactly instead of guessing at TUI clipping.
+    // Keep transport basenames short enough to match native attachment cards
+    // without guessing at terminal clipping.
     const path = join(workspace, freebuffImageBasename(index, image.extension));
     writeManagedCliFile(path, decoded);
     return path;
@@ -223,114 +208,215 @@ function stringifyToolResult(value: unknown): string {
   }
 }
 
-function findLogFiles(root: string): string[] {
-  if (!existsSync(root)) return [];
-  const found: string[] = [];
-  const visit = (dir: string): void => {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
+// Read CLI-controlled paths INSIDE bwrap. Reading them on the host would let a
+// native sandbox tool point a symlink at a host log/credential file. Output is
+// bounded and offsets are bytes, not JS UTF-16 character positions.
+export const FREEBUFF_LOG_READER = String.raw`
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, rawOffsets] = process.argv.slice(1);
+const offsets = new Map(JSON.parse(rawOffsets));
+const chunks = [];
+let budget = 512 * 1024;
+let visited = 0;
+function visit(dir, depth = 0) {
+  if (depth > 12 || ++visited > 256) throw Error('log tree limit');
+  if (!fs.existsSync(dir) || !fs.lstatSync(dir).isDirectory()) return;
+  for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) visit(file, depth + 1);
+    else if (entry.isFile() && entry.name === 'log.jsonl' && budget > 0) {
+      const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      try {
+        const size = fs.fstatSync(fd).size;
+        let offset = offsets.get(file) || 0;
+        if (size < offset) offset = 0;
+        const bytes = Buffer.alloc(Math.min(Math.max(0, size - offset), budget));
+        const count = fs.readSync(fd, bytes, 0, bytes.length, offset);
+        const newline = bytes.subarray(0, count).lastIndexOf(10);
+        if (newline < 0) {
+          if (count === budget) throw Error('log row limit');
+          continue;
+        }
+        const length = newline + 1;
+        budget -= length;
+        chunks.push({file, offset: offset + length, text: bytes.subarray(0, length).toString('utf8')});
+      } finally { fs.closeSync(fd); }
     }
-    for (const entry of entries) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) visit(path);
-      else if (entry.isFile() && entry.name === 'log.jsonl') found.push(path);
-    }
-  };
-  visit(root);
-  return found;
-}
-
-async function tmux(args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
-  const result = await execFileAsync('tmux', args, {
-    env,
-    timeout: 10_000,
-    maxBuffer: 2 * 1024 * 1024,
-  });
-  return result.stdout;
-}
-
-async function wait(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  await new Promise<void>((resolveWait, reject) => {
-    const timer = setTimeout(resolveWait, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException('Aborted', 'AbortError'));
-      },
-      { once: true },
-    );
-  });
-}
-
-async function waitForPane(
-  session: string,
-  predicate: (pane: string) => boolean,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<string> {
-  const startedAt = Date.now();
-  let lastPane = '';
-  let emptyCount = 0;
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      lastPane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
-    } catch {
-      await wait(250, signal);
-      continue;
-    }
-    if (!lastPane.trim()) {
-      emptyCount += 1;
-      if (emptyCount < 4) {
-        await wait(500, signal);
-        continue;
-      }
-    } else {
-      emptyCount = 0;
-    }
-    if (predicate(lastPane)) return lastPane;
-    await wait(250, signal);
   }
-  throw new Error(`Freebuff TUI did not reach the expected state: ${lastPane.slice(-500)}`);
+}
+visit(root);
+process.stdout.write(JSON.stringify(chunks));
+`;
+
+export async function readFreebuffLogRows(
+  runtime: Pick<FreebuffTurnRuntime, 'exec' | 'bunBinary'>,
+  root: string,
+  offsets: Map<string, number>,
+): Promise<Record<string, unknown>[]> {
+  const raw = await runtime.exec(
+    runtime.bunBinary,
+    ['-e', FREEBUFF_LOG_READER, root, JSON.stringify([...offsets])],
+    { timeout: 10_000 },
+  );
+  const chunks: unknown = JSON.parse(raw);
+  if (!Array.isArray(chunks))
+    throw new FreebuffPtyError('Freebuff produced invalid log transport data');
+  const rows: Record<string, unknown>[] = [];
+  for (const chunk of chunks) {
+    if (
+      !chunk ||
+      typeof chunk.file !== 'string' ||
+      typeof chunk.text !== 'string' ||
+      !Number.isSafeInteger(chunk.offset) ||
+      chunk.offset < 0
+    ) {
+      throw new FreebuffPtyError('Freebuff produced invalid log transport data');
+    }
+    offsets.set(chunk.file, chunk.offset);
+    for (const line of chunk.text.split('\n')) {
+      try {
+        const row: unknown = JSON.parse(line);
+        if (row && typeof row === 'object' && !Array.isArray(row))
+          rows.push(row as Record<string, unknown>);
+      } catch {
+        /* Ignore incomplete/unstructured diagnostic lines, never echo them. */
+      }
+    }
+  }
+  return rows;
+}
+
+type FreebuffTurnRuntime = Awaited<ReturnType<typeof createFreebuffTurnRuntime>>;
+type FreebuffTmux = (args: string[]) => Promise<string>;
+
+/** Only adapter-owned messages may reach diagnostics; panes and child errors can contain secrets. */
+class FreebuffPtyError extends Error {}
+
+function checkAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+}
+
+export async function waitForFreebuffPoll(ms: number, signal?: AbortSignal): Promise<void> {
+  checkAbort(signal);
+  await new Promise<void>((resolveWait, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolveWait();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+export type FreebuffStartupState = 'ready' | 'welcome' | 'trust' | 'login' | 'waiting';
+export function freebuffStartupState(pane: string): FreebuffStartupState {
+  const screen = pane.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (/Load and run these\?\s*\[y\/N\]/i.test(screen)) return 'trust';
+  if (
+    /sign in to continue|log in to continue|please (?:log|sign) in|https?:\/\/\S+\/(?:login|auth)\b/i.test(
+      screen,
+    )
+  )
+    return 'login';
+  // A banner or a long pane is NOT input readiness. This is 0.2.12's actual composer placeholder.
+  if (/enter a coding task or \/ for commands/i.test(screen)) return 'ready';
+  if (/start coding for free|press enter to continue/i.test(screen)) return 'welcome';
+  return 'waiting';
+}
+
+/** Trust is limited to the generated .agents directory, never a user checkout. */
+export function freebuffPrivateCliArgs(runRoot: string, workspace: string): string[] {
+  if (resolve(workspace) !== join(resolve(runRoot), 'workspace')) {
+    throw new FreebuffPtyError('Freebuff refused to trust a non-private workspace');
+  }
+  return ['--cwd', workspace, '--trust-agents'];
+}
+
+export async function waitForFreebuffStartup(
+  tmux: FreebuffTmux,
+  session: string,
+  signal?: AbortSignal,
+  timeoutMs = 45_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  let dismissedWelcome = false;
+  while (Date.now() - startedAt < timeoutMs) {
+    checkAbort(signal);
+    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    checkAbort(signal);
+    switch (freebuffStartupState(pane)) {
+      case 'ready':
+        return;
+      // --trust-agents must have bypassed this for only our generated workspace.
+      // Never blindly send Enter/y to arbitrary prompts (including tool approvals).
+      case 'trust':
+        throw new FreebuffPtyError('Freebuff did not accept the private workspace trust flag');
+      case 'login':
+        throw new FreebuffPtyError(
+          'Freebuff CLI login is required; run "freebuff login" and reconnect',
+        );
+      case 'welcome':
+        if (!dismissedWelcome) {
+          await tmux(['send-keys', '-t', session, 'Enter']);
+          dismissedWelcome = true;
+        }
+        break;
+    }
+    await waitForFreebuffPoll(250, signal);
+  }
+  throw new FreebuffPtyError('Freebuff TUI did not reach its input-ready state');
 }
 
 async function waitForFreebuffImageReady(
+  tmux: FreebuffTmux,
   session: string,
   filename: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const startedAt = Date.now();
-  let lastPane = '';
   while (Date.now() - startedAt < 30_000) {
-    lastPane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
-    const filenameIndex = lastPane.indexOf(filename);
+    checkAbort(signal);
+    const pane = await tmux(['capture-pane', '-p', '-J', '-t', session]);
+    const filenameIndex = pane.indexOf(filename);
     if (filenameIndex >= 0) {
-      const attachmentRegion = lastPane.slice(
+      const region = pane.slice(
         Math.max(0, filenameIndex - 500),
-        Math.min(lastPane.length, filenameIndex + filename.length + 500),
+        filenameIndex + filename.length + 500,
       );
-      if (attachmentRegion.includes('❌')) {
-        throw new Error(`Freebuff TUI rejected attached image ${filename}`);
-      }
-      if (!attachmentRegion.includes('processing…') && !attachmentRegion.includes('processing...'))
-        return;
+      if (region.includes('❌'))
+        throw new FreebuffPtyError('Freebuff TUI rejected an attached image');
+      if (!region.includes('processing…') && !region.includes('processing...')) return;
     }
-    await wait(250, signal);
+    await waitForFreebuffPoll(250, signal);
   }
-  throw new Error(
-    `Freebuff TUI did not finish attaching image ${filename}: ${lastPane.slice(-500)}`,
-  );
+  throw new FreebuffPtyError('Freebuff TUI did not finish attaching an image');
 }
 
-function catalogRevision(accounts: FreebuffAccount[]): string | null {
+/** Nested agents commonly set shouldEndTurn. Only the main prompt owns turn completion. */
+export function freebuffCompletionFromLogRow(
+  row: Record<string, unknown>,
+): 'pending' | 'success' | 'error' {
+  if (row.msg !== 'Main prompt finished') return 'pending';
+  const data =
+    row.data && typeof row.data === 'object' ? (row.data as Record<string, unknown>) : {};
+  return ['lastMessage', 'allMessages', 'structuredOutput'].includes(String(data.outputType))
+    ? 'success'
+    : 'error';
+}
+
+function catalogRevision(
+  accounts: FreebuffAccount[],
+  findBinary = nativeFreebuffBinary,
+): string | null {
   try {
     return accounts
       .map((account) => {
-        const binary = nativeFreebuffBinary(account.profileDir);
+        const binary = findBinary(account.profileDir);
         if (!binary) throw new Error('missing binary');
         const metadata = statSync(binary);
         return `${account.id}:${binary}:${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeMs}`;
@@ -365,30 +451,71 @@ function accountCatalogModels(
   });
 }
 
+const freebuffDependencies = {
+  discoverAccounts: discoverFreebuffAccounts,
+  findBinary: nativeFreebuffBinary,
+  discoverCatalog: discoverFreebuffBundledCatalog,
+  runtimeStatus: getFreebuffRuntimeStatus,
+  refreshRuntimeStatus: refreshFreebuffRuntimeStatus,
+  createRuntime: createFreebuffTurnRuntime,
+  prepareBridge: prepareFreebuffBridge,
+  createLease: createKoryBridgeGrantLease,
+  materializeCredentials: materializeFreebuffCredentials,
+  getBridge: getCliBridge,
+  createRunRoot: () =>
+    join(
+      homedir(),
+      '.koryphaios',
+      'freebuff-runs',
+      `${Date.now()}-${randomBytes(8).toString('hex')}`,
+    ),
+  readLogRows: readFreebuffLogRows,
+};
+
+/** Injectable boundary for credential-free lifecycle tests; production uses only these safe defaults. */
+export type FreebuffProviderDependencies = typeof freebuffDependencies;
+
 export class FreebuffProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
   readonly name = 'freebuff' as const;
   private models: ModelDef[] = [];
   private modelDiscoveryError: string | undefined;
   private refreshInFlight: Promise<ModelDef[]> | null = null;
   private loadedCatalogRevision: string | null = null;
 
-  constructor(readonly config: ProviderConfig) {
-    if (this.isAvailable()) void this.refreshModels();
+  private readonly deps: FreebuffProviderDependencies;
+
+  constructor(
+    readonly config: ProviderConfig,
+    dependencies: Partial<FreebuffProviderDependencies> = {},
+  ) {
+    this.deps = { ...freebuffDependencies, ...dependencies };
+    if (!config.disabled) {
+      void this.deps
+        .refreshRuntimeStatus()
+        .then(() => {
+          if (this.isAvailable()) void this.refreshModels();
+        })
+        .catch(() => {
+          /* Unavailable until a successful runtime probe. */
+        });
+    }
   }
 
   isAvailable(): boolean {
-    if (this.config.disabled || process.platform !== 'linux') return false;
-    if (!which('tmux') || !sandboxCapabilities().osIsolation) return false;
-    return discoverFreebuffAccounts().some(
-      (account) =>
-        existsSync(join(account.profileDir, 'credentials.json')) &&
-        nativeFreebuffBinary(account.profileDir) !== null,
-    );
+    if (this.config.disabled || !this.deps.runtimeStatus().available) return false;
+    return this.deps
+      .discoverAccounts()
+      .some(
+        (account) =>
+          existsSync(join(account.profileDir, 'credentials.json')) &&
+          this.deps.findBinary(account.profileDir) !== null,
+      );
   }
 
   listModels(): ModelDef[] {
-    const accounts = discoverFreebuffAccounts();
-    const revision = catalogRevision(accounts);
+    const accounts = this.deps.discoverAccounts();
+    const revision = catalogRevision(accounts, this.deps.findBinary);
     if (this.isAvailable() && revision !== this.loadedCatalogRevision) {
       // A replaced CLI executable invalidates its old model capabilities
       // immediately. Do not display a stale menu while the new binary is read.
@@ -404,8 +531,8 @@ export class FreebuffProvider implements Provider {
 
   refreshModels(forceRefresh = false): Promise<ModelDef[]> {
     if (this.refreshInFlight) return this.refreshInFlight;
-    const accounts = discoverFreebuffAccounts();
-    const revision = catalogRevision(accounts);
+    const accounts = this.deps.discoverAccounts();
+    const revision = catalogRevision(accounts, this.deps.findBinary);
     if (!forceRefresh && revision && revision === this.loadedCatalogRevision) {
       return Promise.resolve(this.models);
     }
@@ -426,11 +553,11 @@ export class FreebuffProvider implements Provider {
 
     this.refreshInFlight = Promise.allSettled(
       accounts.map(async (account) => {
-        const binary = nativeFreebuffBinary(account.profileDir);
-        if (!binary) throw new Error(`Freebuff executable is missing for ${account.label}`);
+        const binary = this.deps.findBinary(account.profileDir);
+        if (!binary) throw new Error('Freebuff executable is missing for an account');
         return {
           account,
-          catalog: await discoverFreebuffBundledCatalog(binary),
+          catalog: await this.deps.discoverCatalog(binary),
         };
       }),
     )
@@ -438,8 +565,17 @@ export class FreebuffProvider implements Provider {
         const failures: string[] = [];
         const loaded = results.flatMap((result) => {
           if (result.status === 'rejected') {
+            failures.push('An installed CLI catalog could not be read');
+            return [];
+          }
+          const qualifiedRuntime = this.deps.runtimeStatus();
+          if (
+            qualifiedRuntime.available &&
+            qualifiedRuntime.version &&
+            result.value.catalog.cliVersion !== qualifiedRuntime.version
+          ) {
             failures.push(
-              result.reason instanceof Error ? result.reason.message : String(result.reason),
+              'The installed CLI version differs from the qualified execution runtime; update and requalify the runtime before using this account',
             );
             return [];
           }
@@ -449,7 +585,7 @@ export class FreebuffProvider implements Provider {
             accounts.length > 1,
           );
         });
-        const currentRevision = catalogRevision(accounts);
+        const currentRevision = catalogRevision(accounts, this.deps.findBinary);
         if (currentRevision !== revision) {
           this.models = [];
           this.loadedCatalogRevision = null;
@@ -485,146 +621,221 @@ export class FreebuffProvider implements Provider {
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
-    if (!this.isAvailable()) {
-      yield { type: 'error', error: FREEBUFF_PTY_UNAVAILABLE_ERROR };
-      return;
-    }
-    if (!request.sessionId?.trim()) {
-      yield {
-        type: 'error',
-        error:
-          'Freebuff PTY turns require a Koryphaios session so MCP tools can be scoped and authenticated.',
-      };
-      return;
-    }
-
-    const availableModels = await this.refreshModels();
-    const requestedSelection = parseModelSelection(request.model);
-    if (
-      !availableModels.some(
-        (model) =>
-          model.apiModelId === requestedSelection.modelId &&
-          (!requestedSelection.profileDir ||
-            model.accountId ===
-              discoverFreebuffAccounts().find(
-                (account) =>
-                  resolve(account.profileDir) === resolve(requestedSelection.profileDir!),
-              )?.id),
-      )
-    ) {
-      yield {
-        type: 'error',
-        error:
-          this.modelDiscoveryError ??
-          `Freebuff model ${requestedSelection.modelId} is not in the installed CLI picker catalog. Refresh models or choose another model.`,
-      };
-      return;
-    }
-
-    let turn: FreebuffPtyTurn;
-    try {
-      turn = buildFreebuffPtyTurn(request.systemPrompt, request.messages);
-    } catch (error: unknown) {
-      yield {
-        type: 'error',
-        error: `Freebuff PTY failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
-      return;
-    }
-    if (!turn.prompt.trim()) {
-      yield { type: 'error', error: 'Freebuff: empty prompt' };
-      return;
-    }
-
-    const selection = parseModelSelection(request.model);
-    const account = selection.profileDir
-      ? discoverFreebuffAccounts().find(
-          (item) => resolve(item.profileDir) === resolve(selection.profileDir!),
-        )
-      : discoverFreebuffAccounts()[0];
-    if (!account) {
-      yield {
-        type: 'error',
-        error: 'Freebuff CLI account no longer exists. Run "freebuff login" and reconnect.',
-      };
-      return;
-    }
-    const sourceBinary = nativeFreebuffBinary(account.profileDir);
-    if (!sourceBinary) {
-      yield {
-        type: 'error',
-        error:
-          'Freebuff native launcher is missing. Run the freebuff installer once, then reconnect.',
-      };
-      return;
-    }
-
-    const runId = `${Date.now()}-${randomBytes(8).toString('hex')}`;
-    const runRoot = join(homedir(), '.koryphaios', 'freebuff-runs', runId);
-    const runHome = join(runRoot, 'home');
-    const workspace = join(runRoot, 'workspace');
-    const runBin = join(runRoot, 'bin');
-    const privateTmp = join(runRoot, 'tmp');
-    for (const dir of [
-      runRoot,
-      runHome,
-      workspace,
-      runBin,
-      privateTmp,
-      join(workspace, '.agents'),
-    ]) {
-      ensureManagedCliDirectory(dir);
-    }
-
-    const copiedBinary = join(runBin, 'freebuff');
-    const credentialsTarget = join(runHome, '.config', 'manicode', 'credentials.json');
-    const settingsTarget = join(runHome, '.config', 'manicode', 'settings.json');
-    ensureManagedCliDirectory(dirname(credentialsTarget));
-    copyFileSync(sourceBinary, copiedBinary);
-    chmodSync(copiedBinary, 0o700);
-    writeManagedCliFile(
-      credentialsTarget,
-      readFileSync(join(account.profileDir, 'credentials.json')),
-    );
-    writeManagedCliFile(
-      settingsTarget,
-      JSON.stringify({ freebuffModel: selection.modelId }, null, 2),
-    );
-
-    const role = request.harnessRole ?? 'manager';
-    const lease = createKoryBridgeGrantLease(request.sessionId, role);
-    const bridge = getCliBridge('freebuff');
-    const bridgeContext = {
-      provider: 'freebuff' as const,
-      role,
-      sandbox: request.sandbox,
-      workingDirectory: request.workingDirectory?.trim() || process.cwd(),
-      sessionId: request.sessionId,
-      systemPrompt: request.systemPrompt,
-      tools: request.tools ?? [],
-      promptManifestHash: request.promptManifestHash,
-      taskContractHash: request.taskContractHash,
-      bridgeGrantLease: lease,
+    let runRoot = '';
+    let runtime: FreebuffTurnRuntime | undefined;
+    let prepared: Awaited<ReturnType<typeof prepareFreebuffBridge>> | undefined;
+    let lease: ReturnType<typeof createKoryBridgeGrantLease> | undefined;
+    let runtimeCleanup: Promise<void> | undefined;
+    const stopRuntime = () => (runtimeCleanup ??= runtime?.cleanup());
+    let phase = 'runtime readiness';
+    const timeout = new AbortController();
+    const signal = request.signal
+      ? AbortSignal.any([request.signal, timeout.signal])
+      : timeout.signal;
+    const requestedLimit = Number(request.sandbox?.maxRuntimeSeconds);
+    const runtimeMs =
+      Number.isFinite(requestedLimit) && requestedLimit > 0
+        ? Math.min(MAX_RUNTIME_MS, requestedLimit * 1000)
+        : MAX_RUNTIME_MS;
+    const timer = setTimeout(() => timeout.abort(), runtimeMs);
+    const onAbort = () => {
+      void stopRuntime()?.catch(() => {});
     };
-
-    let session = '';
-    let buffer = '';
+    signal.addEventListener('abort', onAbort, { once: true });
     try {
-      const servers = bridge?.buildMcpConfig(bridgeContext);
-      if (!servers?.length) throw new Error('Kory MCP bridge configuration is unavailable');
-
-      // Keep the grant inside the one mounted private root. The backend validates
-      // the grant's secret/id against its in-memory lease, not its original path.
-      for (const server of servers) {
-        const grantSource = server.env?.KORY_BRIDGE_AUTH_FILE;
-        if (!grantSource) throw new Error('Kory MCP bridge grant is missing');
-        const grantTarget = join(runRoot, `bridge-${server.name}.json`);
-        writeManagedCliFile(grantTarget, readFileSync(grantSource));
-        server.env = { ...server.env, KORY_BRIDGE_AUTH_FILE: grantTarget };
+      checkAbort(signal);
+      if (!this.config.disabled) await this.deps.refreshRuntimeStatus();
+      checkAbort(signal);
+      if (!this.isAvailable()) {
+        yield { type: 'error', error: FREEBUFF_PTY_UNAVAILABLE_ERROR };
+        return;
       }
+      if (!request.sessionId?.trim()) {
+        yield {
+          type: 'error',
+          error:
+            'Freebuff PTY turns require a Koryphaios session so MCP tools can be scoped and authenticated.',
+        };
+        return;
+      }
+
+      // Recheck host-CLI/runtime version agreement after readiness, including
+      // accounts whose catalogs were discovered before the async probe finished.
+      const availableModels = await this.refreshModels(true);
+      const requestedSelection = parseModelSelection(request.model);
+      if (
+        !availableModels.some(
+          (model) =>
+            model.apiModelId === requestedSelection.modelId &&
+            (!requestedSelection.profileDir ||
+              model.accountId ===
+                this.deps
+                  .discoverAccounts()
+                  .find(
+                    (account) =>
+                      resolve(account.profileDir) === resolve(requestedSelection.profileDir!),
+                  )?.id),
+        )
+      ) {
+        yield {
+          type: 'error',
+          error:
+            this.modelDiscoveryError ??
+            'The selected model is not in the installed CLI catalog. Refresh models or choose another model.',
+        };
+        return;
+      }
+
+      let turn: FreebuffPtyTurn;
+      try {
+        turn = buildFreebuffPtyTurn(request.systemPrompt, request.messages);
+      } catch {
+        yield {
+          type: 'error',
+          error: 'Freebuff PTY received unsupported or invalid message content.',
+        };
+        return;
+      }
+      if (!turn.prompt.trim()) {
+        yield { type: 'error', error: 'Freebuff: empty prompt' };
+        return;
+      }
+      if (
+        turn.images.length &&
+        !userConfirmedImageInput(this, request) &&
+        !availableModels.some(
+          (model) => model.id === request.model && model.supportsAttachments === true,
+        )
+      ) {
+        yield {
+          type: 'error',
+          error: 'Freebuff cannot verify image support for this CLI model selection.',
+        };
+        return;
+      }
+
+      const selection = parseModelSelection(request.model);
+      const account = selection.profileDir
+        ? this.deps
+            .discoverAccounts()
+            .find((item) => resolve(item.profileDir) === resolve(selection.profileDir!))
+        : this.deps.discoverAccounts()[0];
+      if (!account) {
+        yield {
+          type: 'error',
+          error: 'Freebuff CLI account no longer exists. Run "freebuff login" and reconnect.',
+        };
+        return;
+      }
+      const sourceBinary = this.deps.findBinary(account.profileDir);
+      if (!sourceBinary) {
+        yield {
+          type: 'error',
+          error:
+            'Freebuff native launcher is missing. Run the freebuff installer once, then reconnect.',
+        };
+        return;
+      }
+
+      phase = 'private workspace setup';
+      checkAbort(signal);
+      runRoot = this.deps.createRunRoot();
+      const runHome = join(runRoot, 'home');
+      const workspace = join(runRoot, 'workspace');
+      const privateTmp = join(runRoot, 'tmp');
+      for (const dir of [runRoot, runHome, workspace, privateTmp, join(workspace, '.agents')]) {
+        ensureManagedCliDirectory(dir);
+      }
+
+      const settingsTarget = join(runHome, '.config', 'manicode', 'settings.json');
+      phase = 'CLI login access';
+      try {
+        // Modern CLI profiles reference Freebuff's own Keychain entry. Resolve
+        // only that entry into this fresh 0600 per-turn copy, never into an SDK key.
+        await this.deps.materializeCredentials({ profileDir: account.profileDir, runHome, signal });
+      } catch {
+        checkAbort(signal);
+        throw new FreebuffPtyError(
+          'Freebuff CLI login could not be prepared. Unlock the macOS login keychain and allow access to the Freebuff CLI item if prompted, or run "freebuff login" in the selected profile and retry.',
+        );
+      }
+      phase = 'CLI model settings';
+      const sourceSettings = join(account.profileDir, 'settings.json');
+      const settings = existsSync(sourceSettings)
+        ? JSON.parse(readFileSync(sourceSettings, 'utf8'))
+        : {};
+      writeManagedCliFile(
+        settingsTarget,
+        JSON.stringify(buildFreebuffTurnSettings(settings, selection.modelId)),
+      );
+
+      const role = request.harnessRole ?? 'manager';
+      phase = 'bridge grant setup';
+      lease = this.deps.createLease(request.sessionId, role);
+      const bridge = this.deps.getBridge('freebuff');
+      const bridgeContext = {
+        provider: 'freebuff' as const,
+        role,
+        sandbox: request.sandbox,
+        workingDirectory: request.workingDirectory?.trim() || process.cwd(),
+        sessionId: request.sessionId,
+        systemPrompt: request.systemPrompt,
+        tools: request.tools ?? [],
+        promptManifestHash: request.promptManifestHash,
+        taskContractHash: request.taskContractHash,
+        bridgeGrantLease: lease,
+      };
+
+      checkAbort(signal);
+      phase = 'isolated runtime setup';
+      runtime = await this.deps.createRuntime({
+        runRoot,
+        runHome,
+        workspace,
+        privateTmp,
+        sourceBinary,
+        // Inference always needs outbound network; native filesystem access remains confined.
+        allowNetwork: true,
+        env: buildProviderCliEnv(
+          'freebuff',
+          {
+            HOME: runHome,
+            USERPROFILE: runHome,
+            XDG_CONFIG_HOME: join(runHome, '.config'),
+            XDG_CACHE_HOME: join(runHome, '.cache'),
+            XDG_DATA_HOME: join(runHome, '.local', 'share'),
+            XDG_STATE_HOME: join(runHome, '.local', 'state'),
+            TMPDIR: privateTmp,
+            TERM: 'xterm-256color',
+          },
+          {},
+        ),
+      });
+      checkAbort(signal);
+      const tmux: FreebuffTmux = async (args) => {
+        checkAbort(signal);
+        const result = await runtime!.tmux(args);
+        checkAbort(signal);
+        return result;
+      };
+      const session = runtime.session;
+      const buffer = `${session}-prompt`;
+      phase = 'bridge staging';
+      const servers = bridge?.buildMcpConfig(bridgeContext);
+      if (!servers?.length)
+        throw new FreebuffPtyError('Kory MCP bridge configuration is unavailable');
+      prepared = await this.deps.prepareBridge({
+        runRoot,
+        servers,
+        bunBinary: runtime.bunBinary,
+        runtimeKind: runtime.kind,
+        hostGateway: runtime.hostGateway,
+        signal,
+      });
+      checkAbort(signal);
       writeManagedCliFile(
         join(workspace, '.agents', 'mcp.json'),
-        JSON.stringify(serializeKoryMcpServers(servers), null, 2),
+        JSON.stringify(serializeKoryMcpServers(prepared.servers), null, 2),
       );
       const rules = bridge?.buildRules(bridgeContext) ?? [];
       for (const rule of rules) {
@@ -632,12 +843,9 @@ export class FreebuffProvider implements Provider {
         writeManagedCliFile(target, rule.content);
       }
       const agentConfig = bridge?.buildAgentConfig(bridgeContext);
-      const authoritativeTools = agentConfig?.allowedTools?.join(', ') ?? '';
       const transportPrompt = [
         ...(agentConfig?.systemInstructions ?? []),
-        authoritativeTools
-          ? `Authoritative Kory MCP catalog for this role: ${authoritativeTools}`
-          : '',
+        'The connected Kory MCP server tools/list catalog defines available tools. Native Freebuff tools affect only this disposable transport workspace; use Kory MCP tools for the actual session workspace.',
         turn.prompt,
       ]
         .filter(Boolean)
@@ -646,86 +854,13 @@ export class FreebuffProvider implements Provider {
       writeManagedCliFile(promptPath, transportPrompt);
       const imagePaths = materializeFreebuffImages(turn.images, workspace);
 
-      const runtimePolicy: SandboxPolicy = {
-        preset: 'custom',
-        filesystemIsolation: true,
-        allowNetwork: request.sandbox?.allowNetwork !== false,
-        allowShell: true,
-        allowEdits: true,
-        allowWebSearch: request.sandbox?.allowWebSearch !== false,
-        commandBlocklist: request.sandbox?.commandBlocklist ?? [],
-        maxRuntimeSeconds: Math.min(
-          MAX_RUNTIME_MS / 1000,
-          request.sandbox?.maxRuntimeSeconds || MAX_RUNTIME_MS / 1000,
-        ),
-      };
-      const readonlyRuntimeDirs = [...new Set([PROJECT_ROOT, dirname(process.execPath)])];
-      const wrapped = wrapCommand(copiedBinary, ['--cwd', workspace], {
-        cwd: workspace,
-        homeDir: runHome,
-        configDirs: [runRoot],
-        readonlyConfigDirs: readonlyRuntimeDirs,
-        // The TUI child is the inference transport — it must reach the
-        // model endpoint. See inferenceSandboxPolicy.
-        policy: inferenceSandboxPolicy(runtimePolicy),
-      });
-      if (!wrapped.isolated) throw new Error('Freebuff refused to run without OS isolation');
-
-      session = `kory-freebuff-${process.pid}-${randomBytes(6).toString('hex')}`;
-      buffer = `${session}-prompt`;
-      const childEnv = buildProviderCliEnv('freebuff', {
-        HOME: runHome,
-        USERPROFILE: runHome,
-        XDG_CONFIG_HOME: join(runHome, '.config'),
-        XDG_CACHE_HOME: join(runHome, '.cache'),
-        XDG_DATA_HOME: join(runHome, '.local', 'share'),
-        XDG_STATE_HOME: join(runHome, '.local', 'state'),
-        TMPDIR: privateTmp,
-        TERM: 'xterm-256color',
-      });
-      await tmux(
-        [
-          'new-session',
-          '-d',
-          '-s',
-          session,
-          '-x',
-          '180',
-          '-y',
-          '50',
-          '--',
-          wrapped.command,
-          ...wrapped.args,
-        ],
-        childEnv,
-      );
-      let pane = await waitForPane(
-        session,
-        (screen) =>
-          /start coding for free|freebuff is already running|continue|freebuff|buffy|what would you like/i.test(
-            screen,
-          ) || screen.trim().length > 100,
-        45_000,
-        request.signal,
-      );
-      if (/freebuff is already running/i.test(pane)) {
-        await tmux(['send-keys', '-t', session, 'Enter']);
-        pane = await waitForPane(
-          session,
-          (screen) => !/freebuff is already running/i.test(screen),
-          30_000,
-          request.signal,
-        );
-      }
-      if (/start coding for free|continue/i.test(pane)) {
-        await tmux(['send-keys', '-t', session, 'Enter']);
-        await waitForPane(
-          session,
-          (screen) => !/start coding for free/i.test(screen),
-          30_000,
-          request.signal,
-        );
-      }
+      phase = 'bridge catalog readiness';
+      await runtime.exec(runtime.bunBinary, prepared.probeArgs, { timeout: 35_000 });
+      checkAbort(signal);
+      phase = 'TUI startup';
+      await runtime.start(freebuffPrivateCliArgs(runRoot, workspace));
+      await waitForFreebuffStartup(tmux, session, signal);
+      phase = 'prompt submission';
       // Freebuff removes its old /image slash command from the free surface,
       // but its real OpenTUI paste handler accepts a single existing image
       // path, processes it, and adds a native pending image. Drive that path
@@ -740,16 +875,33 @@ export class FreebuffProvider implements Provider {
         await tmux(['load-buffer', '-b', buffer, pathInput]);
         await tmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', session]);
         const filename = basename(imagePath);
-        await waitForFreebuffImageReady(session, filename, request.signal);
+        await waitForFreebuffImageReady(tmux, session, filename, signal);
       }
       await tmux(['load-buffer', '-b', buffer, promptPath]);
       await tmux(['paste-buffer', '-p', '-d', '-b', buffer, '-t', session]);
       await tmux(['send-keys', '-t', session, 'Enter']);
 
+      // The modern CLI can lazily discover MCP tools while constructing the
+      // first agent request. Preflight the signed catalog before submission,
+      // but wait for actual CLI bridge startup afterward to avoid a deadlock.
+      // No completion/content is published until this additional proof exists.
+      phase = 'CLI MCP startup';
+      const bridgeStartedAt = Date.now();
+      while (!existsSync(prepared.readyPath)) {
+        checkAbort(signal);
+        if (Date.now() - bridgeStartedAt > 30_000) {
+          throw new FreebuffPtyError('Freebuff TUI did not load the Kory MCP bridge');
+        }
+        await tmux(['has-session', '-t', session]);
+        await waitForFreebuffPoll(250, signal);
+      }
+
       const logsRoot = join(runHome, '.config', 'manicode', 'projects');
       const offsets = new Map<string, number>();
       const emittedTools = new Set<string>();
-      const startedAt = Date.now();
+      phase = 'turn completion';
+      let selectedModel: string | null = null;
+      const usageByModel = new Map<string, number[]>();
       let emittedContent = false;
       let complete = false;
       let lastSessionCheck = 0;
@@ -762,103 +914,109 @@ export class FreebuffProvider implements Provider {
       };
 
       while (!complete) {
-        if (request.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-        if (Date.now() - startedAt > runtimePolicy.maxRuntimeSeconds * 1000) {
-          throw new Error('Freebuff PTY turn exceeded its runtime limit');
-        }
+        checkAbort(signal);
         if (Date.now() - lastSessionCheck > 1_000) {
           lastSessionCheck = Date.now();
           try {
             await tmux(['has-session', '-t', session]);
           } catch {
-            throw new Error('Freebuff TUI exited before producing a completion event');
+            checkAbort(signal);
+            throw new FreebuffPtyError('Freebuff TUI exited before producing a completion event');
           }
         }
-        for (const logPath of findLogFiles(logsRoot)) {
-          const text = readFileSync(logPath, 'utf8');
-          const previous = offsets.get(logPath) ?? 0;
-          if (text.length <= previous) continue;
-          const chunk = text.slice(previous);
-          const lastNewline = chunk.lastIndexOf('\n');
-          if (lastNewline < 0) continue;
-          offsets.set(logPath, previous + lastNewline + 1);
-          for (const line of chunk.slice(0, lastNewline).split('\n')) {
-            let row: Record<string, unknown>;
-            try {
-              row = JSON.parse(line) as Record<string, unknown>;
-            } catch {
-              continue;
-            }
-            const msg = typeof row.msg === 'string' ? row.msg : '';
-            const data =
-              row.data && typeof row.data === 'object' ? (row.data as Record<string, unknown>) : {};
-            const requestContextTokens = freebuffUsageFromLogRow(row, selection.modelId);
-            if (requestContextTokens !== null) {
-              usage.finalContextTokens = requestContextTokens;
-              usage.inputTokensProcessed += requestContextTokens;
-              usage.requestCount += 1;
-              usage.requestInputTokens.push(requestContextTokens);
-            }
-            if (msg === '[send-message] Sending message with sdk run config') {
-              const runConfig =
-                data.runConfig && typeof data.runConfig === 'object'
-                  ? (data.runConfig as Record<string, unknown>)
-                  : {};
-              const contentBlockCount = Number(runConfig.contentBlockCount);
-              if (imagePaths.length > 0 && contentBlockCount !== imagePaths.length) {
-                throw new Error(
-                  `Freebuff TUI reported ${contentBlockCount || 0} image content blocks; expected ${imagePaths.length}`,
-                );
-              }
-              if (contentBlockCount === imagePaths.length) verifiedImageCount = true;
-            }
-            const response = typeof data.fullResponse === 'string' ? data.fullResponse : '';
-            if (response) {
-              emittedContent = true;
-              yield { type: 'content_delta', content: response };
-            }
-            const calls = Array.isArray(data.toolCalls) ? data.toolCalls : [];
-            const results = Array.isArray(data.toolResults) ? data.toolResults : [];
-            for (const rawCall of calls) {
-              if (!rawCall || typeof rawCall !== 'object') continue;
-              const call = rawCall as Record<string, unknown>;
-              const callId = String(call.toolCallId ?? '');
-              if (!callId || emittedTools.has(callId)) continue;
-              emittedTools.add(callId);
-              const result = results.find(
-                (item) =>
-                  item &&
-                  typeof item === 'object' &&
-                  String((item as Record<string, unknown>).toolCallId ?? '') === callId,
-              ) as Record<string, unknown> | undefined;
-              const rawToolName = String(call.toolName ?? 'freebuff_tool');
-              yield {
-                type: 'tool_executed',
-                toolCallId: callId,
-                toolName: rawToolName.startsWith('kory__')
-                  ? rawToolName
-                  : `freebuff_sandbox__${rawToolName}`,
-                toolInput: stringifyToolResult(call.input ?? {}),
-                toolOutput: stringifyToolResult(result?.content ?? ''),
-                isError: Boolean(result?.isError),
-              };
-            }
-            if (data.shouldEndTurn === true || msg === 'Main prompt finished') complete = true;
+        const rows = await this.deps.readLogRows(runtime, logsRoot, offsets);
+        checkAbort(signal);
+        for (const row of rows) {
+          const msg = typeof row.msg === 'string' ? row.msg : '';
+          const data =
+            row.data && typeof row.data === 'object' ? (row.data as Record<string, unknown>) : {};
+          const loggedModel = typeof data.model === 'string' ? data.model : '';
+          const requestContextTokens = freebuffUsageFromLogRow(row, loggedModel);
+          if (loggedModel && requestContextTokens !== null) {
+            const samples = usageByModel.get(loggedModel) ?? [];
+            samples.push(requestContextTokens);
+            usageByModel.set(loggedModel, samples);
           }
+          const rootModel = freebuffSelectedModelFromLogRow(row);
+          if (rootModel) {
+            if (
+              selection.modelId !== FREEBUFF_CLI_DEFAULT_MODEL_ID &&
+              rootModel !== selection.modelId
+            ) {
+              throw new FreebuffPtyError(
+                'Freebuff CLI did not use the requested model; refresh models and reconnect',
+              );
+            }
+            selectedModel = rootModel;
+          }
+          const completion = freebuffCompletionFromLogRow(row);
+          if (completion === 'error')
+            throw new FreebuffPtyError('Freebuff main prompt returned an error or no output');
+          if (msg === '[send-message] Sending message with sdk run config') {
+            const runConfig =
+              data.runConfig && typeof data.runConfig === 'object'
+                ? (data.runConfig as Record<string, unknown>)
+                : {};
+            const contentBlockCount = Number(runConfig.contentBlockCount);
+            if (imagePaths.length > 0 && contentBlockCount !== imagePaths.length) {
+              throw new FreebuffPtyError(
+                'Freebuff TUI did not submit the expected image content blocks',
+              );
+            }
+            if (contentBlockCount === imagePaths.length) verifiedImageCount = true;
+          }
+          const response =
+            rootModel && typeof data.fullResponse === 'string' ? data.fullResponse : '';
+          if (response.trim()) {
+            emittedContent = true;
+            yield { type: 'content_delta', content: response };
+          }
+          const calls = Array.isArray(data.toolCalls) ? data.toolCalls : [];
+          const results = Array.isArray(data.toolResults) ? data.toolResults : [];
+          for (const rawCall of calls) {
+            if (!rawCall || typeof rawCall !== 'object') continue;
+            const call = rawCall as Record<string, unknown>;
+            const callId = String(call.toolCallId ?? '');
+            if (!callId || emittedTools.has(callId)) continue;
+            emittedTools.add(callId);
+            const result = results.find(
+              (item) =>
+                item &&
+                typeof item === 'object' &&
+                String((item as Record<string, unknown>).toolCallId ?? '') === callId,
+            ) as Record<string, unknown> | undefined;
+            const rawToolName = String(call.toolName ?? 'freebuff_tool');
+            yield {
+              type: 'tool_executed',
+              toolCallId: callId,
+              toolName: rawToolName.startsWith('kory__')
+                ? rawToolName
+                : `freebuff_sandbox__${rawToolName}`,
+              toolInput: stringifyToolResult(call.input ?? {}),
+              toolOutput: stringifyToolResult(result?.content ?? ''),
+              isError: Boolean(result?.isError),
+            };
+          }
+          if (completion === 'success') complete = true;
         }
-        if (!complete) await wait(250, request.signal);
+        if (!complete) await waitForFreebuffPoll(250, signal);
       }
-      if (!verifiedImageCount) {
-        throw new Error('Freebuff TUI did not report native image content for this turn');
-      }
-      if (!emittedContent) {
-        const statePath = findLogFiles(logsRoot)[0]?.replace(/log\.jsonl$/, 'run-state.json');
-        if (statePath && existsSync(statePath)) {
-          const state = JSON.parse(readFileSync(statePath, 'utf8')) as Record<string, unknown>;
-          const last = typeof state.lastMessage === 'string' ? state.lastMessage : '';
-          if (last) yield { type: 'content_delta', content: last };
-        }
-      }
+      checkAbort(signal);
+      if (!selectedModel)
+        throw new FreebuffPtyError(
+          'Freebuff did not verify the main agent model in its completion log',
+        );
+      if (!verifiedImageCount)
+        throw new FreebuffPtyError(
+          'Freebuff TUI did not report native image content for this turn',
+        );
+      // Never treat a stale run-state or a nested agent response as a successful empty root turn.
+      if (!emittedContent)
+        throw new FreebuffPtyError('Freebuff main prompt completed without a text response');
+      usage.requestInputTokens = usageByModel.get(selectedModel) ?? [];
+      usage.requestCount = usage.requestInputTokens.length;
+      usage.finalContextTokens = usage.requestInputTokens.at(-1) ?? 0;
+      usage.inputTokensProcessed = usage.requestInputTokens.reduce((sum, value) => sum + value, 0);
       if (usage.finalContextTokens > 0) {
         yield {
           type: 'usage_update',
@@ -868,7 +1026,7 @@ export class FreebuffProvider implements Provider {
           tokensOut: 0,
           // Billing needs all selected-model requests made during the agentic
           // turn, not only the final context. Output usage is not present in
-          // Freebuff 0.0.162's log and therefore remains explicitly unknown.
+          // Freebuff's log and therefore remains explicitly unknown.
           billingTokensIn: usage.inputTokensProcessed,
           billingTokensOut: 0,
           billingUsageSamples: usage.requestInputTokens.map((tokensIn) => ({
@@ -881,38 +1039,44 @@ export class FreebuffProvider implements Provider {
       }
       yield { type: 'complete', finishReason: 'end_turn' };
     } catch (err: unknown) {
-      const aborted =
-        request.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError');
+      const aborted = signal.aborted || (err instanceof Error && err.name === 'AbortError');
       yield {
         type: 'error',
-        error: aborted
-          ? 'Freebuff PTY turn cancelled.'
-          : `Freebuff PTY failed: ${err instanceof Error ? err.message : String(err)}`,
-        // A PTY that dies mid-turn is a transport failure, not a bad prompt:
-        // repeat the turn instead of surfacing it.
+        error:
+          timeout.signal.aborted && !request.signal?.aborted
+            ? 'Freebuff PTY turn exceeded its runtime limit.'
+            : aborted
+              ? 'Freebuff PTY turn cancelled.'
+              : err instanceof FreebuffPtyError
+                ? err.message
+                : `Freebuff PTY failed during ${phase}. No private diagnostic output was retained.`,
         errorTransient: !aborted && isTransientStreamErrorText(err),
       };
     } finally {
-      if (session) {
-        try {
-          await tmux(['send-keys', '-t', session, 'Escape']);
-          await tmux(['kill-session', '-t', session]);
-        } catch {
-          providerLog.debug({ provider: 'freebuff' }, 'Freebuff tmux session already exited');
-        }
-      }
-      if (buffer) {
-        try {
-          await tmux(['delete-buffer', '-b', buffer]);
-        } catch {
-          // paste-buffer -d usually removed it already.
-        }
-      }
-      lease.cleanup();
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      // Each cleanup is independent: one failure must not retain copied credentials or live grants.
       try {
-        rmSync(runRoot, { recursive: true, force: true });
-      } catch (err: unknown) {
-        providerLog.warn({ err }, 'Freebuff private run cleanup failed');
+        await stopRuntime();
+      } catch {
+        providerLog.warn({ provider: 'freebuff' }, 'Freebuff private runtime cleanup failed');
+      }
+      try {
+        await prepared?.cleanup();
+      } catch {
+        providerLog.warn({ provider: 'freebuff' }, 'Freebuff staged bridge cleanup failed');
+      }
+      try {
+        lease?.cleanup();
+      } catch {
+        providerLog.warn({ provider: 'freebuff' }, 'Freebuff bridge grant cleanup failed');
+      }
+      if (runRoot) {
+        try {
+          rmSync(runRoot, { recursive: true, force: true });
+        } catch {
+          providerLog.warn({ provider: 'freebuff' }, 'Freebuff private run cleanup failed');
+        }
       }
     }
   }

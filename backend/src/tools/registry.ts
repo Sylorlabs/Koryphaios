@@ -12,6 +12,12 @@ import {
   type ResolvedSandboxOptions,
 } from './permission-policy';
 import { toolSchemaGuidance, validateToolInputAgainstSchema } from './tool-exposure';
+import { checkNoteToolPermission } from '../notes/notes-settings';
+import { realpathSync } from 'node:fs';
+import { resolve, relative, isAbsolute, sep } from 'node:path';
+import { sessionWorkspaceOwnership } from '../kory/session-workspace';
+import { validatePathAccess } from '../security/path-security';
+import { tryAcquireWorkspaceOperation } from './workspace-operation-gate';
 
 export interface ToolContext {
   sessionId: string;
@@ -34,6 +40,11 @@ export interface ToolContext {
    *  stub schema, because the model then has not seen the real contract. */
   validateToolInput?: boolean;
   workingDirectory: string;
+  /** Host-derived immutable write grant for an owned chat checkout (or its
+   * narrower worker directory). Never take this value from tool input. */
+  requiredWorkspaceRoot?: string;
+  /** Canonical host-owned project root, distinct from a worker's disposable checkout. */
+  settingsRoot?: string;
   signal?: AbortSignal;
   /** whitelisted paths for scoped access (sandboxing) */
   allowedPaths?: string[];
@@ -106,6 +117,8 @@ export interface ToolCallInput {
 }
 
 export interface ToolCallOutput {
+  /** Ephemeral model-visible images; do not include in text archives or audit payloads. */
+  images?: Array<{ mimeType: string; data: string }>;
   callId: string;
   name: string;
   output: string;
@@ -307,12 +320,52 @@ export class ToolRegistry {
 
     const start = performance.now();
 
+    // Ownership, not provider input or sandbox preferences, establishes the
+    // mandatory write boundary. A worker's own cwd is intentionally narrower
+    // than the owning chat checkout. Clone rather than mutate the caller's ctx.
+    try {
+      const owner = sessionWorkspaceOwnership(ctx.workingDirectory);
+      if (!owner && ctx.requiredWorkspaceRoot) {
+        throw new Error('Owned workspace is no longer available');
+      }
+      const cwd = owner ? realpathSync(ctx.workingDirectory) : undefined;
+      if (owner && cwd) {
+        const rel = relative(owner.checkout, cwd);
+        if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+          throw new Error('Owned workspace cwd was redirected outside its checkout');
+        }
+      }
+      // A manager opened on a repository subdirectory still owns that chat's
+      // independent Git metadata. Workers retain only their task checkout.
+      const root = owner ? (ctx.callerRole === 'manager' ? owner.checkout : cwd) : undefined;
+      if (ctx.requiredWorkspaceRoot && root !== ctx.requiredWorkspaceRoot) {
+        throw new Error('The pinned workspace grant was redirected');
+      }
+      if (root || ctx.requiredWorkspaceRoot) {
+        ctx.requiredWorkspaceRoot = root;
+        ctx.approvedToolCallIds ??= new Set();
+        ctx = { ...ctx, requiredWorkspaceRoot: root, ...(cwd ? { workingDirectory: cwd } : {}) };
+      }
+    } catch {
+      return {
+        callId: call.id,
+        name: call.name,
+        isError: true,
+        output: 'Cannot establish the mandatory workspace boundary.',
+        durationMs: performance.now() - start,
+      };
+    }
+
     // Approval receipts are single-invocation capabilities. A provider may
     // reuse a tool-call ID, so discard any stale receipt before deciding the
     // current call. The host adds it back only after this invocation's prompt.
     ctx.approvedToolCallIds?.delete(call.id);
 
-    if (ctx.validateToolInput) {
+    if (
+      ctx.validateToolInput ||
+      call.name === 'propose_note_relationship' ||
+      call.name === 'review_note_relationship'
+    ) {
       const verdict = await validateToolInputAgainstSchema(tool.inputSchema, call.input);
       if (!verdict.valid) {
         return {
@@ -335,7 +388,7 @@ export class ToolRegistry {
       input.source,
       input.destination,
     ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-    for (const file of files) {
+    for (const file of [...files, ...edits]) {
       if (typeof file.path === 'string') paths.push(file.path);
     }
     const operations = Array.isArray(input.operations)
@@ -365,7 +418,36 @@ export class ToolRegistry {
       fileCount: new Set(paths).size,
       linesChanged: lineSources.reduce((total, value) => total + value.split('\n').length, 0),
     };
-    const permission = decideToolPermission(ctx.permissionPolicy, call.name, change);
+    const decidePermission = () => {
+      const host = decideToolPermission(ctx.permissionPolicy, call.name, change);
+      if (host.action === 'deny') return host;
+      if (call.name === 'propose_note_relationship' || call.name === 'review_note_relationship') {
+        const notes = checkNoteToolPermission(call.name, ctx.settingsRoot ?? ctx.workingDirectory);
+        if (!notes.allowed) return { action: 'deny' as const, reason: notes.reason };
+        if (call.name === 'review_note_relationship')
+          return {
+            action: 'ask' as const,
+            reason: `Independent human review required for ${call.name}: ${JSON.stringify(call.input)}`,
+          };
+        return notes.requiresApproval ? { action: 'ask' as const, reason: notes.reason } : host;
+      }
+      if (call.name !== 'retrieve_note_context') return host;
+      // Retrieval reads note bodies on behalf of read_note. Compose both
+      // policies here so every native/MCP path gets one fresh approval receipt,
+      // and an allowlist or permissive mode cannot override Notes Ask/Block.
+      const root = ctx.settingsRoot ?? ctx.workingDirectory;
+      let decision = host;
+      for (const name of ['retrieve_note_context', 'read_note']) {
+        const notes = checkNoteToolPermission(name, root);
+        if (!notes.allowed) return { action: 'deny' as const, reason: notes.reason };
+        const readHost = decideToolPermission(ctx.permissionPolicy, name);
+        if (readHost.action === 'deny') return readHost;
+        if (notes.requiresApproval) decision = { action: 'ask', reason: notes.reason };
+        else if (readHost.action === 'ask') decision = readHost;
+      }
+      return decision;
+    };
+    const permission = decidePermission();
     if (permission.action === 'deny') {
       return {
         callId: call.id,
@@ -375,7 +457,12 @@ export class ToolRegistry {
         durationMs: performance.now() - start,
       };
     }
-    if (permission.action === 'ask') {
+    // First-party computer tools perform their argument-bound approval inside
+    // the cancellable desktop lock. Do not leave a second generic prompt outside Stop.
+    if (
+      permission.action === 'ask' &&
+      (!tool.name.startsWith('computer_') || tool.name === 'computer_status')
+    ) {
       if (!ctx.waitForUserInput) {
         return {
           callId: call.id,
@@ -389,7 +476,7 @@ export class ToolRegistry {
       const liveRace = new Promise<string>((resolve) => {
         poll = setInterval(() => {
           try {
-            const fresh = decideToolPermission(ctx.permissionPolicy, call.name, change);
+            const fresh = decidePermission();
             if (fresh.action === 'allow') {
               clearInterval(poll);
               resolve('__LIVE_ALLOW__');
@@ -426,7 +513,7 @@ export class ToolRegistry {
       if (selection === '__LIVE_ALLOW__') {
         (ctx.approvedToolCallIds ??= new Set()).add(call.id);
       } else if (selection === '__LIVE_DENY__') {
-        const fresh = decideToolPermission(ctx.permissionPolicy, call.name, change);
+        const fresh = decidePermission();
         return {
           callId: call.id,
           name: call.name,
@@ -505,7 +592,60 @@ export class ToolRegistry {
       }
     }
 
+    if (
+      ['retrieve_note_context', 'propose_note_relationship', 'review_note_relationship'].includes(
+        call.name,
+      )
+    ) {
+      // Approval is not permission to ignore revocation while the prompt was open.
+      const current = decidePermission();
+      if (current.action === 'deny') {
+        return {
+          callId: call.id,
+          name: call.name,
+          output: current.reason,
+          isError: true,
+          durationMs: performance.now() - start,
+        };
+      }
+    }
+
+    const workspaceLease = tryAcquireWorkspaceOperation(ctx.sessionId, call.name === 'git_switch');
+    if (!workspaceLease) {
+      return {
+        callId: call.id,
+        name: call.name,
+        isError: true,
+        output:
+          'This chat has another workspace operation in progress. Retry after it finishes; Git switching cannot overlap other tools.',
+        durationMs: performance.now() - start,
+      };
+    }
     try {
+      if (ctx.requiredWorkspaceRoot && FILE_MUTATING_TOOLS.has(call.name)) {
+        // Recheck after approval/preflight awaits. Settings and YOLO may waive
+        // prompts, never ownership. Always resolve symlinks, including parents
+        // of not-yet-created paths; broad caller allowedPaths are not authority.
+        const root = ctx.requiredWorkspaceRoot;
+        if (
+          realpathSync(root) !== root ||
+          paths.some(
+            (path) =>
+              !validatePathAccess(resolve(ctx.workingDirectory, path), [root], {
+                followSymlinks: true,
+              }).allowed,
+          )
+        ) {
+          return {
+            callId: call.id,
+            name: call.name,
+            isError: true,
+            output: 'Access denied: file mutation is outside the mandatory workspace boundary.',
+            durationMs: performance.now() - start,
+          };
+        }
+        ctx = { ...ctx, allowedPaths: [root] };
+      }
       const result = await runToolWithEvidenceCache(tool, ctx, call);
       result.durationMs = performance.now() - start;
       return result;
@@ -528,6 +668,8 @@ export class ToolRegistry {
         isError: true,
         durationMs: performance.now() - start,
       };
+    } finally {
+      workspaceLease.release();
     }
   }
 }

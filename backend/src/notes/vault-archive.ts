@@ -19,6 +19,7 @@ export interface VaultArchiveLimits {
   maxRevisions: number;
   maxAttachments: number;
   maxLinks: number;
+  maxRelationships: number;
   maxBases: number;
   maxDrafts: number;
   maxInventoryItems: number;
@@ -35,6 +36,7 @@ export const DEFAULT_VAULT_ARCHIVE_LIMITS: Readonly<VaultArchiveLimits> = Object
   maxRevisions: 150_000,
   maxAttachments: 100_000,
   maxLinks: 1_000_000,
+  maxRelationships: 1_000_000,
   maxBases: 10_000,
   maxDrafts: 100_000,
   maxInventoryItems: 1_000_000,
@@ -50,6 +52,22 @@ export interface VaultPayloadDescriptor {
   ownerId: string;
 }
 
+export interface VaultArchiveRelationship {
+  fromNoteId: string;
+  toNoteId: string;
+  type: 'related_to' | 'supports' | 'contradicts' | 'depends_on' | 'supersedes';
+  status: 'proposed' | 'accepted' | 'rejected';
+  actor: Record<string, string>;
+  provenance: 'user' | 'agent' | 'import';
+  evidence: string;
+  weight: number;
+  revision: number;
+  sourceRevision: number;
+  targetRevision: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface VaultArchiveManifest {
   format: 'koryphaios-notes-vault';
   version: 1 | 2;
@@ -58,6 +76,8 @@ export interface VaultArchiveManifest {
   revisions: Array<Record<string, unknown>>;
   attachments: Array<Record<string, unknown>>;
   links: Array<Record<string, unknown>>;
+  /** Optional v2 extension; derived document links are never promoted. */
+  relationships?: VaultArchiveRelationship[];
   bases: Array<Record<string, unknown>>;
   drafts: Array<Record<string, unknown>>;
   files: Array<Record<string, unknown>>;
@@ -133,6 +153,7 @@ export interface VaultArchiveRestorePlan {
   revisions: number;
   attachments: number;
   links: number;
+  relationships?: number;
   bases: number;
   drafts: number;
   noOpNotes: number;
@@ -148,6 +169,7 @@ export interface VaultRestoreCommitCounts {
   restoredRevisions: number;
   restoredAttachments: number;
   restoredLinks: number;
+  restoredRelationships?: number;
   restoredBases: number;
   restoredDrafts: number;
 }
@@ -544,6 +566,15 @@ function validateManifest(
   const revisions = requireArray(root.revisions, 'revisions', limits.maxRevisions);
   const attachments = requireArray(root.attachments, 'attachments', limits.maxAttachments);
   const links = requireArray(root.links, 'links', limits.maxLinks);
+  const rawRelationships = requireArray(
+    root.relationships,
+    'relationships',
+    limits.maxRelationships,
+    true,
+  );
+  if (root.version === 1 && rawRelationships.length) {
+    throw new ValidationError('Vault archive v1 cannot contain relationships');
+  }
   const bases = requireArray(root.bases, 'bases', limits.maxBases, true);
   const drafts = requireArray(root.drafts, 'drafts', limits.maxDrafts, true);
   const files = requireArray(root.files, 'files', limits.maxEntries, true);
@@ -685,6 +716,92 @@ function validateManifest(
     linkKeys.add(key);
   }
 
+  const relationshipKeys = new Set<string>();
+  const relationships: VaultArchiveRelationship[] = rawRelationships.map((record, index) => {
+    const label = `relationships[${index}]`;
+    const fromNoteId = requireId(record.fromNoteId, `${label}.fromNoteId`);
+    const toNoteId = requireId(record.toNoteId, `${label}.toNoteId`);
+    if (!noteIds.has(fromNoteId) || !noteIds.has(toNoteId) || fromNoteId === toNoteId) {
+      throw new ValidationError(`${label} has invalid or foreign endpoints`);
+    }
+    const key = `${fromNoteId}\0${toNoteId}`;
+    if (relationshipKeys.has(key))
+      throw new ValidationError(`Duplicate vault relationship: ${fromNoteId} -> ${toNoteId}`);
+    relationshipKeys.add(key);
+    const type = record.type ?? 'related_to';
+    const status = record.status ?? 'accepted';
+    if (
+      !['related_to', 'supports', 'contradicts', 'depends_on', 'supersedes'].includes(
+        type as string,
+      )
+    ) {
+      throw new ValidationError(`${label}.type is unsupported`);
+    }
+    if (!['proposed', 'accepted', 'rejected'].includes(status as string)) {
+      throw new ValidationError(`${label}.status is unsupported`);
+    }
+    if (!['user', 'agent', 'import'].includes(record.provenance as string)) {
+      throw new ValidationError(`${label}.provenance is unsupported`);
+    }
+    const evidence = requireString(record.evidence, `${label}.evidence`, {
+      max: 2000,
+      allowEmpty: true,
+    });
+    if (type !== 'related_to' && !evidence.trim())
+      throw new ValidationError(`${label} requires evidence`);
+    if (
+      typeof record.weight !== 'number' ||
+      !Number.isFinite(record.weight) ||
+      record.weight <= 0 ||
+      record.weight > 1
+    ) {
+      throw new ValidationError(`${label}.weight must be in (0, 1]`);
+    }
+    const sourceRevision = requireInteger(record.sourceRevision, `${label}.sourceRevision`, 1);
+    const targetRevision = requireInteger(record.targetRevision, `${label}.targetRevision`, 1);
+    if (
+      sourceRevision > noteRevisions.get(fromNoteId)! ||
+      targetRevision > noteRevisions.get(toNoteId)!
+    ) {
+      throw new ValidationError(`${label} references a future endpoint revision`);
+    }
+    const actorRecord = requireRecord(record.actor ?? {}, `${label}.actor`);
+    const actor: Record<string, string> = {};
+    const actorKeys = [
+      'sessionId',
+      'provider',
+      'model',
+      'reasoningLevel',
+      'agentId',
+      'goalId',
+      'goalItemId',
+    ];
+    for (const [key, value] of Object.entries(actorRecord)) {
+      if (!actorKeys.includes(key))
+        throw new ValidationError(`${label}.actor has an unsupported field`);
+      actor[key] = requireControlFreeString(value, `${label}.actor.${key}`, 512);
+    }
+    const createdAt = requireDateString(record.createdAt, `${label}.createdAt`)!;
+    const updatedAt = requireDateString(record.updatedAt, `${label}.updatedAt`)!;
+    if (Date.parse(updatedAt) < Date.parse(createdAt))
+      throw new ValidationError(`${label} has reversed timestamps`);
+    return {
+      fromNoteId,
+      toNoteId,
+      type: type as VaultArchiveRelationship['type'],
+      status: status as VaultArchiveRelationship['status'],
+      actor,
+      provenance: record.provenance as VaultArchiveRelationship['provenance'],
+      evidence,
+      weight: record.weight,
+      revision: requireInteger(record.revision, `${label}.revision`, 1),
+      sourceRevision,
+      targetRevision,
+      createdAt,
+      updatedAt,
+    };
+  });
+
   const baseIds = new Set<string>();
   const baseNames = new Set<string>();
   for (const [index, base] of bases.entries()) {
@@ -772,6 +889,7 @@ function validateManifest(
     revisions,
     attachments,
     links,
+    relationships,
     bases,
     drafts,
     files,
@@ -996,6 +1114,7 @@ function buildRestorePlan(
     revisions: archive.manifest.revisions.length,
     attachments: archive.manifest.attachments.length,
     links: archive.manifest.links.length,
+    relationships: archive.manifest.relationships?.length ?? 0,
     bases: archive.manifest.bases.length,
     drafts: archive.manifest.drafts.length,
     noOpNotes: 0,
@@ -1037,10 +1156,15 @@ function validateCommitCounts(
     restoredRevisions: plan.revisions,
     restoredAttachments: plan.attachments,
     restoredLinks: plan.links,
+    restoredRelationships: plan.relationships ?? 0,
     restoredBases: plan.bases,
     restoredDrafts: plan.drafts,
   };
   for (const key of Object.keys(expected) as Array<keyof VaultRestoreCommitCounts>) {
+    // Adapters predating the optional v2 extension can still restore archives
+    // with no relationships. Never accept an omitted count for a nonempty set.
+    if (key === 'restoredRelationships' && counts[key] === undefined && expected[key] === 0)
+      continue;
     if (!Number.isSafeInteger(counts[key]) || counts[key] !== expected[key]) {
       throw new ConflictError(
         'Vault restore adapter did not atomically commit the complete plan.',

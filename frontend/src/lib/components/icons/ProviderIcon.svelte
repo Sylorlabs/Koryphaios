@@ -21,7 +21,9 @@
   // the page. Once a sibling instance is removed (for example when the provider
   // search filter drops one of the two Codex cards), the surviving path keeps
   // pointing at the deleted gradient and the SVG spec renders it as nothing —
-  // an empty tile rather than a logo. Scope the id to this instance instead.
+  // an empty tile rather than a logo. `$props.id()` mints a unique id per
+  // component instance and, unlike a random string, is stable across SSR
+  // hydration so the server and client agree on the reference.
   const codexGradientId = $props.id();
 
   const providerSlugMap: Record<string, string[]> = {

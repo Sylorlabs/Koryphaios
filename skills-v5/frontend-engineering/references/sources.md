@@ -21,6 +21,6 @@ The Command Line Interface Guidelines reinforce that terminal output is both a h
 
 - Apple Human Interface Guidelines: inspected 2026-09-04; recheck within 90 days.
 - Android adaptive-app guidance: inspected 2026-09-04; recheck within 90 days.
-- WHATWG HTML Living Standard interaction sections, updated 2026-09-04 when inspected: recheck within 30 days.
+- WHATWG HTML Living Standard interaction sections: inspected 2026-10-03; the living standard reported its current update date as 2026-10-03. The current inertness, user-activation, activation, and focus sections still support the browser-specific boundary recorded above. Recheck within 30 days.
 - W3C WCAG 2.2 and current input-modality understanding guidance: inspected 2026-09-04; recheck within 90 days for supporting guidance and 365 days for the Recommendation.
 - Command Line Interface Guidelines: inspected 2026-09-04; recheck within 180 days.

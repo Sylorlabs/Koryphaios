@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "repository-environment-discovery",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "domains": ["code", "repository", "runtime"],
@@ -124,10 +124,10 @@
       "notes": "Repository/worktree identity and top-level path resolution semantics."
     },
     {
-      "url": "https://developers.openai.com/codex/guides/agents-md/",
+      "url": "https://developers.openai.com/codex/agent-configuration/agents-md",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI Codex AGENTS.md guidance available on 2026-09-01",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "OpenAI Codex AGENTS.md guidance retrieved on 2026-10-02; redirects to ChatGPT Learn",
+      "verifiedAt": "2026-10-02",
       "staleAfterDays": 30,
       "notes": "Instruction discovery and precedence for global and repository-scoped AGENTS.md guidance."
     },

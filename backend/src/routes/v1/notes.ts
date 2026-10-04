@@ -15,6 +15,11 @@
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import * as notesService from '../../notes/notes-service';
+import { retrieveNoteContext } from '../../notes/note-context';
+import {
+  getNoteSemanticIndexStatus,
+  rebuildNoteSemanticIndex,
+} from '../../notes/note-semantic-index';
 import { noteDraftService } from '../../notes/note-draft-service';
 import { commitVaultRestore, previewVaultRestore } from '../../notes/vault-restore-service';
 import { DEFAULT_VAULT_ARCHIVE_LIMITS } from '../../notes/vault-archive';
@@ -90,6 +95,7 @@ function publicVaultRestoreResult(value: {
   revisions: number;
   attachments: number;
   links: number;
+  relationships?: number;
   bases: number;
   drafts: number;
   noOpNotes: number;
@@ -100,6 +106,7 @@ function publicVaultRestoreResult(value: {
   restoredRevisions?: number;
   restoredAttachments?: number;
   restoredLinks?: number;
+  restoredRelationships?: number;
   restoredBases?: number;
   restoredDrafts?: number;
 }) {
@@ -112,6 +119,7 @@ function publicVaultRestoreResult(value: {
     revisions: value.revisions,
     attachments: value.attachments,
     links: value.links,
+    relationships: value.relationships ?? 0,
     bases: value.bases,
     drafts: value.drafts,
     noOpNotes: value.noOpNotes,
@@ -127,6 +135,7 @@ function publicVaultRestoreResult(value: {
         restoredRevisions: value.restoredRevisions ?? 0,
         restoredAttachments: value.restoredAttachments ?? 0,
         restoredLinks: value.restoredLinks ?? 0,
+        restoredRelationships: value.restoredRelationships ?? 0,
         restoredBases: value.restoredBases ?? 0,
         restoredDrafts: value.restoredDrafts ?? 0,
       };
@@ -169,6 +178,134 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .onBeforeHandle(({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
   })
+
+  .get(
+    '/relationships',
+    async ({ request, query }) => ({
+      success: true,
+      data: await notesService.listNoteRelationships(getRequestProjectRoot(request), query),
+    }),
+    {
+      query: t.Object({
+        noteId: t.Optional(t.String({ maxLength: 2048 })),
+        status: t.Optional(
+          t.Union([t.Literal('proposed'), t.Literal('accepted'), t.Literal('rejected')]),
+        ),
+      }),
+    },
+  )
+  .post(
+    '/relationships',
+    async ({ request, body }) => {
+      const data = await notesService.proposeNoteRelationship(
+        body,
+        getRequestProjectRoot(request),
+        { provenance: 'user' },
+      );
+      broadcastNotesNetworkUpdate('update', data.fromId, undefined, mutationOrigin(request));
+      return { success: true, data };
+    },
+    {
+      body: t.Object({
+        fromId: t.String({ minLength: 1, maxLength: 2048 }),
+        toId: t.String({ minLength: 1, maxLength: 2048 }),
+        type: t.Union([
+          t.Literal('related_to'),
+          t.Literal('supports'),
+          t.Literal('contradicts'),
+          t.Literal('depends_on'),
+          t.Literal('supersedes'),
+        ]),
+        evidence: t.String({ minLength: 1, maxLength: 2000 }),
+        weight: t.Optional(t.Number({ exclusiveMinimum: 0, maximum: 1 })),
+        expectedSourceRevision: t.Integer({ minimum: 1 }),
+        expectedTargetRevision: t.Integer({ minimum: 1 }),
+      }),
+    },
+  )
+  .patch(
+    '/relationships/:fromId/:toId',
+    async ({ request, params, body }) => {
+      const data = await notesService.reviewNoteRelationship(
+        params.fromId,
+        params.toId,
+        body,
+        getRequestProjectRoot(request),
+        { provenance: 'user' },
+      );
+      broadcastNotesNetworkUpdate('update', data.fromId, undefined, mutationOrigin(request));
+      return { success: true, data };
+    },
+    {
+      body: t.Object({
+        status: t.Union([t.Literal('accepted'), t.Literal('rejected')]),
+        expectedRevision: t.Integer({ minimum: 1 }),
+      }),
+    },
+  )
+  .delete(
+    '/relationships/:fromId/:toId',
+    async ({ request, params, body }) => {
+      await notesService.unlinkNotes(
+        params.fromId,
+        params.toId,
+        {
+          syncContent: false,
+          expectedRelationshipRevision: requirePositiveRevision(
+            body.expectedRelationshipRevision,
+            'expectedRelationshipRevision',
+          ),
+          provenance: 'user',
+        },
+        getRequestProjectRoot(request),
+      );
+      broadcastNotesNetworkUpdate('update', params.fromId, undefined, mutationOrigin(request));
+      return { success: true, data: { removed: true } };
+    },
+    {
+      body: t.Object({ expectedRelationshipRevision: t.Integer({ minimum: 1 }) }),
+    },
+  )
+  .post(
+    '/context',
+    async ({ request, body }) => ({
+      success: true,
+      data: await retrieveNoteContext(body, getRequestProjectRoot(request), {
+        signal: request.signal,
+      }),
+    }),
+    {
+      body: t.Object({
+        query: t.String({ minLength: 1, maxLength: 2000 }),
+        seedIds: t.Optional(t.Array(t.String({ minLength: 1, maxLength: 2048 }), { maxItems: 8 })),
+        limit: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
+        maxHops: t.Optional(t.Integer({ minimum: 0, maximum: 2 })),
+        maxChars: t.Optional(t.Integer({ minimum: 256, maximum: 16000 })),
+        excerptChars: t.Optional(t.Integer({ minimum: 128, maximum: 2000 })),
+        semantic: t.Optional(t.Boolean()),
+      }),
+    },
+  )
+  .get('/semantic-index', ({ request }) => ({
+    success: true,
+    data: getNoteSemanticIndexStatus(getRequestProjectRoot(request)),
+  }))
+  .post(
+    '/semantic-index/rebuild',
+    async ({ request, body }) => ({
+      success: true,
+      data: await rebuildNoteSemanticIndex(getRequestProjectRoot(request), body, {
+        signal: request.signal,
+      }),
+    }),
+    {
+      body: t.Object({
+        optIn: t.Literal(true),
+        limit: t.Optional(t.Integer({ minimum: 1, maximum: 128 })),
+        reset: t.Optional(t.Boolean()),
+      }),
+    },
+  )
 
   // ── List all notes (supports ?search=, ?folder=) ─────────────────────────
   .get('/', async ({ request, query }) => {

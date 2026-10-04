@@ -20,4 +20,4 @@ SecondSky's `frontend-design` and `design-review` skills are MIT-licensed commun
 
 - ISO 9241-210:2019: official ISO page verified 2026-09-04; ISO reports the 2019 edition as confirmed on 2025-05-22. Recheck within 180 days or after a published revision.
 - GOV.UK Service Standard point 1 and whole-problem mapping guidance: verified 2026-09-04. Recheck within 90 days or after material Service Manual changes.
-- SecondSky `frontend-design` and `design-review`: GitHub `main` inspected 2026-09-04; upstream marks the skills MIT. Recheck within 30 days. Do not execute or import upstream scripts automatically.
+- SecondSky `frontend-design` at `ba827ce5eb67` and `design-review` at `bfdac85b7229`: GitHub `main` inspected 2026-10-03; upstream marks the skills MIT. Recheck within 30 days. Do not execute or import upstream scripts automatically.

@@ -316,6 +316,12 @@ export class WorkerPipelineService {
     }
   }
 
+  /** Recovery must use the same per-chat manager as execution, never the
+   * backend launch repository's manager. */
+  async workspaceForSession(sessionId: string): Promise<WorkspaceManager | null> {
+    return (await this.resolveProjectResources(sessionId)).workspaceManager;
+  }
+
   private async resolveProjectResources(sessionId: string): Promise<ProjectExecutionResources> {
     const sessionRoot = await this.canonicalDirectory(
       await this.host.resolveSessionWorkingDirectoryPublic(sessionId),

@@ -164,10 +164,10 @@
     {
       "url": "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-concepts.html",
       "sourceType": "official-docs",
-      "versionScope": "Rolling CloudTrail concepts as available 2026-09-19",
+      "versionScope": "Rolling CloudTrail concepts as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Audit/event-history/trail concepts. Event History is limited to 90 days of management events per account/Region and is not a durable organization audit archive.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.aws.amazon.com/prescriptive-guidance/latest/security-reference-architecture/doc-history.html",

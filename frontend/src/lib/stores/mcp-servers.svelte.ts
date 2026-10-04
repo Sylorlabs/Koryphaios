@@ -10,6 +10,40 @@ import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 
+/**
+ * OAuth state for a remote server. Contains no token material — the backend
+ * never sends a token to the client.
+ */
+export interface McpOAuthStatus {
+  authorized: boolean;
+  scope?: string;
+  expiresAt?: number;
+  expired: boolean;
+  refreshable: boolean;
+  resource?: string;
+  /** A live connection was rejected with 401; the user must re-authorize. */
+  needsAuthorization: boolean;
+}
+
+/**
+ * What a server needs before it works, and how the user supplies it.
+ *   none    — works immediately
+ *   env     — required environment variables (local stdio servers)
+ *   headers — a credential in a request header
+ *   oauth   — Koryphaios can register itself and open a browser sign-in
+ *   manual  — the user must create their own app and paste client ID/secret
+ *   unknown — a hand-added remote server with no credential configured
+ */
+export type McpAuthKind = 'none' | 'env' | 'oauth' | 'manual' | 'headers' | 'unknown';
+
+export interface McpAuthRequirement {
+  kind: McpAuthKind;
+  /** Short label, e.g. "Sign in with Notion". */
+  label: string;
+  /** One sentence stating exactly what the user has to do. */
+  detail: string;
+}
+
 export interface McpServerStatus {
   name: string;
   transport: 'stdio' | 'sse';
@@ -18,6 +52,8 @@ export interface McpServerStatus {
   protocolVersion?: string;
   lastError?: string | null;
   configured: boolean;
+  oauth?: McpOAuthStatus;
+  auth?: McpAuthRequirement;
 }
 
 export interface McpServerTestResult {
@@ -64,6 +100,8 @@ export interface McpRegistrySearchResult {
   }>;
   /** Curated grouping for featured registry entries. */
   category?: string;
+  /** What the user will have to do to make this server work. */
+  auth?: McpAuthRequirement;
 }
 
 type McpListResponse = { ok?: boolean; data?: McpServerStatus[]; error?: string };
@@ -82,6 +120,39 @@ type McpRegistrySearchResponse = {
 type McpRegistryFeaturedResponse = {
   ok?: boolean;
   data?: McpRegistrySearchResult[];
+  error?: string;
+};
+type McpOAuthStartResponse = {
+  ok?: boolean;
+  data?: {
+    authorizationUrl: string;
+    authorizationHost: string;
+    scopes: string[];
+    resourceName?: string;
+    expiresInSeconds: number;
+  };
+  error?: string;
+  /** Present when the flow failed; tells the UI what to ask for next. */
+  code?: string;
+};
+
+/**
+ * Why a server cannot be authorized automatically. The UI reveals the manual
+ * client-credential form only for this case, so a server that supports dynamic
+ * registration never asks the user for credentials it does not need.
+ */
+export type McpAuthBlocker =
+  | 'dynamic_registration_unavailable'
+  | 'resource_metadata_unavailable'
+  | 'authorization_server_metadata_unavailable'
+  | 'pkce_unsupported'
+  | 'authorization_denied'
+  | 'state_mismatch'
+  | 'token_exchange_failed'
+  | 'network';
+type McpOAuthCompleteResponse = {
+  ok?: boolean;
+  data?: { oauth: McpOAuthStatus };
   error?: string;
 };
 
@@ -297,6 +368,108 @@ function createMcpServersStore() {
     }
   }
 
+  /**
+   * Begin an OAuth flow for a remote server. The backend binds a loopback
+   * listener and registers a client, then hands back the provider URL the user
+   * must open. Nothing is stored until `completeAuthorization` succeeds.
+   */
+  let authorizingName = $state<string | null>(null);
+  /** Set when a server cannot authorize automatically, so the UI can ask for
+   *  the user's own app credentials instead of failing silently. */
+  let authBlocker = $state<{ server: string; code: string; message: string } | null>(null);
+
+  async function startAuthorization(
+    name: string,
+    manualClient?: { clientId: string; clientSecret?: string },
+  ): Promise<string | null> {
+    authorizingName = name;
+    authBlocker = null;
+    try {
+      const res = await apiFetch(
+        apiUrl(`/api/v1/mcp-servers/${encodeURIComponent(name)}/oauth/start`),
+        {
+          method: 'POST',
+          headers: manualClient ? { 'Content-Type': 'application/json' } : undefined,
+          body: manualClient ? JSON.stringify(manualClient) : undefined,
+        },
+      );
+      const json = await parseJsonResponse<McpOAuthStartResponse>(res);
+      if (!json?.ok || !json.data?.authorizationUrl) {
+        // Keep the blocker so the UI can explain the next step; a generic toast
+        // would leave the user with no way forward.
+        authBlocker = {
+          server: name,
+          code: json?.code ?? 'unknown',
+          message: json?.error ?? 'Could not start authorization',
+        };
+        toastStore.error(authBlocker.message);
+        return null;
+      }
+      return json.data.authorizationUrl;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not start authorization';
+      authBlocker = { server: name, code: 'network', message };
+      toastStore.error(message);
+      return null;
+    } finally {
+      authorizingName = null;
+    }
+  }
+
+  /**
+   * Finish the flow. Resolves once the browser redirect has been exchanged for
+   * a token. Returns false when the user has not completed consent yet, which
+   * is a normal waiting state rather than an error.
+   */
+  async function completeAuthorization(name: string): Promise<boolean> {
+    try {
+      const res = await apiFetch(
+        apiUrl(`/api/v1/mcp-servers/${encodeURIComponent(name)}/oauth/complete`),
+        { method: 'POST' },
+      );
+      const json = await parseJsonResponse<McpOAuthCompleteResponse>(res);
+      if (!json?.ok) throw new Error(json?.error ?? 'Authorization did not complete');
+      const scope = json.data?.oauth?.scope;
+      toastStore.success(`MCP server "${name}" authorized${scope ? ` (${scope})` : ''}`);
+      await loadAll();
+      return true;
+    } catch (err) {
+      toastStore.error(err instanceof Error ? err.message : 'Authorization did not complete');
+      return false;
+    }
+  }
+
+  async function cancelAuthorization(name: string): Promise<void> {
+    try {
+      await apiFetch(apiUrl(`/api/v1/mcp-servers/${encodeURIComponent(name)}/oauth/cancel`), {
+        method: 'POST',
+      });
+    } catch {
+      // Cancelling is best effort; a stale flow expires on its own.
+    }
+  }
+
+  /** Revoke at the provider and delete the stored token. */
+  async function disconnectAuthorization(name: string): Promise<boolean> {
+    try {
+      const res = await apiFetch(apiUrl(`/api/v1/mcp-servers/${encodeURIComponent(name)}/oauth`), {
+        method: 'DELETE',
+      });
+      const json = await parseJsonResponse<{
+        ok?: boolean;
+        data?: { revoked?: boolean };
+        error?: string;
+      }>(res);
+      if (!json?.ok) throw new Error(json?.error ?? 'Could not disconnect');
+      toastStore.success(`MCP server "${name}" disconnected`);
+      await loadAll();
+      return true;
+    } catch (err) {
+      toastStore.error(err instanceof Error ? err.message : 'Could not disconnect');
+      return false;
+    }
+  }
+
   return {
     get servers() {
       return servers;
@@ -314,6 +487,20 @@ function createMcpServersStore() {
     testServer,
     reloadServer,
     getEnvKeys,
+    // OAuth
+    get authorizingName() {
+      return authorizingName;
+    },
+    get authBlocker() {
+      return authBlocker;
+    },
+    clearAuthBlocker(serverName: string): void {
+      if (authBlocker?.server === serverName) authBlocker = null;
+    },
+    startAuthorization,
+    completeAuthorization,
+    cancelAuthorization,
+    disconnectAuthorization,
     // Registry search
     get registryResults() {
       return registryResults;

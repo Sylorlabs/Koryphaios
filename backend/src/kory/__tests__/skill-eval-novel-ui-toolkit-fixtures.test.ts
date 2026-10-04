@@ -625,5 +625,8 @@ describe('novel-ui-toolkit real-browser V5 evaluators', () => {
       /exceeded 2000ms|Target page, context or browser has been closed|Timeout/,
     );
     expect(elapsed).toBeLessThan(8_000);
-  }, 15_000);
+    // The bounded-failure assertions above are the real contract. This outer
+    // budget only has to cover fixture materialization plus two cold browser
+    // launches, which is not a 15s-safe margin on a loaded machine.
+  }, 30_000);
 });

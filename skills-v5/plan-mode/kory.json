@@ -108,10 +108,10 @@
     {
       "url": "https://developers.openai.com/codex/guides/agents-md/",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI Codex AGENTS.md guidance available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "OpenAI Codex AGENTS.md guidance inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Repository instruction discovery and precedence used during evidence gathering before implementation planning."
+      "notes": "Repository instruction discovery and precedence: global guidance first, then project guidance from repository root toward the current directory, with closer applicable guidance taking precedence."
     },
     {
       "url": "https://agentskills.io/specification",

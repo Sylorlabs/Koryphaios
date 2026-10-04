@@ -6,6 +6,14 @@
     import type { Snippet } from 'svelte';
     import { EXPAND_ANCHOR_EVENT } from '$lib/utils/expand-anchor';
 
+    // Pixels of rendered rows kept beyond each edge of the viewport. Row-count
+    // overscan alone scales with row height, so it is either wasteful for short
+    // rows or far too little for tall ones.
+    const OVERSCAN_PX = 600;
+    // Ceiling on the rows walked back to build up pixel overscan, so a
+    // transcript of very short rows cannot render the whole thing.
+    const MAX_HEADROOM_ROWS = 60;
+
     interface Props {
         items: T[];
         estimateHeight: (item: T) => number;
@@ -34,10 +42,23 @@
     let containerEl = $state<HTMLDivElement>();
     
     // Measured heights for the transcript currently open.
+    //
+    // A plain Map, mutated in place, rather than a reactive one that is cloned
+    // per change: a measurement batch arrives on every frame of a scroll, and
+    // cloning meant copying one entry per row in the transcript — thousands of
+    // them, tens of times a second, for a value that never leaves the
+    // component. `heightsVersion` is the reactive signal instead.
+    const heightCache = new Map<string, number>();
+    let heightsVersion = $state(0);
     let transcriptId = transcriptKey(untrack(() => resetKey));
-    let heightCache = $state<Map<string, number>>(
-        new Map(measuredHeights.get(transcriptId) ?? []),
-    );
+    seedHeights(transcriptId);
+
+    /** Load a transcript's remembered measurements into the live cache. */
+    function seedHeights(id: string) {
+        heightCache.clear();
+        for (const [key, height] of measuredHeights.get(id) ?? []) heightCache.set(key, height);
+        heightsVersion++;
+    }
 
     // Scroll state
     let scrollTop = $state(0);
@@ -103,7 +124,7 @@
         if (nextId !== transcriptId) {
             rememberTranscript(transcriptId, heightCache);
             transcriptId = nextId;
-            heightCache = new Map(measuredHeights.get(nextId) ?? []);
+            seedHeights(nextId);
         }
         untrack(() => {
             followBottom = null;
@@ -139,27 +160,55 @@
     // Keep what this transcript taught us about its rows when the view goes
     // away — switching chats unmounts the list, and coming back to a chat is
     // the common case, not the rare one.
-    onDestroy(() => rememberTranscript(transcriptId, heightCache));
+    onDestroy(() => {
+        rowObserver?.disconnect();
+        rowObserver = null;
+        rowResizeHandlers.clear();
+        rememberTranscript(transcriptId, heightCache);
+    });
 
-    // Computed positions
-    let positions = $derived.by(() => {
-        const result: { id: string; top: number; height: number }[] = [];
+    // Computed layout: where every row sits and how tall the transcript is.
+    // Rebuilt when the items change or a row is measured. The id→index maps
+    // exist so the measurement pass can answer "which row is this, and is it
+    // above the viewport?" without scanning the transcript — the scan ran once
+    // per changed row, on every frame of a scroll.
+    let layout = $derived.by(() => {
+        void heightsVersion;
+        const rows: { id: string; top: number; height: number }[] = [];
+        const indexById = new Map<string, number>();
+        const itemById = new Map<string, T>();
         let top = 0;
-        
-        for (const item of items) {
+
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
             const height = heightCache.get(item.id) ?? estimateHeight(item);
-            result.push({ id: item.id, top, height });
+            indexById.set(item.id, i);
+            itemById.set(item.id, item);
+            rows.push({ id: item.id, top, height });
             top += height;
         }
-        
-        return result;
+
+        return { rows, indexById, itemById, totalHeight: top };
     });
-    
-    let totalHeight = $derived(
-        positions.length > 0 
-            ? positions[positions.length - 1].top + positions[positions.length - 1].height 
-            : 0
-    );
+
+    let positions = $derived(layout.rows);
+    let indexById = $derived(layout.indexById);
+    let itemById = $derived(layout.itemById);
+    let totalHeight = $derived(layout.totalHeight);
+
+    // Height of the element that holds the rendered rows.
+    //
+    // This *is* the scrollable extent, and it has to be the transcript's own
+    // height. Deriving it from padding above and below the rendered window —
+    // the obvious way to build a virtual scroll — makes the extent depend on
+    // which rows happen to be rendered, and rows are rendered from estimates,
+    // so the extent moves while the reader scrolls. Measured on an 800px
+    // viewport, that put the bottom 1760px of a chat permanently out of reach
+    // and swung the extent through 48 different values totalling 4525px over a
+    // two-second flick upward: the scrollbar resized under the reader and the
+    // browser kept re-clamping their scroll offset. Stating the extent
+    // outright leaves it changing only when the content's real height changes.
+    let contentHeight = $derived(Math.max(totalHeight, clientHeight));
     
     // While following, the window is drawn at the offset the last pin reached.
     // Deriving it from `totalHeight` instead made the window and the scroll
@@ -188,11 +237,25 @@
             }
         }
         start = Math.max(0, low - overscan);
+
+        // `overscan` rows of headroom is not headroom at all in a transcript of
+        // tall messages: five short rows are nothing, and a flick scrolls past
+        // them in a frame or two. Keep a viewport's worth of rendered rows
+        // above the reader whatever the row heights turn out to be, so moving
+        // upward can never outrun the window and expose blank space.
+        const headroom = effectiveScrollTop - OVERSCAN_PX;
+        while (
+            start > 0 &&
+            start > low - MAX_HEADROOM_ROWS &&
+            positions[start - 1].top + positions[start].height > headroom
+        ) {
+            start--;
+        }
         
         // Find end
         for (let i = start; i < items.length; i++) {
             const pos = positions[i];
-            if (pos && pos.top > effectiveScrollTop + clientHeight + overscan * 100) {
+            if (pos && pos.top > effectiveScrollTop + clientHeight + OVERSCAN_PX) {
                 end = i - 1;
                 break;
             }
@@ -211,18 +274,6 @@
             position: positions[visibleRange.start + i]
         }));
     });
-    
-    let paddingTop = $derived(
-        visibleRange.start > 0 && positions[visibleRange.start] 
-            ? positions[visibleRange.start].top 
-            : 0
-    );
-    
-    let paddingBottom = $derived(
-        visibleRange.end >= 0 && visibleRange.end < positions.length - 1
-            ? totalHeight - (positions[visibleRange.end]?.top ?? 0) - (positions[visibleRange.end]?.height ?? 0)
-            : 0
-    );
     
     // Handle scroll
     function handleScroll(e: Event) {
@@ -255,12 +306,15 @@
     /** Move the container to the bottom and remember the offset we reached.
      *  Synchronous: the caller decides when the write has to land, because
      *  a write inside a rAF is applied after the browser has already painted
-     *  the frame it was scheduled from. */
+     *  the frame it was scheduled from.
+     *
+     *  `totalHeight` is the real maximum scrollTop, because the element holding
+     *  the rendered rows is sized to it. Nothing here has to consult the DOM's
+     *  scrollHeight as a second opinion. */
     function pinToBottomNow() {
         if (!containerEl) return;
-        const target = Math.max(totalHeight, containerEl.scrollHeight);
-        if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - target) > 1) {
-            containerEl.scrollTop = target;
+        if (Math.abs(containerEl.scrollTop + containerEl.clientHeight - totalHeight) > 1) {
+            containerEl.scrollTop = totalHeight;
         }
         // Read the offset back rather than assuming it: the browser clamps to
         // the real max scrollTop, and the rendered window is derived from this
@@ -286,18 +340,12 @@
         landingFrames = 0;
     }
     
-    // Authoritative bottom-pin for virtualization. totalHeight is the
-    // estimated content height and updates as real heights are measured — but
-    // rows outside the rendered window (e.g. a collapsed tool/agent block
-    // whose real height is much taller than its flat estimate) can leave
-    // totalHeight *short* of the DOM's actual scrollHeight for the rows that
-    // ARE currently rendered near the bottom. Pinning to totalHeight alone in
-    // that case stops short of the true bottom (a "partial" scroll) because
-    // the browser clamps our assignment to the real (larger) max scrollTop.
-    // Taking the max of totalHeight and the live DOM scrollHeight guarantees
-    // we always reach the actual bottom, while still reacting to totalHeight
-    // changes as heights converge for rows not yet rendered. Only pins while
-    // `follow` is on (user hasn't scrolled up), so it can never fight the user.
+    // Authoritative bottom-pin for virtualization. `totalHeight` is the
+    // transcript's real height and updates as real heights are measured, and
+    // the rendered rows live in an element sized to exactly that, so it is also
+    // the real scroll extent — there is no gap between "where the transcript
+    // ends" and "where the container stops scrolling". Only pins while `follow`
+    // is on (the reader has not scrolled up), so it can never fight them.
     $effect(() => {
         // Track the signals that move the bottom.
         void totalHeight;
@@ -349,80 +397,58 @@
         onLandingChange?.(landing);
     });
 
-    // Measure item heights after render
-    // FIX: Use ResizeObserver to batch updates instead of one-by-one state triggers
+    // One ResizeObserver for the whole list's rows, rather than one per row.
+    // Rows mount and unmount continuously while a transcript is scrolled, and
+    // allocating, observing and disconnecting an observer per row was work on
+    // exactly the path a reader complains about. Entries are routed back to the
+    // row that produced them.
+    let rowObserver: ResizeObserver | null = null;
+    const rowResizeHandlers = new Map<Element, (entries: ResizeObserverEntry[]) => void>();
+
+    function observeRowSize(element: Element, handler: (entries: ResizeObserverEntry[]) => void) {
+        rowResizeHandlers.set(element, handler);
+        if (!rowObserver) {
+            rowObserver = new ResizeObserver((entries) => {
+                for (const entry of entries) rowResizeHandlers.get(entry.target)?.([entry]);
+            });
+        }
+        rowObserver.observe(element);
+    }
+
+    function unobserveRowSize(element: Element) {
+        rowResizeHandlers.delete(element);
+        rowObserver?.unobserve(element);
+    }
+
+    // Height changes measured since the compensation pass last ran. Filled by the
+    // per-row observers, drained by the effect below.
+    let pendingDeltas: { id: string; amount: number }[] = [];
+
+    // Measure item heights after render.
+    //
+    // The observer only records what changed. Deciding what to do about it —
+    // moving the scroll offset to keep the reader's content where it is — is
+    // the effect below, and the split is load-bearing: a `scrollTop` write
+    // lands in the same frame as the height change it is compensating for, and
+    // writing it here, before the new height had been committed to the DOM,
+    // let the browser clamp the correction against a scroll extent that had
+    // not caught up yet. The reader then saw the shift we meant to cancel, and
+    // saw it as a lurch rather than as stillness.
     function measureItem(element: HTMLElement, id: string) {
         let currentId = id;
-        const ro = new ResizeObserver((entries) => {
-            // Rows are initially estimated, then measured after they mount. If
-            // a tall rich response above the reader settles from its estimate,
-            // the whole transcript below it shifts. When the reader is parked
-            // mid-transcript we correct scrollTop by the total height change
-            // of the rows *above* the viewport so their content stays put.
-            // Growth the reader asked for (see EXPAND_ANCHOR_EVENT) is
-            // corrected even when its row is on screen, so expanding a
-            // reasoning panel or a tool's output cannot push the messages
-            // below it out of view.
-            // Corrections are applied once per batch, after every delta in the
-            // batch is known: applying them inside the loop compared each row
-            // against a scrollTop that an earlier row in the same batch had
-            // already moved, which both mis-attributed the shifts and let the
-            // view slide up towards the start of the chat. Native scroll
-            // anchoring is disabled in the stylesheet to avoid applying the
-            // same correction twice.
-            const deltas: { id: string; amount: number }[] = [];
+        const onResize = (entries: ResizeObserverEntry[]) => {
             for (const entry of entries) {
                 const height = entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height;
-                const currentItem = items.find((item) => item.id === currentId);
-                const previousHeight =
-                    heightCache.get(currentId) ?? (currentItem ? estimateHeight(currentItem) : height);
-                if (height > 0 && previousHeight !== height) {
-                    heightCache.set(currentId, height);
-                    deltas.push({ id: currentId, amount: height - previousHeight });
-                }
+                if (height <= 0) continue;
+                const item = itemById.get(currentId);
+                const previous = heightCache.get(currentId) ?? (item ? estimateHeight(item) : height);
+                if (previous === height) continue;
+                heightCache.set(currentId, height);
+                pendingDeltas.push({ id: currentId, amount: height - previous });
             }
-            if (deltas.length === 0) return;
-            if (follow) {
-                // The bottom pin already keeps the content below a growth in
-                // place, so there is nothing to compensate for here.
-                expandAnchors.clear();
-                anchoredTop = null;
-            } else if (containerEl) {
-                const viewportTop = containerEl.scrollTop;
-                const viewportBottom = viewportTop + clientHeight;
-                let shift = 0;
-                for (const delta of deltas) {
-                    const position = positions.find((candidate) => candidate.id === delta.id);
-                    if (!position) continue;
-                    if (position.top < viewportTop) {
-                        shift += delta.amount;
-                    } else if (expandAnchors.has(delta.id) && position.top < viewportBottom) {
-                        // Growth the reader asked for — an expanded reasoning
-                        // panel or tool output — in a row they can see. Scrolling
-                        // by the growth keeps everything *below* the expansion
-                        // exactly where it was and slides the transcript up
-                        // into the new space, instead of dropping the messages
-                        // below the viewport. Rows scrolled out of view are
-                        // left alone: the reader is reading something else.
-                        const amount = delta.amount > 0 ? Math.min(delta.amount, anchorBudget) : delta.amount;
-                        shift += amount;
-                        if (amount > 0) {
-                            anchorBudget -= amount;
-                            if (anchorBudget <= 0) expandAnchors.delete(delta.id);
-                        }
-                    }
-                }
-                if (shift !== 0) {
-                    containerEl.scrollTop = viewportTop + shift;
-                    // Read back: the browser clamps to the real max scrollTop,
-                    // and that clamped value is what the resulting scroll
-                    // event will report.
-                    anchoredTop = containerEl.scrollTop;
-                }
-            }
-            heightCache = new Map(heightCache); // Trigger reactivity once per batch
-        });
-        ro.observe(element);
+            if (pendingDeltas.length > 0) heightsVersion++;
+        };
+        observeRowSize(element, onResize);
         // The reader expanding a control inside this row: remember it so the
         // growth it causes is absorbed into the scroll offset below.
         const onExpandRequest = () => {
@@ -436,11 +462,74 @@
                 currentId = nextId;
             },
             destroy() {
-                ro.disconnect();
+                unobserveRowSize(element);
                 element.removeEventListener(EXPAND_ANCHOR_EVENT, onExpandRequest);
             },
         };
     }
+
+    // Scroll compensation for measured height changes.
+    //
+    // Rows are initially estimated, then measured after they mount. If a tall
+    // rich response above the reader settles from its estimate, the whole
+    // transcript below it shifts. When the reader is parked mid-transcript we
+    // correct scrollTop by the height change of the rows *above* the viewport
+    // so their content stays put. Growth the reader asked for (see
+    // EXPAND_ANCHOR_EVENT) is corrected even when its row is on screen, so
+    // expanding a reasoning panel or a tool's output cannot push the messages
+    // below it out of view.
+    //
+    // Corrections are applied once per batch, after every delta in the batch is
+    // known: applying them inside the loop compared each row against a
+    // scrollTop that an earlier row in the same batch had already moved, which
+    // both mis-attributed the shifts and let the view slide up towards the
+    // start of the chat. Native scroll anchoring is disabled in the stylesheet
+    // to avoid applying the same correction twice.
+    $effect(() => {
+        // The trigger: the measured heights this correction is derived from.
+        void heightsVersion;
+        if (pendingDeltas.length === 0) return;
+        const deltas = pendingDeltas;
+        pendingDeltas = [];
+
+        if (follow || !containerEl) {
+            // The bottom pin already keeps the content below a growth in place,
+            // so there is nothing to compensate for here.
+            expandAnchors.clear();
+            anchoredTop = null;
+            return;
+        }
+
+        const viewportTop = containerEl.scrollTop;
+        const viewportBottom = viewportTop + clientHeight;
+        let shift = 0;
+        for (const delta of deltas) {
+            const index = indexById.get(delta.id);
+            const position = index === undefined ? undefined : positions[index];
+            if (!position) continue;
+            if (position.top < viewportTop) {
+                shift += delta.amount;
+            } else if (expandAnchors.has(delta.id) && position.top < viewportBottom) {
+                // Growth the reader asked for — an expanded reasoning panel or
+                // tool output — in a row they can see. Scrolling by the growth
+                // keeps everything *below* the expansion exactly where it was
+                // and slides the transcript up into the new space, instead of
+                // dropping the messages below the viewport. Rows scrolled out of
+                // view are left alone: the reader is reading something else.
+                const amount = delta.amount > 0 ? Math.min(delta.amount, anchorBudget) : delta.amount;
+                shift += amount;
+                if (amount > 0) {
+                    anchorBudget -= amount;
+                    if (anchorBudget <= 0) expandAnchors.delete(delta.id);
+                }
+            }
+        }
+        if (shift === 0) return;
+        containerEl.scrollTop = viewportTop + shift;
+        // Read back: the browser clamps to the real max scrollTop, and that
+        // clamped value is what the resulting scroll event will report.
+        anchoredTop = containerEl.scrollTop;
+    });
     
     // Resize observer for client height
     onMount(() => {
@@ -471,8 +560,8 @@
     }
     
     export function scrollToItem(id: string) {
-        const idx = items.findIndex(item => item.id === id);
-        if (idx >= 0 && containerEl) {
+        const idx = indexById.get(id);
+        if (idx !== undefined && containerEl) {
             const pos = positions[idx];
             if (pos) {
                 containerEl.scrollTo({ top: pos.top, behavior: 'smooth' });
@@ -522,7 +611,7 @@
 >
     <div 
         class="virtual-list-content"
-        style="padding-top: {paddingTop}px; padding-bottom: {paddingBottom}px;"
+        style="height: {contentHeight}px;"
     >
         {#each visibleItems as { item, index, position } (item.id)}
             <div 

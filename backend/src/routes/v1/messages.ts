@@ -226,7 +226,9 @@ export const messageRoutes = new Elysia({ prefix: '/api/messages' })
         contextWindow: t.Optional(t.Number()),
         fastMode: t.Optional(t.Boolean()),
         interactionMode: t.Optional(t.Union([t.Literal('act'), t.Literal('plan')])),
-        imageInputMode: t.Optional(t.Union([t.Literal('reject'), t.Literal('omit')])),
+        imageInputMode: t.Optional(
+          t.Union([t.Literal('reject'), t.Literal('omit'), t.Literal('allow')]),
+        ),
         attachments: t.Optional(
           t.Array(
             t.Object({

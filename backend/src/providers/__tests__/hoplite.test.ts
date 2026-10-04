@@ -346,6 +346,13 @@ describe('Hoplite registration metadata', () => {
       // Surfaces as the "Cloud + local" badge, not "Cloud agent": a thread can
       // run in a Hoplite sandbox or on a local Codex/Claude agent.
       deployment: 'hybrid',
+      execution: {
+        defaultMode: 'local',
+        modes: [
+          { id: 'local', available: false },
+          { id: 'cloud', available: false },
+        ],
+      },
     });
     expect(status?.configurationBlocked).toBeUndefined();
     expect(status?.allAvailableModels?.length).toBeGreaterThan(0);

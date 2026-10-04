@@ -11,6 +11,29 @@
 // - linear                                        → Goals / workflows
 // - sequential-thinking                           → agent planning & goal mode
 
+/**
+ * How a server authenticates, so the browse view can say up front what the user
+ * will have to do rather than letting them add a server and hit a 401.
+ *
+ *   none    — works immediately
+ *   env     — the user supplies required environment variables (a local stdio
+ *             server's API key, connection string, …)
+ *   oauth   — Koryphaios can register itself and run a browser sign-in
+ *   manual  — the user must create their own app with the provider and paste the
+ *             client ID/secret, because the provider allows no dynamic registration
+ *   headers — the user pastes a token/credential into a request header
+ *   unknown — a hand-added remote server with no credential; the UI must ask
+ */
+export type McpAuthKind = 'none' | 'env' | 'oauth' | 'manual' | 'headers' | 'unknown';
+
+export interface McpAuthRequirement {
+  kind: McpAuthKind;
+  /** Short label for the browse list, e.g. "Sign in with Notion". */
+  label: string;
+  /** One sentence telling the user exactly what they will need to do. */
+  detail: string;
+}
+
 export interface FeaturedMcpServer {
   id: string;
   name: string;
@@ -36,6 +59,8 @@ export interface FeaturedMcpServer {
     description: string;
     isSecret: boolean;
   }>;
+  /** What the user must do to make this server work. */
+  auth: McpAuthRequirement;
 }
 
 const CATEGORY_DEV = 'Dev & code hosting';
@@ -58,15 +83,73 @@ export const FEATURED_MCP_CATEGORIES = [
   CATEGORY_OPS,
 ] as const;
 
+/**
+ * Providers that publish no `registration_endpoint`, so Koryphaios cannot
+ * register itself and the user must supply their own app credentials.
+ *
+ * Verified against the live metadata: Slack is the only one in this catalog.
+ * `bun run backend/scripts/probe-mcp-oauth-live.ts` re-checks it.
+ */
+const MANUAL_REGISTRATION_HOSTS = new Set(['mcp.slack.com']);
+
+export function deriveMcpAuthRequirement(input: {
+  title: string;
+  transport: 'stdio' | 'sse';
+  url: string | null;
+  headerVars: FeaturedMcpServer['headerVars'];
+  envVars?: FeaturedMcpServer['envVars'];
+}): McpAuthRequirement {
+  if (input.transport === 'stdio') {
+    // A local server can still need a key or connection string; saying "no
+    // sign-in" for brave-search would be wrong.
+    const required = (input.envVars ?? []).filter((v) => v.isRequired);
+    if (required.length > 0) {
+      const names = required.map((v) => v.name).join(', ');
+      return {
+        kind: 'env',
+        label: 'Needs a key or connection string',
+        detail: `Enter ${names} when adding this server. Koryphaios stores the value securely and never shows it again.`,
+      };
+    }
+    return {
+      kind: 'none',
+      label: 'No sign-in',
+      detail: `Runs ${input.title} locally. No credentials needed.`,
+    };
+  }
+  if (input.headerVars.length > 0) {
+    const names = input.headerVars.map((h) => h.name).join(', ');
+    return {
+      kind: 'headers',
+      label: 'Needs a credential',
+      detail: `Paste your ${input.title} credential into the ${names} header when adding this server.`,
+    };
+  }
+  if (input.url && MANUAL_REGISTRATION_HOSTS.has(new URL(input.url).host)) {
+    return {
+      kind: 'manual',
+      label: 'Needs your own Slack app',
+      detail:
+        'Slack does not let apps register automatically. Create a Slack app with the mcp.connect scope, then enter its client ID and client secret when Koryphaios asks for them.',
+    };
+  }
+  return {
+    kind: 'oauth',
+    label: `Sign in with ${input.title}`,
+    detail: `Koryphaios opens ${input.title} in your browser so you can approve access. Nothing is shared until you do.`,
+  };
+}
+
 function remote(
   partial: Omit<
     FeaturedMcpServer,
-    'transport' | 'command' | 'args' | 'envVars' | 'url' | 'headerVars'
+    'transport' | 'command' | 'args' | 'envVars' | 'url' | 'headerVars' | 'auth'
   > & {
     url: string;
     headerVars?: FeaturedMcpServer['headerVars'];
   },
 ): FeaturedMcpServer {
+  const headerVars = partial.headerVars ?? [];
   return {
     ...partial,
     transport: 'sse',
@@ -74,14 +157,20 @@ function remote(
     args: [],
     envVars: [],
     url: partial.url,
-    headerVars: partial.headerVars ?? [],
+    headerVars,
+    auth: deriveMcpAuthRequirement({
+      title: partial.title,
+      transport: 'sse',
+      url: partial.url,
+      headerVars,
+    }),
   };
 }
 
 function stdio(
   partial: Omit<
     FeaturedMcpServer,
-    'transport' | 'command' | 'args' | 'envVars' | 'url' | 'headerVars'
+    'transport' | 'command' | 'args' | 'envVars' | 'url' | 'headerVars' | 'auth'
   > & {
     command: string;
     args: string[];
@@ -96,6 +185,13 @@ function stdio(
     envVars: partial.envVars ?? [],
     url: null,
     headerVars: [],
+    auth: deriveMcpAuthRequirement({
+      title: partial.title,
+      transport: 'stdio',
+      url: null,
+      headerVars: [],
+      envVars: partial.envVars ?? [],
+    }),
   };
 }
 

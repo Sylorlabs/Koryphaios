@@ -123,7 +123,7 @@ Repair the caller-visible contract in \`src/export-contract.ts\`, keep backend q
 };
 
 const exportScorer: SkillEvalDeterministicScorer = {
-  id: 'api-contract-design/idempotent-export-api-scorer@1',
+  id: 'api-contract-design/idempotent-export-api-scorer@2',
   scenarioIds: [EXPORT_API],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -309,7 +309,7 @@ Repair \`src/events-contract.ts\` to implement the staged compatibility contract
 };
 
 const cursorScorer: SkillEvalDeterministicScorer = {
-  id: 'api-contract-design/cursor-pagination-versioning-scorer@2',
+  id: 'api-contract-design/cursor-pagination-versioning-scorer@3',
   scenarioIds: [CURSOR_API],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(

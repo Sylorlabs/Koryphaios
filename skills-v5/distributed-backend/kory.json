@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "distributed-backend",
-  "version": "5.1.1",
+  "version": "5.1.2",
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -26,6 +26,7 @@
   "evidence": [
     "Consistency and failure model",
     "Fault-injection or simulation evidence",
+    "Replay, deduplication, and retention/compaction boundary evidence where identities can expire",
     "Hierarchy boundary and selected specialist rationale",
     "Representative success, negative-path, and recovery verification"
   ],

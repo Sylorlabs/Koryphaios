@@ -152,6 +152,7 @@ describe('MCP bridge role authority', () => {
       },
       goals: { list: async () => [] },
       kory: {
+        resolveSessionWorkingDirectoryPublic: async () => '/tmp',
         requestToolApproval: async () => 'Allow',
         hasActiveSessionExecution: () => true,
         tryAcquireSessionMutationBarrier: () => null,
@@ -279,6 +280,7 @@ describe('MCP bridge role authority', () => {
         },
         goals: { list: async () => [] },
         kory: {
+          resolveSessionWorkingDirectoryPublic: async () => projectRoot,
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,

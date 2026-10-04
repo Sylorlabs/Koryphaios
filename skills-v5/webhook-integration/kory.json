@@ -99,10 +99,10 @@
     {
       "url": "https://docs.stripe.com/webhooks",
       "sourceType": "official-docs",
-      "versionScope": "Stripe webhook documentation as available 2026-09-04",
+      "versionScope": "Stripe webhook documentation as available 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Webhook signing, retries, ordering, endpoint behavior, and event-handling reference.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-03"
     }
   ],
   "authoringMaturity": "individual"

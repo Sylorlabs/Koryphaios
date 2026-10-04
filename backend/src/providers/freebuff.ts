@@ -361,6 +361,7 @@ export const FREEBUFF_UNAVAILABLE_ERROR =
   'Freebuff is unavailable in this build. The @codebuff/sdk package failed to load, the Codebuff session claim was rejected, or the local credentials are missing required fields. Run "freebuff login" to refresh credentials; if the problem persists, re-validate the @codebuff/sdk version pinned in backend/package.json.';
 
 export class FreebuffProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'freebuff' as const;
 
   constructor(readonly config: ProviderConfig) {}

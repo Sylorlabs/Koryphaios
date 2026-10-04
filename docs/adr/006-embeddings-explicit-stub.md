@@ -11,7 +11,15 @@ embedding client. `search_notes`, query-based `recall_notes`, and the existing N
 search route reach `searchNotes()`; when explicitly enabled it ranks scoped current
 note chunks with validated real embeddings. `searchMemory()` in unified memory
 also searches current enabled session/project/universal documents. Existing
-synchronous prompt assembly and mandatory rules are unchanged.
+mandatory rules remain unchanged. Notes automatic context now applies a combined
+catalog/body budget and approval-aware selected-body inclusion.
+
+`retrieve_note_context` additionally uses a persistent, explicitly rebuilt semantic
+index, fused with lexical candidates and graph expansion. This is separate from the
+bounded snapshot search described below. It requires project/provider opt-in in
+**Notes → Network**, never indexes documents during reads, and reports current
+note-count coverage. See [Associative Note Network](../note-network.md) for its
+lifecycle, permissions, representation limits, and archive behavior.
 
 No embedding requests occur by default. An ordinary chat provider credential alone
 does not enable embeddings. Operators must explicitly configure all of:
@@ -26,6 +34,24 @@ KORY_EMBEDDING_API_KEY_ENV=OPENAI_API_KEY
 # KORY_EMBEDDING_API_KEY=<secret supplied by your environment>
 KORY_EMBEDDING_TIMEOUT_MS=15000
 ```
+
+Alternatively, set exactly one variable to use a connected Voyage AI capability
+adapter instead of naming an endpoint:
+
+```dotenv
+KORY_EMBEDDINGS_PROVIDER=voyageai
+```
+
+That opt-in flag **and** a connected `voyageai` provider credential are both
+required. A connected Voyage key on its own deliberately does nothing: semantic
+retrieval forwards memory documents, note content, and user queries to the
+embedding provider, so the operator has to state that choice rather than have it
+inferred from the presence of a credential. The adapter uses `voyage-3.5-lite` and
+expects 1024-wide vectors; a model that returns a different width is rejected
+rather than cached, because mixing widths would make cosine similarity
+meaningless. Voyage reranking (`rerank-3`) is a separate second pass and also
+requires only the connected provider, because it runs after retrieval has already
+narrowed the candidates.
 
 The endpoint is the complete embeddings URL. No provider endpoint, credential, or
 model is inferred. Dimensions are the expected model output size, not a request to
@@ -63,7 +89,9 @@ concurrent edits/deletions after the asynchronous request.
   cryptographic digest of the credential. Edits, credential rotation, model changes,
   and scope changes miss the cache; deleted documents are never candidates. The
   cache is capped at 2,048 entries and 1,048,576 numeric components. No persistent
-  vector database, background indexing, or additional dependency is introduced.
+  vector database is used by this snapshot-search path. The separate associative
+  retrieval index persists revision/content/provider-bound vectors in SQLite,
+  without an additional dependency or unattended background indexing.
 - Disabled/invalid configuration and transport, timeout, cancellation, or validation
   failure preserve local retrieval. Notes retains its established FTS fallback;
   `searchMemory()` reports lexical mode and an unavailable/disabled reason.

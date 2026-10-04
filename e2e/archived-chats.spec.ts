@@ -50,12 +50,8 @@ test('archives a chat and manages its complete lifecycle from Settings', async (
 
   // Create through the same UI control users rely on. This avoids coupling the
   // browser half of the test to a side-channel store refresh after an API write.
-  await sidebar.getByRole('button', { name: 'New session', exact: true }).click();
-  const draftButton = sidebar.getByRole('button', {
-    name: 'Open session New Session, currently open',
-    exact: true,
-  });
-  await expect(draftButton).toBeVisible({ timeout: 15_000 });
+  await sidebar.getByRole('button', { name: 'Create or open' }).click();
+  await sidebar.getByRole('menuitem', { name: 'New Chat' }).click();
   // Keep the row locator stable when Rename swaps the open-session button for
   // an inline textbox.
   const draftRow = sidebar.locator('.session-item.active-session');

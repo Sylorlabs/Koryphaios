@@ -20,6 +20,7 @@ Treat field numbers and wire types as durable compatibility. Define unary/stream
 ## Observable checks
 
 - Run old-client/new-server and new-client/old-server fixtures for changed messages and methods, including unknown fields and deleted-field reservations.
+- Keep executable regression tests with the change. For message evolution, cover old binary -> new reader, new writer -> old reader/server during the compatibility window, precedence between legacy and replacement fields, and unknown enum/field round trips. For streaming fixes, retain tests for slow readers, cancellation, deadlines, downstream errors, half-close, bounded queues, and resource cleanup rather than relying on an implementation-only patch.
 - Force a deadline to expire during server work and verify the client status, server cancellation handling, and downstream deadline propagation where supported.
 - Exercise retryable and non-retryable status codes and verify configured retry count, backoff, and externally visible side effects.
 - For streaming RPCs, test half-close, cancellation, slow consumers, bounded buffering, and backpressure behavior.

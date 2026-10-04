@@ -1,7 +1,7 @@
 {
   "id": "threat-modeling-practice-full-task-1-individual",
   "maturity": "individual",
-  "prompt": "The evaluation repository asks the agent to \"Apply threat model expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery condition that must be demonstrated rather than assumed. The acceptance boundary is threat-modeling-practice: Define scope and security objectives, then map assets, actors, identities, data/control flows, trust boundaries, dependencies, entry points, privilege transitions, and recovery paths. The adjacent application-security discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce reproducible success plus failure or recovery evidence. A happy path alone is insufficient.",
+  "prompt": "The evaluation repository asks the agent to \"Apply threat model expertise to this task\". The fixture contains a plausible happy path, an adjacent-skill decoy, one invalid or partial state, and a recovery-sensitive path that must be modeled and handed to verification rather than assumed. The acceptance boundary is threat-modeling-practice: Define scope and security objectives, then map assets, actors, identities, data/control flows, trust boundaries, dependencies, entry points, privilege transitions, and recovery paths. The adjacent application-security discipline is a routing decoy unless its separate responsibility is actually requested. Resolve environment facts that change the answer, preserve existing contracts and user-owned state, and produce prioritized abuse/control mappings plus reproducible success, negative-path, and recovery verification cases with execution status explicit. Do not invent executed proof when the fixture provides design evidence only.",
   "environment": {
     "kind": "synthetic",
     "startingState": "fixture://threat-modeling-practice/scenario-1",
@@ -31,7 +31,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Trace top threats through implementation and tests, confirm mitigation ownership and negative paths, revisit the model after architecture/identity changes, and record residual risk and assumptions explicitly."
+      "assertion": "Trace top threats to observed or planned enforcing layers, define concrete success/negative/recovery verification cases and owners, label execution status, revisit the model after architecture/identity changes, and record residual risk and assumptions explicitly."
     },
     {
       "id": "anti-pattern-resistance",
@@ -53,9 +53,9 @@
         "Mitigation-to-enforcement and residual-risk map",
         "Verification priorities without unsupported executed-proof claims",
         "Hierarchy boundary and selected specialist rationale",
-        "Representative success, negative-path, and recovery verification",
+        "Concrete success, negative-path, and recovery verification cases with execution status explicit",
         "hierarchy boundary and specialist selection rationale",
-        "representative negative/recovery verification",
+        "representative negative/recovery verification cases without unsupported execution claims",
         "source/version boundary when facts can drift"
       ]
     },
@@ -77,9 +77,9 @@
     "Mitigation-to-enforcement and residual-risk map",
     "Verification priorities without unsupported executed-proof claims",
     "Hierarchy boundary and selected specialist rationale",
-    "Representative success, negative-path, and recovery verification",
+    "Concrete success, negative-path, and recovery verification cases with execution status explicit",
     "hierarchy boundary and selected specialist rationale",
-    "representative success plus negative/recovery evidence",
+    "representative success plus negative/recovery verification cases without unsupported execution claims",
     "paired skill/no-skill run artifacts",
     "explicit unavailable, simulated, inferred, or stale evidence labels"
   ],

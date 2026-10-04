@@ -315,12 +315,20 @@ export const INTERFACE_SEARCH_GRAPHICS_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'search-indexing-full-task-1-individual',
     skill: 'search-indexing',
+    generation: 2,
+    blockers: [
+      'Full-task qualification requires representative search-index execution and evidence for analyzer/mapping versioning, authorization/freshness, reindex/cutover/rollback, and query/index performance; this pure synthetic behavior exercise does not furnish that evidence.',
+    ],
     contract: `Build a versioned target search view without mutating oldVersion. Normalize accents by Unicode NFD diacritic removal and lowercase. Treat hyphenated SKU-like tokens containing letters/digits on both sides of '-' as an exact preserved token in addition to natural-language pieces. Apply writesDuringReindex to target before verification. For each query return ids in document order whose analyzed tokens contain all analyzed query tokens. forceBrokenHyphenHandling=true intentionally removes exact hyphen token to model a failed candidate. cutover is true only when every query result exactly matches expected and target document count equals initial unique ids plus new unique writes. rollbackIndex is oldVersion.`,
     vectors: analyzerVectors,
   },
   {
     id: 'search-indexing-full-task-2-individual',
     skill: 'search-indexing',
+    generation: 2,
+    blockers: [
+      'Full-task qualification requires representative search-index execution and evidence for authorization filtering, freshness/update/delete behavior, judged relevance, and latency/index operation; this pure synthetic behavior exercise does not furnish that evidence.',
+    ],
     contract: `Authorization is applied before ranking. cacheKey is tenant|query|page|pageSize. Only documents for tenant are eligible. Warm cache is usable only for the exact cacheKey and returned ids must all belong to tenant; otherwise ignore it. Cold ranking sorts eligible matching documents by score descending then id, then paginates 1-based. Return cacheKey,ids,cacheHit. Never fall back to another tenant/global cache.`,
     vectors: tenantSearchVectors,
   },

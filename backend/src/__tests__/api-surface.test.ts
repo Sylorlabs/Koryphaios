@@ -27,6 +27,7 @@ const { billingRoutes } = await import('../routes/v1/billing');
 const { processRoutes } = await import('../routes/v1/processes');
 const { voiceRoutes } = await import('../routes/v1/voice');
 const { imageRoutes } = await import('../routes/v1/images');
+const { videoRoutes } = await import('../routes/v1/video');
 const { usageRoutes } = await import('../routes/v1/usage');
 const { feedRoutes } = await import('../routes/v1/feed');
 const { appearanceRoutes } = await import('../routes/v1/appearance');
@@ -63,6 +64,7 @@ const app = new Elysia()
   .use(billingRoutes)
   .use(processRoutes)
   .use(voiceRoutes)
+  .use(videoRoutes)
   .use(imageRoutes)
   .use(usageRoutes)
   .use(appearanceRoutes);

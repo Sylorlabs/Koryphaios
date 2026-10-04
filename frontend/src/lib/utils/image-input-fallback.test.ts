@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   IMAGE_INPUT_FALLBACK_STORAGE_KEY,
+  IMAGE_INPUT_TRUST_STORAGE_KEY,
+  forgetTrustedImageModel,
+  hasTrustedImageModel,
   modelHasVerifiedImageInput,
   needsImageInputChoice,
   readRememberedImageInputMode,
   rememberImageInputMode,
+  rememberTrustedImageModel,
 } from './image-input-fallback';
 
 function memoryStorage(): Storage {
@@ -42,5 +46,16 @@ describe('image input fallback preference', () => {
     expect(readRememberedImageInputMode(storage)).toBe('reject');
     storage.setItem(IMAGE_INPUT_FALLBACK_STORAGE_KEY, '{broken');
     expect(readRememberedImageInputMode(storage)).toBe('reject');
+  });
+
+  it('stores image capability overrides per exact provider/model selection', () => {
+    const storage = memoryStorage();
+    expect(hasTrustedImageModel(storage, 'antigravity:gemini-3-1-pro')).toBe(false);
+    rememberTrustedImageModel(storage, 'antigravity:gemini-3-1-pro');
+    expect(hasTrustedImageModel(storage, 'antigravity:gemini-3-1-pro')).toBe(true);
+    expect(hasTrustedImageModel(storage, 'antigravity:claude-sonnet')).toBe(false);
+    expect(storage.getItem(IMAGE_INPUT_TRUST_STORAGE_KEY)).toContain('gemini-3-1-pro');
+    forgetTrustedImageModel(storage, 'antigravity:gemini-3-1-pro');
+    expect(hasTrustedImageModel(storage, 'antigravity:gemini-3-1-pro')).toBe(false);
   });
 });

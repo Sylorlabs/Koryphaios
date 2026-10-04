@@ -16,9 +16,9 @@ The output options and limitations sections of [OpenAI image generation](https:/
 ## Maintained sources
 
 - **OpenAI image generation guide**: https://platform.openai.com/docs/guides/image-generation
-  - Scope: OpenAI image generation guidance as available 2026-09-04
-  - Use: Image-generation prompt, edit, input, output, and model behavior guidance.
-  - Verified: 2026-09-04; refresh after 30 days.
+  - Scope: the legacy platform URL redirected to the canonical OpenAI image generation guide and was inspected 2026-10-03.
+  - Use: generation and editing through the Image API and Responses API, image inputs, and output controls. Current model IDs remain version-sensitive reference detail rather than reusable skill rules.
+  - Verified: 2026-10-03; refresh after 30 days.
 
 ## Interpretation rules
 

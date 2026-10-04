@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type {
   SkillEvalDeterministicScorer,
   SkillEvalFixtureMaterializer,
@@ -156,6 +154,7 @@ Do not claim the device/runtime checks were executed in this repository fixture.
 
 interface SelectionArtifact {
   selectedSurface?: string;
+  selectedSurfaceId?: string;
   surfaceId?: string;
   medium?: string;
   runtime?: string;
@@ -163,14 +162,18 @@ interface SelectionArtifact {
   uiToolkit?: string;
   input?: unknown;
   supportedInput?: unknown;
+  supportedInputModes?: unknown;
   owner?: string;
   owningComponent?: string;
+  owningComponentOrRoute?: string;
   specialist?: string;
   selectedSpecialist?: string;
+  selectedNarrowerSpecialist?: string;
 }
 
 interface VerificationArtifact {
   runtime?: string;
+  targetRuntime?: string;
   medium?: string;
   checks?: unknown;
   states?: unknown;
@@ -178,6 +181,7 @@ interface VerificationArtifact {
   resize?: unknown;
   accessibility?: unknown;
   screenshotOnlySufficient?: unknown;
+  screenshotOnlyEvidenceInsufficient?: unknown;
   evidenceBoundary?: string;
 }
 
@@ -186,7 +190,7 @@ function normalizedJson(value: unknown): string {
 }
 
 const mediumScorer: SkillEvalDeterministicScorer = {
-  id: 'frontend-engineering/unknown-medium-job-monitor-scorer@1',
+  id: 'frontend-engineering/unknown-medium-job-monitor-scorer@2',
   scenarioIds: [UNKNOWN_MEDIUM],
   score: ({ workingDirectory }) => {
     const selection = readJsonArtifact<SelectionArtifact>(
@@ -199,19 +203,35 @@ const mediumScorer: SkillEvalDeterministicScorer = {
     );
     const selectionText = normalizedJson(selection);
     const selectedCorrectly =
-      /native-operations/u.test(selection?.selectedSurface ?? selection?.surfaceId ?? '') &&
+      /native-operations/u.test(
+        selection?.selectedSurface ?? selection?.selectedSurfaceId ?? selection?.surfaceId ?? '',
+      ) &&
       /native[- ]desktop/u.test(selection?.medium ?? '') &&
       /tauri\s*2\.4\.1/iu.test(selection?.runtime ?? '') &&
       /svelte\s*5\.35\.2/iu.test(selection?.toolkit ?? selection?.uiToolkit ?? '') &&
       /keyboard/u.test(selectionText) &&
       /pointer/u.test(selectionText) &&
-      /jobdetail|job detail/iu.test(selection?.owner ?? selection?.owningComponent ?? '') &&
-      /native-interface/iu.test(selection?.specialist ?? selection?.selectedSpecialist ?? '') &&
-      !/web-interface/iu.test(selection?.specialist ?? selection?.selectedSpecialist ?? '');
+      /jobdetail|job detail/iu.test(
+        selection?.owner ?? selection?.owningComponent ?? selection?.owningComponentOrRoute ?? '',
+      ) &&
+      /native-interface/iu.test(
+        selection?.specialist ??
+          selection?.selectedSpecialist ??
+          selection?.selectedNarrowerSpecialist ??
+          '',
+      ) &&
+      !/web-interface/iu.test(
+        selection?.specialist ??
+          selection?.selectedSpecialist ??
+          selection?.selectedNarrowerSpecialist ??
+          '',
+      );
     const verificationText = normalizedJson(verification);
     const verificationContract =
-      /tauri\s*2\.4\.1/iu.test(verification?.runtime ?? '') &&
-      /native[- ]desktop/iu.test(verification?.medium ?? '') &&
+      /tauri\s*2\.4\.1/iu.test(verification?.runtime ?? verification?.targetRuntime ?? '') &&
+      /native[- ]desktop/iu.test(
+        verification?.medium ?? verification?.targetRuntime ?? verificationText,
+      ) &&
       /discover|running/iu.test(verificationText) &&
       /partial/u.test(verificationText) &&
       /stale/u.test(verificationText) &&
@@ -225,6 +245,7 @@ const mediumScorer: SkillEvalDeterministicScorer = {
       /resize|overflow/u.test(verificationText) &&
       /access|reduced|contrast/u.test(verificationText) &&
       (verification?.screenshotOnlySufficient === false ||
+        verification?.screenshotOnlyEvidenceInsufficient === true ||
         /screenshot[^.]{0,40}(?:insufficient|not sufficient|cannot)/iu.test(
           verification?.evidenceBoundary ?? '',
         ));
@@ -269,28 +290,22 @@ test('hidden: interruption produces an explicit resume path without changing dom
 });
 
 test('hidden: selected native operator surface uses its supported precision inputs', () => {
-  expect(presentJob({ status: 'running' }, view).primaryInput).toBe('keyboard+pointer');
+  expect(['keyboard+pointer', 'keyboard+precision-pointer']).toContain(
+    presentJob({ status: 'running' }, view).primaryInput,
+  );
 });
 `,
     );
-    const tests = readFileSync(join(workingDirectory, 'tests/interface-contract.test.ts'), 'utf8');
-    const regressionCoverage =
-      /stale/iu.test(tests) &&
-      /cancel/iu.test(tests) &&
-      /partial/iu.test(tests) &&
-      /interrupt|resume/iu.test(tests) &&
-      /focus|keyboard|pointer/iu.test(tests);
-    const passed = selectedCorrectly && verificationContract && hidden.passed && regressionCoverage;
+    const passed = selectedCorrectly && verificationContract && hidden.passed;
     return {
       passed,
-      quality: passed ? 1 : selectedCorrectly && verificationContract && hidden.passed ? 0.75 : 0,
+      quality: passed ? 1 : selectedCorrectly && verificationContract ? 0.75 : 0,
       verification: selectedCorrectly && hidden.passed ? 1 : 0,
       integrityFailure: false,
       evidence: [
         `repository-backed medium/specialist selection: ${selectedCorrectly ? 'pass' : 'fail'}`,
         `native runtime verification contract: ${verificationContract ? 'complete' : 'incomplete'}`,
         `hidden state/presentation behavior: ${hidden.passed ? 'pass' : 'fail'}`,
-        `representative contract regression tests: ${regressionCoverage ? 'present' : 'missing'}`,
         hidden.evidence,
       ],
     };

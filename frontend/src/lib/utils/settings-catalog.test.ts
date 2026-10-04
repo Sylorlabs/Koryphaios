@@ -36,6 +36,21 @@ describe('settings catalog', () => {
     expect(SETTINGS_CATALOG[archivedIndex]?.scope).toBe('This app');
   });
 
+  it('exposes a video pane covering every supported video provider', () => {
+    const video = SETTINGS_CATALOG.find((entry) => entry.id === 'video');
+    expect(video).toBeDefined();
+    expect(video?.group).toBe('Operations');
+    // The pane must be reachable by searching for any provider it serves, so a
+    // user who only knows "Kling" can find it.
+    for (const query of ['video', 'clip', 'luma', 'kling', 'prodia', 'replicate']) {
+      expect(
+        filterSettingsCatalog(SETTINGS_CATALOG, query).map((entry) => entry.id),
+        query,
+      ).toContain('video');
+    }
+    expect(resolveSettingsTab('video', undefined)).toBe('video');
+  });
+
   it('prefers a contextual destination, then a valid saved pane, then the default', () => {
     expect(resolveSettingsTab('agent', 'appearance')).toBe('agent');
     expect(resolveSettingsTab(undefined, 'appearance')).toBe('appearance');

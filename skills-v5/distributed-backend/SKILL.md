@@ -39,10 +39,11 @@ Design multi-node coordination around partial failure, independent clocks, and s
 
 ### Failure and recovery discipline
 
-- Wall-clock timestamps are trusted as causality.
-- Retries amplify duplicate effects.
-- Two nodes become authority without reconciliation.
-- Clean-cluster tests hide partition and upgrade behavior.
+- Reject wall-clock timestamps as proof of causality or authority.
+- Bound retry ownership so retries do not amplify duplicate effects across layers.
+- Do not let two nodes become authority without an explicit reconciliation or fencing rule.
+- Do not treat clean-cluster tests as evidence for partition, failover, replay, or mixed-version behavior.
+- When deduplication identities expire or compact, define the shared replay/retention boundary first. Preserve settled contribution separately from retained identities so merge, restart, and failover cannot re-count old work or resurrect inputs that are already outside the replay window.
 
 ### Evidence required before completion
 

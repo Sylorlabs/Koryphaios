@@ -74,6 +74,29 @@ const GREEN_STATE_APP = `<script>
   {/if}
 </section>`;
 
+const HONEST_NOT_RUN_STATE_APP = `<script>
+  import KorySelect from './KorySelect.svelte';
+  let { items, filter, loading = false, error = '' } = $props();
+  let chosenId = $state('');
+  let visible = $derived(items.filter((item) => item.label.toLowerCase().includes(filter.toLowerCase())));
+  let selectedId = $derived(visible.some((item) => item.id === chosenId) ? chosenId : (visible[0]?.id ?? ''));
+  let selectedItem = $derived(visible.find((item) => item.id === selectedId));
+</script>
+
+<section class="panel" data-component-state>
+  <h1>Item inspector</h1>
+  {#if loading}
+    <p aria-busy="true">Loading items…</p>
+  {:else if error}
+    <p role="alert">{error}</p>
+  {:else if visible.length === 0}
+    <p data-empty>No matching items</p>
+  {:else}
+    <KorySelect options={visible} bind:value={() => selectedId, (value) => { chosenId = value; }} label="Active item" />
+    <p class="status" data-selected>Selected: {selectedItem?.label ?? 'None'}</p>
+  {/if}
+</section>`;
+
 const GREEN_ROUTE_APP = `<script>
   import { tick } from 'svelte';
   import { subscribeDetail } from './detail-source.js';
@@ -209,6 +232,64 @@ describe('Svelte 5 real-browser V5 fixtures', () => {
     expect(green.integrityFailure).toBe(false);
     expect(green.quality).toBe(1);
     expect(green.verification).toBe(1);
+  }, 30_000);
+
+  test('honest not-run artifacts allow host-owned real-browser verification', async () => {
+    const root = workspace();
+    const { materializer, scorer, scoreInput } = input(
+      SVELTE_BROWSER_EVAL_CONSTANTS.stateScenario,
+      root,
+    );
+    await materializer.materialize(root, scoreInput.scenario);
+    writeFixtureFile(root, 'src/App.svelte', HONEST_NOT_RUN_STATE_APP);
+    writeFixtureFile(
+      root,
+      'verification/scenario-1-result.json',
+      `${JSON.stringify(
+        {
+          status: 'not_run',
+          reason: 'No browser tool was available to the authoring agent.',
+          authored_evidence: {
+            success_path: 'Derived visible state preserves a chosen item through unrelated prop updates.',
+            failure_recovery_path: 'When the chosen item disappears, selection falls back to a remaining visible item.',
+            browser_observations: [],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFixtureFile(
+      root,
+      'verification/scenario-1-verification.json',
+      `${JSON.stringify(
+        {
+          status: 'authored_not_executed',
+          environment: {
+            reactivity: 'Svelte 5 runes are present in the candidate and shared control.',
+            exact_versions: 'Unknown to the authoring agent.',
+            execution_boundary: 'Derived state renders during component updates; focus behavior is browser owned.',
+          },
+          scenarios: [
+            { name: 'selection survives unrelated prop updates', steps: ['choose Beta', 'rapid update'], expect: ['Beta remains selected'] },
+            { name: 'removed selection recovers', steps: ['remove Beta'], expect: ['remaining item becomes selected'] },
+            { name: 'loading, empty, error, and recovery', steps: ['exercise states'], expect: ['states render and recover'] },
+            { name: 'keyboard and focus', steps: ['Enter', 'ArrowDown', 'Enter'], expect: ['selection and focus restore'] },
+            { name: 'narrow viewport', steps: ['set viewport to 390'], expect: ['no horizontal overflow'] },
+            { name: 'destruction', steps: ['destroy component'], expect: ['shared control tears down'] },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const green = await scorer.score(scoreInput);
+    expect(scorer.id).toEndWith('@2');
+    expect(green.passed, green.evidence.join('\n')).toBe(true);
+    expect(green.verification).toBe(1);
+    expect(green.evidence.some((item) => item.includes('host real-browser execution remains required'))).toBe(
+      true,
+    );
   }, 30_000);
 
   test('tampering with the fixed shared control fails integrity', async () => {

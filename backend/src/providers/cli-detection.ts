@@ -29,7 +29,7 @@ import {
   detectDevinCLILogin,
   createDevinCLIAuthMarker,
   detectKimiCodeCLILogin,
-  detectFreebuffCLILogin,
+  discoverFreebuffAccounts,
   createFreebuffCLIAuthMarker,
 } from './auth-utils';
 import { discoverCliAccounts } from './cli-accounts';
@@ -37,15 +37,7 @@ import { createKimiCodeAuthMarker, createKimiCodeCliMarker } from './kimicode-au
 
 export interface AgentCliStatus {
   /** Stable id for the CLI. */
-  id:
-    | 'claude'
-    | 'codex'
-    | 'antigravity'
-    | 'grok'
-    | 'cursor'
-    | 'devin'
-    | 'kimi'
-    | 'freebuff';
+  id: 'claude' | 'codex' | 'antigravity' | 'grok' | 'cursor' | 'devin' | 'kimi' | 'freebuff';
   displayName: string;
   /** Candidate binary names looked up on PATH. */
   binaries: string[];
@@ -219,13 +211,12 @@ export function canAutoEnable(provider: ProviderName): boolean {
           discoverCliAccounts().some((account) => account.provider === 'kimicode'))
       );
     case 'freebuff':
-      // The active adapter drives the real TUI through tmux and makes
-      // bubblewrap mandatory because Freebuff cannot disable native tools.
-      return (
-        detectFreebuffCLILogin() &&
-        !!whichBinary('freebuff') &&
-        !!whichBinary('tmux') &&
-        !!whichBinary('bwrap')
+      // Enable adapter discovery from CLI-owned setup material only. Runtime
+      // readiness is asynchronous and checked by the provider: Darwin uses
+      // Docker's Linux tmux/bwrap, not nonexistent host tmux/bwrap binaries.
+      // As for other CLIs, this is detection, never an authentication verdict.
+      return discoverFreebuffAccounts().some(
+        (account) => !!whichBinary('freebuff') || existsSync(join(account.profileDir, 'freebuff')),
       );
     default:
       return false;
@@ -395,13 +386,13 @@ export function detectAgentClis(): AgentCliStatus[] {
   });
 
   // ── Freebuff: real TUI driven through a sandboxed tmux PTY. ──
-  const freebuffLogin = detectFreebuffCLILogin();
+  const freebuffLogin = discoverFreebuffAccounts().length > 0;
   const freebuff = mk('freebuff', 'Freebuff CLI', ['freebuff'], 'freebuff', {
     loggedIn: freebuffLogin,
     authSource: freebuffLogin ? '~/.config/manicode/credentials.json' : null,
     autoEnabled: canAutoEnable('freebuff'),
     workingNote:
-      'Freebuff login material detected. Koryphaios drives the real TUI through tmux, confines native tools with bubblewrap, and exposes the real session through its authenticated MCP bridge. Runtime account access is verified only by an actual turn.',
+      'Freebuff CLI login material detected. Native Linux uses tmux/bubblewrap; macOS uses the pinned Linux runtime through Docker/Colima with bubblewrap still mandatory. Reconnect to probe isolation. Account/model access is verified only by an actual turn; the real workspace is accessible through authenticated Kory MCP tools.',
     loggedOutNote: 'No Freebuff login material detected — run "freebuff login", then reconnect.',
     docsUrl: 'https://github.com/CodebuffAI/codebuff',
   });

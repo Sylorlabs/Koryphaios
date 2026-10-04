@@ -19,6 +19,7 @@ import { delimiter, join, basename, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { serverLog } from '../logger';
 import type { SandboxPolicy } from '@koryphaios/shared';
+import { sessionWorkspaceOwnership } from '../kory/session-workspace';
 
 function which(bin: string): string | null {
   const PATH = process.env.PATH ?? '';
@@ -224,21 +225,39 @@ function seatbeltSecretDenies(home: string): string {
     '.npmrc',
     'Library/Keychains',
   ];
-  return dirs.map((d) => `  (subpath ${JSON.stringify(join(home, d))})`).join('\n');
+  return dirs.map((d) => `  (subpath ${JSON.stringify(seatbeltPath(join(home, d)))})`).join('\n');
+}
+
+/** Seatbelt matches path filters against the path the kernel resolves, not the
+ *  spelling the caller used. macOS resolves `/var` → `/private/var`, so a rule
+ *  built from the ambient `tmpdir()` (`/var/folders/...`) never matches and every
+ *  write under it is denied. Canonicalize before quoting; the CLI still receives
+ *  the original argv path, which resolves to the same vnode. */
+function seatbeltPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    // Missing/permission-denied paths cannot be resolved; keep the literal path
+    // so the rule is at least well-formed.
+    return p;
+  }
 }
 
 function quoteSub(p: string): string {
-  return `(subpath ${JSON.stringify(p)})`;
+  return `(subpath ${JSON.stringify(seatbeltPath(p))})`;
 }
 
 export function buildSeatbeltProfile(opts: WrapOptions): string {
   const home = homedir();
+  const strictChat = !!sessionWorkspaceOwnership(opts.cwd);
   const writable = [
     ...(opts.policy.allowEdits ? [opts.cwd] : []),
     ...(opts.configDirs ?? []),
-    '/tmp',
-    '/private/tmp',
-    '/private/var/folders',
+    ...(strictChat
+      ? opts.homeDir
+        ? [opts.homeDir]
+        : []
+      : ['/tmp', '/private/tmp', '/private/var/folders']),
     '/dev',
   ]
     .map(quoteSub)
@@ -315,8 +334,19 @@ export interface SoftJail {
 }
 
 /** Build the soft-jail environment: a redirected HOME (exposing only the CLI's
- *  own config), scrubbed secrets, and a private temp. Cross-platform. */
-export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []): SoftJail {
+ *  own config), scrubbed secrets, and a private temp. Cross-platform.
+ *
+ *  `homeLinks` maps a path *relative to the jail HOME* to an absolute host
+ *  directory, e.g. `{ '.local/share': '/host/staged/.local/share' }`. It exists
+ *  because the `configDirs` shorthand can only symlink a directory's basename,
+ *  which is wrong for nested paths: passing `<staged>/.local/share` would link
+ *  `<jailHome>/share`, while the CLI resolves `<jailHome>/.local/share`. Use
+ *  `homeLinks` whenever the directory the CLI reads is nested. */
+export function buildSoftJail(
+  base: NodeJS.ProcessEnv,
+  configDirs: string[] = [],
+  homeLinks: Record<string, string> = {},
+): SoftJail {
   const home = mkdtempSync(join(tmpdir(), 'kory-home-'));
   const tmp = join(home, '.tmp');
   try {
@@ -340,6 +370,19 @@ export function buildSoftJail(base: NodeJS.ProcessEnv, configDirs: string[] = []
       serverLog.debug(
         { err: err instanceof Error ? err.message : String(err), dir },
         'Soft-jail config symlink failed; best-effort',
+      );
+    }
+  }
+  for (const [relative, source] of Object.entries(homeLinks)) {
+    if (!relative || !existsSync(source)) continue;
+    const target = join(home, relative);
+    try {
+      mkdirSync(dirname(target), { recursive: true });
+      symlinkSync(source, target, 'dir');
+    } catch (err: unknown) {
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err), source, relative },
+        'Soft-jail home link failed; best-effort',
       );
     }
   }
@@ -406,6 +449,22 @@ export function inferenceSandboxPolicy(policy: SandboxPolicy): SandboxPolicy {
  *  is requested AND available; otherwise returns the command unchanged. */
 export function wrapCommand(bin: string, args: string[], opts: WrapOptions): WrapResult {
   const d = detect();
+  const strictChat = !!sessionWorkspaceOwnership(opts.cwd);
+  if (
+    strictChat &&
+    (d.mechanism === 'none' || !d.path || process.env.KORYPHAIOS_OS_SANDBOX === '0')
+  ) {
+    throw new Error(
+      'This CLI cannot run without enforced chat isolation. Install bubblewrap on Linux or enable the macOS sandbox.',
+    );
+  }
+  if (strictChat) {
+    opts = {
+      ...opts,
+      policy: { ...opts.policy, filesystemIsolation: true },
+      configDirs: [...(opts.configDirs ?? []), ...(opts.homeDir ? [opts.homeDir] : [])],
+    };
+  }
   if (!opts.policy.filesystemIsolation || d.mechanism === 'none' || !d.path) {
     return { command: bin, args, isolated: false, mechanism: 'none' };
   }

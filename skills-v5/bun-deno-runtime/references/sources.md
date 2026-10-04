@@ -12,13 +12,17 @@
 ## Maintained sources
 
 - **Bun documentation**: https://bun.com/docs
-  - Scope: Bun documentation as available 2026-09-04
+  - Scope: Bun documentation as available and inspected 2026-10-03
   - Use: Bun runtime, package, test, server, and compatibility behavior.
-  - Verified: 2026-09-04; refresh after 30 days.
+  - Verified: 2026-10-03; refresh after 30 days.
 - **Deno documentation**: https://docs.deno.com/
-  - Scope: Deno documentation as available 2026-09-04
-  - Use: Deno runtime, permissions, package, server, and compatibility behavior.
-  - Verified: 2026-09-04; refresh after 30 days.
+  - Scope: Deno runtime getting-started documentation last modified 2026-07-29 and inspected 2026-10-03.
+  - Use: Deno runtime, secure-default permissions, package and built-in toolchain, server, and Node compatibility behavior.
+  - Verified: 2026-10-03; refresh after 30 days.
+
+## Targeted permission review, 2026-10-02
+
+Retrieved https://docs.deno.com/runtime/fundamentals/security/ and the filesystem API index at https://docs.deno.com/api/deno/file-system/. The security guidance distinguishes scoped read and write grants, permission denials, and subprocess authority outside the runtime sandbox. The API index identifies filesystem operations; it was not a complete per API permission audit. Historical paired artifacts show an output write followed by a denied read. The entrypoint now makes that capability distinction explicit without prescribing the fixture implementation or widening access. This source review is not a fresh runtime execution or evidence of improved model outcomes.
 
 ## Interpretation rules
 

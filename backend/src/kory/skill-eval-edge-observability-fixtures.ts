@@ -313,7 +313,7 @@ const samplingCorpus = `${JSON.stringify(
   2,
 )}\n`;
 const obsSamplingMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'observability-sre/tail-sampling-cardinality@1',
+  id: 'observability-sre/tail-sampling-cardinality@2',
   matches: (s) => s.id === OBS_SAMPLING,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-observability-sampling'));
@@ -324,6 +324,8 @@ const obsSamplingMaterializer: SkillEvalFixtureMaterializer = {
       d,
       'README.md',
       `# OTel sampling/cardinality fixture
+
+Treat \`src/observability-sim.ts\` and \`evidence/replay.json\` as fixed evaluator-owned inputs. Do not edit, replace, or regenerate them; implement the policy and evidence in the requested output artifacts and add separate tests if useful.
 
 Write \`.kory-eval/sampling-policy.json\` as \`SamplingSpec\`. Metric labels are bounded service/operation/status dimensions only; tenant/request correlation may remain only in privacy-approved trace/log fields. The required incident policy retains every error trace and every trace exceeding 2000 ms, which requires completed-trace/tail-capable logic rather than assuming 1% head sampling can inspect outcomes. Normal traffic may be sampled at a documented rate.
 

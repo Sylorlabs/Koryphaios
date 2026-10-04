@@ -156,6 +156,7 @@ function buildPromptBodyOnly(messages: ProviderMessage[]): string {
 }
 
 export class DevinProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'devin' as const;
 
   constructor(readonly config: ProviderConfig) {}
@@ -411,7 +412,16 @@ export class DevinProvider implements Provider {
         : {}),
     });
     const jail =
-      request.sandbox && !researchOnly ? buildSoftJail(baseEnv, [devinHome ?? tmpdir()]) : null;
+      request.sandbox && !researchOnly
+        ? buildSoftJail(baseEnv, [devinHome ?? tmpdir()], {
+            // The jail replaces HOME and points XDG_DATA_HOME inside it, so
+            // `devin auth status` resolved credentials at
+            // <jailHome>/.local/share/devin/credentials.toml and reported "Not
+            // logged in" on every turn. The configDirs shorthand cannot express
+            // this: it links by basename, which would yield <jailHome>/share.
+            ...(devinHome ? { '.local/share': join(devinHome, '.local/share') } : {}),
+          })
+        : null;
     const wrapped =
       request.sandbox && !researchOnly
         ? wrapCommand(bin, args, {

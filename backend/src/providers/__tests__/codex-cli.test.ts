@@ -56,6 +56,7 @@ describe('Codex CLI Kory control-plane bridge', () => {
       expect(supportsKoryControlPlaneTools(provider)).toBe(true);
     }
     expect(supportsKoryControlPlaneTools('gemini-cli')).toBe(false);
+    expect(supportsKoryControlPlaneTools('codebuff')).toBe(false);
   });
 
   it('requests and surfaces the official Codex reasoning summary', () => {

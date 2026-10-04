@@ -29,5 +29,5 @@ Provider documentation establishes its signing and delivery contract. It does no
   - Scope: Stripe webhook documentation checked 2026-09-06.
   - Use: raw request body, signature header, endpoint secret, and verification failures.
 - **Stripe webhooks**: https://docs.stripe.com/webhooks
-  - Scope: Stripe webhook documentation checked 2026-09-06.
+  - Scope: Stripe webhook documentation checked 2026-10-03.
   - Use: Stripe-specific event delivery, retries, endpoint behavior, and testing guidance.

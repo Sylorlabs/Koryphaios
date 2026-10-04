@@ -25,6 +25,8 @@ Do not double-count the same benefit through overlapping labels such as labor ho
 
 Use a consistent time horizon, units, price basis, discounting convention, and scenario assumptions across options. Apply NPV, discounted cash flow, payback, ROI, break-even, cost-effectiveness, or value-for-money measures only when they fit the decision; no single metric is mandatory.
 
+Build the reconciled quantitative comparison before writing the recommendation. For every material option and decision-relevant scenario, show the time-phased incremental cash costs/benefits, separately identified capacity or opportunity costs, and the calculation basis needed to reproduce the result. When break-even or sensitivity is decision-relevant, calculate it from that same reconciled model rather than leaving the economic matrix implicit in prose.
+
 Include strategic fit, dependencies, capacity consumption, reversibility, vendor/technology lock-in, delivery/adoption risk, option value, and opportunity cost alongside quantified economics. Distinguish committed benefits from contingent benefits that require adoption, behavior change, future scale, or another investment.
 
 ## Uncertainty and recommendation

@@ -113,8 +113,23 @@ function readFrontendBundleHash(): string {
 const frontendVersion = readFrontendVersion();
 const frontendBundleHash = readFrontendBundleHash();
 
+// Every Vite dev server rooted at this workspace owns one `node_modules/.vite`
+// dependency cache, and each process rewrites that cache with its own
+// `browserHash`. A process that did not write it keeps injecting
+// `?v=<its-own-stale-hash>` into the module specifiers it serves, so the WebView
+// evaluates a second `svelte/internal/client` whose `next_sibling_getter` is
+// never initialized — the lazily `import()`ed Notes views then throw
+// "undefined is not an object (evaluating 'next_sibling_getter.call')".
+// Scope the cache directory by port so two concurrent servers can never share
+// it, which is what makes the desktop launcher's alternate-port fallback safe.
+const cacheScopePort =
+  process.env.KORYPHAIOS_FRONTEND_PORT ||
+  /--port[=\s]+(\d{1,5})/.exec(process.argv.join(' '))?.[1] ||
+  'default';
+
 export default defineConfig({
   plugins: [tailwindcss(), sveltekit()],
+  cacheDir: `node_modules/.vite-${cacheScopePort}`,
   // Tauri's WebKit shell loads several native-only modules lazily. If Vite
   // discovers one of them only after the first WebView request, it reloads
   // the module graph while the shell is mounting and WebKit can report a

@@ -12,6 +12,7 @@ import {
   type StreamRequest,
 } from '../types';
 import { isModelListCacheFresh } from '../model-list-cache';
+import { imageAttachmentTransportError } from '../attachment-admission';
 import { isTransientStreamErrorText } from '../provider-diagnostics';
 import { applyModelsDevMetadata, modelsDevKeysFor } from '../models-dev';
 import type {
@@ -93,6 +94,10 @@ export class WireAdapterProvider implements Provider {
   ) {
     this.name = config.name;
     this.config = config;
+  }
+
+  get imageInputTransport(): 'native' | 'none' {
+    return this.adapter.imageInputTransport ?? 'none';
   }
 
   private requestContext(): WireAdapterRequestContext {
@@ -195,12 +200,18 @@ export class WireAdapterProvider implements Provider {
       return;
     }
 
+    const imageError = imageAttachmentTransportError(this, request.messages);
+    if (imageError) {
+      yield { type: 'error', error: imageError, errorTransient: false };
+      return;
+    }
+
     const ctx = this.requestContext();
-    const wireRequest = this.adapter.buildChatRequest(canonicalRequest(request), ctx);
     const toolBuffers: ToolBuffer[] = [];
     let finishReason: ProviderEvent['finishReason'];
 
     try {
+      const wireRequest = this.adapter.buildChatRequest(canonicalRequest(request), ctx);
       const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
       const signal = request.signal
         ? AbortSignal.any([request.signal, timeoutSignal])

@@ -87,12 +87,9 @@ test('API-created session appears in the frontend sidebar', async ({ page, reque
   // The session should appear in the sidebar. Its visible label is the project
   // name, so match the accessible name that still carries the title.
   await expect(page.getByTestId('session-sidebar')).toBeVisible({ timeout: 10_000 });
-  // API-created sessions may belong to a different project than the selected
-  // workspace. Exercise the public All scope instead of assuming that filter.
-  await page
-    .getByTestId('session-sidebar')
-    .getByRole('button', { name: 'All', exact: true })
-    .click();
+  // API-created sessions are grouped under the project they belong to rather
+  // than behind a scope filter, so the sidebar must list them without any
+  // additional selection.
   await expect(page.getByRole('button', { name: `Open session ${sessionTitle}` })).toBeVisible({
     timeout: 15_000,
   });

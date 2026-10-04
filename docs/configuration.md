@@ -136,8 +136,12 @@ migration remain disabled rather than being stored with a development key.
 
 ## OS sandbox
 
-Kernel path confinement for delegated agents is controlled by
-`workspace.sandbox`, not by an environment opt-in:
+Independent chat repositories have a **mandatory write boundary** for agent tools,
+file mutations, and backend Git operations. It cannot be disabled by YOLO or
+`workspace.sandbox`. Missing enforcement fails closed.
+
+`workspace.sandbox` still controls optional confinement for execution contexts
+outside owned chat repositories, not the mandatory chat boundary:
 
 | Value    | Behavior                                                                                                                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -160,18 +164,24 @@ The engines themselves:
   `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, and
   `KORYPHAIOS_DATA_DIR`. Toolchain configuration agents legitimately need
   (`~/.gitconfig`, `~/.npmrc`, `~/.bunfig.toml`) stays readable.
-- **Windows / unsupported**: no kernel engine exists, so `auto` reports degraded
-  and `always` refuses sandbox-required commands.
+- **Windows / unsupported**: no kernel engine exists. Owned-chat mutations and
+  commands requiring confinement are refused; they never degrade to shared host writes.
+  Optional non-chat contexts retain the `auto`/`always` behavior described above.
 
-`KORYPHAIOS_OS_SANDBOX=0` is a process-wide kill switch for users who need to
-run without confinement at all.
+`KORYPHAIOS_OS_SANDBOX=0` disables the engine process-wide. Owned-chat operations
+then refuse execution rather than running unconfined.
 
 Approval and confinement are independent. A permission mode — including YOLO —
 decides only whether the user is asked to approve a tool call; it never removes
-the kernel boundary from a worker. Koryphaios does not describe argv parsing or a
+the mandatory kernel boundary from an owned-chat worker. Koryphaios does not describe argv parsing or a
 working-directory check as containment.
 
 ## Workspace and worktrees
+
+Chats use independent repositories by default; the settings below govern delegated
+worker worktrees **inside each chat's repository**, not sharing a checkout across
+chats. See [Chat workspace isolation](chat-isolation.md) for source/settings routing,
+mandatory write confinement, legacy migration, recovery, and platform/provider limits.
 
 ```jsonc
 {

@@ -38,14 +38,21 @@ function observerFor(element: Element): ObserverRecord {
   return record;
 }
 
-/** Report a new measured height for a row, the way the real observer would. */
-function measure(element: Element, height: number) {
+/** Report a new measured height for a row, the way the real observer would.
+ *
+ *  Resolves once the component has committed the new height and moved the
+ *  scroll offset to compensate for it. The compensation deliberately runs after
+ *  the commit — a scroll write that lands before the height it compensates for
+ *  is committed gets clamped by the browser — so it is a microtask away, not a
+ *  synchronous one. */
+async function measure(element: Element, height: number) {
   const entry = {
     target: element,
     borderBoxSize: [{ blockSize: height }],
     contentRect: { height },
   } as unknown as ResizeObserverEntry;
   observerFor(element).callback([entry], {} as ResizeObserver);
+  await tick();
 }
 
 /** Ask the transcript to anchor the growth this row is about to take. */
@@ -78,7 +85,7 @@ async function setup(rowCount = 12) {
   // Let every row settle on its estimate so the height cache holds real
   // numbers and reports no growth of its own.
   const rows = Array.from(container.querySelectorAll('.virtual-list-item'));
-  for (const row of rows) measure(row, ROW_HEIGHT);
+  for (const row of rows) await measure(row, ROW_HEIGHT);
   await tick();
 
   return { scroller, rows };
@@ -98,7 +105,7 @@ describe('VirtualList expansion anchoring', () => {
     // Row 6 sits inside the parked viewport, so expanding it would push
     // everything below it (rows 7..) off the bottom of the screen.
     requestAnchor(rows[6]);
-    measure(rows[6], ROW_HEIGHT + 220);
+    await measure(rows[6], ROW_HEIGHT + 220);
 
     expect(scroller.scrollTop).toBe(PARKED_AT + 220);
   });
@@ -107,7 +114,7 @@ describe('VirtualList expansion anchoring', () => {
     // A streaming row, a chart decoding, markdown settling: none of it is the
     // reader's intent, so the view must not move under them.
     const { scroller, rows } = await setup();
-    measure(rows[6], ROW_HEIGHT + 220);
+    await measure(rows[6], ROW_HEIGHT + 220);
 
     expect(scroller.scrollTop).toBe(PARKED_AT);
   });
@@ -116,7 +123,7 @@ describe('VirtualList expansion anchoring', () => {
     const { scroller, rows } = await setup();
     // Row 11 starts at 1100, past the bottom of the [500, 1100] viewport.
     requestAnchor(rows[11]);
-    measure(rows[11], ROW_HEIGHT + 220);
+    await measure(rows[11], ROW_HEIGHT + 220);
 
     expect(scroller.scrollTop).toBe(PARKED_AT);
   });
@@ -127,7 +134,7 @@ describe('VirtualList expansion anchoring', () => {
     // The reader takes the viewport back before the panel finishes opening.
     scroller.scrollTop = PARKED_AT - 120;
     scroller.dispatchEvent(new Event('scroll'));
-    measure(rows[6], ROW_HEIGHT + 220);
+    await measure(rows[6], ROW_HEIGHT + 220);
 
     expect(scroller.scrollTop).toBe(PARKED_AT - 120);
   });
@@ -137,7 +144,7 @@ describe('VirtualList expansion anchoring', () => {
     requestAnchor(rows[6]);
     // A multi-thousand-pixel tool output must not fling the reader thousands of
     // pixels away from where they were reading.
-    measure(rows[6], ROW_HEIGHT + 5000);
+    await measure(rows[6], ROW_HEIGHT + 5000);
 
     expect(scroller.scrollTop).toBe(PARKED_AT + VIEWPORT);
   });
@@ -146,7 +153,7 @@ describe('VirtualList expansion anchoring', () => {
     const { scroller, rows } = await setup();
     // Row 1 is above the parked viewport: a rich response settling from its
     // estimate must not slide the transcript the reader is looking at.
-    measure(rows[1], ROW_HEIGHT + 50);
+    await measure(rows[1], ROW_HEIGHT + 50);
 
     expect(scroller.scrollTop).toBe(PARKED_AT + 50);
   });

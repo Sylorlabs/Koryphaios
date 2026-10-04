@@ -66,6 +66,34 @@ describe('KoryManager session mutation barrier', () => {
     }
   });
 
+  test('agent Git switching permits its owning manager run but excludes workers and other mutations', () => {
+    const { manager } = createManager();
+    const internal = manager as unknown as {
+      managerAbortBySession: Map<string, AbortController>;
+      workers: { hasSessionWorkers(id: string): boolean };
+    };
+    const previous = internal.workers.hasSessionWorkers;
+    try {
+      internal.managerAbortBySession.set('git-agent', new AbortController());
+      expect(manager.tryAcquireSessionMutationBarrier('git-agent')).toBeNull();
+      internal.workers.hasSessionWorkers = () => true;
+      expect(manager.tryAcquireAgentGitMutationBarrier('git-agent')).toBeNull();
+      internal.workers.hasSessionWorkers = () => false;
+      const lease = manager.tryAcquireAgentGitMutationBarrier('git-agent');
+      expect(lease).not.toBeNull();
+      expect(manager.tryAcquireAgentGitMutationBarrier('git-agent')).toBeNull();
+      lease!.release();
+      lease!.release();
+      const next = manager.tryAcquireAgentGitMutationBarrier('git-agent');
+      expect(next).not.toBeNull();
+      next!.release();
+    } finally {
+      internal.workers.hasSessionWorkers = previous;
+      internal.managerAbortBySession.delete('git-agent');
+      manager.shutdown();
+    }
+  });
+
   test('prevents processTask from entering provider resolution while held', async () => {
     const { manager, resolveProvider } = createManager();
     try {
@@ -146,11 +174,7 @@ describe('KoryManager session mutation barrier', () => {
 
       expect(controller.signal.aborted).toBe(true);
       expect(cancelCurrent).not.toHaveBeenCalled();
-      expect(timeline).toEqual([
-        'abort-requested',
-        'partial-response-persisted',
-        'owner-terminal',
-      ]);
+      expect(timeline).toEqual(['abort-requested', 'partial-response-persisted', 'owner-terminal']);
     } finally {
       manager.shutdown();
     }

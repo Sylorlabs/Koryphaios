@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import type { Provider, StreamRequest } from '../../providers/types';
 import type { IMessageStore, CompactionCommit } from '../../stores/message-store';
 import { db, sessions as sessionRows } from '../../db';
+import { SessionStore } from '../../stores/session-store';
 import { readSessionMemory, writeSessionMemory } from '../../memory/unified-memory';
 
 describe('KoryManager (Original) - Smoke Tests', () => {
@@ -147,6 +148,9 @@ describe('KoryManager real compaction', () => {
     });
     let request: StreamRequest | undefined;
     let committed: CompactionCommit | undefined;
+    // Compaction resolves the chat's isolated checkout, so session memory is
+    // read and written there rather than in the source project.
+    let workspace = dir;
     const structured = {
       projectBrief:
         'Continue the verified compaction implementation without restoring archived transcript messages.',
@@ -162,7 +166,7 @@ describe('KoryManager real compaction', () => {
       durableMemory: '# Session Memory\n\nCompaction uses revisioned checkpoints.',
     };
     const originalMemory = writeSessionMemory(
-      dir,
+      workspace,
       sessionId,
       '# Session Memory\n\nOriginal user memory.',
     );
@@ -174,7 +178,7 @@ describe('KoryManager real compaction', () => {
       async *streamResponse(next: StreamRequest) {
         request = next;
         writeSessionMemory(
-          dir,
+          workspace,
           sessionId,
           '# Session Memory\n\nConcurrent UI edit must survive.',
           originalMemory.revision,
@@ -223,10 +227,11 @@ describe('KoryManager real compaction', () => {
       {} as ToolRegistry,
       dir,
       {} as KoryphaiosConfig,
-      undefined,
+      new SessionStore(),
       messageStore,
     );
     try {
+      workspace = await manager.resolveSessionWorkingDirectoryPublic(sessionId);
       await manager.compactSession({ sessionId, selectedModel: 'codex:gpt-selected' });
       expect(request?.model).toBe('gpt-selected');
       expect(request?.sessionId).toStartWith(`${sessionId}:compaction:`);
@@ -243,7 +248,7 @@ describe('KoryManager real compaction', () => {
         sourceMessageCount: 2,
       });
       expect(committed?.summary).toContain('# Compacted Session Checkpoint');
-      expect(readSessionMemory(dir, sessionId).content).toContain(
+      expect(readSessionMemory(workspace, sessionId).content).toContain(
         'Concurrent UI edit must survive.',
       );
     } finally {

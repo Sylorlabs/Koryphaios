@@ -99,10 +99,10 @@
     {
       "url": "https://docs.expo.dev/",
       "sourceType": "official-docs",
-      "versionScope": "Expo documentation as available 2026-09-04",
+      "versionScope": "Expo documentation index inspected 2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Expo/React Native platform, routing, build, module, and deployment behavior.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Expo platform discovery covering universal JavaScript/TypeScript apps, EAS workflows, Expo Router, SDK modules, examples, and deployment entry points.",
+      "verifiedAt": "2026-10-03"
     },
     {
       "url": "https://docs.expo.dev/develop/development-builds/introduction/?buildenv=build-with-eas",

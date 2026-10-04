@@ -68,7 +68,7 @@
     },
     {
       "id": "verification-discipline",
-      "assertion": "Use contract tests and runnable examples for success, invalid/denied, pagination, retries, concurrent modification, compatibility, and deprecation."
+      "assertion": "Use contract tests and runnable examples for the semantic partitions this export contract actually exposes: a new start, same-key replay, same-key/different-body rejection, cancellation before and after the packaging boundary, retryable versus terminal failure polling, compatibility with the supplied older client, and recovery from an uncertain prior start. Do not invent unrelated pagination, authorization-denial, or deprecation cases."
     },
     {
       "id": "anti-pattern-resistance",

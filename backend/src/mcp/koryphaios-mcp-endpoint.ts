@@ -33,8 +33,11 @@ const MCP_EXPOSED_TOOLS = new Set([
   'query_note_base',
   'search_notes',
   'recall_notes',
+  'retrieve_note_context',
   'list_notes',
   'link_notes',
+  'propose_note_relationship',
+  'review_note_relationship',
   'get_note_backlinks',
 ]);
 

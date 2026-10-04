@@ -41,6 +41,9 @@
   import { requestExpandAnchor } from '$lib/utils/expand-anchor';
   import AnimatedStatusIcon from './AnimatedStatusIcon.svelte';
   import ThinkingBlock from './ThinkingBlock.svelte';
+  import MediaAttachment from './MediaAttachment.svelte';
+  import GeneratedVideo from './GeneratedVideo.svelte';
+  import { chatMediaKind, chatMediaMimeType } from '@koryphaios/shared';
   import { agentSettingsStore } from '$lib/stores/agent-settings.svelte';
   import { createChatMarkdown, renderChatMarkdown, renderKatex } from '$lib/utils/chat-markdown';
   import { Renderer } from 'marked';
@@ -202,17 +205,30 @@
     }
   }
 
+  function generatedVideoId(meta?: Record<string, unknown>): string | null {
+    const result = meta?.toolResult as { name?: string; output?: string; isError?: boolean } | undefined;
+    if (result?.name !== 'generate_video' || result.isError) return null;
+    try {
+      const parsed = JSON.parse(result.output ?? '');
+      return typeof parsed.historyId === 'string' && parsed.historyId ? parsed.historyId : null;
+    } catch { return null; }
+  }
+
   /** Local/relative image paths route through the authed backend renderer. */
   function rawImageUrl(path: string): string {
-    const auth = authStore.token ? `&auth=${encodeURIComponent(authStore.token)}` : '';
-    return apiUrl(`/api/workspace/raw?path=${encodeURIComponent(path)}${auth}`);
+    const params = new URLSearchParams({ path });
+    if (authStore.token) params.set('auth', authStore.token);
+    const sessionId = sessionStore.activeSessionId;
+    const session = sessionStore.sessions.find((item) => item.id === sessionId);
+    if (sessionId) params.set('sessionId', sessionId);
+    const source = session?.workingDirectory ?? projectStore.requestPath;
+    if (source) params.set('project', source);
+    return apiUrl(`/api/workspace/raw?${params}`);
   }
   renderer.image = ({ href, text }: { href?: string | null; text?: string | null }) => {
     let src = href ?? '';
     if (src && !/^(https?:|data:|blob:)/i.test(src)) {
-      const base = (projectStore.currentPath ?? '').replace(/[/\\]+$/, '');
-      const abs = src.startsWith('/') ? src : base ? `${base}/${src.replace(/^\.\//, '')}` : src;
-      src = rawImageUrl(abs);
+      src = rawImageUrl(src);
     }
     const alt = (text ?? '').replace(/"/g, '&quot;');
     return `<img src="${src}" alt="${alt}" loading="lazy" style="max-width:100%;max-height:420px;border-radius:12px;margin:8px 0;display:block;" />`;
@@ -1380,6 +1396,8 @@
             defaultExpanded={agentSettingsStore.settings.reasoningExpandedByDefault ?? false}
             finalized={entry.thinkingFinalized ?? false}
           />
+        {:else if entry.type === 'tool_result' && generatedVideoId(entry.metadata)}
+          <GeneratedVideo historyId={generatedVideoId(entry.metadata)!} />
         {:else if entry.type === 'tool_result' && viewImagePath(entry.metadata)}
           {@const imgPath = viewImagePath(entry.metadata)!}
           <div class="mt-1 flex flex-col gap-1">
@@ -1650,6 +1668,8 @@
                       />
                     </button>
                   {/if}
+                {:else if ['audio', 'video'].includes(chatMediaKind(chatMediaMimeType(attachment.name, attachment.mimeType)) ?? '')}
+                  <MediaAttachment data={attachment.data} name={attachment.name} mimeType={attachment.mimeType} />
                 {/if}
               {/each}
             </div>

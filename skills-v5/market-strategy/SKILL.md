@@ -28,4 +28,6 @@ Use secondary data for broad context and direct customer work for the unresolved
 
 Recommend a coherent set of choices and exclusions, with a bounded next test and criteria for changing course. Pricing, channel execution, and investment approval belong to their respective skills when those outputs are requested. A strategy document is not authorization to enter contracts or spend capital.
 
+Reconcile the final recommendation and verification summary against the evidence artifacts that actually exist. Claim a check, evidence map, or validation step as completed only when its recorded result is available; if an artifact was not produced, a check did not finish, or the supporting evidence is missing, label that item unavailable or unverified instead of describing it as completed.
+
 Use [the maintained source map](references/sources.md) for version-sensitive facts and source conflicts.

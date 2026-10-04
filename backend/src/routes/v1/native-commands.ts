@@ -103,9 +103,17 @@ export const nativeCommandRoutes = new Elysia({ prefix: '/api/native-commands' }
           );
         }
 
-        const workingDirectory =
-          (session.workingDirectory && session.workingDirectory.trim()) ||
-          (await kory.resolveSessionWorkingDirectoryPublic(body.sessionId));
+        const workingDirectory = await kory.resolveSessionWorkingDirectoryPublic(body.sessionId);
+        // Native slash-command adapters do not share the provider turn's OS
+        // jail. Do not create an escape hatch from the isolated chat.
+        if (
+          session.gitWorkspace?.isolation === 'independent-repository' ||
+          workingDirectory !== session.workingDirectory
+        ) {
+          throw new ValidationError(
+            'Native CLI slash commands are unavailable in isolated chats until their adapter enforces the workspace boundary. Use chat tools or run the command manually outside Koryphaios.',
+          );
+        }
 
         const messageId = newNativeMessageId();
         const providerLabel = getNativeProviderLabel(providerName);

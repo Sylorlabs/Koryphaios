@@ -162,17 +162,15 @@ export interface CreateNoteDraftInput {
   format: 'markdown' | 'html';
 }
 
-export interface UpdateNoteDraftInput
-  extends Omit<CreateNoteDraftInput, 'noteId' | 'baseRevision' | 'baseTitle'> {
+export interface UpdateNoteDraftInput extends Omit<
+  CreateNoteDraftInput,
+  'noteId' | 'baseRevision' | 'baseTitle'
+> {
   expectedDraftRevision: number;
 }
 
 export type VaultRestoreConflictKind =
-  | 'source_exists'
-  | 'note_id_exists'
-  | 'attachment_exists'
-  | 'base_name_exists'
-  | 'archive_invalid';
+  'source_exists' | 'note_id_exists' | 'attachment_exists' | 'base_name_exists' | 'archive_invalid';
 
 export interface VaultRestoreConflict {
   kind: VaultRestoreConflictKind;
@@ -190,6 +188,7 @@ export interface VaultRestorePreview {
   revisions: number;
   attachments: number;
   links: number;
+  relationships: number;
   bases: number;
   drafts: number;
   noOpNotes: number;
@@ -203,6 +202,7 @@ export interface VaultRestoreResult extends VaultRestorePreview {
   restoredRevisions: number;
   restoredAttachments: number;
   restoredLinks: number;
+  restoredRelationships: number;
   restoredBases: number;
   restoredDrafts: number;
 }

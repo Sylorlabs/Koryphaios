@@ -9,7 +9,10 @@
 //                 --effort, --permission-mode, CLAUDE_CONFIG_DIR, MCP (.claude.json)
 //   codex       : --sandbox, --json, --model, <KORY_TOOL_CALL> envelope, CODEX_HOME
 //   cursor      : -p, --output-format stream-json, --mode, --sandbox, --force, --model
-//   antigravity : --print, --model, --mode, --sandbox, --log-file, --conversation
+//   antigravity : --input-format stream-json, --model, --sandbox, --log-file,
+//                 --conversation, --add-dir. Permissions are enforced through
+//                 settings.json (permissions + toolPermission), not --mode, which
+//                 agy ignores headlessly. Hooks: ~/.gemini/config/hooks.json.
 //   grok        : -p, --model, --output-format, --permission-mode, --no-subagents,
 //                 --session-id, --leader-socket, --reasoning-effort
 //   kimicode    : OpenAI-compatible API (no subprocess); bridge injects Kory
@@ -17,7 +20,7 @@
 //                 function-calling definitions.
 
 import type { ProviderName } from '@koryphaios/shared';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { existsSync, symlinkSync, rmSync, lstatSync } from 'node:fs';
 import { serverLog } from '../logger';
@@ -43,6 +46,7 @@ import { buildKoryCliMcpConfig } from './kory-cli-mcp-config';
 import { getKoryBridgeGrant, type BridgeGrantAction } from './bridge-grant';
 import { toolsForRole } from './kory-mcp-bridge';
 import { ensureManagedCliDirectory } from './managed-cli-storage';
+import { credentialLinkCandidates } from './cli-config-paths';
 
 // ─── Shared harness note ───────────────────────────────────────────────────
 
@@ -180,6 +184,20 @@ export function getKoryphaiosCursorHome(): string {
   return makeIsolatedHome('cursor-home', join(homedir(), '.cursor'), []);
 }
 
+/**
+ * Credential files agy may keep inside `$GEMINI_DIR`, relative to that root.
+ * Discovered by probing instead of hardcoded to one name: the CLI has shipped
+ * the OAuth token as `antigravity-cli/antigravity-oauth-token`, while older
+ * builds used top-level `oauth_creds.json` / `google_accounts.json`. Linking a
+ * name that does not exist is a silent no-op, so a stale list leaves the staged
+ * home unauthenticated and every turn drops into the browser OAuth flow.
+ */
+const ANTIGRAVITY_CREDENTIAL_FILES = [
+  'antigravity-cli/antigravity-oauth-token',
+  'oauth_creds.json',
+  'google_accounts.json',
+] as const;
+
 export function getKoryphaiosAntigravityHome(): string {
   const dir = makeIsolatedHome('antigravity-home', join(homedir(), '.antigravity'), []);
   // agy authenticates via ~/.gemini OAuth material, but the child runs with
@@ -191,10 +209,14 @@ export function getKoryphaiosAntigravityHome(): string {
     const geminiDir = join(homedir(), '.gemini');
     const isolatedGemini = join(dir, '.gemini');
     ensureManagedCliDirectory(isolatedGemini);
-    for (const file of ['oauth_creds.json', 'google_accounts.json']) {
+    for (const file of ANTIGRAVITY_CREDENTIAL_FILES) {
       const src = join(geminiDir, file);
       const dst = join(isolatedGemini, file);
-      if (!existsSync(src) || existsSync(dst)) continue;
+      if (!existsSync(src)) continue;
+      ensureManagedCliDirectory(join(isolatedGemini, dirname(file)));
+      if (existsSync(dst) || lstatSync(dst, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        rmSync(dst, { force: true });
+      }
       try {
         symlinkSync(src, dst);
       } catch {
@@ -207,16 +229,63 @@ export function getKoryphaiosAntigravityHome(): string {
   return dir;
 }
 
+/**
+ * Symlink credential files into an isolated home at every plausible resolution
+ * point (root and nested dot-directory), skipping any that already exist.
+ *
+ * Best-effort by design: a CLI that cannot see its login degrades to its own
+ * sign-in prompt, which is a visible failure rather than a silent one.
+ */
+function linkCredentialCandidates(
+  realConfigDir: string,
+  homeDir: string,
+  dotDir: string,
+  files: readonly string[],
+): void {
+  for (const { source, target } of credentialLinkCandidates(
+    realConfigDir,
+    homeDir,
+    dotDir,
+    files,
+  )) {
+    if (!existsSync(source)) continue;
+    try {
+      if (existsSync(target) || lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        rmSync(target, { force: true });
+      }
+    } catch {
+      serverLog.debug({}, 'cli-bridges: no existing link to remove');
+    }
+    try {
+      ensureManagedCliDirectory(dirname(target));
+      symlinkSync(source, target);
+    } catch {
+      serverLog.debug({}, 'cli-bridges: credential link best-effort failed');
+    }
+  }
+}
+
 export function getKoryphaiosGrokHome(): string {
   // Grok stores its login outside the environment. Keep the child isolated for
   // sessions/configuration, but make the CLI-owned auth and model cache visible
   // to it. Without this, Koryphaios can detect a working terminal login and
   // then launch a child that quite correctly says "sign in" because it has an
   // empty HOME.
-  return makeIsolatedHome('grok-home', join(homedir(), '.grok'), [
+  //
+  // Linked at the root AND under `.grok/`: whether the CLI resolves these
+  // against GROK_HOME or against a ~/.grok directory inside it is unmeasured,
+  // because the grok CLI is not installed on the authoring host. The root link
+  // alone left the child unauthenticated if the dot-directory is what it reads,
+  // which is the exact failure this comment describes.
+  const dir = makeIsolatedHome('grok-home', join(homedir(), '.grok'), [
     'auth.json',
     'models_cache.json',
   ]);
+  linkCredentialCandidates(join(homedir(), '.grok'), dir, '.grok', [
+    'auth.json',
+    'models_cache.json',
+  ]);
+  return dir;
 }
 
 // ─── Claude Code bridge ────────────────────────────────────────────────────
@@ -238,7 +307,7 @@ export class ClaudeCodeCliBridge extends ManagedCliBridge implements CliBridge {
       supportsMcp: true, // .claude.json mcpServers
       supportsRules: true, // CLAUDE.md
       supportsSkills: false, // no skills system
-      supportsHooks: true, // .claude/hooks (Claude Code compatible)
+      supportsHooks: true, // settings.json `hooks` key, supplied per turn via --settings
       version: null,
       probedAt: 0,
     };
@@ -588,14 +657,22 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
     return {
       ...EMPTY_CLI_CAPABILITIES,
       supportsAgentConfig: false,
-      supportsSandbox: true, // --sandbox
+      supportsSandbox: true, // --sandbox, plus enableTerminalSandbox
       supportsExport: true, // --log-file SSE + SQLite trajectory
-      supportsPermissionMode: true, // --mode plan/accept-edits
+      // Permission posture is enforced through agy's own engine
+      // (settings.json permissions + toolPermission), NOT via --mode: agy
+      // ignores --mode in print/stream-json mode. See
+      // antigravity-permissions.ts.
+      supportsPermissionMode: true,
       supportsAcp: false,
-      supportsMcp: true, // imports .claude/ config (mcpServers)
-      supportsRules: true, // AGENTS.md (imports from .claude/)
-      supportsSkills: true, // .claude/ skills (imported)
-      supportsHooks: true, // .claude/ hooks (imported)
+      supportsMcp: true, // imports .claude.json mcpServers
+      supportsRules: true, // AGENTS.md
+      supportsSkills: true,
+      // agy reads hooks from ~/.gemini/config/hooks.json or
+      // <workspace>/.agents/hooks.json — not .claude/. Its schema and decision
+      // vocabulary also differ, so hooks are written directly by the adapter
+      // via antigravity-permissions.ts rather than through this abstraction.
+      supportsHooks: true,
       version: null,
       probedAt: 0,
     };
@@ -613,10 +690,14 @@ export class AntigravityCliBridge extends ManagedCliBridge implements CliBridge 
     return '{}';
   }
 
-  buildHooks(ctx: CliBridgeContext): CliHookConfig[] | null {
-    // Antigravity imports .claude/hooks — same format as Claude Code.
-    // Always wire hooks to block native tool calls.
-    return buildKoryHookConfigs(ctx);
+  buildHooks(_ctx: CliBridgeContext): CliHookConfig[] | null {
+    // Deliberately null. `CliHookConfig` encodes Claude Code's shape — event
+    // names as top-level keys and approve/block decisions — which agy does not
+    // accept: it keys hooks by *name*, matches tools by regex, and only parses
+    // allow/deny/ask/force_ask. Emitting the Claude shape produced a hooks.json
+    // agy silently ignored, so the native-tool gate never ran. The adapter
+    // writes the real format through buildAntigravityHooks().
+    return null;
   }
 
   serializeHooks(hooks: CliHookConfig[]): string {

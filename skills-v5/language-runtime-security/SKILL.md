@@ -17,6 +17,7 @@ Start by writing down the exact guarantee the runtime is expected to provide. â€
 6. **Bound resource consumption.** Enforce memory/table/stack/code-size limits, recursion, compilation/JIT time, instruction/fuel or epoch limits where supported, host-call cost, output size, and cancellation. Traps and out-of-fuel paths must not leave privileged partial effects behind.
 7. **Audit native/unsafe escape hatches.** FFI, native extensions, unsafe intrinsics, raw pointers, signal/exception bridges, reflection, dynamic loading, and JIT executable memory can invalidate the safe-language model. Define ABI/layout/lifetime/ownership rules and W^X or equivalent executable-memory policy where relevant.
 8. **Prove security invariants with adversarial programs.** Use minimized reproducers, optimization-level comparisons, differential/interpreter-vs-JIT tests, malformed module corpora, capability-denial cases, and resource-exhaustion cases. Preserve the smallest cross-layer trace that explains the failure instead of stopping at a crash symptom.
+9. **Honor supplied runtime contracts exactly.** When a repository task provides an interface, artifact schema, fixed simulator, corpus, or lifecycle command, preserve it unless the task explicitly authorizes a change. Populate the exact field names and types instead of inventing a cleaner capability model. Keep staged privileged work distinct from durable committed effects: a trap may discard staged work, but it must not report or perform a committed privileged side effect.
 
 ## Evidence and claims
 

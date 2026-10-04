@@ -11,8 +11,8 @@ Use these references when changing the Plan-mode operating contract, readiness b
 ## OpenAI Codex repository instructions
 
 - Source: https://developers.openai.com/codex/guides/agents-md/
-- Verified: 2026-09-04
-- Relevant pattern: repository-specific instructions are discovered with defined precedence. A plan should reflect the guidance that actually governs the target files rather than generic repository assumptions.
+- Verified: 2026-10-03
+- Relevant pattern: Codex loads global guidance first, then walks from the project root toward the current directory. It uses one applicable instruction file per directory, with closer guidance appearing later and taking precedence. A plan should reflect the guidance that actually governs the target files rather than generic repository assumptions.
 
 ## Agent Skills specification
 

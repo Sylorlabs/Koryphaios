@@ -199,6 +199,44 @@ export const DEFAULT_NOTES_SETTINGS: NotesSettings = {
 // Agent permissions for note network tools
 // ============================================================================
 
+export const NOTE_RELATIONSHIP_TYPES = [
+  'related_to',
+  'supports',
+  'contradicts',
+  'depends_on',
+  'supersedes',
+] as const;
+export type NoteRelationshipType = (typeof NOTE_RELATIONSHIP_TYPES)[number];
+export type NoteRelationshipStatus = 'proposed' | 'accepted' | 'rejected';
+/** Host-owned identity, never accepted from agent tool arguments. */
+export interface NoteRelationshipActor {
+  sessionId?: string;
+  provider?: string;
+  model?: string;
+  reasoningLevel?: string;
+  agentId?: string;
+  goalId?: string;
+  goalItemId?: string;
+}
+export interface NoteRelationship {
+  fromId: string;
+  toId: string;
+  fromTitle: string;
+  toTitle: string;
+  type: NoteRelationshipType;
+  status: NoteRelationshipStatus;
+  evidence: string;
+  weight: number;
+  revision: number;
+  sourceRevision: number;
+  targetRevision: number;
+  stale: boolean;
+  provenance: 'user' | 'agent' | 'import';
+  actor: NoteRelationshipActor;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export type NotePermissionLevel = 'auto' | 'ask' | 'block';
 
 export type NotesPermissionPreset = 'default' | 'allow_all' | 'ask_all' | 'block_all' | 'custom';
@@ -208,6 +246,7 @@ export const NOTE_TOOL_NAMES = [
   'search_notes',
   'list_notes',
   'recall_notes',
+  'retrieve_note_context',
   'get_note_backlinks',
   'get_note_graph_summary',
   'get_note_properties',
@@ -220,6 +259,8 @@ export const NOTE_TOOL_NAMES = [
   'delete_note',
   'link_notes',
   'unlink_notes',
+  'propose_note_relationship',
+  'review_note_relationship',
 ] as const;
 
 export type NoteToolName = (typeof NOTE_TOOL_NAMES)[number];
@@ -232,6 +273,19 @@ export interface NoteToolDefinition {
 }
 
 export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
+  {
+    name: 'propose_note_relationship',
+    label: 'Propose relationship',
+    description: 'Suggest one revision-bound evidence relationship without accepting it as fact',
+    category: 'write',
+  },
+  {
+    name: 'review_note_relationship',
+    label: 'Review relationship',
+    description:
+      'Accept or reject a proposed relationship; always requires separate human approval',
+    category: 'write',
+  },
   {
     name: 'read_note',
     label: 'Read note',
@@ -254,6 +308,12 @@ export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
     name: 'recall_notes',
     label: 'Recall notes',
     description: 'Load full content for multiple notes',
+    category: 'read',
+  },
+  {
+    name: 'retrieve_note_context',
+    label: 'Retrieve related context',
+    description: 'Find bounded relevant excerpts with explainable graph relationships',
     category: 'read',
   },
   {
@@ -342,6 +402,7 @@ export const DEFAULT_NOTE_TOOL_PERMISSIONS: NoteToolPermissions = {
   search_notes: 'auto',
   list_notes: 'auto',
   recall_notes: 'auto',
+  retrieve_note_context: 'auto',
   get_note_backlinks: 'auto',
   get_note_graph_summary: 'auto',
   get_note_properties: 'auto',
@@ -354,6 +415,8 @@ export const DEFAULT_NOTE_TOOL_PERMISSIONS: NoteToolPermissions = {
   delete_note: 'ask',
   link_notes: 'ask',
   unlink_notes: 'ask',
+  propose_note_relationship: 'ask',
+  review_note_relationship: 'ask',
 };
 
 export const NOTES_PERMISSION_PRESET_LEVELS: Record<

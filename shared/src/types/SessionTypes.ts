@@ -3,6 +3,7 @@
 
 import type { AgentRole, AgentStatus, WorkerDomain } from './AgentTypes';
 import type { ProviderName } from '../providers/ProviderNames';
+import type { CreatedGitWorkspace } from '../git-workspace';
 
 /**
  * Per-chat overrides for the composer controls that must not leak between
@@ -32,6 +33,8 @@ export interface Session {
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;
+  /** Immutable origin of a persistent isolated Git chat workspace. */
+  gitWorkspace?: CreatedGitWorkspace;
   /** Persisted per-conversation capability mode. Plan mode is read-only apart
    * from its dedicated planning note and explicit durable-preference writes. */
   interactionMode?: 'act' | 'plan';

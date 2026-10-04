@@ -206,42 +206,81 @@ describe('built-in provider catalog truth', () => {
     expect(status?.configurationBlocked).toBeUndefined();
   });
 
-  it('reports blocked modalities and mutation-capable adapters as unavailable, not ready', () => {
+  it('reports a still-blocked adapter as unavailable, not ready', () => {
     const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
     const createProvider = (
       registry as unknown as { createProvider(name: ProviderName, config: ProviderConfig): unknown }
     ).createProvider.bind(registry);
+    // Set before the big assign: createProvider is called while that object
+    // literal is being evaluated, so these fields must already exist.
     Object.assign(registry, { customProviderIds: new Set() });
     const julesConfig: ProviderConfig = {
       name: 'jules',
       apiKey: 'present-but-not-approved',
       disabled: false,
     };
-    const replicateConfig: ProviderConfig = {
-      name: 'replicate',
-      apiKey: 'present-but-not-a-chat-contract',
-      baseUrl: PROVIDER_CONFIG_MAP.get('replicate')?.baseUrl,
-      disabled: false,
-    };
     Object.assign(registry, {
       providers: new Map([['jules', createProvider('jules', julesConfig)]]),
-      providerConfigs: new Map([
-        ['jules', julesConfig],
-        ['replicate', replicateConfig],
-      ]),
+      providerConfigs: new Map([['jules', julesConfig]]),
       circuitStates: new Map(),
       customProviderIds: new Set(),
       verificationRecords: new Map(),
     });
+    const status = registry.getStatus().find((entry) => entry.name === 'jules');
+    expect(status?.authenticated).toBe(false);
+    expect(status?.supportsApiKey).toBe(false);
+    expect(status?.supportsAuthToken).toBe(false);
+    expect(status?.requiresBaseUrl).toBe(false);
+    expect(status?.configurationBlocked).toBe(true);
+    expect(status?.error).toBeTruthy();
+  });
+
+  it('reports media and memory capability adapters as configurable without a chat adapter', () => {
+    // These providers have no chat-completions contract, so they must stay
+    // absent from the chat picker while still being verifiable and configurable
+    // through their dedicated capability adapter.
+    const registry = Object.create(ProviderRegistry.prototype) as ProviderRegistry;
+    const configs = new Map<ProviderName, ProviderConfig>();
+    for (const name of [
+      'replicate',
+      'luma',
+      'klingai',
+      'prodia',
+      'lmnt',
+      'voyageai',
+      'mem0',
+      'letta',
+    ] as const) {
+      configs.set(name, {
+        name,
+        apiKey: 'configured-key',
+        baseUrl: PROVIDER_CONFIG_MAP.get(name)?.baseUrl,
+        disabled: false,
+      });
+    }
+    Object.assign(registry, {
+      providers: new Map(),
+      providerConfigs: configs,
+      circuitStates: new Map(),
+      customProviderIds: new Set(),
+      verificationRecords: new Map(
+        [...configs.keys()].map((name) => [
+          name,
+          { state: 'verified', checkedAt: Date.now(), scope: 'credential' },
+        ]),
+      ),
+    });
+
     const statuses = registry.getStatus();
-    for (const name of ['jules', 'replicate'] as const) {
+    for (const name of configs.keys()) {
       const status = statuses.find((entry) => entry.name === name);
-      expect(status?.authenticated).toBe(false);
-      expect(status?.supportsApiKey).toBe(false);
-      expect(status?.supportsAuthToken).toBe(false);
-      expect(status?.requiresBaseUrl).toBe(false);
-      expect(status?.configurationBlocked).toBe(true);
-      expect(status?.error).toBeTruthy();
+      expect(status, name).toMatchObject({
+        authenticated: true,
+        adapterAvailable: false,
+        supportsApiKey: true,
+      });
+      // Configurable through its capability adapter, not blocked.
+      expect(status?.configurationBlocked, name).toBeUndefined();
     }
   });
 });

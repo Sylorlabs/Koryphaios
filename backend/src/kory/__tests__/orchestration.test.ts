@@ -101,13 +101,14 @@ describe('KoryManager Orchestration', () => {
 
   beforeEach(() => {
     resetSessionAgentOverridesCache();
-    manager = new KoryManager(
-      mockProviderRegistry,
-      mockToolRegistry,
-      testWorkDir,
-      mockConfig as any,
-      {
-        get: async (id: string) => ({
+    // Chat execution resolves (and persists) that chat's own isolated
+    // checkout, so the session stub has to round-trip the stored workspace.
+    const rows = new Map<string, any>();
+    const sessions = {
+      get: async (id: string) => {
+        const existing = rows.get(id);
+        if (existing) return existing;
+        const created = {
           id,
           title: id,
           workingDirectory: testWorkDir,
@@ -117,8 +118,25 @@ describe('KoryManager Orchestration', () => {
           totalCost: 0,
           createdAt: 1,
           updatedAt: 1,
-        }),
-      } as any,
+          version: 1,
+        };
+        rows.set(id, created);
+        return created;
+      },
+      update: async (id: string, updates: object, version: number) => {
+        const current = rows.get(id);
+        if (!current || current.version !== version) return undefined;
+        const next = { ...current, ...updates, version: version + 1 };
+        rows.set(id, next);
+        return next;
+      },
+    };
+    manager = new KoryManager(
+      mockProviderRegistry,
+      mockToolRegistry,
+      testWorkDir,
+      mockConfig as any,
+      sessions as any,
       { getRecent: () => [], add: () => {}, getContextMessages: () => [] } as any,
     );
   });
@@ -238,6 +256,10 @@ describe('KoryManager Orchestration', () => {
     // YOLO is per chat, so the unsandboxed worker path is enabled by giving
     // this session its own approval preset rather than a process-wide flag.
     setSessionAgentOverrides('session-2', { permissionMode: 'yolo' });
+    // Reconciliation is exercised against the configured project workspace,
+    // which is the one this test stubs. Per-chat checkout resolution has its
+    // own coverage in manager-chat-workspace.test.ts.
+    manager['resolveSessionWorkingDirectoryPublic'] = async () => testWorkDir;
     manager['workerPipeline']['prepareRecoveryBaseline'] = mock(async () => ({ ok: true }));
     manager['resolveIndependentRouting'] = mock(() => ({
       model: 'independent-worker',

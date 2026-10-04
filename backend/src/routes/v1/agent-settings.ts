@@ -1,4 +1,5 @@
 import { Elysia, t } from 'elysia';
+import { admitComputerPolicy, computerAuthorityRevision } from '../../computer-use/authority';
 import { getRequestProjectRoot } from '../../runtime/request-project';
 import { getContext } from '../../context';
 import {
@@ -1167,7 +1168,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     const settings = loadAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
-      data: settings,
+      data: { ...settings, computerUseRevision: computerAuthorityRevision() },
       message: 'Project-scoped agent settings loaded.',
     };
   })
@@ -1175,11 +1176,21 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     const root = getRequestProjectRoot(request);
     const currentSettings = loadAgentSettings(root);
+    const patch = body as Record<string, unknown>;
+    const changesComputer = patch && Object.prototype.hasOwnProperty.call(patch, 'computerUse');
+    if (changesComputer && patch.computerUseRevision !== computerAuthorityRevision()) {
+      set.status = 409;
+      return {
+        ok: false,
+        error: 'Computer permissions changed or were stopped. Reload settings before saving.',
+      };
+    }
     const newSettings = mergeAgentSettings(currentSettings, body);
     saveAgentSettings(root, newSettings);
+    if (changesComputer) admitComputerPolicy(root, newSettings.computerUse);
     return {
       ok: true,
-      data: newSettings,
+      data: { ...newSettings, computerUseRevision: computerAuthorityRevision() },
       message: 'Project-scoped agent settings updated.',
     };
   })
@@ -1188,7 +1199,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
     const settings = resetAgentSettings(getRequestProjectRoot(request));
     return {
       ok: true,
-      data: settings,
+      data: { ...settings, computerUseRevision: computerAuthorityRevision() },
       message: 'Project-scoped agent settings reset to defaults.',
     };
   })

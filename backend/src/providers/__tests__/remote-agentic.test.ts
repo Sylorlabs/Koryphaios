@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { RemoteProvider } from '../remote-provider';
 import { relayGuestClient } from '../../collaboration/relay-guest-client';
 import type { ProviderEvent, StreamRequest } from '../types';
+import type { RemoteInferenceRequestPayload } from '@koryphaios/shared';
+import { toRemoteStreamRequest } from '../../collaboration/remote-provider-host';
 
 // Prove the sync-back loop: a host `file_edit` event (path relative to the host
 // sandbox) is written to the CLIENT's own project directory.
@@ -82,5 +84,71 @@ describe('RemoteProvider agentic write-back', () => {
     expect(written).toBe('export const created = true;');
     // The file_edit event is still surfaced for the UI.
     expect(events.some((e) => e.type === 'file_edit' && e.filePath === 'src/new.ts')).toBe(true);
+  });
+
+  test.each([false, true])(
+    'preserves route-scoped image confirmation across the relay (agentic=%s)',
+    async (agentic) => {
+      root = await mkdtemp(join(tmpdir(), 'ra-images-'));
+      Object.defineProperty(Object.getPrototypeOf(relayGuestClient), 'isConnected', {
+        configurable: true,
+        get: () => true,
+      });
+      let payload: RemoteInferenceRequestPayload | undefined;
+      relayGuestClient.requestInference = async function* (input) {
+        payload = input;
+        yield { type: 'complete', finishReason: 'end_turn' } as ProviderEvent;
+      };
+      const provider = new RemoteProvider({
+        id: 'remote-custom-vision',
+        hostProvider: 'custom:vision',
+        label: 'Host vision',
+        agentic,
+        models: [],
+      });
+      const request: StreamRequest = {
+        model: 'vision:latest',
+        systemPrompt: '',
+        workingDirectory: root,
+        imageInputOverride: { provider: provider.name, model: 'vision:latest' },
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image', imageData: 'cGl4ZWxz', imageMimeType: 'image/png' }],
+          },
+        ],
+      };
+      for await (const _event of provider.streamResponse(request)) {
+      }
+      expect(payload?.imageInputOverride).toEqual({
+        provider: 'custom:vision',
+        model: 'vision:latest',
+      });
+      const hostRequest = toRemoteStreamRequest(
+        payload!,
+        new AbortController().signal,
+        agentic ? '/host/sandbox' : undefined,
+      );
+      expect(hostRequest.imageInputOverride).toEqual(payload?.imageInputOverride);
+      expect(hostRequest.messages).toEqual(request.messages);
+      expect(hostRequest.workingDirectory).toBe(agentic ? '/host/sandbox' : undefined);
+    },
+  );
+
+  test('the host drops an image override that names a different route', () => {
+    const payload: RemoteInferenceRequestPayload = {
+      provider: 'google',
+      model: 'gemini',
+      systemPrompt: '',
+      messages: [],
+      imageInputOverride: { provider: 'anthropic', model: 'gemini' },
+    };
+    expect(
+      toRemoteStreamRequest(payload, new AbortController().signal).imageInputOverride,
+    ).toBeUndefined();
+    payload.imageInputOverride = { provider: 'google', model: 'different' };
+    expect(
+      toRemoteStreamRequest(payload, new AbortController().signal).imageInputOverride,
+    ).toBeUndefined();
   });
 });

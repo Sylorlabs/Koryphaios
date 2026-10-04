@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
   SkillEvalDeterministicScorer,
@@ -120,16 +120,24 @@ Evolve \`proto/job.proto\` and the small reference wire codec in \`src/wire.ts\`
 };
 
 const fieldEvolutionScorer: SkillEvalDeterministicScorer = {
-  id: 'grpc-protobuf/proto-field-evolution-scorer@1',
+  id: 'grpc-protobuf/proto-field-evolution-scorer@2',
   scenarioIds: [FIELD_EVOLUTION],
   score: ({ workingDirectory }) => {
     const liveProto = readFileSync(join(workingDirectory, 'proto/job.proto'), 'utf8');
-    let postWindow = '';
-    try {
-      postWindow = readFileSync(join(workingDirectory, 'proto/job.post-window.proto'), 'utf8');
-    } catch {
-      // Missing future reservation artifact is scored below.
-    }
+    const protoDirectory = join(workingDirectory, 'proto');
+    const postWindow =
+      readdirSync(protoDirectory, { withFileTypes: true })
+        .filter(
+          (entry) => entry.isFile() && entry.name.endsWith('.proto') && entry.name !== 'job.proto',
+        )
+        .map((entry) => readFileSync(join(protoDirectory, entry.name), 'utf8'))
+        .find(
+          (source) =>
+            /reserved\s+2\s*;/iu.test(source) &&
+            /reserved\s+"urgent"\s*;/iu.test(source) &&
+            /Priority\s+priority\s*=\s*3\s*;/iu.test(source) &&
+            !/bool\s+urgent\s*=\s*2/iu.test(source),
+        ) ?? '';
     const liveSchema =
       /bool\s+urgent\s*=\s*2\s*\[[^\]]*deprecated\s*=\s*true[^\]]*\]/iu.test(liveProto) &&
       /enum\s+Priority\s*\{[^}]*UNSPECIFIED\s*=\s*0[^}]*NORMAL\s*=\s*1[^}]*HIGH\s*=\s*2/isu.test(

@@ -7,6 +7,7 @@ import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { Provider, ProviderEvent, StreamRequest } from '../../providers/types';
 import type { CompactionCommit, IMessageStore } from '../../stores/message-store';
 import { db, sessions as sessionRows } from '../../db';
+import { SessionStore } from '../../stores/session-store';
 import { wsBroker } from '../../pubsub';
 import { KoryManager } from '../manager';
 
@@ -86,7 +87,7 @@ async function createHarness(
     {} as ToolRegistry,
     dir,
     {} as KoryphaiosConfig,
-    undefined,
+    new SessionStore(),
     messageStore,
   );
   return {

@@ -8,6 +8,7 @@ import {
   activateJoinedTeamSession,
   leaveJoinedTeamSession as removeJoinedTeamSession,
   upsertJoinedTeamSession,
+  parseSharedTeamFolders,
   type JoinedTeamSessionRecord,
 } from '$lib/utils/joined-team-sessions';
 
@@ -83,6 +84,8 @@ function parseJoinedSession(value: unknown): JoinedTeamSession | null {
     inviteUrl,
     tierId: tierId.slice(0, 64),
     joinedAt,
+    hostName: typeof input.hostName === 'string' ? input.hostName.slice(0, 80) : 'Host',
+    sharedFolders: parseSharedTeamFolders(input.sharedFolders),
   };
 }
 
@@ -131,6 +134,7 @@ function persistJoinedSessions(
 
 let activeCollab = $state<CollaborationSession | null>(null);
 let loading = $state(false);
+let joinError = $state<string | null>(null);
 let pendingPrompts = $state<PendingPrompt[]>([]);
 let pendingJoins = $state<
   Array<{ guestId: string; name: string; tierId: string; timestamp: number }>
@@ -141,6 +145,7 @@ let participants = $state<
 export interface JoinedTeamSession extends JoinedTeamSessionRecord {}
 let joinedSessions = $state<JoinedTeamSession[]>([]);
 let activeJoinedSessionId = $state<string | null>(null);
+let activeJoinedFolderId = $state<string | null>(null);
 let settingsRequest = $state(0);
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 let policyRevision = 0;
@@ -183,6 +188,12 @@ export const collaborationStore = {
   get loading() {
     return loading;
   },
+  get joinError() {
+    return joinError;
+  },
+  clearJoinError() {
+    joinError = null;
+  },
   get pendingPrompts() {
     return pendingPrompts;
   },
@@ -198,18 +209,33 @@ export const collaborationStore = {
   get activeJoinedSession() {
     return joinedSessions.find((session) => session.sessionId === activeJoinedSessionId) ?? null;
   },
+  get activeJoinedFolder() {
+    const team = joinedSessions.find((session) => session.sessionId === activeJoinedSessionId);
+    return team?.sharedFolders?.find((folder) => folder.id === activeJoinedFolderId) ?? null;
+  },
+  updateJoinedMetadata(sessionId: string, metadata: { hostName?: string; sessionName?: string; sharedFolders?: unknown }) {
+    joinedSessions = joinedSessions.map((team) => team.sessionId !== sessionId ? team : {
+      ...team,
+      hostName: typeof metadata.hostName === 'string' ? metadata.hostName.slice(0, 80) || 'Host' : team.hostName || 'Host',
+      sessionName: typeof metadata.sessionName === 'string' ? metadata.sessionName.slice(0, 160) || team.sessionName : team.sessionName,
+      sharedFolders: parseSharedTeamFolders(metadata.sharedFolders),
+    });
+    persistJoinedSessions(joinedSessions, activeJoinedSessionId);
+  },
   get settingsRequest() {
     return settingsRequest;
   },
   requestTeamSettings() {
     settingsRequest += 1;
   },
-  openJoinedSession(sessionId: string) {
+  openJoinedSession(sessionId: string, folderId?: string) {
     activeJoinedSessionId = activateJoinedTeamSession(joinedSessions, sessionId);
+    activeJoinedFolderId = folderId ?? null;
     persistJoinedSessions(joinedSessions, activeJoinedSessionId);
   },
   closeJoinedSession() {
     activeJoinedSessionId = null;
+    activeJoinedFolderId = null;
     persistJoinedSessions(joinedSessions, activeJoinedSessionId);
   },
   leaveJoinedSession(sessionId: string) {
@@ -261,7 +287,7 @@ export const collaborationStore = {
     return restoreInFlight;
   },
 
-  async hostSession(workspacePaths: string[] = []) {
+  async hostSession(workspacePaths: string[] = [], hostName = 'Host') {
     const sessionId = sessionStore.activeSessionId;
     if (!sessionId) {
       toastStore.error('No active session to host');
@@ -273,7 +299,7 @@ export const collaborationStore = {
       const res = await apiFetch(apiUrl('/api/collab/host/start'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, workspacePaths }),
+        body: JSON.stringify({ sessionId, workspacePaths, hostName }),
       });
       const data = await parseJsonResponse(res);
       if (data.ok) {
@@ -407,6 +433,11 @@ export const collaborationStore = {
   },
 
   async joinSession(joinCode: string, name: string) {
+    joinError = null;
+    if (!/^[A-HJ-NP-Z2-9]{8}$/.test(joinCode.trim().toUpperCase())) {
+      joinError = 'Not a valid code. Enter the eight-character code from your host.';
+      return null;
+    }
     loading = true;
     try {
       const res = await apiFetch(apiUrl(`/api/collab/join`), {
@@ -419,7 +450,7 @@ export const collaborationStore = {
         }),
       });
       const data = await parseJsonResponse(res);
-      if (data.ok) {
+      if (res.ok && data.ok) {
         toastStore.success('Join code accepted');
         const joined: JoinedTeamSession = {
           sessionId: data.data.sessionId,
@@ -427,17 +458,19 @@ export const collaborationStore = {
           inviteUrl: data.data.inviteUrl,
           tierId: data.data.tierId || 'viewer',
           joinedAt: Date.now(),
+          hostName: data.data.hostName || 'Host',
+          sharedFolders: parseSharedTeamFolders(data.data.sharedFolders),
         };
         joinedSessions = upsertJoinedTeamSession(joinedSessions, joined);
         activeJoinedSessionId = joined.sessionId;
         persistJoinedSessions(joinedSessions, activeJoinedSessionId);
         return data.data;
       } else {
-        toastStore.error(data.error || 'Failed to join session');
+        joinError = data.error || 'Failed to join session';
         return null;
       }
     } catch (err: unknown) {
-      toastStore.error((err instanceof Error ? err.message : String(err)) || 'Network error');
+      joinError = 'Could not reach the team service. Check your connection and try again.';
       return null;
     } finally {
       loading = false;

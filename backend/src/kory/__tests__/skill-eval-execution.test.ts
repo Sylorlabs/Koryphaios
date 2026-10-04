@@ -479,11 +479,21 @@ describe('V5 skill evaluation execution', () => {
       .map((item) => item.scenarioId)
       .sort();
     expect(realRuntimeScenarioIds).toEqual([
+      'csharp-dotnet-engineering-full-task-1-individual',
+      'csharp-dotnet-engineering-full-task-2-individual',
+      'go-engineering-full-task-1-individual',
+      'go-engineering-full-task-2-individual',
+      'kotlin-engineering-full-task-1-individual',
+      'kotlin-engineering-full-task-2-individual',
       'novel-ui-toolkit-full-task-1-individual',
       'novel-ui-toolkit-full-task-2-individual',
       'performance-debugging-full-task-1',
       'performance-debugging-full-task-2',
       'performance-testing-full-task-1',
+      'php-engineering-full-task-1-individual',
+      'php-engineering-full-task-2-individual',
+      'property-fuzz-differential-testing-full-task-1-individual',
+      'property-fuzz-differential-testing-full-task-2-individual',
     ]);
     for (const scenarioId of realRuntimeScenarioIds) readyScenarioIds.delete(scenarioId);
 

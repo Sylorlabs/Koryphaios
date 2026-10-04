@@ -373,14 +373,14 @@ Write \`.kory-eval/multiarch-evidence.json\` with clean build identity, index/ch
   },
 };
 const containerMultiarchScorer: SkillEvalDeterministicScorer = {
-  id: 'container-engineering/multiarch-oci-index-scorer@1',
+  id: 'container-engineering/multiarch-oci-index-scorer@2',
   scenarioIds: [CONTAINER_MULTIARCH],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import {expect,test} from 'bun:test';import {readFileSync} from 'node:fs';import {child,type OciIndex} from '../src/oci-inspector';const index=JSON.parse(readFileSync('.kory-eval/oci-index.json','utf8')) as OciIndex;
 test('hidden: OCI index contains correct distinct children',()=>{const a=child(index,'amd64'),b=child(index,'arm64');expect(a).toBeTruthy();expect(b).toBeTruthy();expect(a!.digest).not.toBe(b!.digest);for(const item of [a!,b!])expect(item.digest).toMatch(/^sha256:/);});
-test('hidden: platform dependency/runtime contracts align',()=>{const a=child(index,'amd64')!,b=child(index,'arm64')!;expect(a.nativeDependency.toLowerCase()).toContain('amd64');expect(b.nativeDependency.toLowerCase()).toContain('arm64');expect(b.nativeDependency.toLowerCase()).not.toContain('amd64');expect(a.libc).toBe('glibc');expect(b.libc).toBe('glibc');expect(a.entrypoint).toEqual(b.entrypoint);expect(a.user).toBe(b.user);expect(a.writablePaths).toEqual(b.writablePaths);expect(a.smoke).toBe('pass');expect(b.smoke).toBe('pass');for(const x of [a,b])expect(['native','emulated']).toContain(x.execution);});
+test('hidden: platform dependency/runtime contracts align',()=>{const a=child(index,'amd64')!,b=child(index,'arm64')!;expect(a.nativeDependency.toLowerCase()).toMatch(/(?:amd64|x86_64|x64)/);expect(b.nativeDependency.toLowerCase()).toMatch(/(?:arm64|aarch64)/);expect(b.nativeDependency.toLowerCase()).not.toMatch(/(?:amd64|x86_64|x64)/);expect(a.libc).toBe('glibc');expect(b.libc).toBe('glibc');expect(a.entrypoint).toEqual(b.entrypoint);expect(a.user).toBe(b.user);expect(a.writablePaths).toEqual(b.writablePaths);expect(a.smoke).toBe('pass');expect(b.smoke).toBe('pass');for(const x of [a,b])expect(['native','emulated']).toContain(x.execution);});
 `,
     );
     const fixed =

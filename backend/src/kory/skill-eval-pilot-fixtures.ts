@@ -657,7 +657,7 @@ test('hidden: analysis command completes', () => {
 };
 
 const appsecImportMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'application-security/media-import-boundaries@2',
+  id: 'application-security/media-import-boundaries@3',
   matches: (scenario) => scenario.id === APPSEC_IMPORT,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-appsec-import'));
@@ -727,13 +727,21 @@ export function sanitizeDiagnostic(message: string): string {
       destination,
       'tests/importer.test.ts',
       `import { expect, test } from 'bun:test';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { archiveDestination, converterInvocation, validateArchive, validateFetchChain } from '../src/importer';
 
 test('happy-path public input remains accepted', () => {
-  expect(validateFetchChain([{ url: 'https://media.example/file.zip', resolvedIp: '1.1.1.1' }])).toBe(true);
-  expect(archiveDestination('/jobs/1', 'media/a.wav')).toContain('/jobs/1');
-  expect(validateArchive({ entries: 3, totalUncompressedBytes: 1000, maxEntryBytes: 800, maxDepth: 2 })).toBe(true);
-  expect(converterInvocation('a.wav', 'a.mp3', ['--quality', 'high']).args.length).toBeGreaterThan(0);
+  const root = mkdtempSync(join(tmpdir(), 'kory-appsec-import-'));
+  try {
+    expect(validateFetchChain([{ url: 'https://media.example/file.zip', resolvedIp: '1.1.1.1' }])).toBe(true);
+    expect(archiveDestination(root, 'a.wav')).toBe(join(realpathSync(root), 'a.wav'));
+    expect(validateArchive({ entries: 3, totalUncompressedBytes: 1000, maxEntryBytes: 800, maxDepth: 2 })).toBe(true);
+    expect(converterInvocation('a.wav', 'a.mp3', ['--quality', 'high']).args.length).toBeGreaterThan(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 `,
     );
@@ -744,6 +752,8 @@ test('happy-path public input remains accepted', () => {
 
 The caller is already authorized; do not redesign authorization. The service may fetch only HTTPS public-network sources. Every redirect target and resolved address must satisfy the same destination policy. Archive and output paths must remain inside the job root after normalization/canonicalization. The converter executable is fixed and must receive attacker-controlled values as structured argv entries, never shell syntax.
 
+The supplied happy-path job root exists before path confinement is evaluated. Resolve that real root (and existing ancestors for new targets) rather than assuming an invented absolute path exists. The fixture requires the existing \`--quality low|medium|high\` option contract; implementations may reject unsupported converter flags. Safe argument separation is proved with supported options plus attacker-controlled file/operand values, not by requiring arbitrary flags to be accepted.
+
 Resource limits must cover redirect count, archive entry count, total expanded bytes, per-entry bytes, and nesting depth. Failures are fail-closed and user-visible diagnostics must not leak credentials or terminal/control sequences. Add reproducible negative tests for the privileged sinks you harden.
 `,
     );
@@ -751,7 +761,7 @@ Resource limits must cover redirect count, archive entry count, total expanded b
 };
 
 const appsecImportScorer: SkillEvalDeterministicScorer = {
-  id: 'application-security/media-import-boundaries-scorer@2',
+  id: 'application-security/media-import-boundaries-scorer@3',
   scenarioIds: [APPSEC_IMPORT],
   score: ({ workingDirectory }) =>
     hiddenScore({
@@ -763,6 +773,9 @@ const appsecImportScorer: SkillEvalDeterministicScorer = {
       ],
       coverageLabel: 'security negative-case coverage',
       source: `import { expect, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { archiveDestination, converterInvocation, sanitizeDiagnostic, validateArchive, validateFetchChain } from '../src/importer';
 
 test('hidden: every redirect and resolved address is revalidated', () => {
@@ -778,10 +791,21 @@ test('hidden: every redirect and resolved address is revalidated', () => {
 });
 
 test('hidden: archive paths cannot escape the job root', () => {
-  expect(() => archiveDestination('/jobs/1', '../escape.txt')).toThrow();
-  expect(() => archiveDestination('/jobs/1', '/etc/passwd')).toThrow();
-  const inside = archiveDestination('/jobs/1', 'nested/file.wav');
-  expect(inside.startsWith('/jobs/1/')).toBe(true);
+  const root = mkdtempSync(join(tmpdir(), 'kory-appsec-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'kory-appsec-outside-'));
+  try {
+    mkdirSync(join(root, 'nested'));
+    symlinkSync(outside, join(root, 'escape-link'), process.platform === 'win32' ? 'junction' : 'dir');
+    expect(() => archiveDestination(root, '../escape.txt')).toThrow();
+    expect(() => archiveDestination(root, '/etc/passwd')).toThrow();
+    expect(() => archiveDestination(root, 'escape-link/file.wav')).toThrow();
+    expect(archiveDestination(root, 'nested/file.wav')).toBe(
+      join(realpathSync(root), 'nested', 'file.wav'),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
 });
 
 test('hidden: declared archive limits fail closed', () => {
@@ -792,11 +816,12 @@ test('hidden: declared archive limits fail closed', () => {
 });
 
 test('hidden: converter values remain argv data and executable stays fixed', () => {
-  const call = converterInvocation('input;touch pwn', 'out.mp3', ['--metadata', 'x;rm -rf nope']);
+  const call = converterInvocation('input;touch pwn', 'out;rm -rf nope.mp3', ['--quality', 'high']);
   expect(call.file).toBe('media-converter');
   expect(call.shell).toBe(false);
   expect(call.args).toContain('input;touch pwn');
-  expect(call.args).toContain('x;rm -rf nope');
+  expect(call.args).toContain('out;rm -rf nope.mp3');
+  expect(call.args).toContain('high');
 });
 
 test('hidden: diagnostics redact secrets and terminal controls', () => {

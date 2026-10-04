@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { Elysia } from 'elysia';
 
 process.env.NODE_ENV = 'test';
@@ -13,6 +13,8 @@ const processDatabase = await import('../../process-supervisor/database');
 const { setContext } = await import('../../context');
 const { processRoutes } = await import('./processes');
 
+const resolveWorkspace = mock(async (_sessionId: string) => process.cwd());
+
 setContext({
   sessions: {
     getActive: async (sessionId: string) => ({ id: sessionId }),
@@ -21,12 +23,69 @@ setContext({
   kory: {
     hasActiveSessionExecution: () => true,
     tryAcquireSessionMutationBarrier: () => null,
+    resolveSessionWorkingDirectoryPublic: resolveWorkspace,
   },
 } as never);
 
 const app = new Elysia().onError(errorHandler).use(processRoutes);
 
 describe('process route cancellation truth', () => {
+  test('defaults manual cwd to the explicit body session rather than the active request session', async () => {
+    const original = processSupervisor.startManualProcess;
+    const start = mock(async (_input: unknown) => null as never);
+    const auth = localAuth.createSession();
+    try {
+      processSupervisor.startManualProcess = start;
+      const response = await app.handle(
+        new Request('http://localhost/api/processes/', {
+          method: 'POST',
+          headers: {
+            authorization: buildLocalBearerToken(auth),
+            'content-type': 'application/json',
+            'x-koryphaios-session': 'wrong-chat',
+          },
+          body: JSON.stringify({ name: 'manual', command: 'pwd', sessionId: 'owner-chat' }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(resolveWorkspace).toHaveBeenLastCalledWith('owner-chat');
+      expect(start).toHaveBeenLastCalledWith({
+        name: 'manual',
+        command: 'pwd',
+        sessionId: 'owner-chat',
+        cwd: process.cwd(),
+      });
+    } finally {
+      processSupervisor.startManualProcess = original;
+      localAuth.revokeSession(auth.sessionId);
+    }
+  });
+
+  test('refuses a default cwd when the session checkout has disappeared', async () => {
+    const original = processSupervisor.startManualProcess;
+    const start = mock(async (_input: unknown) => null as never);
+    const auth = localAuth.createSession();
+    resolveWorkspace.mockResolvedValueOnce('/missing-kory-session-checkout');
+    try {
+      processSupervisor.startManualProcess = start;
+      const response = await app.handle(
+        new Request('http://localhost/api/processes/', {
+          method: 'POST',
+          headers: {
+            authorization: buildLocalBearerToken(auth),
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'manual', command: 'pwd', sessionId: 'owner-chat' }),
+        }),
+      );
+      expect(response.status).toBe(400);
+      expect(start).not.toHaveBeenCalled();
+    } finally {
+      processSupervisor.startManualProcess = original;
+      localAuth.revokeSession(auth.sessionId);
+    }
+  });
+
   test('returns conflict rather than not-found when failed termination retains a live process', async () => {
     const originalGetProcess = processSupervisor.getProcess;
     const originalKillProcess = processSupervisor.killProcess;

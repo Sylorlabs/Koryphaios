@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { KoryphaiosConfig, StoredMessage } from '@koryphaios/shared';
 import type { ProviderRegistry } from '../../providers';
 import type { IMessageStore } from '../../stores/message-store';
+import type { ISessionStore } from '../../stores/session-store';
 import type { ToolRegistry } from '../../tools';
 import { MIGRATIONS } from '../../db/migrations';
 import { SessionRunCoordinator } from '../../runs/session-run-coordinator';
@@ -78,12 +79,27 @@ function createManager(coordinator: SessionRunCoordinator, messages?: IMessageSt
     getToolDefsForRole: () => [],
     execute: mock(),
   } as unknown as ToolRegistry;
+  // A turn resolves its chat's isolated checkout before provider routing, so the
+  // manager needs a session row it can migrate that checkout from and persist.
+  type Row = { id: string; workingDirectory: string; version: number; gitWorkspace?: unknown };
+  const rows = new Map<string, Row>();
+  const sessions = {
+    get: async (id: string): Promise<Row> =>
+      rows.get(id) ?? { id, workingDirectory: directory, version: 1 },
+    update: async (id: string, updates: { gitWorkspace?: unknown }, version: number) => {
+      const current = await sessions.get(id);
+      if (current.version !== version) return undefined;
+      const next: Row = { ...current, ...updates, version: version + 1 };
+      rows.set(id, next);
+      return next;
+    },
+  };
   return new KoryManager(
     providers,
     tools,
     directory,
     {} as KoryphaiosConfig,
-    undefined,
+    sessions as unknown as ISessionStore,
     messages,
     undefined,
     undefined,

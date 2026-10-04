@@ -91,7 +91,8 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   },
   cline: {
     risk: 'caution',
-    reason: 'A Cline API key is metered against shared Cline credits; sharing it spends the owner\u2019s balance.',
+    reason:
+      'A Cline API key is metered against shared Cline credits; sharing it spends the owner\u2019s balance.',
   },
 };
 
@@ -163,6 +164,9 @@ export interface RemoteInferenceRequestPayload {
   maxTokens?: number;
   temperature?: number;
   reasoningLevel?: string;
+  /** Explicit model-capability correction; the host still validates sharing,
+   * access tiers, and whether its adapter can transport images. */
+  imageInputOverride?: { provider: string; model: string };
   harnessRole?: 'manager' | 'worker' | 'critic';
   promptManifestHash?: string;
   taskContractHash?: string;

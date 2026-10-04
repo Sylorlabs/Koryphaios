@@ -38,6 +38,46 @@ afterEach(() => {
 });
 
 describe('WorkspaceManager isolation boundaries', () => {
+  test('shutdown retains dirty working copy and manifest when its commit fails', async () => {
+    const root = repo();
+    const manager = new WorkspaceManager(root);
+    await manager.init();
+    const worktree = (await manager.spawn('shutdown-failure', 'Shutdown Failure'))!;
+    writeFileSync(join(worktree.path, 'seed.txt'), 'uncommitted recovery data\n');
+    const commit = spyOn(manager as any, 'commitPendingWorktreeChanges').mockResolvedValue(false);
+    try {
+      await manager.shutdown();
+      expect(readFileSync(join(worktree.path, 'seed.txt'), 'utf8')).toBe(
+        'uncommitted recovery data\n',
+      );
+      const manifest = JSON.parse(readFileSync(join(root, '.koryphaios/worktrees.json'), 'utf8'));
+      expect(manifest.worktrees.some((entry: any) => entry.id === 'shutdown-failure')).toBe(true);
+      expect(manifest.resolutions.some((entry: any) => entry.taskId === 'shutdown-failure')).toBe(
+        true,
+      );
+      const recovered = new WorkspaceManager(root);
+      await recovered.init();
+      expect(await recovered.validateWorktree('shutdown-failure')).toBe(worktree.path);
+      const retryCommit = spyOn(recovered as any, 'commitPendingWorktreeChanges').mockResolvedValue(
+        false,
+      );
+      try {
+        const resolution = await recovered.applyResolution('shutdown-failure');
+        expect(resolution.success).toBe(false);
+        expect(resolution.message).toContain('Recovery worktree is still present');
+        expect(readFileSync(join(worktree.path, 'seed.txt'), 'utf8')).toBe(
+          'uncommitted recovery data\n',
+        );
+      } finally {
+        retryCommit.mockRestore();
+      }
+      expect((await recovered.applyResolution('shutdown-failure')).success).toBe(true);
+      expect(readFileSync(join(root, 'seed.txt'), 'utf8')).toBe('uncommitted recovery data\n');
+    } finally {
+      commit.mockRestore();
+    }
+  });
+
   test('concurrent spawn cannot exceed capacity or reuse a task ID', async () => {
     const root = repo();
     const manager = new WorkspaceManager(root, { worktreeLimit: 1 });

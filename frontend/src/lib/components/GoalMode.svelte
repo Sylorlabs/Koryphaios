@@ -761,6 +761,10 @@
     >
       {#if steered}
         <Target size={13} class="shrink-0 text-[var(--color-text-muted)]" />
+        <span
+          class="hidden shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)] sm:inline"
+          >Goal</span
+        >
         <button
           type="button"
           class="flex min-w-0 items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[var(--color-surface-3)]"

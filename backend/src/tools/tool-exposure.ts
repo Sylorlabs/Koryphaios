@@ -55,13 +55,23 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   delegate_to_worker: 'Delegate to a local specialist worker. params: task, domain',
   ghost_commit: 'Commit work-in-progress locally. params: label',
   commit_and_create_pr: 'Commit, push, and open a pull request. params: taskDescription',
+  git_inspect:
+    'Inspect this chat Git state, a commit or GitHub PRs. params: action (state/commit/pull-requests/pull-request), ref?, number?',
+  git_switch:
+    'Switch this chat only, requiring clean files and no workers. params: expectedHead, expectedBranch, target (kind, ref/number, branch?, expectedHash?)',
   get_resource_budget: 'Report remaining provider credit and rate limits.',
   load_skill_detail: 'Load the full instructions for one skill. params: name',
-  recall_notes: 'Semantic search across saved notes. params: query, titles, ids',
+  recall_notes: 'Load full bodies for selected notes. params: query, titles, ids',
+  retrieve_note_context:
+    'Retrieve bounded note excerpts with related graph evidence. params: query',
   search_notes: 'Keyword search across saved notes. params: query',
   delete_note: 'Delete a note. params: id, title',
   get_note_graph_summary: 'Summarize the link graph between notes.',
   get_note_backlinks: 'List notes linking to a note. params: title, id',
+  propose_note_relationship:
+    'Propose one evidence relationship, not a fact. params: fromId, toId, type, evidence, expectedSourceRevision, expectedTargetRevision, weight?',
+  review_note_relationship:
+    'Review a proposal with separate human approval. params: fromId, toId, status (accepted/rejected), expectedRevision',
   link_notes: 'Create a link between two notes. params: fromId, toId',
   unlink_notes: 'Remove a link between two notes. params: fromId, toId',
   query_note_base: 'Read rows from a structured note base. params: baseId, baseName',

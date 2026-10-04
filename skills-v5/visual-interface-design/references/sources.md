@@ -24,5 +24,5 @@ Apple HIG guidance is authoritative for Apple platforms and useful evidence for 
 
 - Apple HIG Layout and Typography: official Apple documentation verified 2026-09-04; recheck within 90 days.
 - WCAG 2.2 Recommendation: official W3C specification verified 2026-09-04; recheck within 180 days or after a new Recommendation.
-- Anthropic `frontend-design`: GitHub `main` inspected 2026-09-04; skill license file is Apache-2.0. Recheck within 30 days.
-- SecondSky `frontend-design`: GitHub `main` inspected 2026-09-04; skill frontmatter declares MIT. Recheck within 30 days.
+- Anthropic `frontend-design`: GitHub `main` at `8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4`, inspected 2026-10-03; skill license file is Apache-2.0. The current skill still emphasizes brief specific subject matter, intentional hierarchy, anti-template self critique, restraint, and rendered review; its numeric typography guidance and current generated-design tells remain contextual heuristics. Recheck within 30 days.
+- SecondSky `frontend-design`: GitHub `main` at `88378361314f558fb719aec0af9fd898ab36f0b2`, inspected 2026-10-03; skill frontmatter declares MIT. The current skill still includes fixed breakpoint checks, font prohibitions, style prescriptions, and web implementation advice, so Kory continues to use it only for intentional-direction and anti-generic review patterns. Recheck within 30 days.

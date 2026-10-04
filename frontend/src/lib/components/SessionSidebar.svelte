@@ -6,6 +6,7 @@
   import { toastStore } from '$lib/stores/toast.svelte';
   import { projectStore, projectDisplayName } from '$lib/stores/project.svelte';
   import { collaborationStore } from '$lib/stores/collaboration.svelte';
+  import JoinedTeamTree from './JoinedTeamTree.svelte';
   import { isGuidedDemo } from '$lib/demo-flags';
   import { apiFetch } from '$lib/api.svelte';
   import { apiUrl } from '$lib/utils/api-url';
@@ -21,8 +22,6 @@
   import FolderOpen from 'lucide-svelte/icons/folder-open';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import ChevronRight from 'lucide-svelte/icons/chevron-right';
-  import Users from 'lucide-svelte/icons/users';
-  import LogOut from 'lucide-svelte/icons/log-out';
   import UserPlus from 'lucide-svelte/icons/user-plus';
   import ShieldAlert from 'lucide-svelte/icons/shield-alert';
   import Target from 'lucide-svelte/icons/target';
@@ -127,6 +126,7 @@
   let hoveredCostSessionId = $state('');
   /** Viewport coordinates for the fixed tracked-spend popover. */
   let costPopoverAnchor = $state<{ left: number; top: number } | null>(null);
+  let costPopoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
   let billingExcludedProviders = $state<string[]>([]);
   let showSubscriptionApiEquivalent = $state(true);
   let sessionBillingTimer: ReturnType<typeof setInterval> | null = null;
@@ -241,6 +241,7 @@
     sessionBillingTimer = setInterval(() => void loadSessionBilling(), 15_000);
     return () => {
       nowClock.unsubscribe();
+      cancelCostPopoverClose();
       if (sessionBillingTimer) clearInterval(sessionBillingTimer);
       window.removeEventListener(
         'kory:billing-preferences-changed',
@@ -484,6 +485,65 @@
   function anchorCostPopover(trigger: HTMLElement) {
     const rect = trigger.getBoundingClientRect();
     costPopoverAnchor = { left: Math.round(rect.left), top: Math.round(rect.bottom + 4) };
+  }
+
+  const COST_POPOVER_CLOSE_DELAY_MS = 160;
+
+  /** The tracked-spend card is portalled to <body>, so the pointer leaving
+   *  the price no longer implies the pointer left the card. Closing on a short
+   *  delay keeps the card open while the pointer crosses the gap into it. */
+  function openCostPopover(sessionId: string, trigger: HTMLElement) {
+    cancelCostPopoverClose();
+    hoveredCostSessionId = sessionId;
+    anchorCostPopover(trigger);
+    void loadSessionBillingDetail(sessionId);
+  }
+
+  function keepCostPopoverOpen() {
+    cancelCostPopoverClose();
+  }
+
+  function cancelCostPopoverClose() {
+    if (!costPopoverCloseTimer) return;
+    clearTimeout(costPopoverCloseTimer);
+    costPopoverCloseTimer = null;
+  }
+
+  function closeCostPopover() {
+    cancelCostPopoverClose();
+    hoveredCostSessionId = '';
+    costPopoverAnchor = null;
+  }
+
+  function scheduleCostPopoverClose() {
+    if (costPopoverCloseTimer) clearTimeout(costPopoverCloseTimer);
+    costPopoverCloseTimer = setTimeout(() => {
+      costPopoverCloseTimer = null;
+      hoveredCostSessionId = '';
+      costPopoverAnchor = null;
+    }, COST_POPOVER_CLOSE_DELAY_MS);
+  }
+
+  /** Re-parent a node under <body> so its stacking context is the document's.
+   *  The chat row isolates and the sidebar nav is promoted by `will-change`,
+   *  so a card nested inside them can never paint above the chat column no
+   *  matter how high its own z-index is. */
+  function portalToBody(node: HTMLElement) {
+    if (typeof document === 'undefined') return {};
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        cancelCostPopoverClose();
+        node.remove();
+      },
+    };
+  }
+
+  /** Clicking the tracked price — or the card it opens — takes the user to the
+   *  billing section in Settings, where these numbers can actually be acted on. */
+  function openBillingSettings() {
+    closeCostPopover();
+    if (onAction) void onAction('open_settings_billing');
   }
 
   function requestWorkspaceNewChat() {
@@ -906,47 +966,7 @@
             >{collaborationStore.joinedSessions.length}</span
           >
         </div>
-        {#each collaborationStore.joinedSessions as team (team.sessionId)}
-          <div
-            role="button"
-            tabindex="0"
-            onclick={() => collaborationStore.openJoinedSession(team.sessionId)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter') collaborationStore.openJoinedSession(team.sessionId);
-            }}
-            class="group mx-1 flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-3 transition-colors {collaborationStore
-              .activeJoinedSession?.sessionId === team.sessionId
-              ? 'border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10'
-              : 'border-transparent hover:border-[var(--color-border)] hover:bg-[var(--color-surface-2)]'}"
-          >
-            <div
-              class="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg"
-              style="background:color-mix(in srgb,var(--color-accent) 14%,transparent);color:var(--color-accent)"
-            >
-              <Users size={12} />
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-sm font-medium" style="color:var(--color-text-primary)">
-                {team.sessionName}
-              </div>
-              <div
-                class="mt-1 flex items-center gap-1.5 text-[10px]"
-                style="color:var(--color-text-muted)"
-              >
-                <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>{team.tierId} · hosted
-              </div>
-            </div>
-            <button
-              type="button"
-              onclick={(e) => {
-                e.stopPropagation();
-                collaborationStore.leaveJoinedSession(team.sessionId);
-              }}
-              class="rounded-lg p-1.5 text-red-400 opacity-0 transition-all hover:bg-red-500/10 group-hover:opacity-100"
-              title="Leave team workspace"><LogOut size={12} /></button
-            >
-          </div>
-        {/each}
+        <JoinedTeamTree />
       </div>
       <div class="mx-3 mb-3 border-t" style="border-color:var(--color-border)"></div>
     {/if}
@@ -1279,118 +1299,127 @@
                           style="color: var(--color-text-muted);"
                         >
                           {#if sessionCostLabel(session)}
-                            <span
-                              class="pointer-events-auto relative z-20 shrink-0"
-                              role="group"
-                              onmouseenter={(event) => {
-                                hoveredCostSessionId = session.id;
-                                anchorCostPopover(event.currentTarget as HTMLElement);
-                                void loadSessionBillingDetail(session.id);
+                            <button
+                              type="button"
+                              class="pointer-events-auto relative z-20 shrink-0 rounded px-0.5 font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-secondary)]"
+                              style="font-size: var(--text-xs); color: var(--color-text-muted);"
+                              onmouseenter={(event) =>
+                                openCostPopover(session.id, event.currentTarget as HTMLElement)}
+                              onmouseleave={scheduleCostPopoverClose}
+                              onclick={(event) => {
+                                event.stopPropagation();
+                                openBillingSettings();
                               }}
-                              onmouseleave={() => {
-                                hoveredCostSessionId = '';
-                                costPopoverAnchor = null;
-                              }}
+                              title="Tracked spend — open billing settings"
+                              aria-label={`Billing detail for ${session.title}`}
                             >
+                              {sessionCostLabel(session)}
+                            </button>
+                          {#if hoveredCostSessionId === session.id}
+                              <!-- Viewport-anchored because the sidebar is a scroll
+                               container, and portalled to <body> so it paints above
+                               every other surface instead of inside the row's
+                               stacking context. -->
                               <button
                                 type="button"
-                                class="rounded px-0.5 font-mono underline decoration-dotted underline-offset-2 hover:text-[var(--color-text-secondary)]"
-                                style="font-size: var(--text-xs); color: var(--color-text-muted);"
-                                onclick={(event) => event.stopPropagation()}
-                                aria-label={`Billing detail for ${session.title}`}
+                                use:portalToBody
+                                class="cost-billing-popover fixed w-72 cursor-pointer rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-left shadow-2xl"
+                                onmouseenter={keepCostPopoverOpen}
+                                onmouseleave={scheduleCostPopoverClose}
+                                onclick={(event) => {
+                                  event.stopPropagation();
+                                  openBillingSettings();
+                                }}
+                                style="left: {costPopoverAnchor?.left ??
+                                  0}px; top: {costPopoverAnchor?.top ?? 0}px;"
                               >
-                                {sessionCostLabel(session)}
-                              </button>
-                              {#if hoveredCostSessionId === session.id}
-                                <!-- Viewport-anchored: the sidebar is a scroll container, so an
-                                 absolutely positioned panel overflowed it and was clipped. -->
-                                <div
-                                  class="cost-billing-popover fixed z-[80] w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] p-3 text-left shadow-2xl"
-                                  role="tooltip"
-                                  style="left: {costPopoverAnchor?.left ??
-                                    0}px; top: {costPopoverAnchor?.top ?? 0}px;"
-                                >
-                                  {#if sessionBillingDetails[session.id] === undefined}
-                                    <div class="text-[10px] text-[var(--color-text-muted)]">
-                                      Loading billing detail…
+                                {#if sessionBillingDetails[session.id] === undefined}
+                                  <div class="text-[10px] text-[var(--color-text-muted)]">
+                                    Loading billing detail…
+                                  </div>
+                                {:else if sessionBillingDetails[session.id] === null}
+                                  <div class="text-[10px] text-[var(--color-text-muted)]">
+                                    Billing detail unavailable
+                                  </div>
+                                {:else}
+                                  {@const detail = sessionBillingDetails[session.id]}
+                                  <div class="mb-2 flex items-start justify-between gap-3">
+                                    <div>
+                                      <div
+                                        class="text-[10px] font-semibold text-[var(--color-text-primary)]"
+                                      >
+                                        Tracked spend
+                                      </div>
+                                      {#if detail?.pricingIncomplete}<div
+                                          class="text-[9px] text-[var(--color-warning)]"
+                                        >
+                                          Pricing incomplete
+                                        </div>{/if}
                                     </div>
-                                  {:else if sessionBillingDetails[session.id] === null}
-                                    <div class="text-[10px] text-[var(--color-text-muted)]">
-                                      Billing detail unavailable
+                                    <div
+                                      class="font-mono text-[11px] font-bold text-[var(--color-text-primary)]"
+                                    >
+                                      {detail?.hasMeteredUsage && !detail?.hasKnownCost
+                                        ? USD_UNKNOWN
+                                        : formatUsd(detail?.spendUsd ?? 0)}
                                     </div>
-                                  {:else}
-                                    {@const detail = sessionBillingDetails[session.id]}
-                                    <div class="mb-2 flex items-start justify-between gap-3">
+                                  </div>
+                                  <div class="space-y-2">
+                                    {#each detail?.providers ?? [] as provider (provider.name)}
                                       <div>
                                         <div
-                                          class="text-[10px] font-semibold text-[var(--color-text-primary)]"
+                                          class="flex items-center justify-between gap-2 text-[10px]"
                                         >
-                                          Tracked spend
+                                          <span
+                                            class="font-semibold text-[var(--color-text-secondary)]"
+                                            >{provider.name}</span
+                                          >
+                                          <span
+                                            class="font-mono text-[var(--color-text-primary)]"
+                                          >
+                                            {provider.subscription
+                                              ? showSubscriptionApiEquivalent &&
+                                                provider.apiEquivalentUsd != null
+                                                ? `API eq ${formatUsd(provider.apiEquivalentUsd)}`
+                                                : 'Subscription'
+                                              : provider.hasKnownCost
+                                                ? formatUsd(provider.spendUsd ?? 0)
+                                                : USD_UNKNOWN}
+                                          </span>
                                         </div>
-                                        {#if detail?.pricingIncomplete}<div
-                                            class="text-[9px] text-[var(--color-warning)]"
-                                          >
-                                            Pricing incomplete
-                                          </div>{/if}
-                                      </div>
-                                      <div
-                                        class="font-mono text-[11px] font-bold text-[var(--color-text-primary)]"
-                                      >
-                                        {detail?.hasMeteredUsage && !detail?.hasKnownCost
-                                          ? USD_UNKNOWN
-                                          : formatUsd(detail?.spendUsd ?? 0)}
-                                      </div>
-                                    </div>
-                                    <div class="space-y-2">
-                                      {#each detail?.providers ?? [] as provider (provider.name)}
-                                        <div>
+                                        {#each provider.models ?? [] as model (model.model)}
                                           <div
-                                            class="flex items-center justify-between gap-2 text-[10px]"
+                                            class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[9px] text-[var(--color-text-muted)]"
                                           >
-                                            <span
-                                              class="font-semibold text-[var(--color-text-secondary)]"
-                                              >{provider.name}</span
+                                            <span class="min-w-0 truncate font-mono"
+                                              >{model.model}</span
                                             >
-                                            <span
-                                              class="font-mono text-[var(--color-text-primary)]"
-                                            >
-                                              {provider.subscription
+                                            <span class="shrink-0 font-mono">
+                                              {model.subscription
                                                 ? showSubscriptionApiEquivalent &&
-                                                  provider.apiEquivalentUsd != null
-                                                  ? `API eq ${formatUsd(provider.apiEquivalentUsd)}`
-                                                  : 'Subscription'
-                                                : provider.hasKnownCost
-                                                  ? formatUsd(provider.spendUsd ?? 0)
+                                                  model.apiEquivalentUsd != null
+                                                  ? `API eq ${formatUsd(model.apiEquivalentUsd)}`
+                                                  : 'subscription'
+                                                : model.hasKnownCost
+                                                  ? formatUsd(model.spendUsd ?? 0)
                                                   : USD_UNKNOWN}
                                             </span>
                                           </div>
-                                          {#each provider.models ?? [] as model (model.model)}
-                                            <div
-                                              class="ml-2 flex items-center justify-between gap-2 py-0.5 text-[9px] text-[var(--color-text-muted)]"
-                                            >
-                                              <span class="min-w-0 truncate font-mono"
-                                                >{model.model}</span
-                                              >
-                                              <span class="shrink-0 font-mono">
-                                                {model.subscription
-                                                  ? showSubscriptionApiEquivalent &&
-                                                    model.apiEquivalentUsd != null
-                                                    ? `API eq ${formatUsd(model.apiEquivalentUsd)}`
-                                                    : 'subscription'
-                                                  : model.hasKnownCost
-                                                    ? formatUsd(model.spendUsd ?? 0)
-                                                    : USD_UNKNOWN}
-                                              </span>
-                                            </div>
-                                          {/each}
-                                        </div>
-                                      {/each}
-                                    </div>
-                                  {/if}
+                                        {/each}
+                                      </div>
+                                    {/each}
+                                  </div>
+                                {/if}
+                                <div
+                                  class="mt-2 flex items-center justify-between gap-2 border-t pt-1.5 text-[9px]"
+                                  style="color: var(--color-text-muted); border-color: var(--color-border);"
+                                >
+                                  <span>Click to open billing</span>
+                                  <ChevronRight size={10} />
                                 </div>
-                              {/if}
-                            </span>
-                          {/if}
+                              </button>
+                            {/if}
+                            {/if}
                           {#if primaryGoal}
                             <button
                               type="button"
@@ -1541,6 +1570,30 @@
 <style>
   .sidebar-toolbar {
     box-shadow: 0 1px 0 color-mix(in srgb, var(--color-accent) 4%, transparent);
+  }
+
+  /* Tracked-price card. It is portalled to <body> (so no ancestor stacking
+     context can trap it) and layered at the tooltip level, which sits above
+     modals and drawers — this readout must never be hidden by another window.
+     It is a button, so re-assert the pointer and text-align resets Tailwind's
+     preflight applies to form controls. */
+  .cost-billing-popover {
+    z-index: var(--z-tooltip);
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--color-text-primary);
+  }
+
+  .cost-billing-popover:hover {
+    border-color: var(--color-border-bright);
+  }
+
+  .cost-billing-popover:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+    outline-offset: 2px;
   }
 
   /* Sized to the sidebar, not to the "+" button. The button is 32px wide and

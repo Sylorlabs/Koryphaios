@@ -135,42 +135,42 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/fine-tuning-best-practices",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-09-17",
+      "versionScope": "Rolling OpenAI fine-tuning best-practices documentation as available 2026-10-02",
       "staleAfterDays": 7,
       "notes": "Current platform wind-down notice, data quality/quantity, train/test separation, prompt inclusion, hyperparameter iteration and training-example token limits.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/supervised-fine-tuning",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-09-17",
+      "versionScope": "Rolling OpenAI supervised fine-tuning documentation as available 2026-10-02",
       "staleAfterDays": 7,
       "notes": "Eval-first SFT workflow, representative datasets, base-model comparison, checkpoints, overfitting and provider safety checks.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/direct-preference-optimization",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI DPO documentation as available 2026-09-17",
+      "versionScope": "Rolling OpenAI DPO documentation as available 2026-10-02",
       "staleAfterDays": 7,
       "notes": "Current preference-pair objective and constraints, beta semantics, SFT-before-DPO guidance and safety checks.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/rft-use-cases",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-09-17",
+      "versionScope": "Rolling OpenAI reinforcement fine-tuning use-case documentation as available 2026-10-02",
       "staleAfterDays": 7,
       "notes": "RFT suitability, eval-first requirement, base-model learning signal, grader robustness and reward-hacking considerations.",
-      "verifiedAt": "2026-09-26"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/deprecations",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI deprecations page as available 2026-09-17",
+      "versionScope": "OpenAI deprecations page retrieved on 2026-10-02; self-serve fine-tuning and base-model lifetime sections inspected",
       "staleAfterDays": 3,
-      "notes": "Authoritative current self-serve fine-tuning wind-down dates and fine-tuned-model shutdown/deprecation schedule.",
-      "verifiedAt": "2026-09-26"
+      "notes": "Current self-serve training eligibility restrictions and 2027-01-06 new-job cutoff remain documented; inference ends with underlying base-model deprecation. No account eligibility or live training was verified.",
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://huggingface.co/docs/transformers/en/peft",

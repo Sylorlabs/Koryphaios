@@ -28,6 +28,10 @@ function runTests(root: string, path: string): { status: number | null; output: 
   return { status: result.status, output: `${result.stdout ?? ''}\n${result.stderr ?? ''}` };
 }
 
+function firstExistingPath(root: string, candidates: readonly string[]): string | null {
+  return candidates.find((path) => existsSync(join(root, path))) ?? null;
+}
+
 const LEASE_SOURCE = `export interface Lease { token: string; expiresAt: string }
 export interface Clock { now(): Date }
 export interface NonceSource { nextBytes(): Uint8Array; consumed(): number }
@@ -86,7 +90,7 @@ Write \`.kory-eval/deterministic-lease.json\` with contract→case matrix, fixed
 };
 
 const leaseScorer: SkillEvalDeterministicScorer = {
-  id: 'deterministic-contract-testing/lease-renewal-boundaries-scorer@1',
+  id: 'deterministic-contract-testing/lease-renewal-boundaries-scorer@2',
   scenarioIds: [LEASE],
   score: ({ workingDirectory }) => {
     const path = join(workingDirectory, 'src/lease.ts');
@@ -98,11 +102,17 @@ const leaseScorer: SkillEvalDeterministicScorer = {
       /12:00:00\.001|after/iu,
       /nonce/iu,
     ]);
-    const first = runTests(workingDirectory, 'tests/lease.test.ts');
+    const leaseTestPath = firstExistingPath(workingDirectory, [
+      'tests/lease.test.ts',
+      'src/lease.test.ts',
+    ]);
+    const first = leaseTestPath
+      ? runTests(workingDirectory, leaseTestPath)
+      : { status: null, output: '' };
     let mutationRed = false;
     let restoredFirst: ReturnType<typeof runTests> = { status: null, output: '' };
     let restoredSecond: ReturnType<typeof runTests> = { status: null, output: '' };
-    if (existsSync(join(workingDirectory, 'tests/lease.test.ts')) && sourcePreserved) {
+    if (leaseTestPath && sourcePreserved) {
       try {
         writeFileSync(
           path,
@@ -111,15 +121,15 @@ const leaseScorer: SkillEvalDeterministicScorer = {
             '> new Date(lease.expiresAt).getTime()',
           ),
         );
-        mutationRed = runTests(workingDirectory, 'tests/lease.test.ts').status !== 0;
+        mutationRed = runTests(workingDirectory, leaseTestPath).status !== 0;
       } finally {
         writeFileSync(path, source);
       }
-      restoredFirst = runTests(workingDirectory, 'tests/lease.test.ts');
-      restoredSecond = runTests(workingDirectory, 'tests/lease.test.ts');
+      restoredFirst = runTests(workingDirectory, leaseTestPath);
+      restoredSecond = runTests(workingDirectory, leaseTestPath);
     }
     const noAmbient = !/setTimeout|sleep\s*\(|Date\.now\(\)|Math\.random|crypto\.random/iu.test(
-      `${source}\n${existsSync(join(workingDirectory, 'tests/lease.test.ts')) ? readFileSync(join(workingDirectory, 'tests/lease.test.ts'), 'utf8') : ''}`,
+      `${source}\n${leaseTestPath ? readFileSync(join(workingDirectory, leaseTestPath), 'utf8') : ''}`,
     );
     const artifact = readJsonArtifact<unknown>(
       workingDirectory,
@@ -253,7 +263,7 @@ Write \`.kory-eval/deterministic-job.json\` with case matrix, dialect identity, 
 };
 
 const jobSchemaScorer: SkillEvalDeterministicScorer = {
-  id: 'deterministic-contract-testing/job-command-schema-state-machine-scorer@1',
+  id: 'deterministic-contract-testing/job-command-schema-state-machine-scorer@2',
   scenarioIds: [JOB_SCHEMA],
   score: ({ workingDirectory }) => {
     const sourcePath = join(workingDirectory, 'src/job-contract.ts');
@@ -285,11 +295,21 @@ const jobSchemaScorer: SkillEvalDeterministicScorer = {
       }
     }
     const restored = runTests(workingDirectory, 'tests/job-contract.test.ts');
-    const artifact = readJsonArtifact<unknown>(
-      workingDirectory,
-      '.kory-eval/deterministic-job.json',
-    );
+    const artifact = readJsonArtifact<{
+      stateTable?: { legal?: unknown[] };
+    }>(workingDirectory, '.kory-eval/deterministic-job.json');
     const body = JSON.stringify(artifact ?? '').toLowerCase();
+    const idempotentCancellationEncoded =
+      /idempoten/u.test(body) ||
+      artifact?.stateTable?.legal?.some(
+        (row) =>
+          Array.isArray(row) &&
+          row[0] === 'Cancelled' &&
+          row[1] === 'cancel' &&
+          row[2] === 'Cancelled' &&
+          Array.isArray(row[3]) &&
+          row[3].length === 0,
+      ) === true;
     const report =
       /2020-12/u.test(body) &&
       /invalid_job_id/u.test(body) &&
@@ -299,7 +319,7 @@ const jobSchemaScorer: SkillEvalDeterministicScorer = {
       /running/u.test(body) &&
       /succeeded/u.test(body) &&
       /cancelled/u.test(body) &&
-      /idempoten/u.test(body) &&
+      idempotentCancellationEncoded &&
       /mutation/u.test(body) &&
       /red|fail/u.test(body) &&
       /restore|green|pass/u.test(body) &&

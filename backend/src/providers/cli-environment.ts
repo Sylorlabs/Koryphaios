@@ -94,6 +94,7 @@ const PROVIDER_ENV_KEYS: Record<NativeCliProvider, readonly string[]> = {
   antigravity: [
     'ANTIGRAVITY_API_KEY',
     'ANTIGRAVITY_HOME',
+    'GEMINI_DIR',
     'GOOGLE_API_KEY',
     'GEMINI_API_KEY',
     'HOME',

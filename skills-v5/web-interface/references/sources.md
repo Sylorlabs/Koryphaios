@@ -20,8 +20,8 @@ SecondSky's MIT-licensed `frontend-design` skill is valuable for forcing an expl
 
 ## Verification record
 
-- WHATWG HTML Living Standard interaction sections: inspected 2026-09-04; the living standard reported an update on 2026-09-04; recheck within 30 days.
+- WHATWG HTML Living Standard interaction sections: inspected 2026-10-03; the living standard reported its current update date as 2026-10-03. The current inertness, activation, and focus sections still support the browser semantics recorded above. Recheck within 30 days.
 - W3C Media Queries Level 5: inspected 2026-09-04; recheck within 90 days.
 - W3C WCAG 2.2 Recommendation and current understanding guidance: inspected 2026-09-04; recheck supporting guidance within 90 days and the Recommendation within 365 days.
 - Google web.dev Learn Responsive Design: inspected 2026-09-04; recheck within 90 days.
-- secondsky/claude-skills `frontend-design` on `main`: inspected 2026-09-04; recheck within 30 days.
+- secondsky/claude-skills `frontend-design` on `main` at `88378361314f558fb719aec0af9fd898ab36f0b2`: inspected 2026-10-03. Its fixed breakpoint, font, style, and implementation prescriptions remain contextual patterns that Kory does not universalize. Recheck within 30 days.

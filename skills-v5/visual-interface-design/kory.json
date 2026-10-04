@@ -140,8 +140,8 @@
     {
       "url": "https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "anthropics/skills main frontend-design skill as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "anthropics/skills main frontend-design skill at 8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4, inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "Apache-2.0",
       "notes": "Strong pattern source for brief-specific direction, grounding visual choices in subject matter, anti-template self-critique, restraint, and rendered review. Numeric typography rules and aesthetic tells are contextual patterns, not universal requirements."
@@ -149,8 +149,8 @@
     {
       "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "secondsky/claude-skills main frontend-design skill as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "secondsky/claude-skills main frontend-design skill at 88378361314f558fb719aec0af9fd898ab36f0b2, inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for explicit purpose/tone/constraints, cohesive direction, complete-state validation, and anti-generic critique. Font bans, fixed breakpoints, stylistic extremes, and web-only mechanics are not universalized."

@@ -24,7 +24,8 @@ Failure boundaries: Do not treat cache presence as truth, use KEYS in production
 - First classify Redis as cache, coordination state, queue or stream, rate limiter, or authoritative data. Persistence, eviction, and recovery requirements depend on that role.
 - Choose expiration and eviction policy from the data-loss contract. A cache may tolerate eviction; authoritative or coordination state often cannot.
 - Use Redis transactions, scripts, or single commands only for invariants they actually provide. Redis transactions serialize queued commands but do not provide rollback after runtime command errors.
-- Treat distributed locks as leases with failure and fencing implications. Expiry alone does not prove an old holder can no longer perform an external side effect.
+- Treat distributed locks as leases whose authority can end while a worker is paused. Expiry alone does not prove an old holder can no longer perform an external side effect. Protect publication or other external effects with a fencing token, source revision, monotonic version, or an atomic server-side check-and-effect at the real side-effect boundary. A separate ownership check immediately before a later write still has a time-of-check/time-of-use race.
+- Put a concrete upper bound on lease TTL and renewal duration derived from the operation and recovery contract. Reject unbounded or merely positive TTLs when the design claims leases are bounded.
 - Design key shape and cluster slotting around access locality and hot-key risk before assuming horizontal scale fixes contention.
 
 ## Observable checks
@@ -35,6 +36,7 @@ For Streams, distinguish pending ownership, last delivery time, application effe
 - Exercise transaction or script failure cases, including errors that occur after `EXEC`, and verify the resulting state rather than assuming rollback.
 - Reconnect clients and, where in scope, exercise failover with the configured persistence and replication mode.
 - Replay duplicate work through queue, stream, or retry paths and verify idempotency or deduplication at the real side-effect boundary.
+- For lease-controlled refresh or publication, pause one worker past expiry, let a newer owner acquire and publish, then resume the stale worker and prove it cannot overwrite the newer result. Exercise this against the publication/versioning mechanism, not only against lock release or renewal.
 - Load-test representative key distributions to expose hot keys, stampedes, memory pressure, and serialization cost when those claims matter.
 
 ## Completion evidence

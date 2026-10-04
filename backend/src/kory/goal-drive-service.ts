@@ -446,7 +446,8 @@ export class GoalDriveService {
       if (this.erasingSessions.has(goal.execution.sessionId)) return;
       const session = await this.sessions.getActive(goal.execution.sessionId);
       if (!session) throw new Error('Goal execution chat is missing or archived');
-      const workingDirectory = this.resolveWorkingDirectory(goal, session);
+      this.resolveWorkingDirectory(goal, session); // Validate source-project ownership.
+      const workingDirectory = await this.kory.resolveSessionWorkingDirectoryPublic(session.id);
       if (this.kory.isSessionRunning(goal.execution.sessionId)) {
         koryLog.debug({ goalId }, 'Deferred periodic goal checkpoint until the session is idle');
         return;

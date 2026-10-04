@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "accessibility-verification",
-  "version": "5.0.1",
+  "version": "5.0.2",
   "skillKind": "verification",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",

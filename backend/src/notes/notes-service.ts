@@ -11,6 +11,7 @@ import { db, getDb } from '../db';
 import {
   notes,
   noteLinks,
+  noteRelationships,
   noteAttachments,
   noteRevisions,
   noteBases,
@@ -46,6 +47,10 @@ import type {
   GraphEdge,
   FolderNode,
   NoteWithLinks,
+  NoteRelationship,
+  NoteRelationshipActor,
+  NoteRelationshipType,
+  NoteRelationshipStatus,
 } from '@koryphaios/shared';
 import {
   existsSync,
@@ -792,6 +797,7 @@ export async function createNote(
     await parseAndSaveLinks(id, content, { projectRoot: root });
   }
 
+  await resolveForwardNoteReferences(root, new Set([id]));
   return (await getNote(id, root))!;
 }
 
@@ -825,97 +831,128 @@ export async function updateNote(
   input: UpdateNoteInput,
   projectRoot?: string,
 ): Promise<Note> {
-  return withNoteMutation(id, async () => {
-    const existing = await getNote(id, projectRoot);
-    if (!existing) throw new NotFoundError('Note', id);
-    if (input.expectedRevision !== undefined && input.expectedRevision !== existing.revision) {
+  return withNoteMutation(id, () => updateNoteUnlocked(id, input, projectRoot));
+}
+
+type NotesTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** The caller owns the source note mutation queue. Graph writes share the
+ * note/revision transaction, so a failed association write cannot report success. */
+async function updateNoteUnlocked(
+  id: string,
+  input: UpdateNoteInput,
+  projectRoot?: string,
+  mutateGraph?: (tx: NotesTransaction) => void,
+): Promise<Note> {
+  const existing = await getNote(id, projectRoot);
+  if (!existing) throw new NotFoundError('Note', id);
+  if (input.expectedRevision !== undefined && input.expectedRevision !== existing.revision) {
+    throw new ConflictError(
+      'This note changed after it was opened. Review the newer version before saving.',
+      {
+        expectedRevision: input.expectedRevision,
+        currentRevision: existing.revision,
+      },
+    );
+  }
+
+  const root = rowProjectRoot({ id, projectRoot: resolvedProjectRoot(projectRoot) });
+  if (input.content !== undefined) assertContentBudget(input.content, root);
+  const sourceFile = resolveProjectDocument(id);
+  if (sourceFile && input.content !== undefined) {
+    const sourceExists = existsSync(sourceFile);
+    if (!sourceExists && !input.restoreDeletedSource) {
       throw new ConflictError(
-        'This note changed after it was opened. Review the newer version before saving.',
+        'The source document was removed outside Koryphaios. Review the deletion before recreating it.',
+        { sourceDeleted: true, currentRevision: existing.revision },
+      );
+    }
+    const diskContent = sourceExists ? readFileSync(sourceFile, 'utf8') : null;
+    if (diskContent !== null && diskContent !== existing.content) {
+      assertContentBudget(diskContent, root);
+      const diskStat = statSync(sourceFile);
+      const diskRevision = existing.revision + 1;
+      const refreshedRows = db.transaction((tx) => {
+        const changed = tx
+          .update(notes)
+          .set({
+            content: diskContent,
+            projectRoot: root,
+            revision: diskRevision,
+            updatedAt: diskStat.mtime,
+          })
+          .where(
+            and(eq(notes.id, id), eq(notes.revision, existing.revision), isNull(notes.trashedAt)),
+          )
+          .returning({ id: notes.id })
+          .all();
+        if (changed.length === 1) {
+          tx.run(revisionSnapshotSql(id, 'external_sync'));
+        }
+        return changed;
+      });
+      if (refreshedRows.length === 1) {
+        fileMtimeCache.set(sourceFile, diskStat.mtimeMs);
+        invalidateNotesCache();
+        await parseAndSaveLinks(id, diskContent, { projectRoot: root });
+      }
+      const current = await getNote(id, root);
+      throw new ConflictError(
+        'The source document changed on disk. The newer disk revision is ready for review.',
         {
           expectedRevision: input.expectedRevision,
-          currentRevision: existing.revision,
+          currentRevision: current?.revision ?? diskRevision,
+          sourceChanged: true,
         },
       );
     }
+  }
+  const now = new Date();
+  const nextRevision = existing.revision + 1;
+  const updateData: Partial<typeof notes.$inferInsert> = {
+    updatedAt: now,
+    revision: nextRevision,
+    projectRoot: root,
+  };
 
-    const root = rowProjectRoot({ id, projectRoot: resolvedProjectRoot(projectRoot) });
-    if (input.content !== undefined) assertContentBudget(input.content, root);
-    const sourceFile = resolveProjectDocument(id);
-    if (sourceFile && input.content !== undefined) {
-      const sourceExists = existsSync(sourceFile);
-      if (!sourceExists && !input.restoreDeletedSource) {
-        throw new ConflictError(
-          'The source document was removed outside Koryphaios. Review the deletion before recreating it.',
-          { sourceDeleted: true, currentRevision: existing.revision },
-        );
-      }
-      const diskContent = sourceExists ? readFileSync(sourceFile, 'utf8') : null;
-      if (diskContent !== null && diskContent !== existing.content) {
-        assertContentBudget(diskContent, root);
-        const diskStat = statSync(sourceFile);
-        const diskRevision = existing.revision + 1;
-        const refreshedRows = db.transaction((tx) => {
-          const changed = tx
-            .update(notes)
-            .set({
-              content: diskContent,
-              projectRoot: root,
-              revision: diskRevision,
-              updatedAt: diskStat.mtime,
-            })
-            .where(
-              and(eq(notes.id, id), eq(notes.revision, existing.revision), isNull(notes.trashedAt)),
-            )
-            .returning({ id: notes.id })
-            .all();
-          if (changed.length === 1) {
-            tx.run(revisionSnapshotSql(id, 'external_sync'));
-          }
-          return changed;
-        });
-        if (refreshedRows.length === 1) {
-          fileMtimeCache.set(sourceFile, diskStat.mtimeMs);
-          invalidateNotesCache();
-          await parseAndSaveLinks(id, diskContent, { projectRoot: root });
-        }
-        const current = await getNote(id, root);
-        throw new ConflictError(
-          'The source document changed on disk. The newer disk revision is ready for review.',
-          {
-            expectedRevision: input.expectedRevision,
-            currentRevision: current?.revision ?? diskRevision,
-            sourceChanged: true,
-          },
-        );
+  if (input.title !== undefined) updateData.title = validateTitle(input.title);
+  if (input.content !== undefined) updateData.content = input.content;
+  if (input.folderPath !== undefined) updateData.folderPath = validateFolderPath(input.folderPath);
+  if (input.tags !== undefined) {
+    const [rawRow] = await db.select({ tags: notes.tags }).from(notes).where(eq(notes.id, id));
+    const internalTags = parseStoredTags(rawRow?.tags).filter(isInternalNoteTag);
+    updateData.tags = JSON.stringify([...validateTags(input.tags), ...internalTags]);
+  }
+  if (input.pinned !== undefined) updateData.pinned = input.pinned ? 1 : 0;
+  if (input.includeInContext !== undefined)
+    updateData.includeInContext = input.includeInContext ? 1 : 0;
+  if (input.format !== undefined) updateData.format = input.format;
+
+  // Content-synchronized graph edits must commit their derived links alongside
+  // the explicit association and source revision, not in a later transaction.
+  let graphTargets: Set<string> | undefined;
+  if (mutateGraph && input.content !== undefined) {
+    const index = await getResolveIndex(root);
+    graphTargets = new Set(
+      extractWikilinks(input.content)
+        .map((ref) => resolveNoteRefFromIndex(ref, index))
+        .filter((target): target is string => Boolean(target) && target !== id),
+    );
+    const identity = projectDocumentIdentity(id);
+    if (identity) {
+      for (const path of extractProjectDocumentLinks(identity.sourcePath, input.content)) {
+        const target = projectDocumentId(root, path);
+        if (target !== id) graphTargets.add(target);
       }
     }
-    const now = new Date();
-    const nextRevision = existing.revision + 1;
-    const updateData: Partial<typeof notes.$inferInsert> = {
-      updatedAt: now,
-      revision: nextRevision,
-      projectRoot: root,
-    };
+  }
+  const sourceExistedBeforeWrite = sourceFile ? existsSync(sourceFile) : false;
+  if (sourceFile && input.content !== undefined) {
+    atomicWrite(sourceFile, input.content);
+  }
 
-    if (input.title !== undefined) updateData.title = validateTitle(input.title);
-    if (input.content !== undefined) updateData.content = input.content;
-    if (input.folderPath !== undefined)
-      updateData.folderPath = validateFolderPath(input.folderPath);
-    if (input.tags !== undefined) {
-      const [rawRow] = await db.select({ tags: notes.tags }).from(notes).where(eq(notes.id, id));
-      const internalTags = parseStoredTags(rawRow?.tags).filter(isInternalNoteTag);
-      updateData.tags = JSON.stringify([...validateTags(input.tags), ...internalTags]);
-    }
-    if (input.pinned !== undefined) updateData.pinned = input.pinned ? 1 : 0;
-    if (input.includeInContext !== undefined)
-      updateData.includeInContext = input.includeInContext ? 1 : 0;
-    if (input.format !== undefined) updateData.format = input.format;
-
-    if (sourceFile && input.content !== undefined) {
-      atomicWrite(sourceFile, input.content);
-    }
-
-    const updatedRows = db.transaction((tx) => {
+  try {
+    db.transaction((tx) => {
       const changed = tx
         .update(notes)
         .set(updateData)
@@ -924,31 +961,47 @@ export async function updateNote(
         )
         .returning({ id: notes.id })
         .all();
-      if (changed.length === 1) tx.run(revisionSnapshotSql(id, 'update'));
-      return changed;
+      if (changed.length !== 1) {
+        throw new ConflictError(
+          'This note changed while it was being saved. Reload and review the newer version.',
+        );
+      }
+      mutateGraph?.(tx);
+      if (graphTargets) replaceDocumentLinks(tx, id, graphTargets, root);
+      tx.run(revisionSnapshotSql(id, 'update'));
     });
-    if (updatedRows.length !== 1) {
-      throw new ConflictError(
-        'This note changed while it was being saved. Reload and review the newer version.',
-      );
+  } catch (error) {
+    // Compensate our file write on SQLite failure, never overwriting a newer
+    // external edit. The existing disk-conflict check ran before this write.
+    if (
+      sourceFile &&
+      input.content !== undefined &&
+      existsSync(sourceFile) &&
+      readFileSync(sourceFile, 'utf8') === input.content
+    ) {
+      if (sourceExistedBeforeWrite) atomicWrite(sourceFile, existing.content);
+      else unlinkSync(sourceFile);
     }
+    throw error;
+  }
 
-    // Title/alias may have changed → drop the resolution index before re-linking.
-    invalidateNotesCache();
+  // Title/alias may have changed → drop the resolution index before re-linking.
+  invalidateNotesCache();
 
-    if (input.title !== undefined && input.title !== existing.title) {
-      await propagateTitleRename(id, existing.title, validateTitle(input.title), root);
-    }
+  if (input.title !== undefined && input.title !== existing.title) {
+    await propagateTitleRename(id, existing.title, validateTitle(input.title), root);
+  }
 
-    const contentForLinks =
-      input.content ?? (input.title !== undefined ? (await getNote(id, root))?.content : undefined);
-    if (contentForLinks !== undefined) {
-      await parseAndSaveLinks(id, contentForLinks, { projectRoot: root });
-    }
+  const contentForLinks =
+    input.content ?? (input.title !== undefined ? (await getNote(id, root))?.content : undefined);
+  if (contentForLinks !== undefined && !mutateGraph) {
+    await parseAndSaveLinks(id, contentForLinks, { projectRoot: root });
+  }
 
-    invalidateNotesCache();
-    return (await getNote(id, root))!;
-  });
+  invalidateNotesCache();
+  if (input.title !== undefined || input.content !== undefined)
+    await resolveForwardNoteReferences(root, new Set([id]));
+  return (await getNote(id, root))!;
 }
 
 async function getStoredNoteRow(
@@ -1469,6 +1522,11 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
           .where(or(inArray(noteLinks.fromNoteId, noteIds), inArray(noteLinks.toNoteId, noteIds)))
           .all()
       : [];
+    const relationshipRows = tx
+      .select()
+      .from(noteRelationships)
+      .where(eq(noteRelationships.projectRoot, root))
+      .all();
     const baseIds = baseRows.map((row) => row.id);
     const baseRevisionRows: Array<typeof noteBaseRevisions.$inferSelect> = baseIds.length
       ? tx
@@ -1488,6 +1546,9 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
       revisionRows,
       attachmentRows,
       linkRows: allLinkRows.filter((link) => ids.has(link.fromNoteId) && ids.has(link.toNoteId)),
+      relationshipRows: relationshipRows.filter(
+        (link) => ids.has(link.fromNoteId) && ids.has(link.toNoteId),
+      ),
       baseRows,
       baseRevisionRows,
       draftRows,
@@ -1502,6 +1563,11 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
     (a, b) => stableStringCompare(a.noteId, b.noteId) || stableStringCompare(a.id, b.id),
   );
   snapshot.linkRows.sort(
+    (a, b) =>
+      stableStringCompare(a.fromNoteId, b.fromNoteId) ||
+      stableStringCompare(a.toNoteId, b.toNoteId),
+  );
+  snapshot.relationshipRows.sort(
     (a, b) =>
       stableStringCompare(a.fromNoteId, b.fromNoteId) ||
       stableStringCompare(a.toNoteId, b.toNoteId),
@@ -1750,6 +1816,21 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
         fromNoteId: link.fromNoteId,
         toNoteId: link.toNoteId,
       })),
+      relationships: snapshot.relationshipRows.map((relationship) => ({
+        fromNoteId: relationship.fromNoteId,
+        toNoteId: relationship.toNoteId,
+        type: relationship.type,
+        status: relationship.status,
+        actor: parseVaultJson(relationship.actorJson, 'Relationship actor'),
+        provenance: relationship.provenance,
+        evidence: relationship.evidence,
+        weight: relationship.weight,
+        revision: relationship.revision,
+        sourceRevision: relationship.sourceRevision,
+        targetRevision: relationship.targetRevision,
+        createdAt: dateIso(relationship.createdAt, true),
+        updatedAt: dateIso(relationship.updatedAt, true),
+      })),
       bases: manifestBases,
       drafts: manifestDrafts,
       files: [],
@@ -1888,6 +1969,40 @@ async function relocateProjectDocumentRow(
         FROM note_links
         WHERE from_note_id = ${oldRow.id} OR to_note_id = ${oldRow.id}
       `);
+      const relationships = tx
+        .select()
+        .from(noteRelationships)
+        .where(
+          or(
+            eq(noteRelationships.fromNoteId, oldRow.id),
+            eq(noteRelationships.toNoteId, oldRow.id),
+          ),
+        )
+        .all();
+      for (const relationship of relationships) {
+        const fromNoteId =
+          relationship.fromNoteId === oldRow.id ? target.id : relationship.fromNoteId;
+        const toNoteId = relationship.toNoteId === oldRow.id ? target.id : relationship.toNoteId;
+        // A vacant destination can still have review receipts in its audit
+        // history. Invalidate both those receipts and the moved edge's revision,
+        // retaining its evidence revisions and immutable old-pair snapshots.
+        tx.update(noteRelationships)
+          .set({
+            fromNoteId,
+            toNoteId,
+            revision: Math.max(
+              relationship.revision + 1,
+              nextRelationshipRevision(tx, relationship.projectRoot, fromNoteId, toNoteId),
+            ),
+          })
+          .where(
+            and(
+              eq(noteRelationships.fromNoteId, relationship.fromNoteId),
+              eq(noteRelationships.toNoteId, relationship.toNoteId),
+            ),
+          )
+          .run();
+      }
       tx.update(noteAttachments)
         .set({ noteId: target.id })
         .where(eq(noteAttachments.noteId, oldRow.id))
@@ -2484,6 +2599,7 @@ async function performProjectDocumentSync(projectRoot: string): Promise<ProjectD
       }
     }
     invalidateNotesCache();
+    await resolveForwardNoteReferences(root, new Set(changed.map((row) => row.id)));
   }
 
   const issueParts: string[] = [];
@@ -2599,7 +2715,7 @@ export async function listNotes(
 
 export async function getNoteBacklinks(id: string, projectRoot?: string): Promise<Note[]> {
   if (!(await getNote(id, projectRoot))) return [];
-  const links = await db.select().from(noteLinks).where(eq(noteLinks.toNoteId, id));
+  const links = await getNoteLinkPairs([id], 'in', projectRoot);
 
   if (!links.length) return [];
 
@@ -2613,7 +2729,7 @@ export async function getNoteBacklinks(id: string, projectRoot?: string): Promis
 
 export async function getNoteOutlinks(id: string, projectRoot?: string): Promise<Note[]> {
   if (!(await getNote(id, projectRoot))) return [];
-  const links = await db.select().from(noteLinks).where(eq(noteLinks.fromNoteId, id));
+  const links = await getNoteLinkPairs([id], 'out', projectRoot);
 
   if (!links.length) return [];
 
@@ -2623,6 +2739,35 @@ export async function getNoteOutlinks(id: string, projectRoot?: string): Promise
     .from(notes)
     .where(and(inArray(notes.id, ids), scopedNotesCondition(projectRoot)));
   return rows.filter((row) => isVisibleInProject(row, projectRoot)).map(rowToNote);
+}
+
+/** Unified compatibility view, without conflating persistence ownership. Both
+ * endpoints must be active and in the requested project before IDs escape. */
+async function getNoteLinkPairs(
+  ids: string[],
+  direction: 'in' | 'out',
+  projectRoot?: string,
+): Promise<NoteLink[]> {
+  if (!ids.length) return [];
+  const root = resolvedProjectRoot(projectRoot);
+  const launchRoot = resolveProjectIdentity(PROJECT_ROOT);
+  const column = direction === 'out' ? sql`e.from_note_id` : sql`e.to_note_id`;
+  return db.all<NoteLink>(sql`
+    SELECT DISTINCT e.from_note_id AS fromNoteId, e.to_note_id AS toNoteId
+    FROM (
+      SELECT from_note_id, to_note_id FROM note_links
+      UNION ALL SELECT from_note_id, to_note_id FROM note_relationships WHERE status = 'accepted'
+    ) e
+    JOIN notes f ON f.id = e.from_note_id
+    JOIN notes t ON t.id = e.to_note_id
+    WHERE ${column} IN (${sql.join(
+      ids.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      AND f.trashed_at IS NULL AND t.trashed_at IS NULL
+      ${root ? sql`AND COALESCE(f.project_root, ${launchRoot}) = ${root} AND COALESCE(t.project_root, ${launchRoot}) = ${root}` : sql``}
+    ORDER BY e.from_note_id, e.to_note_id
+  `);
 }
 
 /** Resolve a note ID from id or title lookup. */
@@ -2641,81 +2786,397 @@ export async function resolveNoteId(
   return null;
 }
 
-/**
- * Create an explicit graph edge between two notes.
- * Optionally appends a [[wikilink]] to the source note content.
- */
+export interface ProposeNoteRelationshipInput {
+  fromId: string;
+  toId: string;
+  type: NoteRelationshipType;
+  evidence: string;
+  expectedSourceRevision: number;
+  expectedTargetRevision: number;
+  weight?: number;
+}
+
+export async function listNoteRelationships(
+  projectRoot: string,
+  options: {
+    noteId?: string;
+    status?: NoteRelationshipStatus;
+    fromId?: string;
+    toId?: string;
+    limit?: number;
+  } = {},
+): Promise<NoteRelationship[]> {
+  const root = resolveProjectIdentity(projectRoot);
+  if (options.status && !['proposed', 'accepted', 'rejected'].includes(options.status))
+    throw new ValidationError('Invalid relationship status');
+  const rows = db.all<NoteRelationship & { actorJson: string }>(sql`
+    SELECT r.from_note_id AS fromId, r.to_note_id AS toId, f.title AS fromTitle, t.title AS toTitle,
+      r.type, r.status, r.evidence, r.weight, r.revision, r.provenance, r.actor_json AS actorJson,
+      r.source_revision AS sourceRevision, r.target_revision AS targetRevision,
+      (r.source_revision <> f.revision OR r.target_revision <> t.revision) AS stale,
+      r.created_at AS createdAt, r.updated_at AS updatedAt
+    FROM note_relationships r JOIN notes f ON f.id=r.from_note_id JOIN notes t ON t.id=r.to_note_id
+    WHERE r.project_root=${root} AND f.trashed_at IS NULL AND t.trashed_at IS NULL
+      AND COALESCE(f.project_root,${resolveProjectIdentity(PROJECT_ROOT)})=${root}
+      AND COALESCE(t.project_root,${resolveProjectIdentity(PROJECT_ROOT)})=${root}
+      ${options.noteId ? sql`AND (r.from_note_id=${options.noteId} OR r.to_note_id=${options.noteId})` : sql``}
+      ${options.status ? sql`AND r.status=${options.status}` : sql``}
+      ${options.fromId ? sql`AND r.from_note_id=${options.fromId}` : sql``}
+      ${options.toId ? sql`AND r.to_note_id=${options.toId}` : sql``}
+    ORDER BY r.updated_at DESC,r.from_note_id,r.to_note_id LIMIT ${graphBound(options.limit, 100, 200)}
+  `);
+  // Project document IDs are also checked against their encoded filesystem scope.
+  const visible: NoteRelationship[] = [];
+  for (const { actorJson, ...row } of rows) {
+    if (
+      !isVisibleInProject({ id: row.fromId, projectRoot: root }, root) ||
+      !isVisibleInProject({ id: row.toId, projectRoot: root }, root)
+    )
+      continue;
+    visible.push({
+      ...row,
+      actor: JSON.parse(actorJson),
+      stale: Boolean(row.stale),
+      createdAt: new Date(row.createdAt),
+      updatedAt: new Date(row.updatedAt),
+    });
+  }
+  return visible;
+}
+
+/** Keep pair revisions monotonic across deletion/recreation (no ABA review receipts). */
+function nextRelationshipRevision(
+  tx: NotesTransaction,
+  root: string,
+  fromId: string,
+  toId: string,
+): number {
+  const row = tx.all<{ revision: number }>(sql`SELECT COALESCE(MAX(revision),0) AS revision
+    FROM note_relationship_history WHERE project_root=${root} AND from_note_id=${fromId} AND to_note_id=${toId}`)[0];
+  return (row?.revision ?? 0) + 1;
+}
+
+/** One bounded proposal, never automatic acceptance or a rewrite of an existing decision. */
+export async function proposeNoteRelationship(
+  input: ProposeNoteRelationshipInput,
+  projectRoot: string,
+  host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
+): Promise<NoteRelationship> {
+  if (!['related_to', 'supports', 'contradicts', 'depends_on', 'supersedes'].includes(input.type))
+    throw new ValidationError('Invalid relationship type');
+  if (typeof input.evidence !== 'string' || !input.evidence.trim() || input.evidence.length > 2000)
+    throw new ValidationError('Relationship evidence must contain 1–2000 characters');
+  if (
+    !input.fromId ||
+    !input.toId ||
+    input.fromId === input.toId ||
+    input.fromId.length > 2048 ||
+    input.toId.length > 2048
+  )
+    throw new ValidationError('Two distinct bounded note IDs are required');
+  if (
+    !Number.isSafeInteger(input.expectedSourceRevision) ||
+    input.expectedSourceRevision < 1 ||
+    !Number.isSafeInteger(input.expectedTargetRevision) ||
+    input.expectedTargetRevision < 1
+  )
+    throw new ValidationError('Both expected endpoint revisions are required');
+  if (
+    input.weight !== undefined &&
+    (!Number.isFinite(input.weight) || input.weight <= 0 || input.weight > 1)
+  )
+    throw new ValidationError('Relationship weight must be greater than zero and at most one');
+  const root = resolveProjectIdentity(projectRoot);
+  await withNoteMutation(input.fromId, async () => {
+    const from = await getStoredNoteRow(input.fromId, root);
+    const to = await getStoredNoteRow(input.toId, root);
+    if (!from || from.trashedAt || !to || to.trashedAt)
+      throw new NotFoundError('Relationship endpoint');
+    db.transaction((tx) => {
+      const source = tx.select().from(notes).where(eq(notes.id, input.fromId)).get();
+      const target = tx.select().from(notes).where(eq(notes.id, input.toId)).get();
+      if (
+        !source ||
+        !target ||
+        source.trashedAt ||
+        target.trashedAt ||
+        !isVisibleInProject(source, root) ||
+        !isVisibleInProject(target, root)
+      )
+        throw new NotFoundError('Relationship endpoint');
+      if (
+        source.revision !== input.expectedSourceRevision ||
+        target.revision !== input.expectedTargetRevision
+      )
+        throw new ConflictError(
+          'Relationship endpoints changed; read them again before proposing.',
+        );
+      const current = tx
+        .select()
+        .from(noteRelationships)
+        .where(
+          and(
+            eq(noteRelationships.fromNoteId, input.fromId),
+            eq(noteRelationships.toNoteId, input.toId),
+          ),
+        )
+        .get();
+      if (current)
+        throw new ConflictError(
+          'A relationship already exists for this directed pair. Review it instead.',
+        );
+      const now = new Date();
+      tx.insert(noteRelationships)
+        .values({
+          fromNoteId: input.fromId,
+          toNoteId: input.toId,
+          projectRoot: root,
+          type: input.type,
+          status: 'proposed',
+          evidence: input.evidence.trim(),
+          weight: input.weight ?? 1,
+          sourceRevision: source.revision,
+          targetRevision: target.revision,
+          revision: nextRelationshipRevision(tx, root, input.fromId, input.toId),
+          provenance: host.provenance,
+          actorJson: JSON.stringify(host.actor ?? {}),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+    });
+  });
+  graphCache.clear();
+  return (await listNoteRelationships(root, { fromId: input.fromId, toId: input.toId }))[0]!;
+}
+
+export async function reviewNoteRelationship(
+  fromId: string,
+  toId: string,
+  input: { status: 'accepted' | 'rejected'; expectedRevision: number },
+  projectRoot: string,
+  host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
+): Promise<NoteRelationship> {
+  if (
+    !['accepted', 'rejected'].includes(input.status) ||
+    !Number.isSafeInteger(input.expectedRevision) ||
+    input.expectedRevision < 1
+  )
+    throw new ValidationError(
+      'Review requires accepted/rejected status and a positive expectedRevision',
+    );
+  const root = resolveProjectIdentity(projectRoot);
+  await withNoteMutation(fromId, async () => {
+    const from = await getStoredNoteRow(fromId, root);
+    const to = await getStoredNoteRow(toId, root);
+    if (!from || !to || from.trashedAt || to.trashedAt)
+      throw new NotFoundError('Relationship endpoint');
+    db.transaction((tx) => {
+      const pair = and(
+        eq(noteRelationships.fromNoteId, fromId),
+        eq(noteRelationships.toNoteId, toId),
+        eq(noteRelationships.projectRoot, root),
+      );
+      const current = tx.select().from(noteRelationships).where(pair).get();
+      if (!current) throw new NotFoundError('Relationship');
+      if (current.revision !== input.expectedRevision || current.status !== 'proposed')
+        throw new ConflictError('Relationship changed or was already reviewed.');
+      const source = tx.select().from(notes).where(eq(notes.id, fromId)).get();
+      const target = tx.select().from(notes).where(eq(notes.id, toId)).get();
+      if (
+        !source ||
+        !target ||
+        source.trashedAt ||
+        target.trashedAt ||
+        !isVisibleInProject(source, root) ||
+        !isVisibleInProject(target, root)
+      )
+        throw new NotFoundError('Relationship endpoint');
+      if (
+        input.status === 'accepted' &&
+        (current.sourceRevision !== source.revision || current.targetRevision !== target.revision)
+      )
+        throw new ConflictError(
+          'Stale evidence cannot be accepted; endpoints changed since proposal.',
+        );
+      tx.update(noteRelationships)
+        .set({
+          status: input.status,
+          revision: current.revision + 1,
+          provenance: host.provenance,
+          actorJson: JSON.stringify(host.actor ?? {}),
+          updatedAt: new Date(),
+        })
+        .where(pair)
+        .run();
+    });
+  });
+  graphCache.clear();
+  return (await listNoteRelationships(root, { fromId, toId }))[0]!;
+}
+
+export interface NoteRelationshipMutationOptions {
+  syncContent?: boolean;
+  /** Optimistic revision of the source note, including graph-only edits. */
+  expectedRevision?: number;
+  /** Zero means the association must not exist yet. */
+  expectedRelationshipRevision?: number;
+  provenance?: 'user' | 'agent' | 'import';
+  actor?: NoteRelationshipActor;
+  evidence?: string;
+  weight?: number;
+}
+
+/** Persist an explicit association, independently of any Markdown references. */
 export async function linkNotes(
   fromId: string,
   toId: string,
-  options?: { syncContent?: boolean },
+  options?: NoteRelationshipMutationOptions,
   projectRoot?: string,
 ): Promise<void> {
   if (fromId === toId) return;
-
-  const [fromNote, toNote] = await Promise.all([
-    getNote(fromId, projectRoot),
-    getNote(toId, projectRoot),
-  ]);
-  if (!fromNote || !toNote) throw new NotFoundError('Note');
-
-  try {
-    await db.insert(noteLinks).values({ fromNoteId: fromId, toNoteId: toId });
-  } catch (err: unknown) {
-    // Already linked
-    serverLog.debug(
-      { err: err instanceof Error ? err.message : String(err), fromNoteId: fromId, toNoteId: toId },
-      'note link edge already exists — skipping duplicate insert',
-    );
-  }
-  graphCache.clear();
-
-  if (options?.syncContent !== false) {
-    const linkPattern = new RegExp(`!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]`);
-    if (!linkPattern.test(fromNote.content)) {
-      const suffix = fromNote.content.endsWith('\n') || !fromNote.content ? '' : '\n';
-      await updateNote(
-        fromId,
-        {
-          content: fromNote.content + suffix + `[[${toNote.title}]]`,
-        },
-        projectRoot,
-      );
-    }
-  }
+  await mutateNoteRelationship(fromId, toId, false, options, projectRoot);
 }
 
-/**
- * Remove a directed edge between two notes.
- * Optionally strips the matching [[wikilink]] from source content.
- */
+/** Removing an association never removes a document-derived reference unless
+ * syncContent is enabled and its matching wikilink is removed from the note. */
 export async function unlinkNotes(
   fromId: string,
   toId: string,
-  options?: { syncContent?: boolean },
+  options?: NoteRelationshipMutationOptions,
   projectRoot?: string,
 ): Promise<void> {
-  const [fromNote, toNote] = await Promise.all([
-    getNote(fromId, projectRoot),
-    getNote(toId, projectRoot),
-  ]);
-  if (!fromNote || !toNote) throw new NotFoundError('Note');
+  await mutateNoteRelationship(fromId, toId, true, options, projectRoot);
+}
 
-  await db
-    .delete(noteLinks)
-    .where(and(eq(noteLinks.fromNoteId, fromId), eq(noteLinks.toNoteId, toId)));
-  graphCache.clear();
-
-  if (options?.syncContent !== false) {
-    const linkPattern = new RegExp(
-      `!?\\[\\[${escapeRegExp(toNote.title)}(?:[|#][^\\]]+?)?\\]\\]\\n?`,
-      'g',
-    );
-    const stripped = fromNote.content.replace(linkPattern, '').trimEnd();
-    if (stripped !== fromNote.content) {
-      await updateNote(fromId, { content: stripped }, projectRoot);
-    }
+async function mutateNoteRelationship(
+  fromId: string,
+  toId: string,
+  remove: boolean,
+  options: NoteRelationshipMutationOptions = {},
+  projectRoot?: string,
+): Promise<void> {
+  if (
+    options.weight !== undefined &&
+    (!Number.isFinite(options.weight) || options.weight <= 0 || options.weight > 1)
+  ) {
+    throw new ValidationError('Relationship weight must be greater than zero and at most one');
   }
+  if (
+    options.evidence !== undefined &&
+    (typeof options.evidence !== 'string' || options.evidence.length > 2000)
+  ) {
+    throw new ValidationError('Relationship evidence cannot exceed 2000 characters');
+  }
+  if (
+    options.provenance !== undefined &&
+    !['user', 'agent', 'import'].includes(options.provenance)
+  ) {
+    throw new ValidationError('Invalid relationship provenance');
+  }
+  await withNoteMutation(fromId, async () => {
+    const from = await getStoredNoteRow(fromId, projectRoot);
+    if (!from || from.trashedAt) throw new NotFoundError('Note', fromId);
+    const root = rowProjectRoot(from);
+    const to = await getStoredNoteRow(toId, root);
+    if (!to || to.trashedAt) throw new NotFoundError('Note', toId);
+    if (options.expectedRevision !== undefined && options.expectedRevision !== from.revision) {
+      throw new ConflictError('This note changed before its relationships could be edited.', {
+        expectedRevision: options.expectedRevision,
+        currentRevision: from.revision,
+      });
+    }
+    const pair = and(
+      eq(noteRelationships.fromNoteId, fromId),
+      eq(noteRelationships.toNoteId, toId),
+    );
+    const assertRelationshipRevision = (tx: NotesTransaction) => {
+      const current = tx.select().from(noteRelationships).where(pair).get();
+      if (!remove && current && (current.status !== 'accepted' || current.type !== 'related_to'))
+        throw new ConflictError(
+          'Typed or pending relationships must use the independent review workflow.',
+        );
+      if (
+        options.expectedRelationshipRevision !== undefined &&
+        options.expectedRelationshipRevision !== (current?.revision ?? 0)
+      ) {
+        throw new ConflictError('This relationship changed before it could be edited.', {
+          expectedRevision: options.expectedRelationshipRevision,
+          currentRevision: current?.revision ?? 0,
+        });
+      }
+      return current;
+    };
+    // Reject stale relationship edits before writing a project-backed file.
+    db.transaction(assertRelationshipRevision);
+    let content = from.content;
+    if (options.syncContent !== false) {
+      const pattern = new RegExp(
+        `!?\\[\\[${escapeRegExp(to.title)}(?:[|#][^\\]]+?)?\\]\\]\\n?`,
+        'g',
+      );
+      if (remove) content = content.replace(pattern, '').trimEnd();
+      else if (!pattern.test(content))
+        content += (content.endsWith('\n') || !content ? '' : '\n') + `[[${to.title}]]`;
+    }
+    await updateNoteUnlocked(
+      fromId,
+      {
+        expectedRevision: from.revision,
+        ...(content !== from.content ? { content } : {}),
+      },
+      root,
+      (tx) => {
+        const target = tx.select().from(notes).where(eq(notes.id, toId)).get();
+        if (!target || target.trashedAt || !isVisibleInProject(target, root))
+          throw new NotFoundError('Note', toId);
+        if (target.revision !== to.revision)
+          throw new ConflictError('The target note changed during the relationship edit.');
+        const current = assertRelationshipRevision(tx);
+        if (remove) {
+          // Bind the deleting actor before the DELETE snapshot, atomically.
+          if (current)
+            tx.update(noteRelationships)
+              .set({
+                provenance: options.provenance ?? 'user',
+                actorJson: JSON.stringify(options.actor ?? {}),
+                revision: current.revision + 1,
+                updatedAt: new Date(),
+              })
+              .where(pair)
+              .run();
+          tx.delete(noteRelationships).where(pair).run();
+        } else {
+          const now = new Date();
+          const values = {
+            provenance: options.provenance ?? ('user' as const),
+            actorJson: JSON.stringify(options.actor ?? {}),
+            evidence: options.evidence ?? current?.evidence ?? '',
+            weight: options.weight ?? current?.weight ?? 1,
+            revision: current
+              ? current.revision + 1
+              : nextRelationshipRevision(tx, root, fromId, toId),
+            sourceRevision: from.revision + 1,
+            targetRevision: to.revision,
+            updatedAt: now,
+          };
+          tx.insert(noteRelationships)
+            .values({
+              fromNoteId: fromId,
+              toNoteId: toId,
+              projectRoot: root,
+              createdAt: now,
+              ...values,
+            })
+            .onConflictDoUpdate({
+              target: [noteRelationships.fromNoteId, noteRelationships.toNoteId],
+              set: values,
+            })
+            .run();
+        }
+      },
+    );
+  });
 }
 
 /** Update [[wikilinks]] across the vault when a note is renamed. Only the notes
@@ -2810,7 +3271,11 @@ export async function getNotesCatalog(projectRoot?: string): Promise<NoteCatalog
       projectRoot: notes.projectRoot,
       linkCount: sql<number>`
         (SELECT COUNT(*) FROM note_links WHERE from_note_id = ${notes.id}) +
-        (SELECT COUNT(*) FROM note_links WHERE to_note_id = ${notes.id})
+        (SELECT COUNT(*) FROM note_links WHERE to_note_id = ${notes.id}) +
+        (SELECT COUNT(*) FROM note_relationships r WHERE r.from_note_id = ${notes.id} AND r.status = 'accepted'
+          AND NOT EXISTS (SELECT 1 FROM note_links l WHERE l.from_note_id = r.from_note_id AND l.to_note_id = r.to_note_id)) +
+        (SELECT COUNT(*) FROM note_relationships r WHERE r.to_note_id = ${notes.id} AND r.status = 'accepted'
+          AND NOT EXISTS (SELECT 1 FROM note_links l WHERE l.from_note_id = r.from_note_id AND l.to_note_id = r.to_note_id))
       `,
     })
     .from(notes)
@@ -2858,7 +3323,9 @@ export interface RecallNotesOptions {
 
 /** Recall full note content by search query, IDs, or titles. */
 export async function recallNotes(options: RecallNotesOptions): Promise<NoteWithLinks[]> {
-  const limit = options.limit ?? 10;
+  const limit = Number.isFinite(options.limit)
+    ? Math.min(100, Math.max(1, Math.floor(options.limit!)))
+    : 10;
   const found = new Map<string, Note>();
 
   if (options.ids?.length) {
@@ -2890,20 +3357,34 @@ export async function recallNotes(options: RecallNotesOptions): Promise<NoteWith
     }
   }
 
-  if (!options.query && !options.ids?.length && !options.titles?.length) {
+  if (!options.query?.trim() && !options.ids?.length && !options.titles?.length) {
     const all = await listNotes(undefined, options.projectRoot);
     for (const note of all.slice(0, limit)) {
       found.set(note.id, note);
     }
   }
 
-  const candidates = [...found.values()].slice(0, limit);
-  if (candidates.length === 0) return [];
+  const selectedIds = [...found.keys()].slice(0, limit);
+  if (selectedIds.length === 0) return [];
+  // listNotes intentionally returns summaries without bodies. Hydrate every
+  // path from authoritative scoped rows, rechecking visibility after discovery.
+  const scope = scopedNotesCondition(options.projectRoot);
+  const rows = await db
+    .select()
+    .from(notes)
+    .where(scope ? and(inArray(notes.id, selectedIds), scope) : inArray(notes.id, selectedIds));
+  const hydrated = new Map(
+    rows
+      .filter((row) => isVisibleInProject(row, options.projectRoot))
+      .map((row) => [row.id, rowToNote(row)]),
+  );
+  const candidates = selectedIds.flatMap((id) => (hydrated.has(id) ? [hydrated.get(id)!] : []));
+  if (!candidates.length) return [];
   const candidateIds = candidates.map((n) => n.id);
 
   const [outLinks, inLinks, attRows] = await Promise.all([
-    db.select().from(noteLinks).where(inArray(noteLinks.fromNoteId, candidateIds)),
-    db.select().from(noteLinks).where(inArray(noteLinks.toNoteId, candidateIds)),
+    getNoteLinkPairs(candidateIds, 'out', options.projectRoot),
+    getNoteLinkPairs(candidateIds, 'in', options.projectRoot),
     db.select().from(noteAttachments).where(inArray(noteAttachments.noteId, candidateIds)),
   ]);
 
@@ -2948,42 +3429,325 @@ export async function recallNotes(options: RecallNotesOptions): Promise<NoteWith
 
 /**
  * Re-parse wikilinks in a note's content and update the noteLinks table.
- * Removes all previous outgoing edges from this note, then re-inserts resolved
- * ones. Resolution is a single indexed map lookup per link (title OR alias) —
+ * Replaces only outgoing document-reference edges; durable associations are
+ * never touched. Resolution is a single indexed map lookup (title OR alias) —
  * no per-link database round-trip.
  */
 export async function parseAndSaveLinks(
   noteId: string,
   content: string,
-  opts?: { index?: NoteResolveIndex; skipInvalidate?: boolean; projectRoot?: string },
+  opts?: {
+    index?: NoteResolveIndex;
+    skipInvalidate?: boolean;
+    projectRoot?: string;
+    expectedRevision?: number;
+  },
 ): Promise<void> {
+  const source = await getStoredNoteRow(noteId, opts?.projectRoot);
+  if (!source || source.trashedAt) throw new NotFoundError('Note', noteId);
+  if (
+    source.content !== content ||
+    (opts?.expectedRevision !== undefined && source.revision !== opts.expectedRevision)
+  ) {
+    throw new ConflictError('Cannot replace document links from an outdated note revision.');
+  }
+  const root = rowProjectRoot(source);
   const titles = extractWikilinks(content);
   const targetIds = new Set<string>();
   if (titles.length > 0) {
-    const index = opts?.index ?? (await getResolveIndex(opts?.projectRoot));
+    const index = opts?.index ?? (await getResolveIndex(root));
     for (const title of titles) {
       const id = resolveNoteRefFromIndex(title, index) ?? undefined;
       if (id && id !== noteId) targetIds.add(id);
     }
   }
 
+  // Source-backed Markdown/HTML path references are the same derived layer as
+  // wikilinks. Rebuild both on editor/agent saves, not just during file scans.
+  const identity = projectDocumentIdentity(noteId);
+  if (identity) {
+    for (const path of extractProjectDocumentLinks(identity.sourcePath, content)) {
+      const id = projectDocumentId(root, path);
+      if (id !== noteId) targetIds.add(id);
+    }
+  }
+
   // Replace a note's derived edges atomically. A failed resolution/index build
   // leaves the prior graph intact, and a failed insert rolls the delete back.
   db.transaction((tx) => {
-    tx.delete(noteLinks).where(eq(noteLinks.fromNoteId, noteId)).run();
-    for (const toId of targetIds) {
-      tx.insert(noteLinks)
-        .values({ fromNoteId: noteId, toNoteId: toId })
-        .onConflictDoNothing()
-        .run();
+    const current = tx.select().from(notes).where(eq(notes.id, noteId)).get();
+    if (
+      !current ||
+      current.trashedAt ||
+      current.revision !== source.revision ||
+      current.content !== content
+    ) {
+      throw new ConflictError('The note changed while its document links were being resolved.');
     }
+    replaceDocumentLinks(tx, noteId, targetIds, root);
   });
   if (!opts?.skipInvalidate) graphCache.clear();
+}
+
+/** Resolve older forward references without clearing independent path links.
+ * Keyset batches bound memory; each source is revision-checked before insertion. */
+async function resolveForwardNoteReferences(root: string, targetIds: Set<string>): Promise<void> {
+  if (!targetIds.size) return;
+  const index = await getResolveIndex(root);
+  let cursor = '';
+  for (;;) {
+    const rows = await db
+      .select({ id: notes.id, content: notes.content, revision: notes.revision })
+      .from(notes)
+      .where(
+        and(
+          scopedNotesCondition(root),
+          gt(notes.id, cursor),
+          or(
+            like(notes.content, '%[[%'),
+            like(notes.content, '%.md%'),
+            like(notes.content, '%.htm%'),
+          ),
+        ),
+      )
+      .orderBy(asc(notes.id))
+      .limit(200);
+    if (!rows.length) break;
+    for (const row of rows) {
+      const targets = new Set(
+        extractWikilinks(row.content)
+          .map((ref) => resolveNoteRefFromIndex(ref, index))
+          .filter((id): id is string => Boolean(id && id !== row.id && targetIds.has(id))),
+      );
+      const identity = projectDocumentIdentity(row.id);
+      if (identity) {
+        for (const path of extractProjectDocumentLinks(identity.sourcePath, row.content)) {
+          const id = projectDocumentId(root, path);
+          if (id !== row.id && targetIds.has(id)) targets.add(id);
+        }
+      }
+      if (!targets.size) continue;
+      db.transaction((tx) => {
+        const current = tx.select().from(notes).where(eq(notes.id, row.id)).get();
+        if (
+          !current ||
+          current.trashedAt ||
+          current.revision !== row.revision ||
+          !isVisibleInProject(current, root)
+        )
+          return;
+        for (const id of targets) {
+          const target = tx.select().from(notes).where(eq(notes.id, id)).get();
+          if (!target || target.trashedAt || !isVisibleInProject(target, root)) continue;
+          tx.insert(noteLinks)
+            .values({ fromNoteId: row.id, toNoteId: id })
+            .onConflictDoNothing()
+            .run();
+        }
+      });
+    }
+    cursor = rows[rows.length - 1]!.id;
+    if (rows.length < 200) break;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  graphCache.clear();
+}
+
+function replaceDocumentLinks(
+  tx: NotesTransaction,
+  noteId: string,
+  targetIds: Set<string>,
+  root: string,
+): void {
+  tx.delete(noteLinks).where(eq(noteLinks.fromNoteId, noteId)).run();
+  for (const toId of targetIds) {
+    const target = tx
+      .select({ id: notes.id, projectRoot: notes.projectRoot, trashedAt: notes.trashedAt })
+      .from(notes)
+      .where(eq(notes.id, toId))
+      .get();
+    if (!target || target.trashedAt || !isVisibleInProject(target, root)) continue;
+    tx.insert(noteLinks).values({ fromNoteId: noteId, toNoteId: toId }).onConflictDoNothing().run();
+  }
 }
 
 // ============================================================================
 // Graph
 // ============================================================================
+
+export interface NoteGraphTraversalEdge {
+  from: string;
+  to: string;
+  kind: 'document_link' | 'association';
+  type?: NoteRelationshipType;
+  status?: NoteRelationshipStatus;
+  provenance: string;
+  evidence: string;
+  weight: number;
+  revision?: number;
+  /** Endpoint revisions when the association was last explicitly confirmed. */
+  sourceRevision?: number;
+  targetRevision?: number;
+  /** True when an endpoint changed since that confirmation. */
+  stale?: boolean;
+}
+
+export interface NoteGraphExpansion {
+  nodes: Array<{
+    id: string;
+    title: string;
+    revision: number;
+    depth: number;
+    seedId: string;
+    path: NoteGraphTraversalEdge[];
+  }>;
+  edges: NoteGraphTraversalEdge[];
+  truncated: boolean;
+}
+
+export interface NoteGraphExpansionOptions {
+  maxDepth?: number;
+  maxNodes?: number;
+  maxEdges?: number;
+  maxNeighborsPerNode?: number;
+}
+
+function graphBound(value: number | undefined, fallback: number, max: number, min = 1): number {
+  if (value === undefined) return fallback;
+  if (!Number.isFinite(value)) throw new ValidationError('Graph bounds must be finite numbers');
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+/** Bounded breadth-first traversal over explicit associations and document
+ * references, in either direction. No note bodies or global graph are loaded.
+ * Both endpoints are scoped before SQL LIMIT and all reads share a snapshot.
+ * A path is evidence of connectivity, not proof that the note answers a query. */
+export async function expandNoteGraph(
+  seedIds: string[],
+  projectRoot: string,
+  options: NoteGraphExpansionOptions = {},
+): Promise<NoteGraphExpansion> {
+  if (!projectRoot?.trim()) throw new ValidationError('Graph expansion requires a project root');
+  const root = resolveProjectIdentity(projectRoot);
+  const maxDepth = graphBound(options.maxDepth, 2, 3, 0);
+  const maxNodes = graphBound(options.maxNodes, 40, 100);
+  const maxEdges = graphBound(options.maxEdges, 100, 300);
+  const maxNeighbors = graphBound(options.maxNeighborsPerNode, 20, 50);
+  const launchRoot = resolveProjectIdentity(PROJECT_ROOT);
+  return db.transaction((tx) => {
+    const result: NoteGraphExpansion = { nodes: [], edges: [], truncated: false };
+    const visited = new Map<string, NoteGraphExpansion['nodes'][number]>();
+    const edgeKeys = new Set<string>();
+    const metadata = (id: string) =>
+      tx
+        .select({
+          id: notes.id,
+          title: notes.title,
+          revision: notes.revision,
+          projectRoot: notes.projectRoot,
+        })
+        .from(notes)
+        .where(and(eq(notes.id, id), scopedNotesCondition(root)))
+        .get();
+    // Bound even malicious/redundant seed arrays before building any sets.
+    if (seedIds.length > 100) result.truncated = true;
+    for (const id of seedIds.slice(0, 100)) {
+      if (visited.has(id)) continue;
+      const row = metadata(id);
+      if (!row || !isVisibleInProject(row, root)) continue;
+      if (result.nodes.length >= maxNodes) {
+        result.truncated = true;
+        break;
+      }
+      const node = {
+        id: row.id,
+        title: row.title,
+        revision: row.revision,
+        depth: 0,
+        seedId: row.id,
+        path: [],
+      };
+      visited.set(id, node);
+      result.nodes.push(node);
+    }
+    for (let cursor = 0; cursor < result.nodes.length; cursor++) {
+      const node = result.nodes[cursor]!;
+      if (node.depth >= maxDepth) continue;
+      const rows = tx.all<NoteGraphTraversalEdge>(sql`
+        SELECT l.from_note_id AS "from", l.to_note_id AS "to",
+          'document_link' AS kind, 'document' AS provenance,
+          'Resolved document reference' AS evidence, 1.0 AS weight, NULL AS revision,
+          f.revision AS sourceRevision, t.revision AS targetRevision, 0 AS stale,
+          NULL AS type, NULL AS status
+        FROM note_links l
+        JOIN notes f ON f.id = l.from_note_id
+        JOIN notes t ON t.id = l.to_note_id
+        WHERE (l.from_note_id = ${node.id} OR l.to_note_id = ${node.id})
+          AND f.trashed_at IS NULL AND t.trashed_at IS NULL
+          AND COALESCE(f.project_root, ${launchRoot}) = ${root}
+          AND COALESCE(t.project_root, ${launchRoot}) = ${root}
+        UNION ALL
+        SELECT r.from_note_id AS "from", r.to_note_id AS "to",
+          'association' AS kind, r.provenance, r.evidence, r.weight, r.revision,
+          r.source_revision AS sourceRevision, r.target_revision AS targetRevision,
+          (r.source_revision <> f.revision OR r.target_revision <> t.revision) AS stale, r.type, r.status
+        FROM note_relationships r
+        JOIN notes f ON f.id = r.from_note_id
+        JOIN notes t ON t.id = r.to_note_id
+        WHERE r.project_root = ${root} AND r.status = 'accepted'
+          AND (r.from_note_id = ${node.id} OR r.to_note_id = ${node.id})
+          AND f.trashed_at IS NULL AND t.trashed_at IS NULL
+          AND COALESCE(f.project_root, ${launchRoot}) = ${root}
+          AND COALESCE(t.project_root, ${launchRoot}) = ${root}
+        ORDER BY weight DESC, kind ASC, "from" ASC, "to" ASC
+        LIMIT ${maxNeighbors + 1}
+      `);
+      if (rows.length > maxNeighbors) result.truncated = true;
+      for (const row of rows.slice(0, maxNeighbors)) {
+        const edge: NoteGraphTraversalEdge = {
+          from: row.from,
+          to: row.to,
+          kind: row.kind,
+          ...(row.kind === 'association' ? { type: row.type, status: row.status } : {}),
+          provenance: row.provenance,
+          evidence: row.evidence,
+          weight: row.weight,
+          sourceRevision: row.sourceRevision,
+          targetRevision: row.targetRevision,
+          stale: Boolean(row.stale),
+          ...(row.revision == null ? {} : { revision: row.revision }),
+        };
+        const neighborId = edge.from === node.id ? edge.to : edge.from;
+        const target = metadata(neighborId);
+        if (!target || !isVisibleInProject(target, root)) continue;
+        const key = JSON.stringify([edge.kind, edge.from, edge.to]);
+        if (edgeKeys.has(key)) continue;
+        if (
+          result.edges.length >= maxEdges ||
+          (!visited.has(neighborId) && result.nodes.length >= maxNodes)
+        ) {
+          result.truncated = true;
+          continue;
+        }
+        if (!visited.has(neighborId)) {
+          const neighbor = {
+            id: target.id,
+            title: target.title,
+            revision: target.revision,
+            depth: node.depth + 1,
+            seedId: node.seedId,
+            path: [...node.path, edge],
+          };
+          visited.set(neighborId, neighbor);
+          result.nodes.push(neighbor);
+        }
+        edgeKeys.add(key);
+        result.edges.push(edge);
+      }
+    }
+    return result;
+  });
+}
 
 export async function getGraphData(projectRoot?: string): Promise<GraphData> {
   const cacheKey = projectRoot ? resolveProjectIdentity(projectRoot) : '';
@@ -3043,8 +3807,34 @@ export async function getGraphData(projectRoot?: string): Promise<GraphData> {
           )
           .orderBy(asc(noteLinks.fromNoteId), asc(noteLinks.toNoteId))
           .limit(MAX_GRAPH_LINKS + 1);
-  let linksTruncated = linkRows.length > MAX_GRAPH_LINKS;
-  const allLinks = linkRows.slice(0, MAX_GRAPH_LINKS);
+  const relationshipRows =
+    visibleIdList.length === 0
+      ? []
+      : await db
+          .select({
+            fromNoteId: noteRelationships.fromNoteId,
+            toNoteId: noteRelationships.toNoteId,
+          })
+          .from(noteRelationships)
+          .where(
+            and(
+              eq(noteRelationships.status, 'accepted'),
+              inArray(noteRelationships.fromNoteId, visibleIdList),
+              inArray(noteRelationships.toNoteId, visibleIdList),
+            ),
+          )
+          .orderBy(asc(noteRelationships.fromNoteId), asc(noteRelationships.toNoteId))
+          .limit(MAX_GRAPH_LINKS + 1);
+  const uniqueLinks = [
+    ...new Map(
+      [...linkRows, ...relationshipRows].map((link) => [
+        JSON.stringify([link.fromNoteId, link.toNoteId]),
+        link,
+      ]),
+    ).values(),
+  ];
+  let linksTruncated = uniqueLinks.length > MAX_GRAPH_LINKS;
+  const allLinks = uniqueLinks.slice(0, MAX_GRAPH_LINKS);
   if (linksTruncated) {
     serverLog.warn(
       { maxLinks: MAX_GRAPH_LINKS, projectRoot: resolvedProjectRoot(projectRoot) ?? null },
@@ -3814,8 +4604,8 @@ export async function getNoteWithLinks(
   if (!note) return null;
 
   const [outRows, inRows, attRows] = await Promise.all([
-    db.select().from(noteLinks).where(eq(noteLinks.fromNoteId, id)),
-    db.select().from(noteLinks).where(eq(noteLinks.toNoteId, id)),
+    getNoteLinkPairs([id], 'out', projectRoot),
+    getNoteLinkPairs([id], 'in', projectRoot),
     db.select().from(noteAttachments).where(eq(noteAttachments.noteId, id)),
   ]);
 

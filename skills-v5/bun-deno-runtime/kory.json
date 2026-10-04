@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "name": "bun-deno-runtime",
-  "version": "5.1.0",
+  "version": "5.1.2",
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
@@ -106,18 +106,18 @@
     {
       "url": "https://bun.com/docs",
       "sourceType": "official-docs",
-      "versionScope": "Bun documentation as available 2026-09-04",
+      "versionScope": "Bun documentation as available and inspected 2026-10-03",
       "staleAfterDays": 30,
       "notes": "Bun runtime, package, test, server, and compatibility behavior.",
-      "verifiedAt": "2026-09-04"
+      "verifiedAt": "2026-10-03"
     },
     {
       "url": "https://docs.deno.com/",
       "sourceType": "official-docs",
-      "versionScope": "Deno documentation as available 2026-09-04",
+      "versionScope": "Deno runtime getting-started documentation last modified 2026-07-29 and inspected 2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Deno runtime, permissions, package, server, and compatibility behavior.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Deno runtime, secure-default permissions, package and built-in toolchain, server, and Node compatibility behavior.",
+      "verifiedAt": "2026-10-03"
     }
   ],
   "authoringMaturity": "individual"

@@ -120,12 +120,12 @@
   },
   "sources": [
     {
-      "url": "https://developers.openai.com/api/docs/guides/latest-model",
+      "url": "https://developers.openai.com/api/docs/guides/tools-web-search",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI web-search and research guidance as available 2026-09-04",
+      "versionScope": "OpenAI web search documentation inspected 2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Currentness-sensitive browsing, source quality, date comparison, and citation expectations.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Up-to-date web retrieval and sourced citation behavior. Specific model IDs and API migration details are volatile and are not reusable research methodology.",
+      "verifiedAt": "2026-10-03"
     },
     {
       "url": "https://guides.loc.gov/student-resources/search-strategies",
@@ -178,11 +178,11 @@
     {
       "url": "https://github.com/PracticalSwan/agent-skills/blob/main/research/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "PracticalSwan research skill as inspected 2026-09-04",
+      "versionScope": "PracticalSwan research skill v2.0, last_updated 2026-09-08, inspected 2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
-      "notes": "Community comparison for primary-source preference and claim-level traceability; not factual authority.",
-      "verifiedAt": "2026-09-04"
+      "notes": "Community comparison for primary-source preference, claim-level citation, and explicit fallback evidence. Its background-agent and file-output prescriptions are not treated as universal authority.",
+      "verifiedAt": "2026-10-03"
     }
   ],
   "authoringMaturity": "individual"

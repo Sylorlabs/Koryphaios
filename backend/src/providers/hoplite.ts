@@ -22,6 +22,7 @@ export const HOPLITE_DELEGATION_NOT_AVAILABLE =
   'Hoplite runs tasks in Hoplite cloud sandboxes or on a local Codex/Claude agent bound to your machine, and opens pull requests; results arrive as Hoplite threads/PRs rather than local output. Live delegation from Koryphaios is not wired in this release — your API key is verified in Settings, and no chat or streaming execution is available from this provider.';
 
 export class HopliteProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'hoplite' as const;
 
   constructor(readonly config: ProviderConfig) {}

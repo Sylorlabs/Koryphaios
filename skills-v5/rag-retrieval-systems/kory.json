@@ -135,18 +135,18 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/retrieval",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI Retrieval API documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current vector-store ingestion, chunking, attribute filtering, ranking options, hybrid weights and deletion consistency behavior.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/tools-file-search",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI file-search documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI file-search documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Hosted retrieval integration, result inclusion, metadata filtering and max-result quality/latency tradeoffs.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://www.elastic.co/docs/solutions/search/hybrid-search",

@@ -557,7 +557,7 @@ Add on-time, late-within, too-late, duplicate, reordered, restart/checkpoint and
   },
 };
 const streamWindowScorer: SkillEvalDeterministicScorer = {
-  id: 'stream-processing/event-time-window-dedup-scorer@1',
+  id: 'stream-processing/event-time-window-dedup-scorer@2',
   scenarioIds: [STREAM_WINDOW],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
@@ -565,6 +565,8 @@ const streamWindowScorer: SkillEvalDeterministicScorer = {
       `import{expect,test}from'bun:test';import{WindowCounter}from'../src/stream';const m=60000;
 test('hidden: event-time bucketing, lateness and dedup',()=>{const c=new WindowCounter(m,12*m);expect(c.ingest({id:'a',key:'k',eventTimeMs:2*m+1,value:1},10*m)).toBe('applied');expect(c.ingest({id:'a',key:'k',eventTimeMs:2*m+1,value:1},10*m)).toBe('duplicate');expect(c.count(2*m)).toBe(1);expect(c.ingest({id:'old',key:'k',eventTimeMs:1*m,value:1},14*m)).toBe('too-late');});
 test('hidden: checkpoint/restart preserves logical state',()=>{const c=new WindowCounter(m,12*m);c.ingest({id:'a',key:'k',eventTimeMs:5,value:2},m);const s=c.checkpoint();const d=new WindowCounter(m,12*m);d.restore(s);expect(d.ingest({id:'a',key:'k',eventTimeMs:5,value:2},m)).toBe('duplicate');expect(d.count(0)).toBe(2);});
+test('hidden: advancing watermark evicts expired aggregate and dedup state',()=>{const c=new WindowCounter(m,12*m);expect(c.ingest({id:'old',key:'k',eventTimeMs:1,value:2},m)).toBe('applied');expect(c.count(0)).toBe(2);expect(c.ingest({id:'new',key:'k',eventTimeMs:20*m+1,value:1},20*m)).toBe('applied');expect(c.count(0)).toBe(0);expect(c.retainedIds()).toBeLessThanOrEqual(1);});
+test('hidden: out-of-order arrival remains in its event-time window',()=>{const c=new WindowCounter(m,12*m);expect(c.ingest({id:'later',key:'k',eventTimeMs:10*m+1,value:1},10*m)).toBe('applied');expect(c.ingest({id:'earlier',key:'k',eventTimeMs:9*m+1,value:3},10*m)).toBe('applied');expect(c.count(9*m)).toBe(3);expect(c.count(10*m)).toBe(1);});
 `,
     );
     const reg = hasRegressionText(workingDirectory, [

@@ -21,6 +21,7 @@ Source curation for `react-native-expo`. Routing fixtures and eval IDs remain in
   - Conditional: the project's chosen runtime-version policy controls how compatibility is encoded.
   - Limit: matching runtime versions cannot prove application-level correctness after an update.
 - **Expo documentation index**: https://docs.expo.dev/
-  - Preserved use: SDK, Router, module, build, and deployment discovery.
+  - Verified: 2026-10-03.
+  - Preserved use: universal Expo application, EAS workflow, Expo Router, SDK module, example, build, and deployment discovery.
 
 Report Expo Go, development-build, simulator or emulator, physical-device, and production-build evidence separately because they prove different boundaries.

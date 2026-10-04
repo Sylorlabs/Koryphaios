@@ -143,8 +143,8 @@
     {
       "url": "https://github.com/rampstackco/claude-skills/blob/main/skills/accessibility-audit/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "rampstackco/claude-skills main accessibility-audit skill as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "rampstackco/claude-skills main accessibility-audit skill at e5bc67519991 as inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Community workflow evidence for combining automation, keyboard/alternative-input checks, assistive technology, visual checks, cognitive checks, explicit gaps, and remediation. Its WCAG 2.1/web-specific assumptions are not copied as the current or universal standard."

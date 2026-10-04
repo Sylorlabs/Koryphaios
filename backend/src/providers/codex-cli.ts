@@ -725,6 +725,7 @@ function resolveCliModel(modelId: string, models: ModelDef[]): string {
 }
 
 export class CodexCliProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
   readonly name = 'codex' as const;
   private models: ModelDef[] = [];
   private modelsAt = 0;

@@ -77,65 +77,68 @@ function admittedWorkExecutor(controller: AbortController) {
 }
 
 describe('image generation from chat', () => {
-  test('persists a CLI screenshot while forwarding explicit provider-only omission', async () => {
-    const stored: Array<Record<string, unknown>> = [];
-    const { token } = admission();
-    const reserveSessionTurn = mock(async () => token);
-    const dispatchAdmittedTask = mock(async () => undefined);
-    const attachments = [
-      {
-        type: 'image',
-        data: Buffer.from('screen').toString('base64'),
-        name: 'clipboard-image.png',
-        mimeType: 'image/png',
-      },
-    ];
-    setContext({
-      sessions: { get: async () => ({ id: 'session-1', interactionMode: 'act' }) },
-      messages: {
-        add: async (_sessionId: string, message: Record<string, unknown>) => stored.push(message),
-      },
-      providers: { getConfigs: () => ({}), get: () => undefined },
-      kory: {
-        generateSessionTitle: async () => undefined,
-        reserveSessionTurn,
-        dispatchAdmittedTask,
-        rejectSessionTurn: async () => undefined,
-      },
-      wsManager: { broadcast: () => undefined, broadcastToSession: () => undefined },
-    } as never);
+  test.each(['omit', 'allow'] as const)(
+    'persists a CLI screenshot while forwarding explicit image mode %s',
+    async (imageInputMode) => {
+      const stored: Array<Record<string, unknown>> = [];
+      const { token } = admission();
+      const reserveSessionTurn = mock(async () => token);
+      const dispatchAdmittedTask = mock(async () => undefined);
+      const attachments = [
+        {
+          type: 'image',
+          data: Buffer.from('screen').toString('base64'),
+          name: 'clipboard-image.png',
+          mimeType: 'image/png',
+        },
+      ];
+      setContext({
+        sessions: { get: async () => ({ id: 'session-1', interactionMode: 'act' }) },
+        messages: {
+          add: async (_sessionId: string, message: Record<string, unknown>) => stored.push(message),
+        },
+        providers: { getConfigs: () => ({}), get: () => undefined },
+        kory: {
+          generateSessionTitle: async () => undefined,
+          reserveSessionTurn,
+          dispatchAdmittedTask,
+          rejectSessionTurn: async () => undefined,
+        },
+        wsManager: { broadcast: () => undefined, broadcastToSession: () => undefined },
+      } as never);
 
-    const response = await app.handle(
-      request({
-        sessionId: 'session-1',
+      const response = await app.handle(
+        request({
+          sessionId: 'session-1',
+          content: 'What controls are visible in this screenshot?',
+          model: 'codex-account:primary:gpt-5.6-sol',
+          attachments,
+          imageInputMode,
+        }),
+      );
+      expect(response.status).toBe(200);
+      await waitFor(() => dispatchAdmittedTask.mock.calls.length === 1);
+
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({
+        role: 'user',
         content: 'What controls are visible in this screenshot?',
-        model: 'codex-account:primary:gpt-5.6-sol',
         attachments,
-        imageInputMode: 'omit',
-      }),
-    );
-    expect(response.status).toBe(200);
-    await waitFor(() => dispatchAdmittedTask.mock.calls.length === 1);
-
-    expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({
-      role: 'user',
-      content: 'What controls are visible in this screenshot?',
-      attachments,
-    });
-    expect(reserveSessionTurn).toHaveBeenCalledWith('session-1', 'user_turn');
-    expect(dispatchAdmittedTask).toHaveBeenCalledWith(token, {
-      userMessage: 'What controls are visible in this screenshot?',
-      preferredModel: 'codex-account:primary:gpt-5.6-sol',
-      reasoningLevel: undefined,
-      attachments,
-      interactionMode: 'act',
-      fastMode: undefined,
-      inputAlreadyPersisted: true,
-      imageInputMode: 'omit',
-    });
-    expect((await response.json()).data.runId).toBe(token.runId);
-  });
+      });
+      expect(reserveSessionTurn).toHaveBeenCalledWith('session-1', 'user_turn');
+      expect(dispatchAdmittedTask).toHaveBeenCalledWith(token, {
+        userMessage: 'What controls are visible in this screenshot?',
+        preferredModel: 'codex-account:primary:gpt-5.6-sol',
+        reasoningLevel: undefined,
+        attachments,
+        interactionMode: 'act',
+        fastMode: undefined,
+        inputAlreadyPersisted: true,
+        imageInputMode,
+      });
+      expect((await response.json()).data.runId).toBe(token.runId);
+    },
+  );
 
   test('routes a selected image model through image generation and persists the result', async () => {
     const stored: Array<Record<string, unknown>> = [];

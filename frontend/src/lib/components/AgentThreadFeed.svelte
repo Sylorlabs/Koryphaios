@@ -10,6 +10,7 @@
   import Send from 'lucide-svelte/icons/send';
   import { untrack } from 'svelte';
   import { createAutoScroll } from '$lib/utils/autoscroll.svelte';
+  import { estimateFeedHeight as estimateRowHeight } from '$lib/utils/estimate-row-height';
   import { feedStore } from '$lib/stores/feed.svelte';
   import { agentStore } from '$lib/stores/agents.svelte';
   import { sessionStore } from '$lib/stores/sessions.svelte';
@@ -78,26 +79,7 @@
   });
 
   function estimateFeedHeight(entry: FeedEntryLocal): number {
-    switch (entry.type) {
-      case 'user_message':
-        return 60;
-      case 'content':
-        return 120;
-      case 'tool_call':
-      case 'tool_result':
-      case 'tool_group':
-        return 80;
-      // Sub-agent groups render as a clamped summary, never as a full
-      // transcript dump, so a flat estimate stays close to the real height.
-      case 'agent_group':
-        return 44;
-      default:
-        return 100;
-    }
-  }
-
-  function scrollFeedToBottom(behavior: ScrollBehavior = 'instant') {
-    autoScrollCtl.jumpToBottom(behavior === 'smooth' ? 'smooth' : 'instant');
+    return estimateRowHeight(entry);
   }
 
   function toggleGroup(id: string) {

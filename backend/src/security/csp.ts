@@ -496,7 +496,7 @@ export function buildSecurityHeaders(config: SecurityHeadersConfig = {}): Record
     // Permissions policy (restrict browser features)
     'Permissions-Policy': [
       'geolocation=()',
-      'microphone=()',
+      'microphone=(self)',
       'camera=()',
       'payment=()',
       'usb=()',

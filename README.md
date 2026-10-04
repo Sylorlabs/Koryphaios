@@ -74,7 +74,9 @@ The backend handles orchestration, tools, sessions, HTTP APIs, and WebSocket str
 
 **Notes, feedback, and cost tracking.** Project-scoped long-form Notes and Memory use revision checks, explicit context budgets, and bounded attachments. The feedback dialog opens a prefilled GitHub issue containing only the text and optional app version you review; it does not silently upload diagnostics, source, prompts, screenshots, or keys. Session history tracks provider-reported usage and Koryphaios-attributed cost without inventing unavailable account totals.
 
-**Optional semantic retrieval.** Notes search can use an explicitly configured authenticated embedding endpoint. It applies project visibility and permissions before sending content, validates returned vectors, bounds requests and caching, and falls back to local search when unavailable. It is disabled by default and searches a bounded candidate set, not an exhaustive vault index. See [configuration and limits](docs/adr/006-embeddings-explicit-stub.md).
+**Associative Note Network.** Notes → Network offers evidence-backed relationship proposals and review, plus bounded query activation showing retrieved excerpts and connection paths. Agents can retrieve project context through lexical/semantic seeds and up to two graph hops without loading the whole vault. Durable relationships survive document edits, preserve endpoint revisions, and require separate human approval before an agent accepts a proposal. See [usage, permissions, and limits](docs/note-network.md).
+
+**Optional semantic retrieval.** Notes search can use an explicitly configured authenticated embedding endpoint. Associative retrieval also supports an explicitly rebuilt, persistent revision-aware index; reads do not upload note bodies or build that index. Both paths apply project visibility and permissions, validate vectors, and retain local retrieval on failure. Embeddings are disabled by default. Index coverage counts bounded note representations, not every passage in every document. See [configuration and limits](docs/adr/006-embeddings-explicit-stub.md).
 
 **Signed-update plumbing with a verification boundary.** The Tauri shell includes signed-manifest update support and platform build workflows. A configured updater is not proof that every external artifact currently exists or works; each published OS/architecture target must pass its own build, signature, install, restart, and rollback checks. This checkout's local verification does not certify unavailable platform targets.
 
@@ -116,7 +118,7 @@ The backend handles orchestration, tools, sessions, HTTP APIs, and WebSocket str
 
 Koryphaios is free, open, and genuinely useful, and it is also still growing. The honest weak spots are:
 
-**CLI integrations depend on the installed CLI and local profile.** Koryphaios can detect an executable or login file without claiming that the account is authenticated. Those signals remain explicitly detected and unverified unless a supported read-only account probe succeeds; definitive access is known only when the CLI actually runs. Freebuff uses its real TUI through a tmux PTY and is available only when Linux bubblewrap can confine its native tools to a disposable checkout; authoritative project work is routed through Kory's authenticated MCP bridge. Results can vary with CLI version, profile layout, provider entitlement, and sandbox support. Approval-requiring Jules mutation remains deliberately unavailable rather than reported as working.
+**CLI integrations depend on the installed CLI and local profile.** Koryphaios can detect an executable or login file without claiming that the account is authenticated. Those signals remain explicitly detected and unverified unless a supported read-only account probe succeeds; definitive access is known only when the CLI actually runs. Freebuff uses its real TUI through a private tmux PTY with mandatory Linux bubblewrap, including a pinned Docker/Colima Linux runtime on macOS. Native tools remain confined to a disposable workspace; authoritative project work and Notes use Kory's authenticated MCP bridge. Modern CLI model selection stays CLI-owned. See [Freebuff setup and verification](docs/freebuff-cli.md). Results can vary with CLI version, profile layout, provider entitlement, and sandbox support. Approval-requiring Jules mutation remains deliberately unavailable rather than reported as working.
 
 **Kernel sandboxing is platform-dependent.** Linux sandbox-required work needs Bubblewrap. Unsupported or unavailable confinement is reported as unavailable and does not count as a successful sandboxed run. Explicit unsandboxed execution remains a separate user-controlled mode.
 
@@ -195,6 +197,6 @@ Check `config/app.config.json` for the expected backend host and port. After sta
 
 ---
 
-**Version:** 0.2.0
+**Version:** 0.5.0
 **License:** Apache 2.0
 **Cost:** Free, forever

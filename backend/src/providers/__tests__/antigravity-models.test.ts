@@ -34,6 +34,13 @@ describe('Antigravity model capabilities', () => {
     expect(model.name).toBe('gemini-flash');
   });
 
+  it('recognizes Gemini vision separately from unconfirmed CLI image transport', () => {
+    const model = modelDefFromCliName('gemini-3.1-pro\tGemini 3.1 Pro');
+    expect(model.vision).toBe(true);
+    expect(model.supportsAttachments).toBe(false);
+    expect(modelDefFromCliName('unknown-text-model').vision).toBeUndefined();
+  });
+
   it('forwards the composer effort level to the provider', () => {
     // Antigravity has no reasoning parameter, but Koryphaios collapses the
     // per-tier slugs and maps the level onto one of them at spawn time.
@@ -128,9 +135,8 @@ describe('Antigravity models.dev enrichment', () => {
   // the `google` provider key (gemini-* / claude-* both live there) plus the
   // `openai` key (gpt-oss-*).
   it('stamps real context + output limits onto known gemini/claude slugs', async () => {
-    const { applyModelsDevMetadata, warmModelsDevCache, __resetModelsDevCacheForTesting } = await import(
-      '../models-dev'
-    );
+    const { applyModelsDevMetadata, warmModelsDevCache, __resetModelsDevCacheForTesting } =
+      await import('../models-dev');
     // Force a fresh fetch — other test files in the same process may have
     // pre-populated the cache with mocked data.
     __resetModelsDevCacheForTesting();

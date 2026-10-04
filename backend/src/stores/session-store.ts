@@ -4,6 +4,7 @@ import { ID, SESSION } from '../constants';
 import { db, sessions, type Session as DbSession } from '../db';
 import { eq, and, desc, isNotNull, isNull, sql } from 'drizzle-orm';
 import { serverLog } from '../logger';
+import { createSessionWorkspace, sessionWorkspaceOwnership } from '../kory/session-workspace';
 
 const PERMISSION_MODES = ['yolo', 'guarded', 'edits', 'ask', 'plan', 'custom'] as const;
 const AGENT_EXECUTION_MODES = ['auto', 'single', 'multi'] as const;
@@ -39,6 +40,7 @@ export interface ISessionStore {
     titleOrParentId?: string,
     parentId?: string,
     workingDirectory?: string,
+    gitWorkspace?: SharedSession['gitWorkspace'],
   ): Promise<SharedSession>;
   get(id: string): Promise<SharedSession | undefined>;
   getActive(id: string): Promise<SharedSession | undefined>;
@@ -68,6 +70,7 @@ function toSharedSession(s: DbSession): SharedSession {
     interactionMode?: 'act' | 'plan';
     planNoteId?: string;
     agentOverrides?: unknown;
+    gitWorkspace?: SharedSession['gitWorkspace'];
   } = {};
   try {
     metadata = s.metadata ? JSON.parse(s.metadata) : {};
@@ -85,6 +88,7 @@ function toSharedSession(s: DbSession): SharedSession {
     status: s.archivedAt ? 'archived' : 'active',
     parentSessionId: s.parentId ?? undefined,
     workingDirectory: s.workingDirectory ?? undefined,
+    gitWorkspace: metadata.gitWorkspace,
     interactionMode: metadata.interactionMode === 'plan' ? 'plan' : 'act',
     planNoteId: typeof metadata.planNoteId === 'string' ? metadata.planNoteId : undefined,
     agentOverrides: sanitizeSessionAgentOverrides(metadata.agentOverrides),
@@ -104,6 +108,7 @@ export class SessionStore implements ISessionStore {
     titleOrTitle?: string,
     parentId?: string,
     workingDirectory?: string,
+    gitWorkspace?: SharedSession['gitWorkspace'],
   ): Promise<SharedSession> {
     const argc = arguments.length;
     const userId = argc >= 1 ? (titleOrUserId ?? null) : null;
@@ -114,6 +119,17 @@ export class SessionStore implements ISessionStore {
     const parent = argc >= 3 ? parentId : argc === 2 ? undefined : titleOrTitle;
 
     const id = nanoid(ID.SESSION_ID_LENGTH);
+    // All project-backed chats isolate by default, including callers that do
+    // not use the revision picker. A picker-created workspace is already new.
+    if (
+      workingDirectory &&
+      !(
+        gitWorkspace?.isolation === 'independent-repository' &&
+        sessionWorkspaceOwnership(gitWorkspace.path)
+      )
+    ) {
+      gitWorkspace = await createSessionWorkspace(workingDirectory);
+    }
     const now = new Date();
 
     const [session] = await db
@@ -124,6 +140,7 @@ export class SessionStore implements ISessionStore {
         title: title ?? SESSION.DEFAULT_TITLE,
         parentId: parent || null,
         workingDirectory: workingDirectory || null,
+        ...(gitWorkspace && { metadata: JSON.stringify({ gitWorkspace }) }),
         createdAt: now,
         updatedAt: now,
         version: 1,
@@ -209,43 +226,37 @@ export class SessionStore implements ISessionStore {
     if (
       updates.interactionMode !== undefined ||
       updates.planNoteId !== undefined ||
-      updates.agentOverrides !== undefined
+      updates.agentOverrides !== undefined ||
+      updates.gitWorkspace !== undefined
     ) {
-      const prior = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
-      let metadata: Record<string, unknown> = {};
-      try {
-        metadata = prior?.metadata ? JSON.parse(prior.metadata) : {};
-      } catch (err: unknown) {
-        serverLog.debug(
-          { err: err instanceof Error ? err.message : String(err) },
-          'session metadata parse failed during update — using empty metadata',
-        );
-        metadata = {};
-      }
-      if (updates.interactionMode !== undefined) metadata.interactionMode = updates.interactionMode;
-      if (updates.planNoteId !== undefined) metadata.planNoteId = updates.planNoteId;
+      // Patch the row's current metadata in the UPDATE itself. Reading and
+      // serializing it before an await lets concurrent settings writes erase a
+      // newly persisted Git workspace (or another writer's unrelated fields).
+      let metadata = sql`CASE WHEN json_valid(${sessions.metadata}) THEN
+        CASE WHEN json_type(${sessions.metadata}) = 'object' THEN ${sessions.metadata} ELSE '{}' END
+        ELSE '{}' END`;
+      if (updates.interactionMode !== undefined)
+        metadata = sql`json_set(${metadata}, '$.interactionMode', ${updates.interactionMode})`;
+      if (updates.planNoteId !== undefined)
+        metadata = sql`json_set(${metadata}, '$.planNoteId', ${updates.planNoteId})`;
+      if (updates.gitWorkspace !== undefined)
+        metadata = sql`json_set(${metadata}, '$.gitWorkspace', json(${JSON.stringify(updates.gitWorkspace)}))`;
       if (updates.agentOverrides !== undefined) {
         const sanitized = sanitizeSessionAgentOverrides(updates.agentOverrides);
         // An empty patch clears the per-chat overrides so the chat falls back
         // to the project-wide agent settings again.
-        if (sanitized) metadata.agentOverrides = sanitized;
-        else delete metadata.agentOverrides;
+        metadata = sanitized
+          ? sql`json_set(${metadata}, '$.agentOverrides', json(${JSON.stringify(sanitized)}))`
+          : sql`json_remove(${metadata}, '$.agentOverrides')`;
       }
-      drizzleUpdates.metadata = JSON.stringify(metadata);
+      drizzleUpdates.metadata = metadata;
     }
 
     // Optimistic locking: when expectedVersion is provided, the update only
     // succeeds if the row's current version matches. On success, increment
     // the version so stale readers fail on retry. When no expectedVersion is
     // provided, increment unconditionally (no concurrency guard).
-    if (expectedVersion !== undefined) {
-      drizzleUpdates.version = expectedVersion + 1;
-    } else {
-      // Read current version and increment it.
-      const current = await db.query.sessions.findFirst({ where: eq(sessions.id, id) });
-      if (!current) return undefined;
-      drizzleUpdates.version = (current.version ?? 1) + 1;
-    }
+    drizzleUpdates.version = sql`COALESCE(${sessions.version}, 1) + 1`;
 
     const whereClause =
       expectedVersion !== undefined

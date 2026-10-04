@@ -16,7 +16,7 @@
 
 Provider documentation establishes API semantics and supported test mechanisms. It does not prove merchant-account settings, settlement timing, tax treatment, dispute outcomes, fee configuration, or production fraud behavior. Keep those claims scoped to evidence from the configured account and exercised environment.
 
-All four specific URLs below were reopened on 2026-09-06 and registered in `kory.json`; refresh within 60 days. The broader payments landing page keeps its inherited discovery record. These API examples are adapted patterns, not a mandate to switch an existing provider or a claim of successful payment execution.
+All four specific URLs below were reopened on 2026-09-06 and registered in `kory.json`; refresh within 60 days. The broader payments landing page was rechecked on 2026-10-03 and remains a discovery source for integration options, payment methods, and build/test entry points. Lifecycle, idempotency, and webhook semantics remain bound to the specific sources below. These API examples are adapted patterns, not a mandate to switch an existing provider or a claim of successful payment execution.
 
 ## Qualification basis
 
@@ -27,6 +27,10 @@ All four specific URLs below were reopened on 2026-09-06 and registered in `kory
 - Source discipline: authoritative/spec/reference sources outrank community patterns when they conflict; runtime evidence outranks examples for behavioral claims.
 
 ## Maintained sources
+
+- **Stripe payments**: https://docs.stripe.com/payments
+  - Scope: Stripe payments landing page inspected 2026-10-03.
+  - Use: discovery for online and in-person payment integrations, subscriptions, payment methods, and build/test documentation.
 
 - **Stripe idempotent requests**: https://docs.stripe.com/api/idempotent_requests
   - Scope: Stripe API documentation checked 2026-09-06.

@@ -4,6 +4,7 @@ import { apiFetch } from '$lib/api.svelte';
 import { isDemoMode } from '$lib/demo-flags';
 import { sessionStore } from './sessions.svelte';
 import { wsStore } from './websocket.svelte';
+import { projectStore } from './project.svelte';
 
 export interface GitFileStatus {
   path: string;
@@ -30,7 +31,7 @@ export interface GitState {
   isRepo: boolean;
 }
 
-let state = $state<GitState>({
+const initialState = (): GitState => ({
   status: [],
   branch: '',
   branches: [],
@@ -46,6 +47,39 @@ let state = $state<GitState>({
   isRepo: false,
 });
 
+let state = $state<GitState>(initialState());
+let contextKey = '';
+let generation = 0;
+let statusRequest = 0;
+let diffRequest = 0;
+
+function currentContextKey(): string {
+  const sessionId = sessionStore.activeSessionId;
+  const session = sessionStore.sessions.find((item) => item.id === sessionId);
+  return JSON.stringify([
+    sessionId,
+    session?.workingDirectory ?? projectStore.requestPath,
+    session?.gitWorkspace?.path,
+  ]);
+}
+
+/** Called on chat/project changes, including switches within one source repository. */
+function resetForContext(): void {
+  const key = currentContextKey();
+  if (key === contextKey) return;
+  contextKey = key;
+  generation++;
+  // Recovery UI observes a globally monotonic revision, including resets.
+  state = { ...initialState(), conflictRevision: state.conflictRevision + 1 };
+}
+
+function captureContext(): () => boolean {
+  resetForContext();
+  const key = contextKey;
+  const version = generation;
+  return () => version === generation && key === currentContextKey();
+}
+
 function syncDemoReview(): void {
   if (!isDemoMode || !sessionStore.activeSessionId) return;
   void import('$lib/demo-api').then(({ getDemoReviewChanges }) =>
@@ -54,10 +88,14 @@ function syncDemoReview(): void {
 }
 
 async function refreshStatus() {
+  const current = captureContext();
+  const request = ++statusRequest;
+  const isCurrent = () => current() && request === statusRequest;
   state.loading = true;
   try {
     const res = await apiFetch(apiUrl('/api/git/status'));
     const text = await res.text();
+    if (!isCurrent()) return;
     if (!res.ok) {
       state.status = [];
       state.branch = '';
@@ -98,30 +136,34 @@ async function refreshStatus() {
       }
     }
   } catch (err: unknown) {
+    if (!isCurrent()) return;
     console.warn('Failed to refresh git status:', err instanceof Error ? err.message : String(err));
     state.status = [];
     state.branch = '';
     state.isRepo = false;
   } finally {
-    state.loading = false;
+    if (isCurrent()) state.loading = false;
   }
 }
 
 async function fetchBranches() {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/branches'));
     if (!res.ok) return;
     const text = await res.text();
     if (!text.trim()) return;
     const data = JSON.parse(text);
-    if (data.ok) state.branches = data.data?.branches ?? [];
+    if (isCurrent() && data.ok) state.branches = data.data?.branches ?? [];
   } catch (err: unknown) {
+    if (!isCurrent()) return;
     console.warn('Failed to fetch branches:', err instanceof Error ? err.message : String(err));
     state.branches = [];
   }
 }
 
 async function checkout(branch: string, create = false) {
+  const isCurrent = captureContext();
   state.loading = true;
   try {
     const res = await apiFetch(apiUrl('/api/git/checkout'), {
@@ -129,6 +171,7 @@ async function checkout(branch: string, create = false) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ branch, create }),
     });
+    if (!isCurrent()) return;
     if (res.ok) {
       toastStore.success(`Switched to ${branch}`);
       await refreshStatus();
@@ -136,14 +179,16 @@ async function checkout(branch: string, create = false) {
       toastStore.error(`Failed to switch to ${branch}`);
     }
   } catch (err: unknown) {
+    if (!isCurrent()) return;
     console.warn('Checkout failed:', err instanceof Error ? err.message : String(err));
     toastStore.error('Checkout failed');
   } finally {
-    state.loading = false;
+    if (isCurrent()) state.loading = false;
   }
 }
 
 async function merge(branch: string) {
+  const isCurrent = captureContext();
   state.loading = true;
   try {
     const res = await apiFetch(apiUrl('/api/git/merge'), {
@@ -152,6 +197,7 @@ async function merge(branch: string) {
       body: JSON.stringify({ branch }),
     });
     const data = await res.json();
+    if (!isCurrent()) return;
     if (data.ok) {
       toastStore.success('Merge successful');
       state.conflicts = [];
@@ -164,14 +210,18 @@ async function merge(branch: string) {
     }
     await refreshStatus();
   } catch (err: unknown) {
+    if (!isCurrent()) return;
     console.warn('Merge failed:', err instanceof Error ? err.message : String(err));
     toastStore.error('Merge failed');
   } finally {
-    state.loading = false;
+    if (isCurrent()) state.loading = false;
   }
 }
 
 async function loadDiff(file: string, staged: boolean) {
+  const current = captureContext();
+  const request = ++diffRequest;
+  const isCurrent = () => current() && request === diffRequest;
   state.selectedFile = file;
   state.currentDiff = null;
   state.currentFileContent = null;
@@ -182,13 +232,14 @@ async function loadDiff(file: string, staged: boolean) {
       apiUrl(`/api/git/diff?file=${encodeURIComponent(file)}&staged=${staged}`),
     );
     const data = await res.json();
+    if (!isCurrent()) return;
     if (data.ok && data.data.diff) {
       state.currentDiff = data.data.diff;
     } else {
       // If no diff (e.g. untracked or binary), try getting content
       const contentRes = await apiFetch(apiUrl(`/api/git/file?path=${encodeURIComponent(file)}`));
       const contentData = await contentRes.json();
-      if (contentData.ok) {
+      if (isCurrent() && contentData.ok) {
         state.currentFileContent = contentData.data.content;
       }
     }
@@ -198,75 +249,84 @@ async function loadDiff(file: string, staged: boolean) {
 }
 
 function openDiff(file: string, staged: boolean) {
+  resetForContext();
   state.activeDiff = { file, staged };
   loadDiff(file, staged);
 }
 
 function closeDiff() {
+  diffRequest++;
   state.activeDiff = null;
   state.currentDiff = null;
   state.currentFileContent = null;
 }
 
 async function stageFile(file: string) {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/stage'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file }),
     });
-    if (res.ok) {
+    if (isCurrent() && res.ok) {
       await refreshStatus();
     }
   } catch (err) {
-    toastStore.error('Failed to stage file');
+    if (isCurrent()) toastStore.error('Failed to stage file');
   }
 }
 
 async function unstageFile(file: string) {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/stage'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file, unstage: true }),
     });
-    if (res.ok) {
+    if (isCurrent() && res.ok) {
       await refreshStatus();
     }
   } catch (err) {
-    toastStore.error('Failed to unstage file');
+    if (isCurrent()) toastStore.error('Failed to unstage file');
   }
 }
 
 async function discardChanges(file: string) {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/restore'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file }),
     });
+    if (!isCurrent()) return;
     if (res.ok) {
       toastStore.success('Changes discarded');
       await refreshStatus();
-      syncDemoReview();
+      if (isCurrent()) syncDemoReview();
     } else {
       toastStore.error('Failed to discard changes');
     }
   } catch (err) {
-    toastStore.error('Failed to discard changes');
+    if (isCurrent()) toastStore.error('Failed to discard changes');
   }
 }
 
 async function commit(message: string) {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/commit'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message }),
     });
+    if (!isCurrent()) return false;
     if (res.ok) {
       toastStore.success('Commit successful');
       await refreshStatus();
+      if (!isCurrent()) return false;
       syncDemoReview();
       return true;
     } else {
@@ -274,30 +334,34 @@ async function commit(message: string) {
       return false;
     }
   } catch (err) {
-    toastStore.error('Commit failed');
+    if (isCurrent()) toastStore.error('Commit failed');
     return false;
   }
 }
 
 async function push() {
+  const isCurrent = captureContext();
   try {
     const res = await apiFetch(apiUrl('/api/git/push'), { method: 'POST' });
     const data = await res.json();
+    if (!isCurrent()) return;
     if (data.ok) {
       toastStore.success('Push successful');
     } else {
       toastStore.error('Push failed: ' + data.error);
     }
   } catch (err) {
-    toastStore.error('Push failed');
+    if (isCurrent()) toastStore.error('Push failed');
   }
 }
 
 async function pull() {
+  const isCurrent = captureContext();
   state.loading = true;
   try {
     const res = await apiFetch(apiUrl('/api/git/pull'), { method: 'POST' });
     const data = await res.json();
+    if (!isCurrent()) return;
     if (data.ok) {
       toastStore.success('Pull successful');
       state.conflicts = [];
@@ -310,9 +374,9 @@ async function pull() {
     }
     await refreshStatus();
   } catch (err) {
-    toastStore.error('Pull failed');
+    if (isCurrent()) toastStore.error('Pull failed');
   } finally {
-    state.loading = false;
+    if (isCurrent()) state.loading = false;
   }
 }
 
@@ -320,10 +384,17 @@ function clearConflicts() {
   state.conflicts = [];
 }
 
+function reportConflicts(files: string[]) {
+  resetForContext();
+  state.conflicts = files;
+  state.conflictRevision += 1;
+}
+
 export const gitStore = {
   get state() {
     return state;
   },
+  resetForContext,
   refreshStatus,
   loadDiff,
   openDiff,
@@ -337,4 +408,5 @@ export const gitStore = {
   checkout,
   merge,
   clearConflicts,
+  reportConflicts,
 };

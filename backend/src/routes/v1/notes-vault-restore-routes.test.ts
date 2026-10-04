@@ -111,7 +111,7 @@ describe('Notes vault restore routes', () => {
     };
     expect(preview).toMatchObject({
       ok: true,
-      data: { notes: 1, revisions: 1, canRestore: true, conflicts: [] },
+      data: { notes: 1, revisions: 1, relationships: 0, canRestore: true, conflicts: [] },
     });
     expect(preview.data.archiveSha256).toMatch(/^[a-f0-9]{64}$/);
 
@@ -135,6 +135,8 @@ describe('Notes vault restore routes', () => {
       data: {
         restoredNotes: 1,
         restoredRevisions: 1,
+        relationships: 0,
+        restoredRelationships: 0,
         canRestore: true,
       },
     });

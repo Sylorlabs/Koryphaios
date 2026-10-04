@@ -142,10 +142,10 @@
     {
       "url": "https://mlflow.org/docs/latest/ml/model-registry",
       "sourceType": "reference-implementation",
-      "versionScope": "MLflow 3.15.2 latest documentation as available 2026-09-19",
+      "versionScope": "Rolling MLflow model-registry documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current model registry versioning, lineage, aliases/tags, model signatures and production workflow semantics.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/online-serving-types",
@@ -153,7 +153,7 @@
       "versionScope": "Google Cloud Feature Store online serving documentation updated 2026-09-01",
       "staleAfterDays": 14,
       "notes": "Current online-serving modes and deprecation-sensitive feature-store behavior; verify platform product naming/version before implementation.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/machine-learning/featurestore/latest/serve-feature-values",
@@ -161,7 +161,7 @@
       "versionScope": "Google Cloud Feature Store serving documentation updated 2026-09-02",
       "staleAfterDays": 14,
       "notes": "Latest-value/entity semantics, sync requirements and feature timestamps for online serving.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://www.nist.gov/itl/ai-risk-management-framework",

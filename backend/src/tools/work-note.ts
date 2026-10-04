@@ -1,5 +1,6 @@
 import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registry';
 import { createNote } from '../notes/notes-service';
+import { noteHostProvenance } from './note-host-provenance';
 import { broadcastNotesNetworkUpdate } from '../notes/notes-events';
 import {
   buildWorkNote,
@@ -151,15 +152,7 @@ export const recordWorkNoteTool: Tool = {
         relatedNotes: stringArray(raw.relatedNotes),
         includeInContext: Boolean(raw.includeInContext),
       };
-      const built = buildWorkNote(input, {
-        sessionId: ctx.sessionId,
-        provider: ctx.activeProvider,
-        model: ctx.activeModel,
-        reasoningLevel: ctx.reasoningLevel,
-        agentId: ctx.agentId,
-        goalId: ctx.goalId,
-        goalItemId: ctx.goalItemId,
-      });
+      const built = buildWorkNote(input, noteHostProvenance(ctx));
       const note = await createNote(built, ctx.workingDirectory);
       broadcastNotesNetworkUpdate('create', note.id, ctx.sessionId);
       return {

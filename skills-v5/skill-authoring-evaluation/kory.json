@@ -121,9 +121,8 @@
     {
       "url": "https://github.com/openai/skills/blob/main/skills/.system/skill-creator/SKILL.md",
       "sourceType": "reference-implementation",
-      "versionScope": "openai/skills main",
-      "revision": "49f948faa9258a0c61caceaf225e179651397431",
-      "verifiedAt": "2026-09-01",
+      "versionScope": "openai/skills main SKILL.md content retrieved on 2026-10-02; current commit identity not verified",
+      "verifiedAt": "2026-10-02",
       "staleAfterDays": 30,
       "license": "See upstream repository license",
       "notes": "Skill concision, deterministic helpers, validation, and iterative evaluation patterns."
@@ -139,24 +138,24 @@
     {
       "url": "https://developers.openai.com/codex/skills",
       "sourceType": "official-docs",
-      "versionScope": "OpenAI ChatGPT/Codex skill guidance available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "OpenAI Build skills guidance available on 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Progressive disclosure, description-driven implicit invocation, context-budget discipline, instruction-first authoring, and package resource conventions."
+      "notes": "Progressive disclosure, description-driven implicit invocation, bounded initial skill-discovery context, explicit implicit-invocation policy, instruction-first authoring, and package resource conventions."
     },
     {
-      "url": "https://docs.cursor.com/context/skills",
+      "url": "https://cursor.com/docs/skills",
       "sourceType": "official-docs",
-      "versionScope": "Cursor skill guidance available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "Cursor Agent Skills guidance available on 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
-      "notes": "Competitive reference for reusable task-specific agent guidance and context-scoped loading."
+      "notes": "Competitive reference for automatic and manual invocation, path-scoped loading, progressive resources, and explicit model-invocation control. The previous docs.cursor.com/context/skills URL now redirects to the general docs root."
     },
     {
       "url": "https://github.com/anthropics/skills",
       "sourceType": "reference-implementation",
-      "versionScope": "anthropics/skills main as available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "anthropics/skills main at 8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4, inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "See upstream repository license and per-skill notices",
       "notes": "Production and example skill packages showing simple SKILL.md frontmatter, supporting resources, and cross-surface distribution."
@@ -164,8 +163,8 @@
     {
       "url": "https://github.com/mattpocock/skills",
       "sourceType": "community-pattern",
-      "versionScope": "mattpocock/skills main as available on 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "mattpocock/skills main at d81f3a183412e71a5b1e84ca21bc1a35eea03a60, inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT repository; verify embedded third-party material separately",
       "notes": "Community reference for small composable engineering skills, explicit user/model invocation boundaries, shared project language, and disciplined engineering workflows."

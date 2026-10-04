@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe('systems protocol concept fixtures', () => {
-  test('every explicit scenario becomes executable without widening unrelated environments', () => {
+  test('explicit scenarios are executable unless the component fixture declares full-task blockers', () => {
     const packages = loadV5SkillPackages().packages;
     const readiness = auditSkillEvalExecutionReadiness(
       packages,
@@ -31,7 +31,7 @@ describe('systems protocol concept fixtures', () => {
     expect(SYSTEMS_PROTOCOL_CONCEPTS).toHaveLength(26);
     for (const definition of SYSTEMS_PROTOCOL_CONCEPTS) {
       expect(readiness.find((row) => row.scenarioId === definition.id)?.ready, definition.id).toBe(
-        true,
+        !definition.blockers?.length,
       );
     }
   });

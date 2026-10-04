@@ -26,6 +26,45 @@ afterEach(() => {
 });
 
 describe('protocol-v3 regression closure', () => {
+  test('an integrity-failed no-skill arm is retained as history but cannot block or improve the candidate', () => {
+    const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
+    const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
+
+    recordSkillEvaluationRun(root, {
+      id: 'corrupted-baseline-without-skill',
+      skill: skill.name,
+      revisionHash: skill.hash,
+      caseId: scenario.id,
+      provider: 'baseline-provider',
+      model: 'baseline-model',
+      harnessVersion: 'v3:baseline-integrity',
+      role: 'worker',
+      evaluator: 'deterministic',
+      passed: false,
+      quality: 0,
+      verification: 0,
+      integrityFailure: true,
+      evidence: ['baseline mutated evaluator-owned input'],
+      recordedAt: '2026-09-01T12:00:00Z',
+      protocolVersion: 3,
+      variant: 'without-skill',
+      caseCategory: 'full-task',
+      comparisonId: 'corrupted-baseline-pair',
+      routing: { expectedSelection: true, selected: true },
+      suiteId: 'skill-authoring-evaluation:v5.0.0:held-out',
+      scenarioId: scenario.id,
+      experimentId: 'corrupted-baseline-without-skill',
+      evaluationContractHash: '3333333333333333',
+      evaluationContractVersion: CURRENT_SKILL_EVAL_CONTRACT_VERSION,
+      materializerId: 'fixture@1',
+      deterministicScorerId: 'scorer@1',
+    });
+
+    const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
+    expect(gate.reasons).not.toContain('At least one run recorded an integrity failure.');
+    expect(gate.pairedBaselineCases).toBe(0);
+  });
+
   test('current revision paired evidence closes a historical regression across provider and model changes', () => {
     const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;

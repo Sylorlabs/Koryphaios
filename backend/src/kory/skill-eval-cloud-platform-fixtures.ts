@@ -31,6 +31,149 @@ function nestedBoolean(value: unknown, key: string, expected: boolean): boolean 
   return Object.values(record).some((item) => nestedBoolean(item, key, expected));
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function nonEmptyString(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function nonEmptyStringArray(value: unknown, minimum = 1): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length >= minimum &&
+    value.every((item) => typeof item === 'string' && item.trim().length > 0)
+  );
+}
+
+const AWS_REQUIREMENT_KEYS = [
+  'account',
+  'region',
+  'workload',
+  'compliance',
+  'network',
+  'identity',
+  'data',
+  'availability',
+  'operational',
+] as const;
+
+function awsRequirementsAreExplicit(value: unknown): boolean {
+  const requirements = record(value);
+  return Boolean(requirements && AWS_REQUIREMENT_KEYS.every((key) => requirements[key] === true));
+}
+
+export function gcpFailbackEvidenceIsExplicit(artifact: unknown, text: string): boolean {
+  return (
+    nestedBoolean(artifact, 'failbackExercised', true) ||
+    nestedBoolean(artifact, 'failbackExercised', false) ||
+    /failback.*unverified|failback.*not.*verified/u.test(text)
+  );
+}
+
+export function awsRecoveryEnvironmentEvidenceIsExplicit(artifact: unknown, text: string): boolean {
+  const root = record(artifact);
+  const environment = record(root?.environment);
+  const effectiveAccess = record(root?.effectiveAccess);
+  const iam = record(effectiveAccess?.iam);
+  const kms = record(effectiveAccess?.kms);
+  const audit = record(root?.audit);
+  return Boolean(
+    root &&
+      root.evidenceKind === 'synthetic' &&
+      root.liveProviderVerified === false &&
+      awsRequirementsAreExplicit(root.requirementsConfirmed) &&
+      nonEmptyString(environment?.workloadAccount) &&
+      nonEmptyString(environment?.recoveryAccount) &&
+      nonEmptyString(environment?.primaryRegion) &&
+      nonEmptyString(environment?.secondaryRegion) &&
+      nonEmptyString(environment?.callerPrincipal) &&
+      nonEmptyString(environment?.workloadRole) &&
+      nonEmptyStringArray(environment?.networkPath) &&
+      nonEmptyStringArray(iam?.allowedPaths) &&
+      nonEmptyStringArray(iam?.deniedPaths) &&
+      nonEmptyString(kms?.keyPolicyOwner) &&
+      nonEmptyString(kms?.grantScope) &&
+      nonEmptyString(audit?.cloudTrail) &&
+      nonEmptyString(audit?.config) &&
+      nonEmptyString(audit?.cloudWatch) &&
+      nonEmptyString(root.quotaEvidence) &&
+      nonEmptyString(root.backupOrFailoverEvidence) &&
+      nonEmptyString(root.rollbackEvidence) &&
+      nonEmptyStringArray(root.decisionSequence, 3) &&
+      /synthetic|simulated/u.test(text),
+  );
+}
+
+export function awsBaselineEffectiveAccessEvidenceIsExplicit(
+  artifact: unknown,
+  text: string,
+): boolean {
+  const root = record(artifact);
+  const environment = record(root?.environment);
+  const effectiveAccess = record(root?.effectiveAccess);
+  const iam = record(effectiveAccess?.iam);
+  const kms = record(effectiveAccess?.kms);
+  const audit = record(root?.audit);
+  return Boolean(
+    root &&
+      root.evidenceKind === 'synthetic' &&
+      root.liveProviderVerified === false &&
+      awsRequirementsAreExplicit(root.requirementsConfirmed) &&
+      nonEmptyString(environment?.accountId) &&
+      nonEmptyString(environment?.region) &&
+      nonEmptyString(environment?.callerPrincipal) &&
+      nonEmptyString(environment?.workloadRole) &&
+      nonEmptyStringArray(environment?.networkPath) &&
+      nonEmptyStringArray(iam?.allowedPaths) &&
+      nonEmptyStringArray(iam?.deniedPaths) &&
+      nonEmptyString(kms?.keyPolicyOwner) &&
+      nonEmptyString(kms?.grantScope) &&
+      nonEmptyString(audit?.cloudTrail) &&
+      nonEmptyString(audit?.config) &&
+      nonEmptyString(audit?.cloudWatch) &&
+      nonEmptyStringArray(root.decisionSequence, 3) &&
+      /synthetic|simulated/u.test(text),
+  );
+}
+
+const AWS_EVIDENCE_SPEC_TYPES = `export interface AwsRequirementsConfirmed {
+  account: boolean; region: boolean; workload: boolean; compliance: boolean; network: boolean;
+  identity: boolean; data: boolean; availability: boolean; operational: boolean;
+}
+
+export interface AwsEffectiveAccessEvidence {
+  iam: { allowedPaths: string[]; deniedPaths: string[] };
+  kms: { keyPolicyOwner: string; grantScope: string };
+}
+
+export interface AwsBaselineEvidenceSpec {
+  evidenceKind: 'synthetic';
+  requirementsConfirmed: AwsRequirementsConfirmed;
+  environment: { accountId: string; region: string; callerPrincipal: string; workloadRole: string; networkPath: string[] };
+  effectiveAccess: AwsEffectiveAccessEvidence;
+  audit: { cloudTrail: string; config: string; cloudWatch: string };
+  decisionSequence: string[];
+  liveProviderVerified: false;
+}
+
+export interface AwsRecoveryEvidenceSpec {
+  evidenceKind: 'synthetic';
+  requirementsConfirmed: AwsRequirementsConfirmed;
+  environment: { workloadAccount: string; recoveryAccount: string; primaryRegion: string; secondaryRegion: string; callerPrincipal: string; workloadRole: string; networkPath: string[] };
+  effectiveAccess: AwsEffectiveAccessEvidence;
+  audit: { cloudTrail: string; config: string; cloudWatch: string };
+  quotaEvidence: string;
+  backupOrFailoverEvidence: string;
+  rollbackEvidence: string;
+  decisionSequence: string[];
+  liveProviderVerified: false;
+}
+`;
+
 const CLOUD_SIM = `export interface BaselineSpec {
   provider: 'aws'|'gcp'|'azure';
   placement: { managementPlaneEmptyOfWorkload:boolean; workloadBoundary:string; loggingBoundary:string };
@@ -143,7 +286,7 @@ function baselineMaterializer(
   provider: 'aws' | 'gcp' | 'azure',
 ): SkillEvalFixtureMaterializer {
   return {
-    id: `${provider}-cloud/production-baseline@1`,
+    id: `${provider}-cloud/production-baseline@${provider === 'aws' ? '2' : '1'}`,
     matches: (scenario) => scenario.id === scenarioId,
     materialize: (destination) => {
       writeFixtureFile(destination, 'package.json', packageJson(`kory-eval-${provider}-baseline`));
@@ -156,7 +299,7 @@ function baselineMaterializer(
       writeFixtureFile(destination, 'tests/.gitkeep', '');
       const providerSpecific =
         provider === 'aws'
-          ? 'Use the supplied member workload account and protected log-archive account; human federation is IAM Identity Center/temporary sessions; workload access is dedicated roles. Compute/ALB and RDS availability span at least two AZs. Durable audit means multi-account/Region CloudTrail plus Config aggregation and CloudWatch ownership. RDS Multi-AZ standby is availability, not read scaling. Change evidence is a reviewed CloudFormation change set/drift/rollback path.'
+          ? 'Use the supplied member workload account and protected log-archive account; human federation is IAM Identity Center/temporary sessions; workload access is dedicated roles. Compute/ALB and RDS availability span at least two AZs. Durable audit means multi-account/Region CloudTrail plus Config aggregation and CloudWatch ownership. RDS Multi-AZ standby is availability, not read scaling. Change evidence is a reviewed CloudFormation change set/drift/rollback path. The evidence artifact must include effective KMS key-policy/grant ownership and representative IAM allowed and denied paths; identity labels alone are insufficient.'
           : provider === 'gcp'
             ? 'Use the supplied organization/folder with workload, network and audit projects; identity is workforce/deployment federation or impersonation plus attached workload identities. Networking uses Shared VPC/private service paths and a demonstrated denied isolation path. Central logging has explicit sink/ownership/retention. Change evidence preserves target project/region, quotas, reviewed resource operations and rollback/recovery.'
             : 'Use the supplied Entra tenant, management groups and workload/network/logging subscriptions; application access uses managed identity and least-privilege RBAC. Networking uses hub/private endpoint/Private DNS paths and a demonstrated denied isolation path. Activity/resource logs use Azure Monitor diagnostic settings with observed ingestion. Change evidence preserves tenant/subscription/region/SKU, quotas and rollback/recovery.';
@@ -179,7 +322,7 @@ function baselineScorer(
   provider: 'aws' | 'gcp' | 'azure',
 ): SkillEvalDeterministicScorer {
   return {
-    id: `${provider}-cloud/production-baseline-scorer@1`,
+    id: `${provider}-cloud/production-baseline-scorer@${provider === 'aws' ? '2' : '1'}`,
     scenarioIds: [scenarioId],
     score: ({ workingDirectory }) => {
       const hidden = runHiddenBunTest(
@@ -202,16 +345,20 @@ test('hidden: recovery is observed rather than configured-only',()=>{expect(s.re
         /principal|identity/u.test(evidence.text) &&
         /synthetic|simulated/u.test(evidence.text) &&
         nestedBoolean(evidence.artifact, 'liveProviderVerified', false);
-      const passed = hidden.passed && fixed && startPreserved && bounded;
+      const effectiveAccessBounded =
+        provider !== 'aws' ||
+        awsBaselineEffectiveAccessEvidenceIsExplicit(evidence.artifact, evidence.text);
+      const passed = hidden.passed && fixed && startPreserved && bounded && effectiveAccessBounded;
       return {
         passed,
-        quality: passed ? 1 : hidden.passed && fixed ? 0.8 : hidden.passed ? 0.6 : 0,
+        quality: passed ? 1 : hidden.passed && fixed && bounded ? 0.8 : hidden.passed ? 0.6 : 0,
         verification: hidden.passed ? 1 : 0,
         integrityFailure: !fixed || !startPreserved,
         evidence: [
           `${provider} baseline simulation: ${hidden.passed ? 'pass' : 'fail'}`,
           `fixed simulator/start state preserved: ${fixed && startPreserved ? 'yes' : 'no'}`,
           `identity/restore/change evidence: ${bounded ? 'bounded' : 'missing'}`,
+          `effective AWS IAM/KMS evidence: ${effectiveAccessBounded ? 'bounded' : 'missing'}`,
           hidden.evidence,
         ],
       };
@@ -224,7 +371,7 @@ function recoveryMaterializer(
   provider: 'aws' | 'gcp' | 'azure',
 ): SkillEvalFixtureMaterializer {
   return {
-    id: `${provider}-cloud/regional-recovery@1`,
+    id: `${provider}-cloud/regional-recovery@${provider === 'aws' ? '2' : '1'}`,
     matches: (scenario) => scenario.id === scenarioId,
     materialize: (destination) => {
       writeFixtureFile(destination, 'package.json', packageJson(`kory-eval-${provider}-recovery`));
@@ -241,6 +388,10 @@ function recoveryMaterializer(
           : provider === 'gcp'
             ? 'Use dedicated attached/short-lived service identities, secondary-region networking/service quotas, and a recovery project whose data plus KMS/Secret Manager ownership cannot be trivially destroyed from the primary workload project.'
             : 'Use dedicated managed identities, secondary-region hub/private connectivity plus exact service/SKU quotas, and a recovery subscription whose data plus Key Vault/key ownership cannot be trivially destroyed from the primary workload subscription.';
+      const providerEvidence =
+        provider === 'aws'
+          ? ' Also write \`.kory-eval/cloud-recovery-evidence.json\` with the synthetic organization/account and primary/secondary Region boundary, caller/workload identity, VPC/network path, RDS/S3/KMS/Secrets Manager ownership, secondary quota snapshot, CloudTrail/Config/CloudWatch evidence, backup/failover observation, reviewed rollback path, and explicit \`liveProviderVerified:false\` plus synthetic/simulated labels.'
+          : '';
       writeFixtureFile(
         destination,
         'README.md',
@@ -248,7 +399,7 @@ function recoveryMaterializer(
 
 Preserve the fixed simulator/start evidence. Write \`.kory-eval/cloud-recovery.json\` matching \`RecoverySpec\`. Required Regional-outage objectives are exactly RTO 240 minutes and RPO 15 minutes. ${providerSpecific}
 
-Zonal/Multi-AZ/zone-redundant availability is not Regional DR proof. Before failover, prove secondary networking/service availability/quota/capacity. Execute an actual restore or failover and validate data usability. Record incident-start, recovery-point and service-restored timestamps plus calculated observed RPO/RTO. Telemetry must remain available. Failback should be exercised; if it is not, report that limitation explicitly rather than implying success. Set \`liveProviderVerified:false\` and label the fixture synthetic.
+Zonal/Multi-AZ/zone-redundant availability is not Regional DR proof. Before failover, prove secondary networking/service availability/quota/capacity. Execute an actual restore or failover and validate data usability. Record incident-start, recovery-point and service-restored timestamps plus calculated observed RPO/RTO. Telemetry must remain available. Failback should be exercised; if it is not, report that limitation explicitly rather than implying success. Set \`liveProviderVerified:false\` and label the fixture synthetic.${providerEvidence}
 `,
       );
     },
@@ -260,7 +411,7 @@ function recoveryScorer(
   provider: 'aws' | 'gcp' | 'azure',
 ): SkillEvalDeterministicScorer {
   return {
-    id: `${provider}-cloud/regional-recovery-scorer@1`,
+    id: `${provider}-cloud/regional-recovery-scorer@${provider === 'azure' ? '1' : '2'}`,
     scenarioIds: [scenarioId],
     score: ({ workingDirectory }) => {
       const hidden = runHiddenBunTest(
@@ -277,18 +428,38 @@ test('hidden: actual drill and timestamps satisfy objectives',()=>{expect(s.dril
       const report = artifactText(workingDirectory, '.kory-eval/cloud-recovery.json');
       const failbackBounded =
         Boolean(report.artifact) &&
-        (nestedBoolean(report.artifact, 'failbackExercised', true) ||
-          /failback.*unverified|failback.*not.*verified/u.test(report.text));
-      const passed = hidden.passed && fixed && startPreserved && failbackBounded;
+        (provider === 'gcp'
+          ? gcpFailbackEvidenceIsExplicit(report.artifact, report.text)
+          : nestedBoolean(report.artifact, 'failbackExercised', true) ||
+            /failback.*unverified|failback.*not.*verified/u.test(report.text));
+      const environmentEvidence = artifactText(
+        workingDirectory,
+        '.kory-eval/cloud-recovery-evidence.json',
+      );
+      const environmentBounded =
+        provider !== 'aws' ||
+        awsRecoveryEnvironmentEvidenceIsExplicit(
+          environmentEvidence.artifact,
+          environmentEvidence.text,
+        );
+      const passed =
+        hidden.passed && fixed && startPreserved && failbackBounded && environmentBounded;
       return {
         passed,
-        quality: passed ? 1 : hidden.passed && fixed ? 0.8 : hidden.passed ? 0.6 : 0,
+        quality: passed
+          ? 1
+          : hidden.passed && fixed && failbackBounded
+            ? 0.8
+            : hidden.passed
+              ? 0.6
+              : 0,
         verification: hidden.passed ? 1 : 0,
         integrityFailure: !fixed || !startPreserved,
         evidence: [
           `${provider} Regional recovery drill: ${hidden.passed ? 'pass' : 'fail'}`,
           `fixed simulator/start state preserved: ${fixed && startPreserved ? 'yes' : 'no'}`,
           `failback evidence explicitly bounded: ${failbackBounded ? 'yes' : 'missing'}`,
+          `broader AWS environment evidence: ${environmentBounded ? 'bounded' : 'missing'}`,
           hidden.evidence,
         ],
       };

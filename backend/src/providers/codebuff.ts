@@ -16,7 +16,18 @@ import {
 
 export const CODEBUFF_BASE_AGENT = 'codebuff/base@0.0.16';
 
+// SDK 0.10.7's additionalToolDefinitions filters custom definitions by the
+// agent template's toolNames; executeCustomToolCall also rejects unlisted names.
+// The public API cannot append toolNames to a published store agent. Supplying
+// customToolDefinitions alone (as the legacy adapter did for base) is not Notes
+// support. A custom AgentDefinition would replace, not extend, the pinned agent.
+export const CODEBUFF_NOTES_UNAVAILABLE =
+  'Koryphaios Notes tools are unavailable in this Codebuff store-agent integration. ' +
+  'Do not claim to search, read, create, or review Kory Notes through tools. ' +
+  'SDK custom Notes tools require a separately configured custom agent, not just customToolDefinitions.';
+
 export class CodebuffProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'codebuff' as const;
 
   constructor(readonly config: ProviderConfig) {}
@@ -33,7 +44,7 @@ export class CodebuffProvider implements Provider {
   }
 
   getModelDiscoveryError(): string | undefined {
-    return 'The Codebuff SDK exposes runnable store agent IDs, not a model catalog. This adapter pins the documented codebuff/base@0.0.16 agent.';
+    return `The Codebuff SDK exposes runnable store agent IDs, not a model catalog. This adapter pins the documented codebuff/base@0.0.16 agent. ${CODEBUFF_NOTES_UNAVAILABLE}`;
   }
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
@@ -90,6 +101,7 @@ export class CodebuffProvider implements Provider {
       knowledgeFiles: {
         'knowledge.md': [
           request.systemPrompt,
+          CODEBUFF_NOTES_UNAVAILABLE,
           'Koryphaios owns authoritative filesystem and command execution. Supported SDK filesystem and terminal tools are overridden and routed through Kory ToolRegistry and permission policy. Any provider-local planning artifact is confined to a disposable workspace and does not change the real project.',
         ]
           .filter(Boolean)

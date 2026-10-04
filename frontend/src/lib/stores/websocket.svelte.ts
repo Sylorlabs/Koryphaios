@@ -1453,7 +1453,7 @@ async function sendMessage(
   reasoningLevel?: string,
   attachments?: Array<{ type: string; data: string; name: string; mimeType?: string }>,
   fastMode?: boolean,
-  imageInputMode: 'reject' | 'omit' = 'reject',
+  imageInputMode: 'reject' | 'omit' | 'allow' = 'reject',
 ): Promise<boolean> {
   const optimisticEntryId = feedStore.addUserMessage(sessionId, content, attachments);
   runStateStore.startRun(sessionId);

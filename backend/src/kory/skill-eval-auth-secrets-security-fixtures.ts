@@ -24,12 +24,14 @@ function artifactText(root: string, path: string): { artifact: unknown | null; t
 
 const AUTH_POLICY = `export type AuthMethod='password'|'webauthn'|'otp'|'recovery-code'|'recovery-email'|'helpdesk';
 export interface ConsumerAuthSpec {
-  password:{verifier:string;memoryHard:boolean;compromisedScreening:boolean;antiEnumeration:boolean;throttleDimensions:string[];globalAttackerLockout:boolean};
-  webauthn:{challengeFreshnessSeconds:number;rpId:string;origins:string[];requireUserVerification:boolean;verifyCredentialIdentity:boolean;verifySignature:boolean;duplicateEnrollmentRejected:boolean};
-  recovery:{codesSingleUse:boolean;codesProtectedLikeAuthenticator:boolean;lostDeviceRequiresDeliberateRecovery:boolean;recoveryEmailAloneResetsAll:boolean};
+  password:{verifier:string;verifierParameters:string;salted:boolean;memoryHard:boolean;compromisedScreening:boolean;rejectCompromisedOrCommon:boolean;antiEnumeration:boolean;throttleDimensions:string[];progressiveBackoff:boolean;throttlePolicy:string;globalAttackerLockout:boolean};
+  webauthn:{challengeFreshnessSeconds:number;rpId:string;origins:string[];requireUserVerification:boolean;verifyCredentialIdentity:boolean;verifySignature:boolean;duplicateEnrollmentRejected:boolean;enrollmentRequiresCurrentAssurance:boolean};
+  recovery:{codesSingleUse:boolean;codesProtectedLikeAuthenticator:boolean;lostDeviceRequiresDeliberateRecovery:boolean;recoveryEmailAloneResetsAll:boolean;deliberateRecoveryAssurance:string[];authenticatorReplacementRequiresCurrentOrRecoveryAssurance:boolean;strongPolicyBypassAllowed:boolean};
   freshAuth:{maxAgeSeconds:number;primaryEmail:boolean;removeAuthenticator:boolean;resetAllAuthenticators:boolean;exportRecoveryMaterial:boolean};
+  recoveryResponse:{revokeExistingSessions:boolean;rotateRefreshCredentials:boolean;securityEventRecorded:boolean};
   compromise:{revokeExistingSessions:boolean;rotateRefreshCredentials:boolean;securityEventRecorded:boolean};
   phishingResistantMethods:AuthMethod[];
+  nonPhishingResistantMethods:AuthMethod[];
   oauthOidcInScope:boolean;
 }
 export interface WebAuthnAttempt{challengeAgeSeconds:number;rpId:string;origin:string;credentialKnown:boolean;signatureValid:boolean;userVerified:boolean}
@@ -132,7 +134,7 @@ const AUTH_CORPUS = `${JSON.stringify(
 )}\n`;
 
 const consumerAuthMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'secure-authentication/consumer-passkey-recovery@1',
+  id: 'secure-authentication/consumer-passkey-recovery@2',
   matches: (scenario) => scenario.id === CONSUMER_AUTH,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-consumer-auth'));
@@ -144,26 +146,27 @@ const consumerAuthMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Consumer authentication/passkey design fixture
 
-Preserve the evaluator/corpus. Write \`.kory-eval/consumer-auth.json\` as \`ConsumerAuthSpec\`. Password verifiers must use a current memory-hard password KDF, screen compromised/common passwords, avoid existence leaks, and throttle across multiple abuse dimensions without an attacker-controlled global lockout key.
+Preserve the evaluator/corpus. Write \`.kory-eval/consumer-auth.json\` as \`ConsumerAuthSpec\`. Password verifiers must use a salted current memory-hard password KDF with explicit verifier parameters, reject compromised/common passwords according to the screening policy, avoid existence leaks, and define concrete progressive throttling/backoff across the supplied abuse dimensions without an attacker-controlled global lockout key.
 
-For WebAuthn, use the supplied RP ID/origin and validate challenge freshness, credential identity, signature, and user verification. Duplicate enrollment is rejected. Recovery codes are single-use/protected like authenticators; recovery email alone may not silently reset all strong authenticators. Primary-email change, authenticator removal/reset, and recovery-material export require fresh auth or the deliberate recovery flow. Recovery/compromise revokes existing sessions, rotates refresh credentials, and records a security event.
+For WebAuthn, use the supplied literal RP ID/origin and validate challenge freshness, credential identity, signature, and user verification. Duplicate enrollment is rejected and enrollment requires current assurance. Recovery codes are single-use/protected like authenticators; recovery email alone may not silently reset all strong authenticators. Define the assurance factors/state transition for lost-device recovery and authenticator replacement so recovery cannot bypass the stronger policy. Primary-email change, authenticator removal/reset, and recovery-material export require fresh auth or the deliberate recovery flow. Successful recovery and suspected compromise each explicitly revoke existing sessions, rotate refresh credentials, and record a security event.
 
-Only WebAuthn/passkey is phishing-resistant in this fixture; password, OTP, recovery email/code and helpdesk are not. Set \`oauthOidcInScope:false\` and keep federation out of this skill. Label evidence synthetic/design-only.
+Only WebAuthn/passkey is phishing-resistant in this fixture; explicitly list password, OTP, recovery email/code and helpdesk as non-phishing-resistant. Set \`oauthOidcInScope:false\` and keep federation out of this skill. Label evidence synthetic/design-only.
 `,
     );
   },
 };
 
 const consumerAuthScorer: SkillEvalDeterministicScorer = {
-  id: 'secure-authentication/consumer-passkey-recovery-scorer@2',
+  id: 'secure-authentication/consumer-passkey-recovery-scorer@3',
   scenarioIds: [CONSUMER_AUTH],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{acceptWebAuthn,type ConsumerAuthSpec,type WebAuthnAttempt}from'../src/auth-policy';
 const spec=JSON.parse(readFileSync('.kory-eval/consumer-auth.json','utf8')) as ConsumerAuthSpec;const corpus=JSON.parse(readFileSync('evidence/auth-corpus.json','utf8')) as any;
-test('hidden: WebAuthn corpus is enforced by RP/origin/challenge/credential/signature/UV',()=>{expect(spec.webauthn.rpId).toBe(corpus.rpId);expect(spec.webauthn.origins).toEqual(corpus.allowedOrigins);expect(spec.webauthn.challengeFreshnessSeconds).toBeGreaterThan(0);expect(spec.webauthn.challengeFreshnessSeconds).toBeLessThan(900);for(const row of corpus.webauthn)expect(acceptWebAuthn(spec,row as WebAuthnAttempt),row.id).toBe(row.expected);expect(spec.webauthn.duplicateEnrollmentRejected).toBe(true);});
-test('hidden: password/recovery/fresh-auth/compromise contracts do not weaken passkeys',()=>{expect(spec.password.memoryHard).toBe(true);expect(spec.password.compromisedScreening).toBe(true);expect(spec.password.antiEnumeration).toBe(true);expect(spec.password.throttleDimensions.length).toBeGreaterThanOrEqual(3);expect(spec.password.globalAttackerLockout).toBe(false);expect(spec.recovery.codesSingleUse).toBe(true);expect(spec.recovery.codesProtectedLikeAuthenticator).toBe(true);expect(spec.recovery.lostDeviceRequiresDeliberateRecovery).toBe(true);expect(spec.recovery.recoveryEmailAloneResetsAll).toBe(false);for(const k of ['primaryEmail','removeAuthenticator','resetAllAuthenticators','exportRecoveryMaterial'] as const)expect(spec.freshAuth[k]).toBe(true);expect(spec.compromise.revokeExistingSessions).toBe(true);expect(spec.compromise.rotateRefreshCredentials).toBe(true);expect(spec.compromise.securityEventRecorded).toBe(true);expect(spec.phishingResistantMethods).toEqual(['webauthn']);expect(spec.oauthOidcInScope).toBe(false);});
+test('hidden: WebAuthn corpus is enforced by RP/origin/challenge/credential/signature/UV',()=>{expect(spec.webauthn.rpId).toBe(corpus.rpId);expect(spec.webauthn.origins).toEqual(corpus.allowedOrigins);expect(spec.webauthn.challengeFreshnessSeconds).toBeGreaterThan(0);expect(spec.webauthn.challengeFreshnessSeconds).toBeLessThan(900);for(const row of corpus.webauthn)expect(acceptWebAuthn(spec,row as WebAuthnAttempt),row.id).toBe(row.expected);expect(spec.webauthn.duplicateEnrollmentRejected).toBe(true);expect(spec.webauthn.enrollmentRequiresCurrentAssurance).toBe(true);});
+test('hidden: password abuse controls are concrete rather than boolean completion claims',()=>{expect(spec.password.verifier.length).toBeGreaterThan(0);expect(spec.password.verifierParameters.length).toBeGreaterThan(8);expect(spec.password.salted).toBe(true);expect(spec.password.memoryHard).toBe(true);expect(spec.password.compromisedScreening).toBe(true);expect(spec.password.rejectCompromisedOrCommon).toBe(true);expect(spec.password.antiEnumeration).toBe(true);for(const d of corpus.stuffingDimensions)expect(spec.password.throttleDimensions).toContain(d);expect(spec.password.progressiveBackoff).toBe(true);expect(spec.password.throttlePolicy.length).toBeGreaterThan(8);expect(spec.password.globalAttackerLockout).toBe(false);});
+test('hidden: recovery/replacement/session contracts cannot weaken passkeys',()=>{expect(spec.recovery.codesSingleUse).toBe(true);expect(spec.recovery.codesProtectedLikeAuthenticator).toBe(true);expect(spec.recovery.lostDeviceRequiresDeliberateRecovery).toBe(true);expect(spec.recovery.recoveryEmailAloneResetsAll).toBe(false);expect(spec.recovery.deliberateRecoveryAssurance.length).toBeGreaterThanOrEqual(2);expect(spec.recovery.authenticatorReplacementRequiresCurrentOrRecoveryAssurance).toBe(true);expect(spec.recovery.strongPolicyBypassAllowed).toBe(false);expect(spec.freshAuth.maxAgeSeconds).toBeGreaterThan(0);expect(spec.freshAuth.maxAgeSeconds).toBeLessThanOrEqual(900);for(const k of ['primaryEmail','removeAuthenticator','resetAllAuthenticators','exportRecoveryMaterial'] as const)expect(spec.freshAuth[k]).toBe(true);for(const response of [spec.recoveryResponse,spec.compromise]){expect(response.revokeExistingSessions).toBe(true);expect(response.rotateRefreshCredentials).toBe(true);expect(response.securityEventRecorded).toBe(true);}expect(spec.phishingResistantMethods).toEqual(['webauthn']);for(const m of ['password','otp','recovery-code','recovery-email','helpdesk'] as const)expect(spec.nonPhishingResistantMethods).toContain(m);expect(spec.nonPhishingResistantMethods).not.toContain('webauthn');expect(spec.oauthOidcInScope).toBe(false);});
 `,
     );
     const fixed = fixtureTextEquals(workingDirectory, 'src/auth-policy.ts', AUTH_POLICY);
@@ -190,7 +193,7 @@ test('hidden: password/recovery/fresh-auth/compromise contracts do not weaken pa
 };
 
 const adminAuthMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'secure-authentication/admin-step-up@1',
+  id: 'secure-authentication/admin-step-up@2',
   matches: (scenario) => scenario.id === ADMIN_AUTH,
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-admin-auth'));

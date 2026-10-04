@@ -20,11 +20,25 @@
 // The CLI spawns this as a subprocess (stdio MCP). Session ID correlates tool
 // calls back to the Kory session that owns the turn.
 
+import { writeFileSync } from 'node:fs';
 import { McpServer, fromJsonSchema } from '@modelcontextprotocol/server';
+import {
+  proposeNoteRelationshipSchema,
+  reviewNoteRelationshipSchema,
+} from '../tools/note-relationship-schema';
+import { validatedToolImages, type ToolImage } from '../tools/tool-images';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { readBridgeGrantScopeFromFile, signedBridgeHeadersFromFile } from './bridge-grant';
 
-const BRIDGE_REQUEST_TIMEOUT_MS = 30_000;
+// Catalog startup should fail promptly; tools may wait for explicit human
+// approval. Neither deadline is unlimited and neither bypasses backend policy.
+export const BRIDGE_CATALOG_TIMEOUT_MS = 30_000;
+export const BRIDGE_EXECUTE_TIMEOUT_MS = 5 * 60_000;
+
+function relayHeaders(): Record<string, string> {
+  const token = process.env.KORY_BRIDGE_RELAY_TOKEN;
+  return token ? { 'x-kory-bridge-relay': token } : {};
+}
 
 // ─── CLI arg parsing ───────────────────────────────────────────────────────
 
@@ -69,6 +83,59 @@ export interface KoryToolDef {
 }
 
 export const KORY_TOOLS: KoryToolDef[] = [
+  // Runtime schemas/descriptions are fetched from the authoritative registry.
+  ...[
+    'status',
+    'list_apps',
+    'observe',
+    'click',
+    'double_click',
+    'move',
+    'drag',
+    'type',
+    'key',
+    'scroll',
+    'wait',
+    'focus',
+  ].map((action) => {
+    const targeted = !['status', 'list_apps'].includes(action);
+    const properties: Record<string, unknown> = targeted
+      ? {
+          appId: { type: 'string', minLength: 1, maxLength: 1024 },
+          windowId: { type: 'string', minLength: 1, maxLength: 256 },
+        }
+      : {};
+    const required = targeted ? ['appId', 'windowId'] : [];
+    const extras: Record<string, Record<string, unknown>> = {
+      click: {
+        x: { type: 'integer', minimum: 0, maximum: 100000 },
+        y: { type: 'integer', minimum: 0, maximum: 100000 },
+      },
+      type: { text: { type: 'string', minLength: 1, maxLength: 10000 } },
+      double_click: {
+        x: { type: 'integer', minimum: 0, maximum: 100000 },
+        y: { type: 'integer', minimum: 0, maximum: 100000 },
+      },
+      move: {
+        x: { type: 'integer', minimum: 0, maximum: 100000 },
+        y: { type: 'integer', minimum: 0, maximum: 100000 },
+      },
+      drag: { path: { type: 'array', minItems: 2, maxItems: 100 } },
+      key: { key: { type: 'string', minLength: 1, maxLength: 80 } },
+      scroll: { delta: { type: 'integer', minimum: -100, maximum: 100 } },
+      wait: { ms: { type: 'integer', minimum: 0, maximum: 10000 } },
+    };
+    Object.assign(properties, extras[action] ?? {});
+    required.push(...Object.keys(extras[action] ?? {}));
+    return {
+      name: `kory__computer_${action}`,
+      description: `Permissioned computer ${action}; native support varies. Separate tier, role and app grants required; explicit role settings decide whether it asks or runs.`,
+      inputSchema: { type: 'object', properties, required, additionalProperties: false },
+      // Role authorization is enforced by the dedicated computer policy and
+      // editable role matrix, not a static tool-role filter.
+      role: 'any' as const,
+    };
+  }),
   // ── Filesystem tools ──
   {
     name: 'kory__read_file',
@@ -395,6 +462,44 @@ export const KORY_TOOLS: KoryToolDef[] = [
       required: ['from', 'to'],
     },
     role: 'worker',
+  },
+  {
+    name: 'kory__propose_note_relationship',
+    description:
+      'Propose one revision-bound typed evidence relationship; never accepts it as fact.',
+    inputSchema: proposeNoteRelationshipSchema,
+    role: 'worker',
+  },
+  {
+    name: 'kory__review_note_relationship',
+    description:
+      'Accept or reject a proposed relationship. Always requires separate human approval.',
+    inputSchema: reviewNoteRelationshipSchema,
+    role: 'worker',
+  },
+  {
+    name: 'kory__retrieve_note_context',
+    description:
+      'Retrieve bounded relevant project-note excerpts with lexical/semantic seeds and explainable graph paths. Read-only; never creates relationships.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string', minLength: 1, maxLength: 2000 },
+        seedIds: {
+          type: 'array',
+          maxItems: 8,
+          items: { type: 'string', minLength: 1, maxLength: 2048 },
+        },
+        limit: { type: 'integer', minimum: 1, maximum: 12 },
+        maxHops: { type: 'integer', minimum: 0, maximum: 2 },
+        maxChars: { type: 'integer', minimum: 256, maximum: 16000 },
+        excerptChars: { type: 'integer', minimum: 128, maximum: 2000 },
+        semantic: { type: 'boolean' },
+      },
+      required: ['query'],
+    },
+    role: 'any',
   },
   {
     name: 'kory__recall_notes',
@@ -808,6 +913,35 @@ export const KORY_TOOLS: KoryToolDef[] = [
 
   // ── Git ──
   {
+    name: 'kory__git_inspect',
+    description: 'Inspect the current chat Git state, commit details, or GitHub PRs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string' },
+        ref: { type: 'string' },
+        number: { type: 'integer' },
+      },
+      required: ['action'],
+    },
+    role: 'manager',
+  },
+  {
+    name: 'kory__git_switch',
+    description:
+      'Switch only the current chat checkout to a branch, commit, or PR, with dirty-work and concurrency guards.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        expectedHead: { type: 'string' },
+        expectedBranch: { type: ['string', 'null'] },
+        target: { type: 'object' },
+      },
+      required: ['expectedHead', 'expectedBranch', 'target'],
+    },
+    role: 'manager',
+  },
+  {
     name: 'kory__commit_and_create_pr',
     description: 'Commit changes and create a pull request.',
     inputSchema: {
@@ -828,6 +962,80 @@ export const KORY_TOOLS: KoryToolDef[] = [
     description: 'View an image file.',
     inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
     role: 'worker',
+  },
+
+  // ── Video ──
+  {
+    name: 'kory__generate_video',
+    description:
+      'Generate a short video clip from a text description through a connected video provider ' +
+      '(Luma, Kling AI, Prodia, Replicate). Generation is asynchronous and usually takes 30s to ' +
+      'several minutes and is billed per clip, so confirm the provider and model with the user ' +
+      'first unless they already specified one. The clip is saved to the video gallery and shown ' +
+      'to the user; the agent cannot view video frames.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'What the video shows, including motion and camera.',
+        },
+        provider: {
+          type: 'string',
+          description: 'Provider id. Omit to use the only connected provider.',
+        },
+        model: { type: 'string', description: 'Provider model id. Omit for the provider default.' },
+        duration: { type: 'string', description: 'Clip length such as "5s" or "10s".' },
+        aspectRatio: { type: 'string', description: 'Frame shape such as "16:9" or "9:16".' },
+        negativePrompt: { type: 'string', description: 'What to avoid in the clip.' },
+      },
+      required: ['prompt'],
+    },
+    role: 'manager',
+  },
+
+  // ── External long-term memory ──
+  {
+    name: 'kory__remember',
+    description:
+      'Store a durable fact in external long-term memory (Mem0 or Letta). Only for information ' +
+      'that stays true across sessions — preferences, decisions, recurring constraints. Never ' +
+      'store secrets or credentials. Does nothing unless external memory is enabled in Settings.',
+    inputSchema: {
+      type: 'object',
+      properties: { text: { type: 'string', description: 'One self-contained fact.' } },
+      required: ['text'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__recall',
+    description:
+      'Search external long-term memory (Mem0 or Letta) for facts relevant to a query, recovering ' +
+      'knowledge from earlier sessions or other machines.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What you are trying to remember.' },
+        limit: { type: 'number', description: 'Maximum memories to return.' },
+      },
+      required: ['query'],
+    },
+    role: 'any',
+  },
+  {
+    name: 'kory__forget',
+    description:
+      'Delete specific memories from external long-term memory by id. Cannot be undone, so ' +
+      'confirm with the user first. Project memory files are unaffected.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: { type: 'array', items: { type: 'string' }, description: 'Memory ids from recall.' },
+      },
+      required: ['ids'],
+    },
+    role: 'manager',
   },
 
   // ── MCP server management ──
@@ -877,12 +1085,17 @@ export function toolsForRole(role: string): KoryToolDef[] {
 
 export type RuntimeKoryToolDef = Omit<KoryToolDef, 'role'>;
 
-async function fetchAuthoritativeToolCatalog(
+export async function fetchAuthoritativeToolCatalog(
   config: ReturnType<typeof parseArgs>,
 ): Promise<RuntimeKoryToolDef[]> {
-  if (!config.sessionId || toolsForRole(config.role).length === 0) return [];
+  if (
+    !config.sessionId ||
+    !['manager', 'worker', 'coder', 'critic'].includes(config.role) ||
+    !config.authFile
+  ) {
+    throw new Error('Kory bridge catalog authorization is unavailable');
+  }
   try {
-    if (!config.authFile) return [];
     const path = '/api/v1/mcp-bridge/catalog';
     const body = { sessionId: config.sessionId, role: config.role };
     const response = await fetch(`${config.backendUrl}${path}`, {
@@ -890,18 +1103,15 @@ async function fetchAuthoritativeToolCatalog(
       headers: {
         'content-type': 'application/json',
         ...signedBridgeHeadersFromFile(config.authFile, 'mcp', 'POST', path, body),
+        ...relayHeaders(),
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+      redirect: 'error',
+      signal: AbortSignal.timeout(BRIDGE_CATALOG_TIMEOUT_MS),
     });
-    if (!response.ok) {
-      process.stderr.write(
-        `[kory-mcp-bridge] authoritative catalog unavailable (${response.status})\n`,
-      );
-      return [];
-    }
+    if (!response.ok) throw new Error('Catalog request rejected');
     const payload = (await response.json()) as { tools?: unknown };
-    if (!Array.isArray(payload.tools)) return [];
+    if (!payload || !Array.isArray(payload.tools)) throw new Error('Invalid catalog');
     const tools = payload.tools.filter(
       (tool): tool is RuntimeKoryToolDef =>
         !!tool &&
@@ -912,14 +1122,15 @@ async function fetchAuthoritativeToolCatalog(
         !!(tool as RuntimeKoryToolDef).inputSchema &&
         typeof (tool as RuntimeKoryToolDef).inputSchema === 'object',
     );
-    // A malformed or duplicated catalog must not prevent the bridge from
-    // serving the rest of the authenticated tool set.
+    // An authenticated empty list is valid. An invalid nonempty list is not
+    // evidence that this session has no tools: fail readiness instead.
+    if (tools.length !== payload.tools.length) throw new Error('Invalid catalog entries');
+    // Duplicate names do not prevent serving the authenticated tool set.
     return tools.filter(
       (tool, index) => tools.findIndex((candidate) => candidate.name === tool.name) === index,
     );
   } catch {
-    process.stderr.write('[kory-mcp-bridge] authoritative catalog unreachable\n');
-    return [];
+    throw new Error('Kory bridge authoritative catalog is unavailable');
   }
 }
 
@@ -927,7 +1138,7 @@ async function proxyToolCall(
   config: ReturnType<typeof parseArgs>,
   toolName: string,
   input: Record<string, unknown>,
-): Promise<{ content: string; isError: boolean }> {
+): Promise<{ content: string; isError: boolean; images?: ToolImage[] }> {
   if (!config.sessionId) {
     return {
       content: 'Kory MCP bridge: no session ID provided. Tool calls cannot be routed.',
@@ -952,9 +1163,11 @@ async function proxyToolCall(
       headers: {
         'content-type': 'application/json',
         ...signedBridgeHeadersFromFile(config.authFile, 'mcp', 'POST', path, body),
+        ...relayHeaders(),
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(BRIDGE_REQUEST_TIMEOUT_MS),
+      redirect: 'error',
+      signal: AbortSignal.timeout(BRIDGE_EXECUTE_TIMEOUT_MS),
     });
     if (!resp.ok) {
       return {
@@ -962,14 +1175,21 @@ async function proxyToolCall(
         isError: true,
       };
     }
-    const data = (await resp.json()) as { output?: unknown; isError?: unknown };
-    if (typeof data.output !== 'string' || (data.isError !== undefined && typeof data.isError !== 'boolean')) {
+    const data = (await resp.json()) as { output?: unknown; isError?: unknown; images?: unknown };
+    if (
+      typeof data.output !== 'string' ||
+      (data.isError !== undefined && typeof data.isError !== 'boolean')
+    ) {
       return {
         content: 'Kory backend returned an invalid tool result.',
         isError: true,
       };
     }
-    return { content: data.output, isError: data.isError ?? false };
+    return {
+      content: data.output,
+      isError: data.isError ?? false,
+      images: data.isError ? [] : validatedToolImages(data.images),
+    };
   } catch {
     return {
       content: 'Kory backend or private authorization is unavailable.',
@@ -995,7 +1215,7 @@ export function buildServer(
   proxy: (
     toolName: string,
     input: Record<string, unknown>,
-  ) => Promise<{ content: string; isError: boolean }>,
+  ) => Promise<{ content: string; isError: boolean; images?: ToolImage[] }>,
 ): McpServer {
   const server = new McpServer(
     { name: 'kory-control-plane', version: '1.0.0' },
@@ -1018,7 +1238,13 @@ export function buildServer(
         async (args: unknown) => {
           const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
           return {
-            content: [{ type: 'text' as const, text: result.content }],
+            content: [
+              { type: 'text' as const, text: result.content },
+              ...(!result.isError ? validatedToolImages(result.images) : []).map((image) => ({
+                type: 'image' as const,
+                ...image,
+              })),
+            ],
             isError: result.isError,
           };
         },
@@ -1044,7 +1270,7 @@ export const createBridgeServer = buildServer;
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function runBridge(): Promise<void> {
   const config = parseArgs(process.argv);
   try {
     const scope = readBridgeGrantScopeFromFile(config.authFile);
@@ -1056,6 +1282,16 @@ async function main(): Promise<void> {
     return;
   }
   const allowedTools = await fetchAuthoritativeToolCatalog(config);
+  if (process.argv.includes('--probe')) {
+    process.stdout.write(`${JSON.stringify({ ready: true, toolCount: allowedTools.length })}\n`);
+    return;
+  }
+  const readyPath = process.env.KORY_BRIDGE_READY_FILE;
+  if (readyPath) {
+    writeFileSync(readyPath, JSON.stringify({ ready: true, toolCount: allowedTools.length }), {
+      mode: 0o600,
+    });
+  }
 
   // serveStdio owns the stdio transport and serves the 2026-07-28 protocol
   // revision by default, with 2025-era fallback for legacy clients.
@@ -1070,7 +1306,7 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) {
-  main().catch(() => {
+  runBridge().catch(() => {
     process.stderr.write('[kory-mcp-bridge] fatal error\n');
     process.exit(1);
   });

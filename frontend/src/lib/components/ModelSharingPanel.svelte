@@ -3,7 +3,7 @@
   import { apiUrl } from '$lib/utils/api-url';
   import { toastStore } from '$lib/stores/toast.svelte';
   import { loadProvidersFromApi } from '$lib/stores/providers.svelte';
-  import { collaborationStore } from '$lib/stores/collaboration.svelte';
+  import { copyText } from '$lib/utils/clipboard';
   import Share2 from 'lucide-svelte/icons/share-2';
   import MonitorSmartphone from 'lucide-svelte/icons/monitor-smartphone';
   import ShieldAlert from 'lucide-svelte/icons/shield-alert';
@@ -14,7 +14,6 @@
   import HardDrive from 'lucide-svelte/icons/hard-drive';
   import Lock from 'lucide-svelte/icons/lock';
   import Search from 'lucide-svelte/icons/search';
-  import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import SlidersHorizontal from 'lucide-svelte/icons/sliders-horizontal';
   import {
     SANDBOX_PRESETS,
@@ -23,12 +22,17 @@
     type SandboxPreset,
   } from '@koryphaios/shared';
   import SettingsSwitch from './SettingsSwitch.svelte';
+  import SettingsToggle from './SettingsToggle.svelte';
+  import ModelSelectionDialog from './ModelSelectionDialog.svelte';
+  import ProviderIcon from './icons/ProviderIcon.svelte';
+  let { hostName = 'Host' }: { hostName?: string } = $props();
 
   interface ShareCandidate {
     provider: string;
     label: string;
     modelCount: number;
     available: boolean;
+    sharingBlockedReason?: string;
     agentic: boolean;
     risk: ProviderShareRisk;
     reason: string;
@@ -38,10 +42,23 @@
   let candidates = $state<ShareCandidate[]>([]);
   let sharedSet = $state<Set<string>>(new Set());
   let sharedModels = $state<Record<string, string[]>>({});
-  let expandedProvider = $state<string | null>(null);
+  let configuringProvider = $state<ShareCandidate | null>(null);
   let loadingHost = $state(false);
   let savingHost = $state(false);
   let providerSearch = $state('');
+  let modelSharing = $state(false);
+  let sharingBusy = $state(false);
+  let sharingError = $state<string | null>(null);
+  let modelInviteUrl = $state<string | null>(null);
+  let modelCode = $state<string | null>(null);
+  let modelHostName = $state('');
+  let publishedHostName = $state<string | null>(null);
+  let hostNameEdited = $state(false);
+  let sharingRestored = $state(false);
+  let connectError = $state<string | null>(null);
+  $effect(() => {
+    if (!hostNameEdited && !sharingRestored) modelHostName = hostName;
+  });
 
   let joinCode = $state('');
   let connecting = $state(false);
@@ -53,9 +70,9 @@
     null,
   );
   let savingSandbox = $state(false);
-  const sharingAnyCli = $derived(candidates.some((c) => c.agentic && sharedSet.has(c.provider)));
+  const sharingAnyCli = $derived(candidates.some((c) => c.agentic && c.available && sharedSet.has(c.provider)));
+  const shareableSelection = $derived(candidates.some((c) => c.available && sharedSet.has(c.provider) && modelsFor(c).length > 0));
 
-  const hosting = $derived(!!collaborationStore.activeCollab);
 
   const riskMeta: Record<ProviderShareRisk, { icon: any; color: string; label: string }> = {
     ok: { icon: ShieldCheck, color: '#22c55e', label: 'Safe to share' },
@@ -105,6 +122,73 @@
         err instanceof Error ? err.message : String(err),
       );
       /* ignore */
+    }
+  }
+
+  async function loadSharing() {
+    try {
+      const res = await apiFetch(apiUrl('/api/collab/providers/sharing'));
+      const data = await parseJsonResponse<{ ok?: boolean; data?: { active: boolean; joinCode?: string | null; hostName?: string | null } }>(res);
+      if (data.ok) {
+        modelSharing = data.data?.active === true;
+        modelCode = modelSharing ? data.data?.joinCode ?? null : null;
+        publishedHostName = modelSharing ? data.data?.hostName ?? null : null;
+        if (!hostNameEdited && publishedHostName) modelHostName = publishedHostName;
+        sharingRestored = true;
+      }
+    } catch {
+      // The explicit action below reports service failures.
+    }
+  }
+
+  async function shareModels() {
+    sharingBusy = true;
+    sharingError = null;
+    try {
+      if (!await saveHost(true)) return;
+      const res = await apiFetch(apiUrl('/api/collab/providers/sharing/start'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostName: modelHostName.trim() }),
+      });
+      const data = await parseJsonResponse<{ ok?: boolean; error?: string; data?: { inviteUrl: string; joinCode: string; hostName: string } }>(res);
+      if (!res.ok || !data.ok || !data.data?.joinCode) {
+        sharingError = data.error || 'Could not start model sharing. Check the relay connection.';
+        return;
+      }
+      modelSharing = true;
+      modelInviteUrl = data.data.inviteUrl;
+      modelCode = data.data.joinCode;
+      publishedHostName = data.data.hostName;
+      modelHostName = data.data.hostName;
+      try {
+        await copyText(modelCode);
+        toastStore.success(`${publishedHostName}'s model-sharing code copied`);
+      } catch {
+        toastStore.info('Model sharing is active. Copy the code shown below.');
+      }
+    } catch {
+      sharingError = 'Could not share models. Check the connection and try again.';
+    } finally {
+      sharingBusy = false;
+    }
+  }
+
+  async function stopSharingModels() {
+    sharingBusy = true;
+    sharingError = null;
+    try {
+      const res = await apiFetch(apiUrl('/api/collab/providers/sharing/stop'), { method: 'POST' });
+      if (!res.ok) throw new Error();
+      modelSharing = false;
+      modelInviteUrl = null;
+      modelCode = null;
+      publishedHostName = null;
+      toastStore.info('Model sharing stopped');
+    } catch {
+      sharingError = 'Could not stop model sharing. Try again.';
+    } finally {
+      sharingBusy = false;
     }
   }
 
@@ -163,6 +247,7 @@
     void loadHost();
     void loadRemote();
     void loadSandbox();
+    void loadSharing();
   });
 
   const SANDBOX_TOGGLES: Array<{
@@ -234,15 +319,7 @@
     return sharedModels[candidate.provider] ?? candidate.models.map((model) => model.id);
   }
 
-  function toggleModel(candidate: ShareCandidate, modelId: string) {
-    const current = modelsFor(candidate);
-    const next = current.includes(modelId)
-      ? current.filter((id) => id !== modelId)
-      : [...current, modelId];
-    sharedModels = { ...sharedModels, [candidate.provider]: next };
-  }
-
-  async function saveHost() {
+  async function saveHost(quiet = false): Promise<boolean> {
     savingHost = true;
     try {
       const res = await apiFetch(apiUrl('/api/collab/providers/shared'), {
@@ -250,14 +327,19 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providers: [...sharedSet], models: sharedModels }),
       });
-      if (res.ok) toastStore.success('Shared providers updated');
-      else toastStore.error('Could not update shared providers');
+      if (res.ok) {
+        if (!quiet) toastStore.success('Shared providers updated');
+        return true;
+      }
+      toastStore.error('Could not update shared providers');
+      return false;
     } catch (err: unknown) {
       console.warn(
         'Failed to save shared providers:',
         err instanceof Error ? err.message : String(err),
       );
       toastStore.error('Could not update shared providers');
+      return false;
     } finally {
       savingHost = false;
     }
@@ -267,6 +349,7 @@
     const code = joinCode.trim();
     if (!code) return;
     connecting = true;
+    connectError = null;
     try {
       const res = await apiFetch(apiUrl('/api/collab/providers/connect'), {
         method: 'POST',
@@ -286,12 +369,10 @@
         await loadRemote();
         await loadProvidersFromApi();
       } else {
-        toastStore.error(data.error || 'Could not connect to host');
+        connectError = data.error || 'Could not connect to host';
       }
     } catch (err: unknown) {
-      toastStore.error(
-        (err instanceof Error ? err.message : String(err)) || 'Could not connect to host',
-      );
+      connectError = 'Could not connect to the shared-model host. Check the code and your connection.';
     } finally {
       connecting = false;
     }
@@ -330,6 +411,7 @@
   });
 
   function candidateDescription(candidate: ShareCandidate): string {
+    if (candidate.sharingBlockedReason) return candidate.sharingBlockedReason;
     if (!candidate.available)
       return 'Not connected. Configure this provider in Providers before sharing it.';
     const modelText = `${candidate.modelCount} model${candidate.modelCount === 1 ? '' : 's'}`;
@@ -346,17 +428,12 @@
   );
 </script>
 
-<div class="space-y-8">
-  <div class="flex items-start gap-4">
-    <div
-      class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl"
-      style="background: color-mix(in srgb, #a78bfa 12%, transparent); color: #a78bfa;"
-    >
-      <Share2 size={18} />
-    </div>
+<div class="space-y-6">
+  <div class="flex items-start gap-3">
+    <Share2 size={18} class="mt-0.5 shrink-0 text-[var(--color-accent)]" />
     <div>
       <h3 class="text-base font-semibold text-[var(--color-text-primary)]">Models you share</h3>
-      <p class="mt-2 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
+      <p class="mt-1 max-w-2xl text-xs leading-5 text-[var(--color-text-muted)]">
         Lend providers for inference without sharing your workspace or files. Only the model call
         travels.
       </p>
@@ -364,17 +441,22 @@
   </div>
 
   <!-- ── HOST: share my providers ── -->
-  <section
-    class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7"
-  >
-    <div class="flex items-center gap-3">
-      <Share2 size={18} style="color: var(--color-accent);" />
+  <section class="space-y-4">
+    <div>
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Share my models</h4>
+      <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+        Share selected inference models using a code. Host commands, files, native agents and login credentials are outside the code's permissions.
+      </p>
     </div>
-    <p class="ml-8 mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">
-      Every provider is listed here. Search by name, then enable the connected providers you want to
-      lend.
-    </p>
+    <div class="max-w-md">
+      <label class="block text-xs font-medium text-[var(--color-text-secondary)]">
+        Host name
+        <input bind:value={modelHostName} maxlength="80" placeholder="e.g. Micah"
+          oninput={() => { hostNameEdited = true; sharingError = null; }}
+          class="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]" />
+      </label>
+      <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">Shown beside your models in the recipient's picker.</p>
+    </div>
 
     {#if loadingHost}
       <div class="mt-6 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
@@ -386,7 +468,7 @@
       </p>
     {:else}
       <div
-        class="mb-4 mt-6 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-4 py-2.5"
+        class="flex min-h-10 items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2"
       >
         <Search size={14} class="shrink-0 text-[var(--color-text-muted)]" />
         <input
@@ -400,78 +482,41 @@
           >{filteredCandidates.length}/{candidates.length}</span
         >
       </div>
-      <div class="max-h-[32rem] space-y-3 overflow-y-auto pr-2">
+      <div class="max-h-[32rem] overflow-y-auto">
         {#each filteredCandidates as c (c.provider)}
           {@const meta = riskMeta[c.risk]}
           {@const on = sharedSet.has(c.provider)}
-          <div
-            class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)]"
-            style="border-color: {on && c.risk === 'prohibited'
-              ? 'color-mix(in srgb, #ef4444 45%, var(--color-border))'
-              : 'var(--color-border)'};"
-          >
-            <SettingsSwitch
-              large
-              checked={on}
-              disabled={!c.available}
-              label={c.label}
-              description={candidateDescription(c)}
-              onchange={() => toggleShare(c)}
-            />
-            {#if c.available && c.models.length > 0}
-              <div class="flex items-center justify-between gap-4 px-4 pb-3">
-                <span class="text-[10px] text-[var(--color-text-muted)]"
-                  >{modelsFor(c).length} of {c.models.length} models shared</span
-                >
+          <div class="provider-share-row flex items-start gap-3 rounded-md border border-transparent px-3 py-3 transition-colors hover:border-[var(--color-border-bright)] hover:bg-[var(--color-surface-2)] focus-within:border-[var(--color-border-bright)]">
+            <div class="mt-0.5 shrink-0"><ProviderIcon provider={c.provider} size={20} /></div>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h5 class="text-sm font-medium text-[var(--color-text-primary)]">{c.label}</h5>
+                <span class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]" title={c.reason}><meta.icon size={11} /> {meta.label}</span>
+                {#if c.agentic}<span class="inline-flex items-center gap-1 text-[10px] text-[var(--color-text-muted)]"><HardDrive size={11} /> CLI</span>{/if}
+              </div>
+              <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">{candidateDescription(c)}</p>
+              {#if c.available && c.models.length > 0}
+                <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <button
                   type="button"
-                  onclick={() =>
-                    (expandedProvider = expandedProvider === c.provider ? null : c.provider)}
-                  class="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[10px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-3)]"
-                  aria-expanded={expandedProvider === c.provider}
+                  onclick={() => (configuringProvider = c)}
+                  class="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-transparent px-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-bright)] hover:text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                  aria-label={`Configure models for ${c.label}`}
+                  aria-haspopup="dialog"
                 >
-                  <SlidersHorizontal size={12} /> Choose models <ChevronDown
-                    size={12}
-                    class={expandedProvider === c.provider ? 'rotate-180' : ''}
-                  />
+                  <SlidersHorizontal size={13} /> Configure models
                 </button>
-              </div>
-              {#if expandedProvider === c.provider}
-                <div
-                  class="mx-4 mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
-                >
-                  <div class="mb-3 px-1 text-[10px] leading-4 text-[var(--color-text-muted)]">
-                    Only these models are advertised to guests and accepted by the host.
-                  </div>
-                  <div class="grid gap-2 sm:grid-cols-2">
-                    {#each c.models as model (model.id)}
-                      <SettingsSwitch
-                        compact
-                        checked={modelsFor(c).includes(model.id)}
-                        label={model.name}
-                        description={model.id}
-                        onchange={() => toggleModel(c, model.id)}
-                      />
-                    {/each}
-                  </div>
+                <span class="text-[11px] text-[var(--color-text-muted)]">{modelsFor(c).length} of {c.models.length} selected</span>
                 </div>
               {/if}
-            {/if}
-            <div class="flex flex-wrap gap-2 px-4 pb-4">
-              <span
-                class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                style="color: {meta.color}; background: color-mix(in srgb, {meta.color} 14%, transparent);"
-                ><meta.icon size={10} /> {meta.label}</span
-              >
-              {#if c.agentic}<span
-                  class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                  style="color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent);"
-                  ><HardDrive size={10} /> CLI</span
-                >{/if}
-              {#if !c.available}<span
-                  class="rounded-full bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-                  >Not connected</span
-                >{/if}
+            </div>
+            <div class="mt-0.5 shrink-0">
+              <SettingsToggle
+                checked={on}
+                disabled={!c.available && !on}
+                label={`Share ${c.label}`}
+                onchange={() => toggleShare(c)}
+              />
             </div>
           </div>
         {/each}
@@ -494,21 +539,49 @@
         </div>
       {/if}
 
+    {/if}
       <div
-        class="mt-6 flex flex-col items-stretch justify-between gap-4 border-t border-[var(--color-border)] pt-5 sm:flex-row sm:items-center"
+        class="mt-6 flex flex-wrap items-start justify-between gap-3 border-t border-[var(--color-border)] pt-4"
       >
-        <span class="text-[10px] text-[var(--color-text-muted)]"
-          >Changes apply only after saving.</span
-        >
-        <button
+        <div class="min-w-0 basis-64 flex-1">
+          <p class="text-xs font-medium text-[var(--color-text-primary)]">{modelSharing ? 'Model sharing is active' : 'Share models independently'}</p>
+          <p class="mt-1 text-[11px] leading-5 text-[var(--color-text-muted)]">Guests use selected models in their own workspace. Login tokens and API keys stay on your computer.</p>
+        </div>
+        <div class="flex max-w-full flex-wrap items-center gap-2">
+          <button
           type="button"
-          onclick={saveHost}
-          disabled={savingHost}
-          class="btn btn-primary shrink-0 px-6 py-2.5 text-xs"
+          onclick={() => saveHost()}
+          disabled={savingHost || sharingBusy}
+          class="btn btn-secondary px-3 py-2 text-xs"
         >
           {savingHost ? 'Saving…' : 'Save shared providers'}
-        </button>
+          </button>
+          <button type="button" onclick={shareModels}
+            disabled={sharingBusy || savingHost || !shareableSelection || !modelHostName.trim()}
+            class="btn btn-primary inline-flex items-center gap-2 px-4 py-2 text-xs">
+            <Share2 size={14} /> {sharingBusy ? 'Sharing…' : modelSharing ? 'Update sharing' : 'Share models'}
+          </button>
+          {#if modelSharing}
+            <button type="button" onclick={stopSharingModels} disabled={sharingBusy}
+              class="rounded-md border border-transparent px-3 py-2 text-xs text-[var(--color-error)] hover:border-[var(--color-border-bright)]">Stop sharing</button>
+          {/if}
+        </div>
       </div>
+      {#if sharingError}<p role="alert" class="text-xs text-[var(--color-error)]">{sharingError}</p>{/if}
+      {#if modelSharing && modelCode}
+        <div class="border-t border-[var(--color-border)] pt-4">
+          <h5 class="text-xs font-semibold text-[var(--color-text-primary)]">{publishedHostName || 'Host'}'s model-sharing code</h5>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <input readonly value={modelCode} aria-label="Model-sharing code"
+              class="min-h-10 w-40 rounded-lg border border-[var(--color-border-bright)] bg-[var(--color-surface-1)] px-3 py-2 text-center font-mono text-base font-semibold tracking-[0.15em] text-[var(--color-text-primary)] outline-none" />
+            <button type="button" onclick={() => copyText(modelCode!)}
+              class="btn btn-secondary inline-flex items-center gap-2 px-3 py-2 text-xs"><Link2 size={13} /> Copy code</button>
+            {#if modelInviteUrl}<button type="button" onclick={() => copyText(modelInviteUrl!)}
+              class="rounded-md border border-transparent px-3 py-2 text-xs text-[var(--color-text-secondary)] hover:border-[var(--color-border-bright)]">Copy invite link</button>{/if}
+          </div>
+          <p class="mt-2 text-[11px] leading-5 text-[var(--color-text-muted)]">Recipients enter this code under “Use someone's models”. Anyone with the code can use your selected models. Stop sharing revokes it.</p>
+        </div>
+      {/if}
 
       {#if sharingAnyCli && sandbox}
         <!-- Sandbox policy — how the shared CLI runs on YOUR machine. -->
@@ -620,49 +693,18 @@
         </div>
       {/if}
 
-      <!-- Dedicated model-sharing link — grants ONLY model access, not session access. -->
-      <div class="mt-7 border-t border-[var(--color-border)] pt-7">
-        {#if hosting}
-          <div
-            class="flex flex-col items-stretch justify-between gap-4 rounded-2xl bg-[var(--color-surface-1)] p-5 sm:flex-row sm:items-center"
-          >
-            <div>
-              <div class="text-xs font-bold text-[var(--color-text-primary)]">
-                Model-sharing invite
-              </div>
-              <p class="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                A models only link. They can use your providers but never see your session or files.
-              </p>
-            </div>
-            <button
-              type="button"
-              onclick={() => collaborationStore.createInvite('models')}
-              class="shrink-0 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold"
-              style="background: color-mix(in srgb, #a78bfa 16%, transparent); color: #a78bfa;"
-            >
-              <Link2 size={12} /> Copy model link
-            </button>
-          </div>
-        {:else}
-          <p class="text-[11px] text-[var(--color-text-muted)]">
-            Start a hosted session (in the Team Collaboration section above) to get a shareable
-            model link.
-          </p>
-        {/if}
-      </div>
-    {/if}
   </section>
 
   <!-- ── CLIENT: use a host's models ── -->
   <section
-    class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-6 lg:p-7"
+    class="border-t border-[var(--color-border)] pt-6"
   >
     <div class="mb-2 flex items-center gap-3">
       <MonitorSmartphone size={18} style="color: var(--color-accent);" />
       <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Use someone's models</h4>
     </div>
     <p class="mb-6 text-[11px] leading-5 text-[var(--color-text-muted)]">
-      Paste a host's model link (or join code). Their models appear in your model picker and run on
+      Enter a host's model-sharing code or model link. Their models appear under the host's chosen name in your model picker and run on
       your own projects and files. You keep your workspace, they supply the inference.
     </p>
 
@@ -693,8 +735,7 @@
             <div class="flex items-start gap-1.5">
               <ShieldCheck size={11} style="color:#22c55e" class="mt-px shrink-0" />
               <span
-                ><strong>{apiCount} API model(s)</strong>. They run on the host, so your files never
-                leave your PC.</span
+                ><strong>{apiCount} inference provider(s)</strong>. Only your messages and model calls are sent. The host cannot browse your workspace.</span
               >
             </div>
           {/if}
@@ -715,8 +756,12 @@
         <input
           type="text"
           bind:value={joinCode}
-          placeholder="Model link or join code from the host"
-          class="input min-h-11 flex-1 text-sm"
+          placeholder="Model-sharing code from the host"
+          aria-label="Host model-sharing code"
+          aria-invalid={!!connectError}
+          aria-describedby={connectError ? 'model-connect-error' : undefined}
+          oninput={() => (connectError = null)}
+          class="input min-h-11 min-w-0 flex-1 text-sm"
           onkeydown={(e) => e.key === 'Enter' && connect()}
         />
         <button
@@ -725,9 +770,31 @@
           disabled={connecting || !joinCode.trim()}
           class="btn btn-primary min-h-11 px-6 py-2 text-xs"
         >
-          {connecting ? 'Connecting…' : 'Connect'}
+          {connecting ? 'Connecting…' : 'Use shared models'}
         </button>
       </div>
+      {#if connectError}<p id="model-connect-error" role="alert" class="mt-2 text-xs text-[var(--color-error)]">{connectError}</p>{/if}
     {/if}
   </section>
 </div>
+
+{#if configuringProvider}
+  {@const candidate = configuringProvider}
+  <ModelSelectionDialog
+    providerName={candidate.label}
+    availableModels={candidate.models}
+    selectedModels={modelsFor(candidate)}
+    mode="sharing"
+    onSave={(selected) => {
+      sharedModels = { ...sharedModels, [candidate.provider]: selected };
+      configuringProvider = null;
+    }}
+    onClose={() => (configuringProvider = null)}
+  />
+{/if}
+
+<style>
+  .provider-share-row + .provider-share-row {
+    box-shadow: 0 -1px 0 var(--color-border);
+  }
+</style>

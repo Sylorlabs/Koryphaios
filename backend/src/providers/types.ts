@@ -137,7 +137,7 @@ export interface ProviderMessage {
 }
 
 export interface ProviderContentBlock {
-  type: 'text' | 'image' | 'tool_use' | 'tool_result';
+  type: 'text' | 'image' | 'audio' | 'video' | 'tool_use' | 'tool_result';
   text?: string;
   toolCallId?: string;
   toolName?: string;
@@ -146,11 +146,16 @@ export interface ProviderContentBlock {
   isError?: boolean;
   imageData?: string;
   imageMimeType?: string;
+  mediaData?: string;
+  mediaMimeType?: string;
 }
 
 // ─── Stream request ─────────────────────────────────────────────────────────
 
 export interface StreamRequest {
+  /** Host-owned route pin. Remote inference cannot fall through to an adapter
+   * with different credentials or native tool authority when availability changes. */
+  requiredProvider?: string;
   model: string;
   messages: ProviderMessage[];
   systemPrompt: string;
@@ -166,6 +171,9 @@ export interface StreamRequest {
   /** Request accelerated processing when the selected route actually supports it.
    * Providers must translate this into their own documented service-tier control. */
   fastMode?: boolean;
+  /** Explicit image capability correction, bound to the authorized route so
+   * provider fallback never inherits another model's override. */
+  imageInputOverride?: { provider: string; model: string };
   /** Signal to abort the stream */
   signal?: AbortSignal;
   /** Project working directory — agentic CLI providers (claude-code) run + edit files here. */
@@ -230,6 +238,11 @@ export interface PromptCachePlan {
 export interface Provider {
   readonly name: ProviderName;
   readonly config: ProviderConfig;
+  /** Adapter transport, independent of the selected model's vision capability.
+   * A user can correct model metadata, but cannot add a missing transport. */
+  readonly imageInputTransport?: 'native' | 'file' | 'none';
+  /** Modalities this adapter can actually deliver as native model input. */
+  readonly mediaInputKinds?: readonly ('audio' | 'video')[];
 
   /** Stream a response from the model. Yields events as they arrive. */
   streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent>;

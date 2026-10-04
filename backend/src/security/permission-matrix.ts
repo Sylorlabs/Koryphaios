@@ -74,6 +74,7 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     search_notes: { tool: 'search_notes', level: 'auto' },
     list_notes: { tool: 'list_notes', level: 'auto' },
     recall_notes: { tool: 'recall_notes', level: 'auto' },
+    retrieve_note_context: { tool: 'retrieve_note_context', level: 'auto' },
     get_note_backlinks: { tool: 'get_note_backlinks', level: 'auto' },
     get_note_graph_summary: { tool: 'get_note_graph_summary', level: 'auto' },
     get_note_properties: { tool: 'get_note_properties', level: 'auto' },
@@ -85,6 +86,8 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
     delete_note: { tool: 'delete_note', level: 'ask' },
     link_notes: { tool: 'link_notes', level: 'ask' },
     unlink_notes: { tool: 'unlink_notes', level: 'ask' },
+    propose_note_relationship: { tool: 'propose_note_relationship', level: 'ask' },
+    review_note_relationship: { tool: 'review_note_relationship', level: 'ask' },
 
     // Write operations - depends
     write_file: {

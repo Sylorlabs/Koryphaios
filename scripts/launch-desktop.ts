@@ -5,11 +5,14 @@
  */
 
 const { spawn } = await import('node:child_process');
-const { readFileSync, existsSync } = await import('node:fs');
-const { resolve } = await import('node:path');
+const { readFileSync, existsSync, writeFileSync, rmSync } = await import('node:fs');
+const { join, resolve } = await import('node:path');
 const net = await import('node:net');
+const os = await import('node:os');
 const { isLauncherBackendReady, mergeCorsOriginEnv, resolveFrontendCorsOrigins } =
   await import('./desktop-launcher-cors');
+const { reapStrayFrontendServers, selectFreeFrontendPort, waitForPortRelease } =
+  await import('./desktop-frontend-reaper');
 
 // On Windows, `spawn('bun', ...)` fails with ENOENT because Node/Bun's spawn
 // doesn't consult PATHEXT — the binary on disk is `bun.exe`. Using `shell: true`
@@ -83,14 +86,66 @@ const backendHost = process.env.KORYPHAIOS_HOST ?? appConfig.server?.host ?? '12
 const backendClientHost = backendHost === '0.0.0.0' ? '127.0.0.1' : backendHost;
 const backendPort = Number(process.env.KORYPHAIOS_PORT ?? appConfig.server?.port ?? 3001);
 const frontendHost = process.env.KORYPHAIOS_FRONTEND_HOST ?? '127.0.0.1';
-const frontendPort = Number(process.env.KORYPHAIOS_FRONTEND_PORT ?? 3003);
+let frontendPort = Number(process.env.KORYPHAIOS_FRONTEND_PORT ?? 3003);
 
 const backendUrl = `http://${backendClientHost}:${backendPort}`;
-const frontendUrl = `http://${frontendHost}:${frontendPort}`;
-const frontendOrigin = new URL(frontendUrl).origin;
-const frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
+let frontendUrl = `http://${frontendHost}:${frontendPort}`;
+let frontendOrigin = new URL(frontendUrl).origin;
+let frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
 const websocketUrl = `ws://${backendClientHost}:${backendPort}/ws`;
 const backendHealthUrl = `${backendUrl}/api/health`;
+
+// ─── Frontend dev-server ownership ───────────────────────────────────────
+// Two Vite servers rooted at the same frontend/ share one node_modules/.vite
+// dependency cache, and whichever loses that race keeps injecting its stale
+// `?v=<browserHash>` specifiers. The WebView then loads a second
+// svelte/internal/client whose `next_sibling_getter` was never initialized,
+// which crashes the lazily imported Notes views. So: reap strays first, and
+// only move to another port when one refuses to die. A different port is safe
+// on its own because frontend/vite.config.ts scopes cacheDir by port.
+const frontendReap = await reapStrayFrontendServers(FRONTEND_DIR, {
+  protectedPids: [],
+  log: (message) => log(message, colors.yellow),
+}).catch((error: unknown) => {
+  // Never fail the launch on a reaper hiccup. The port probe below still
+  // refuses to share a port with whoever holds it.
+  log(
+    `Could not audit existing frontend dev servers (${
+      error instanceof Error ? error.message : String(error)
+    }) — falling back to a port probe.`,
+    colors.yellow,
+  );
+  return { stopped: [], survived: [] };
+});
+
+const isPreferredPortHeld = async (): Promise<boolean> => {
+  if (!(await isPortListening(frontendHost, frontendPort))) return false;
+  if (frontendReap.survived.length > 0) return true;
+  // Everything we found was stopped, so give the kernel a moment to release the
+  // socket before treating the port as genuinely taken.
+  return !(await waitForPortRelease(frontendPort, (port) => isPortListening(frontendHost, port)));
+};
+
+if (await isPreferredPortHeld()) {
+  const fallbackPort = await selectFreeFrontendPort(frontendPort, (port) =>
+    isPortListening(frontendHost, port),
+  );
+  if (fallbackPort === null) {
+    throw new Error(
+      `No free frontend port at or above ${frontendHost}:${frontendPort}. Stop the processes holding it and rerun bun run dev.`,
+    );
+  }
+  if (fallbackPort !== frontendPort) {
+    log(
+      `Port ${frontendPort} is held by a process the launcher could not stop — moving the native dev frontend to ${fallbackPort}.`,
+      colors.yellow,
+    );
+  }
+  frontendPort = fallbackPort;
+  frontendUrl = `http://${frontendHost}:${frontendPort}`;
+  frontendOrigin = new URL(frontendUrl).origin;
+  frontendCorsOrigins = resolveFrontendCorsOrigins(frontendUrl);
+}
 
 const sharedEnv = {
   ...process.env,
@@ -112,6 +167,7 @@ const sharedEnv = {
 };
 
 const children: ManagedChild[] = [];
+const tempConfigPaths: string[] = [];
 let shuttingDown = false;
 
 function track(name: string, proc: Child, owned = true) {
@@ -142,6 +198,13 @@ async function cleanup(exitCode = 0) {
     }
   }
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
+  for (const tempPath of tempConfigPaths) {
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      // ignore
+    }
+  }
   process.exit(exitCode);
 }
 
@@ -353,46 +416,52 @@ async function main() {
 
   log('Backend ready', colors.green);
 
-  const frontendState = await resolvePortState(
-    'Frontend',
-    frontendHost,
-    frontendPort,
-    isFrontendHealthy,
-  );
-
-  if (frontendState === 'free') {
-    const frontend = spawn(
-      'bun',
-      ['x', 'vite', 'dev', '--host', frontendHost, '--port', String(frontendPort), '--strictPort'],
-      {
-        cwd: FRONTEND_DIR,
-        env: {
-          ...sharedEnv,
-          VITE_BACKEND_URL: backendUrl,
-          VITE_BACKEND_WS_URL: websocketUrl,
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: SPAWN_SHELL,
+  // The frontend is always started fresh: attaching to a pre-existing server
+  // would re-expose the shared dependency cache the reap above exists to remove.
+  const frontend = spawn(
+    'bun',
+    ['x', 'vite', 'dev', '--host', frontendHost, '--port', String(frontendPort), '--strictPort'],
+    {
+      cwd: FRONTEND_DIR,
+      env: {
+        ...sharedEnv,
+        VITE_BACKEND_URL: backendUrl,
+        VITE_BACKEND_WS_URL: websocketUrl,
       },
-    );
-    track('frontend', frontend);
-    pipeLogs('frontend', frontend.stdout, colors.dim);
-    pipeLogs('frontend', frontend.stderr, colors.yellow);
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: SPAWN_SHELL,
+    },
+  );
+  track('frontend', frontend);
+  pipeLogs('frontend', frontend.stdout, colors.dim);
+  pipeLogs('frontend', frontend.stderr, colors.yellow);
 
-    log('Waiting for frontend dev server...', colors.blue);
-    await waitForReady('Frontend', isFrontendHealthy, FRONTEND_READY_TIMEOUT_MS);
-  }
+  log('Waiting for frontend dev server...', colors.blue);
+  await waitForReady('Frontend', isFrontendHealthy, FRONTEND_READY_TIMEOUT_MS);
 
   log('Frontend ready', colors.green);
 
   log('Launching native Tauri shell...', colors.blue);
-  const tauri = spawn('bun', ['run', 'tauri', 'dev'], {
+  // tauri.conf.json pins devUrl to the default dev port. When the launcher had
+  // to adopt another port, override devUrl so the window follows the server we
+  // actually started. Tauri merges this file over tauri.conf.json.
+  const tauriConfigPath = join(os.tmpdir(), `kory-desktop-tauri-config-${process.pid}.json`);
+  writeFileSync(tauriConfigPath, JSON.stringify({ build: { devUrl: frontendUrl } }));
+  tempConfigPaths.push(tauriConfigPath);
+  const tauri = spawn('bun', ['run', 'tauri', 'dev', '--config', tauriConfigPath], {
     cwd: DESKTOP_DIR,
     env: sharedEnv,
     stdio: 'inherit',
     shell: SPAWN_SHELL,
   });
   track('tauri', tauri);
+  tauri.on('exit', () => {
+    try {
+      rmSync(tauriConfigPath, { force: true });
+    } catch {
+      // ignore
+    }
+  });
 
   log('', colors.reset);
   log('Native desktop app is running.', colors.green);

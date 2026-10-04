@@ -8,6 +8,7 @@ import { isDemoMode } from '$lib/demo-flags';
 import { demoFetch } from '$lib/demo-api';
 import { untrack } from 'svelte';
 import { projectStore } from '$lib/stores/project.svelte';
+import { sessionStore } from '$lib/stores/sessions.svelte';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -73,6 +74,19 @@ async function apiFetchUntracked(
     });
   }
 
+  // Capture routing before authentication yields: switching chats while auth
+  // refreshes must not redirect an already-started read or mutation.
+  const sessionId = sessionStore.activeSessionId;
+  const session = sessionStore.sessions.find((item) => item.id === sessionId);
+  const projectPath = session?.workingDirectory ?? projectStore.requestPath;
+  const headers = new Headers(init.headers);
+  if (projectPath && !headers.has('X-Koryphaios-Project')) {
+    headers.set('X-Koryphaios-Project', projectPath);
+  }
+  if (sessionId && !headers.has('X-Koryphaios-Session')) {
+    headers.set('X-Koryphaios-Session', sessionId);
+  }
+
   // The desktop webview can survive a backend restart, but the backend's
   // in-memory local-session registry cannot. Validate the bearer before each
   // protected request so a replacement is issued through the non-error auth
@@ -90,7 +104,6 @@ async function apiFetchUntracked(
 
   _inflight++;
   try {
-    const headers = new Headers(init.headers);
     for (const [key, value] of Object.entries(getAuthHeaders())) {
       if (!headers.has(key)) headers.set(key, value);
     }
@@ -102,10 +115,6 @@ async function apiFetchUntracked(
     // the runtime sets their own (often boundary-delimited) content type.
     if (init.body != null && !headers.has('Content-Type') && typeof init.body === 'string') {
       headers.set('Content-Type', 'application/json');
-    }
-    const projectPath = projectStore.requestPath;
-    if (projectPath && !headers.has('X-Koryphaios-Project')) {
-      headers.set('X-Koryphaios-Project', projectPath);
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

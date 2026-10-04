@@ -3,6 +3,7 @@
 // Supports both API key and Claude Code OAuth token (Pro/Max subscription).
 
 import Anthropic from '@anthropic-ai/sdk';
+import { userConfirmedImageInput } from './attachment-admission';
 import type { ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
 import {
   type Provider,
@@ -28,6 +29,7 @@ import { promptCacheMaintenance } from './cache-maintenance';
 import { resolvePricing } from '../pricing';
 
 export class AnthropicProvider implements Provider {
+  readonly imageInputTransport = 'native' as const;
   readonly name: ProviderName;
   protected _client: Anthropic | null = null;
 
@@ -146,6 +148,7 @@ export class AnthropicProvider implements Provider {
 
   async *streamResponse(request: StreamRequest): AsyncGenerator<ProviderEvent> {
     let messages = this.convertMessages(request.messages);
+    const userConfirmedImages = userConfirmedImageInput(this, request);
 
     // Vision guard: all Claude models accept images, but this provider also
     // serves Anthropic-COMPATIBLE gateway models (e.g. OpenCode Go MiniMax/Qwen)
@@ -154,7 +157,11 @@ export class AnthropicProvider implements Provider {
     const requestDef =
       this.listModels().find((m) => m.id === request.model || m.apiModelId === request.model) ??
       resolveModel(request.model);
-    if (requestDef?.vision === false && requestDef.supportsAttachments !== true) {
+    if (
+      requestDef?.vision === false &&
+      requestDef.supportsAttachments !== true &&
+      !userConfirmedImages
+    ) {
       messages = messages.map((m) => {
         if (!Array.isArray(m.content)) return m;
         return {

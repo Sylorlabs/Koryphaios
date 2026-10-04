@@ -350,9 +350,32 @@ export class OpenAICompatiblePlugin implements ProviderPlugin {
       messages.push({ role: 'system', content: request.systemPrompt });
     }
     for (const m of request.messages) {
+      const hasImages =
+        Array.isArray(m.content) && m.content.some((block) => block.type === 'image');
+      const content =
+        typeof m.content === 'string'
+          ? m.content
+          : hasImages
+            ? m.content.map((block) => {
+                if (block.type === 'image') {
+                  if (!block.imageData?.trim())
+                    throw new Error('Image input is missing image data.');
+                  return {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:${block.imageMimeType ?? 'image/png'};base64,${block.imageData}`,
+                    },
+                  };
+                }
+                return {
+                  type: 'text',
+                  text: block.type === 'text' ? (block.text ?? '') : JSON.stringify(block),
+                };
+              })
+            : JSON.stringify(m.content);
       messages.push({
         role: m.role,
-        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        content,
       });
     }
     return {

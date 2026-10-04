@@ -12,6 +12,10 @@ import {
 } from '../runtime/config';
 import { loadMcpEnvSecrets } from '../security/secret-store';
 import { getContext } from '../context';
+import { authorizationStatus } from './oauth-service';
+import type { McpOAuthGrantSummary } from './oauth-secrets';
+import { lookupMcpAuthRequirement } from './auth-requirements';
+import type { McpAuthRequirement } from './featured-registry';
 import { ValidationError, NotFoundError } from '../errors/types';
 import { mcpLog } from '../logger';
 import type { McpServerStatus } from './client';
@@ -140,34 +144,75 @@ function sharedToClientConfig(name: string, shared: SharedMCPServerConfig): Clie
   };
 }
 
-/** List all configured servers with live connection status. */
-export function listServers(projectRoot: string): Array<McpServerStatus & { configured: boolean }> {
+/**
+ * List all configured servers with live connection status.
+ *
+ * Remote servers also carry their OAuth state so the settings UI can offer
+ * "Authorize" exactly when it is needed, and can tell a token that merely needs
+ * refreshing apart from one the user has to re-consent to.
+ */
+export function listServers(
+  projectRoot: string,
+): Array<
+  McpServerStatus & { configured: boolean; oauth: McpOAuthGrantSummary; auth: McpAuthRequirement }
+> {
   const { mcpManager } = getContext();
   const liveStatuses = mcpManager.listServers(projectRoot);
   const configured = readLiveServers(projectRoot);
   const liveByName = new Map(liveStatuses.map((s) => [s.name, s]));
-  const result: Array<McpServerStatus & { configured: boolean }> = [];
+  const result: Array<
+    McpServerStatus & { configured: boolean; oauth: McpOAuthGrantSummary; auth: McpAuthRequirement }
+  > = [];
+
+  const withAuth = (
+    name: string,
+    status: McpServerStatus,
+    configuredFlag: boolean,
+  ): McpServerStatus & {
+    configured: boolean;
+    oauth: McpOAuthGrantSummary;
+    auth: McpAuthRequirement;
+  } => {
+    // A live client knows whether the server rejected us for missing auth.
+    const client = mcpManager.getClient(name, projectRoot);
+    const summary = authorizationStatus(projectRoot, name);
+    const needsAuthorization =
+      status.transport !== 'stdio' && client?.needsAuthorization === true;
+    return {
+      ...status,
+      configured: configuredFlag,
+      oauth: {
+        ...summary,
+        // Report a 401 as "authorized but rejected" so the UI prompts to
+        // re-authorize instead of showing a stale connected-looking grant.
+        needsAuthorization,
+      },
+      auth: lookupMcpAuthRequirement(name, configured[name] ?? null),
+    };
+  };
+
   // Include configured-but-disconnected servers too.
   for (const name of Object.keys(configured)) {
     const live = liveByName.get(name);
     result.push(
-      live
-        ? { ...live, configured: true }
-        : {
-            name,
-            transport: configured[name].type,
-            connected: false,
-            toolCount: 0,
-            protocolVersion: 'unknown',
-            lastError: 'Not connected (will connect on next tool call)',
-            configured: true,
-          },
+      withAuth(
+        name,
+        live ?? {
+          name,
+          transport: configured[name].type,
+          connected: false,
+          toolCount: 0,
+          protocolVersion: 'unknown',
+          lastError: 'Not connected (will connect on next tool call)',
+        },
+        true,
+      ),
     );
     liveByName.delete(name);
   }
   // Include any live servers not in config (e.g. bootstrap-added).
   for (const live of liveByName.values()) {
-    result.push({ ...live, configured: false });
+    result.push(withAuth(live.name, live, false));
   }
   return result;
 }

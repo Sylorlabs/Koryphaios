@@ -34,6 +34,25 @@ function toCohereMessages(request: WireAdapterChatRequest): Array<Record<string,
     messages.push({ role: 'system', content: request.systemPrompt });
   }
   for (const message of request.messages) {
+    if (Array.isArray(message.content) && message.content.some((block) => block.type === 'image')) {
+      if (message.role !== 'user') throw new Error('Cohere image input requires a user message.');
+      const content = message.content.flatMap((block): Array<Record<string, unknown>> => {
+        if (block.type === 'text') return [{ type: 'text', text: block.text ?? '' }];
+        if (block.type !== 'image') return [];
+        if (!block.imageData?.trim())
+          throw new Error('Cohere received an image without image data.');
+        return [
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:${block.imageMimeType ?? 'image/png'};base64,${block.imageData}`,
+            },
+          },
+        ];
+      });
+      messages.push({ role: 'user', content });
+      continue;
+    }
     const text =
       typeof message.content === 'string'
         ? message.content
@@ -87,6 +106,7 @@ function mapFinishReason(reason: string | undefined): WireAdapterStreamChunk['fi
 
 export const cohereAdapter: WireAdapter = {
   id: 'cohere',
+  imageInputTransport: 'native',
   label: 'Cohere (v2 native)',
   description:
     'Cohere /v2/chat protocol with typed SSE events. Manual override — no auto-detection.',

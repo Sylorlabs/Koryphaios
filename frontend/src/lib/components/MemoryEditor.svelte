@@ -35,6 +35,8 @@
   import SettingsSwitch from '$lib/components/SettingsSwitch.svelte';
   import NumberStepper from '$lib/components/NumberStepper.svelte';
   import KorySelect from '$lib/components/KorySelect.svelte';
+  import { apiFetch } from '$lib/api.svelte';
+  import { apiUrl } from '$lib/utils/api-url';
   import {
     autosaveDelayForDraft,
     createDraftRegistry,
@@ -452,6 +454,39 @@
     }
   }
 
+  interface ExternalMemoryProviderInfo {
+    provider: string;
+    supported: boolean;
+    connected: boolean;
+    selected: boolean;
+    scope: string;
+    scopeRequired: boolean;
+  }
+
+  // External memory providers are reported by the backend, which knows which
+  // adapters implement memory and which credential is actually connected. The
+  // client never guesses a provider list.
+  let externalMemoryProviders = $state<ExternalMemoryProviderInfo[]>([]);
+
+  let selectedExternalNeedsScope = $derived(
+    externalMemoryProviders.some(
+      (provider) =>
+        provider.provider === memoryStore.settings?.externalMemoryProvider &&
+        provider.scopeRequired,
+    ),
+  );
+
+  async function loadExternalMemoryProviders() {
+    try {
+      const response = await apiFetch(apiUrl('/api/memory/external/providers'));
+      const result = await response.json();
+      externalMemoryProviders =
+        response.ok && Array.isArray(result.data) ? result.data : [];
+    } catch {
+      externalMemoryProviders = [];
+    }
+  }
+
   function toggleSetting(
     key:
       | 'universalMemoryEnabled'
@@ -462,7 +497,9 @@
       | 'agentMemoryEnabled'
       | 'maxContextTokensEnabled'
       | 'autosaveEnabled'
-      | 'documentSizeLimitEnabled',
+      | 'documentSizeLimitEnabled'
+      | 'externalMemoryEnabled'
+      | 'externalMemoryInContext',
   ) {
     if (!memoryStore.settings) return;
     void memoryStore.saveSettings({ [key]: !memoryStore.settings[key] });
@@ -726,6 +763,7 @@
   });
 
   onMount(() => {
+    void loadExternalMemoryProviders();
     const flushWhenHidden = () => {
       if (
         document.visibilityState === 'hidden' &&
@@ -1298,6 +1336,90 @@
                 onchange={(value) => void memoryStore.saveSettings({ maxContextTokens: value })}
               />
             </div>{/if}
+        </section>
+        <section class="mt-5 border-b border-[var(--color-border)] pb-5">
+          <h5 class="text-sm font-medium text-[var(--color-text-primary)]">External long-term memory</h5>
+          <p class="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+            Optionally mirror memories to an external store so they survive a reinstall and follow
+            you across machines. Mem0 and Letta are managed memory services, not chat providers, and
+            content you store there is sent off this device. Local memory files above remain the
+            source of truth and keep working whatever happens here.
+          </p>
+          <div class="mt-3 border-y border-[var(--color-border)]">
+            <SettingsSwitch
+              checked={memoryStore.settings?.externalMemoryEnabled ?? false}
+              label="Use external memory"
+              description="Off by default: external providers bill per operation and store content off-machine"
+              onchange={() => toggleSetting('externalMemoryEnabled')}
+              flat
+            />
+          </div>
+          {#if memoryStore.settings?.externalMemoryEnabled}
+            <div class="mt-3 space-y-3">
+              <label class="block">
+                <span class="text-xs font-medium text-[var(--color-text-secondary)]">Provider</span>
+                <div class="mt-1.5">
+                  <KorySelect
+                    value={memoryStore.settings?.externalMemoryProvider ?? ''}
+                    onchange={(value: string) =>
+                      void memoryStore.saveSettings({ externalMemoryProvider: value })}
+                    options={[
+                      { value: '', label: 'Select a provider' },
+                      ...externalMemoryProviders.map((provider) => ({
+                        value: provider.provider,
+                        label: provider.connected
+                          ? provider.provider === 'mem0'
+                            ? 'Mem0'
+                            : 'Letta'
+                          : `${provider.provider === 'mem0' ? 'Mem0' : 'Letta'} (not connected)`,
+                        disabled: !provider.connected,
+                        description: provider.scopeRequired
+                          ? 'Requires a Letta agent id as the scope'
+                          : undefined,
+                      })),
+                    ]}
+                    placeholder="Select a provider"
+                  />
+                </div>
+                <span class="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                  {#if !externalMemoryProviders.some((provider) => provider.connected)}
+                    No external memory provider is connected yet. Add a key for Mem0 or Letta in
+                    Providers &amp; models.
+                  {:else if selectedExternalNeedsScope}
+                    Letta stores memories against a Letta agent. Paste that agent id below.
+                  {/if}
+                </span>
+              </label>
+
+              {#if selectedExternalNeedsScope}
+                <label class="block">
+                  <span class="text-xs font-medium text-[var(--color-text-secondary)]">
+                    Letta agent id
+                  </span>
+                  <input
+                    type="text"
+                    class="mt-1.5 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-1)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
+                    placeholder="agent-..."
+                    value={memoryStore.settings?.externalMemoryScope ?? ''}
+                    oninput={(event) =>
+                      void memoryStore.saveSettings({
+                        externalMemoryScope: (event.currentTarget as HTMLInputElement).value,
+                      })}
+                  />
+                </label>
+              {/if}
+
+              <div class="border-t border-[var(--color-border)]">
+                <SettingsSwitch
+                  checked={memoryStore.settings?.externalMemoryInContext ?? false}
+                  label="Include recalled memories in agent context"
+                  description="Agents see relevant external memories automatically"
+                  onchange={() => toggleSetting('externalMemoryInContext')}
+                  flat
+                />
+              </div>
+            </div>
+          {/if}
         </section>
         <section class="mt-5 border-b border-[var(--color-border)] pb-5">
           <h5 class="text-sm font-medium text-[var(--color-text-primary)]">Long-form editor</h5>

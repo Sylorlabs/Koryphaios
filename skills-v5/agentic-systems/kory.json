@@ -124,18 +124,18 @@
     {
       "url": "https://openai.github.io/openai-agents-python/",
       "sourceType": "reference-implementation",
-      "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI Agents SDK documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current agents, tools, guardrails, handoffs/agents-as-tools, sessions, human-in-the-loop and tracing primitives.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://openai.github.io/openai-agents-python/multi_agent/",
       "sourceType": "reference-implementation",
-      "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-09-19",
+      "versionScope": "Rolling OpenAI Agents SDK orchestration guidance as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "LLM-directed versus code-directed orchestration plus current manager-as-tool and handoff patterns.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://www.anthropic.com/research/trustworthy-agents",

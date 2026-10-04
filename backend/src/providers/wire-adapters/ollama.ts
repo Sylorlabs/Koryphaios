@@ -31,6 +31,17 @@ function toOllamaMessages(request: WireAdapterChatRequest): Array<Record<string,
     messages.push({ role: 'system', content: request.systemPrompt });
   }
   for (const message of request.messages) {
+    const images =
+      typeof message.content === 'string'
+        ? []
+        : message.content
+            .filter((block) => block.type === 'image')
+            .map((block) => {
+              if (!block.imageData?.trim())
+                throw new Error('Ollama received an image without image data.');
+              return block.imageData;
+            });
+    const imageContent = images.length ? { images } : {};
     const text =
       typeof message.content === 'string'
         ? message.content
@@ -43,13 +54,14 @@ function toOllamaMessages(request: WireAdapterChatRequest): Array<Record<string,
       const toolCalls: OllamaToolCallObject[] = message.tool_calls.map((call) => ({
         function: { name: call.name, arguments: call.input },
       }));
-      messages.push({ role: 'assistant', content: text, tool_calls: toolCalls });
+      messages.push({ role: 'assistant', content: text, tool_calls: toolCalls, ...imageContent });
       continue;
     }
     if (message.role === 'tool') {
       messages.push({
         role: 'tool',
         content: text,
+        ...imageContent,
         ...(message.tool_call_id &&
           callIdToName.get(message.tool_call_id) && {
             tool_name: callIdToName.get(message.tool_call_id),
@@ -57,13 +69,14 @@ function toOllamaMessages(request: WireAdapterChatRequest): Array<Record<string,
       });
       continue;
     }
-    messages.push({ role: message.role, content: text });
+    messages.push({ role: message.role, content: text, ...imageContent });
   }
   return messages;
 }
 
 export const ollamaAdapter: WireAdapter = {
   id: 'ollama',
+  imageInputTransport: 'native',
   label: 'Ollama (native)',
   description: 'Ollama /api/chat protocol with native tool calls and /api/tags discovery.',
   streamFormat: 'jsonl',

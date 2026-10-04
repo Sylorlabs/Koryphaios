@@ -30,6 +30,8 @@ import {
 import { OpenCodeGoProvider } from './opencodego';
 
 import { GoogleProvider } from './google';
+import { imageAttachmentTransportError } from './attachment-admission';
+import { mediaInputAdmissionError } from './media-input';
 import { CopilotProvider, exchangeGitHubTokenForCopilotAsync } from './copilot';
 import {
   CodexCliProvider,
@@ -42,6 +44,7 @@ import { getManagedCodexAppServer } from './codex-app-server';
 import { ClaudeCodeProvider } from './claude-code';
 import { GrokBuildProvider } from './grok-build';
 import { FreebuffProvider } from './freebuff-cli';
+import { refreshFreebuffRuntimeStatus } from './freebuff-runtime';
 import { CodebuffProvider } from './codebuff';
 import { AntigravityProvider } from './antigravity';
 import { CursorProvider } from './cursor';
@@ -66,6 +69,7 @@ import { ChatbaseProvider } from './chatbase';
 import { NOTION_API_VERSION, NOTION_BASE_URL, NotionProvider } from './notion';
 import { CustomProvider, normalizeCustomProviderBaseUrl, probeCustomProvider } from './custom';
 import { getWireAdapter } from './wire-adapters/registry';
+import { getCapabilityAdapter, resolveCapabilityConfig } from './capabilities';
 import {
   detectCodexCLILogin,
   detectClaudeCodeLogin,
@@ -73,12 +77,15 @@ import {
   detectAntigravityCLILogin,
   detectCursorCLILogin,
   detectDevinCLILogin,
-  detectFreebuffCLILogin,
-  readFreebuffAuthToken,
+  discoverFreebuffAccounts,
 } from './auth-utils';
 import { cliAutoEnableCreds, probeCliConnection, whichBinary } from './cli-detection';
 import { discoverCliAccounts } from './cli-accounts';
 import { type ProviderDeployment, getProviderDisplay } from './provider-display';
+import {
+  providerExecutionCapabilities,
+  type ProviderExecutionCapabilities,
+} from '@koryphaios/shared';
 import { KimiCodeProvider } from './kimicode';
 import { resolveKimiCodeAccessToken } from './kimicode-auth';
 import { secureDecrypt, isUsingSecureEncryption } from '../security';
@@ -119,6 +126,8 @@ import { verifyRuntimeCompletion } from './runtime-verification';
 import { getCatalogRefreshScheduler } from './catalog-refresh';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { syncProviderConfigsToConfig } from '../runtime/config';
+import { enforceChatProviderIsolation } from './chat-isolation';
+import { withBridgeWorkspace } from './bridge-grant';
 
 function safeVerificationHttpError(
   status: number,
@@ -177,14 +186,32 @@ export const UNSUPPORTED_CHAT_PROVIDER_NAMES = new Set<ProviderName>([
  *   - a verified credential still resolves to connectionState 'verified', which
  *     is what unlocks the model selector for a provider whose `isAvailable()`
  *     is false.
- * `hoplite` qualifies: its org API key verifies against /api/projects and it
- * publishes a per-thread model catalog, but a Hoplite thread is a delegated
- * remote/local agent run rather than a chat completion.
+ *
+ * Two populations live here:
+ *  - Audio/transcription backends (`deepgram`, `assemblyai`) reached through the
+ *    dedicated voice route.
+ *  - Media, retrieval, and memory backends reached through a capability adapter
+ *    in `providers/capabilities/`. Their credentials are verified against that
+ *    adapter's own endpoint rather than a chat models list, because none of them
+ *    publishes a chat-completions surface.
+ *
+ * `hoplite` also qualifies but for a third reason: its org API key verifies
+ * against /api/projects and it publishes a per-thread model catalog, but a
+ * Hoplite thread is a delegated remote/local agent run rather than a chat
+ * completion.
  */
 export const DEDICATED_CAPABILITY_PROVIDER_NAMES = new Set<ProviderName>([
   'deepgram',
   'assemblyai',
   'hoplite',
+  'luma',
+  'klingai',
+  'prodia',
+  'replicate',
+  'lmnt',
+  'voyageai',
+  'mem0',
+  'letta',
 ]);
 
 function unsupportedChatReason(name: ProviderName): string | undefined {
@@ -805,6 +832,7 @@ class ProviderRegistry {
     iconPath?: string;
     customIcon?: ProviderConfig['customIcon'];
     deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
+    execution?: ProviderExecutionCapabilities;
     description?: string;
     credentialUrl?: string;
   }> {
@@ -845,6 +873,7 @@ class ProviderRegistry {
       iconPath?: string;
       customIcon?: ProviderConfig['customIcon'];
       deployment?: 'cloud' | 'api' | 'local' | 'hybrid';
+      execution?: ProviderExecutionCapabilities;
       description?: string;
       credentialUrl?: string;
     }> = [];
@@ -999,6 +1028,7 @@ class ProviderRegistry {
           }),
         ...(display?.iconPath && { iconPath: display.iconPath }),
         deployment: inferredDeployment,
+        execution: providerExecutionCapabilities(String(name), inferredDeployment),
         ...(display?.description && { description: display.description }),
         ...(display?.credentialUrl && { credentialUrl: display.credentialUrl }),
         ...(baseUrlPlaceholder && { baseUrlPlaceholder }),
@@ -1336,6 +1366,10 @@ class ProviderRegistry {
     for (let i = 0; i < chain.length; i++) {
       const currentModel = chain[i];
       const provider = this.resolveProvider(currentModel, i === 0 ? preferredProvider : undefined);
+      if (request.requiredProvider && provider?.name !== request.requiredProvider) {
+        yield { type: 'error', error: 'The authorized provider is unavailable. Remote inference cannot use a different provider.' };
+        return;
+      }
 
       if (!provider) {
         if (i === chain.length - 1) {
@@ -1354,6 +1388,19 @@ class ProviderRegistry {
           return;
         }
         continue;
+      }
+
+      // Every dispatch path (including remote turns and fallback routes) must
+      // reject a text-only integration before it can flatten image input.
+      const imageTransportError = imageAttachmentTransportError(provider, request.messages);
+      if (imageTransportError) {
+        yield { type: 'error', error: imageTransportError, errorTransient: false };
+        return;
+      }
+      const mediaError = mediaInputAdmissionError(provider, request.messages);
+      if (mediaError) {
+        yield { type: 'error', error: mediaError, errorTransient: false };
+        return;
       }
 
       // Consecutive same-model retries used for transient failures. Declared
@@ -1391,14 +1438,14 @@ class ProviderRegistry {
           let surfacedError = false;
           try {
             const stream = provider.streamResponse({
-              ...request,
+              ...enforceChatProviderIsolation(provider.name, request),
               model: currentModel,
               ...(isCodexFamily && carriedToolLedger.size > 0
                 ? { messages: [...request.messages, ...carriedToolLedger.values()] }
                 : {}),
             });
 
-            for await (const event of stream) {
+            for await (const event of withBridgeWorkspace(request.workingDirectory, stream)) {
               if (event.type === 'error' && !request.signal?.aborted) {
                 const message = typeof event.error === 'string' ? event.error : '';
                 // `errorTransient` is the provider's own verdict, computed from
@@ -1723,8 +1770,10 @@ class ProviderRegistry {
   private runtimeCheckIneligible(name: ProviderName, config: ProviderConfig): string | null {
     if (CLI_HARNESS_PROVIDERS.has(name) || MANAGED_CLI_PROVIDERS.has(name)) return 'CLI';
     if (LOCAL_PROVIDER_KEYS.has(name)) return 'local';
-    if (UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) return 'unsupported';
+    // Capability-only providers are also absent from the chat surface, but the
+    // dedicated reason is more useful to the settings UI than "unsupported".
     if (DEDICATED_CAPABILITY_PROVIDER_NAMES.has(name)) return 'capability-only';
+    if (UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) return 'unsupported';
     if (String(name).startsWith('remote-')) return 'remote';
     // Deployment-, project-, or OAuth-bound hosts verify their binding through
     // the catalog; a synthetic generation adds cost without adding evidence.
@@ -1943,31 +1992,42 @@ class ProviderRegistry {
           return { success: true, state: 'verified' };
         }
         case 'freebuff': {
-          if (detectFreebuffCLILogin() || readFreebuffAuthToken()) {
-            const runtime = new FreebuffProvider({
-              name: 'freebuff',
-              authToken: authToken || 'cli:freebuff:detected',
-              baseUrl: '',
-              disabled: false,
-            });
-            if (runtime.isAvailable()) {
-              return {
-                success: true,
-                state: 'detected',
-                error:
-                  'Freebuff CLI login and the required PTY sandbox runtime were detected. Account/model access is verified only by an actual Freebuff turn.',
-              };
-            }
+          // Use the same multi-account/reference discovery as actual execution;
+          // never extract a CLI token merely to decide whether setup exists.
+          if (!discoverFreebuffAccounts().length) {
             return {
               success: false,
               error:
-                'Freebuff login exists, but the real PTY adapter requires the native launcher plus tmux and working bubblewrap isolation.',
+                'Freebuff CLI login material was not found. Run "freebuff login" in your terminal, then reconnect.',
+            };
+          }
+          const isolation = await refreshFreebuffRuntimeStatus(true);
+          if (!isolation.available) {
+            return {
+              success: false,
+              error:
+                isolation.reason ?? 'Freebuff mandatory Linux bubblewrap runtime is unavailable.',
+            };
+          }
+          const runtime = new FreebuffProvider({
+            name: 'freebuff',
+            authToken: authToken || 'cli:freebuff:detected',
+            baseUrl: '',
+            disabled: false,
+          });
+          const models = await runtime.refreshModels(true);
+          if (!runtime.isAvailable() || !models.length) {
+            return {
+              success: false,
+              error:
+                runtime.getModelDiscoveryError() ??
+                'Freebuff native CLI executable or model selection is unavailable.',
             };
           }
           return {
-            success: false,
-            error:
-              'Freebuff CLI is not logged in. Run "freebuff login" in your terminal, then reconnect.',
+            success: true,
+            state: 'detected',
+            error: `Freebuff CLI setup and ${isolation.kind === 'docker' ? 'Docker/Linux' : 'native Linux'} bubblewrap isolation passed readiness checks. The CLI owns model selection; account/model access is verified only by an actual Freebuff turn.`,
           };
         }
         case 'codebuff': {
@@ -2418,6 +2478,27 @@ class ProviderRegistry {
           });
         }
         default: {
+          // Dedicated non-chat backends (media, retrieval, memory) verify
+          // against their own adapter endpoint. The OpenAI-compatible
+          // `/models` probe below would fail for all of them, because none
+          // publishes a chat-completions surface, and reporting that as a
+          // broken credential would be a lie.
+          const capabilityAdapter = getCapabilityAdapter(name);
+          if (capabilityAdapter) {
+            const resolved = resolveCapabilityConfig(capabilityAdapter, {
+              apiKey,
+              authToken,
+              baseUrl,
+            });
+            const outcome = await capabilityAdapter.verify(resolved);
+            if (outcome.ok) return { success: true, state: 'verified' };
+            return {
+              success: false,
+              state: 'failed',
+              error: outcome.error ?? `${name} verification failed.`,
+            };
+          }
+
           const defaultBase = providerDefaultBaseUrl(name);
           // A configured base URL that is present but blank (the Settings UI and
           // the shipped koryphaios.json both write `""`) must fall back to the

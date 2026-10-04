@@ -117,8 +117,8 @@
     {
       "url": "https://html.spec.whatwg.org/multipage/interaction.html",
       "sourceType": "spec",
-      "versionScope": "WHATWG HTML Living Standard user-interaction sections, last updated 2026-09-04 when verified",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "WHATWG HTML Living Standard user-interaction sections, last updated 2026-10-03 when verified",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "notes": "Authoritative browser semantics for interaction, focus, activation, inertness, and related HTML behavior."
     },
@@ -149,8 +149,8 @@
     {
       "url": "https://github.com/secondsky/claude-skills/blob/main/plugins/frontend-design/skills/frontend-design/SKILL.md",
       "sourceType": "community-pattern",
-      "versionScope": "secondsky/claude-skills main as inspected 2026-09-04",
-      "verifiedAt": "2026-09-04",
+      "versionScope": "secondsky/claude-skills main at 88378361314f558fb719aec0af9fd898ab36f0b2, inspected 2026-10-03",
+      "verifiedAt": "2026-10-03",
       "staleAfterDays": 30,
       "license": "MIT",
       "notes": "Pattern source for explicit aesthetic direction and anti-generic review. Kory rejects its rigid font bans, fixed breakpoint checklist, and context-free aesthetic prescriptions as universal rules."

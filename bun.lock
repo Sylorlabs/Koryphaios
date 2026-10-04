@@ -15,7 +15,7 @@
     },
     "backend": {
       "name": "backend",
-      "version": "0.2.0",
+      "version": "0.5.0",
       "dependencies": {
         "@anthropic-ai/bedrock-sdk": "^0.30.2",
         "@anthropic-ai/sdk": "^0.39.0",
@@ -61,7 +61,7 @@
     },
     "desktop": {
       "name": "desktop",
-      "version": "0.2.0",
+      "version": "0.5.0",
       "dependencies": {
         "@tauri-apps/api": "^2.11.1",
         "@tauri-apps/plugin-clipboard-manager": "~2.3.2",
@@ -76,7 +76,7 @@
     },
     "frontend": {
       "name": "frontend",
-      "version": "0.2.0",
+      "version": "0.5.0",
       "dependencies": {
         "@codemirror/lang-html": "^6.4.12",
         "@codemirror/lang-markdown": "^6.5.2",
@@ -154,7 +154,7 @@
     },
     "mcp-server": {
       "name": "@koryphaios/mcp-server",
-      "version": "0.2.0",
+      "version": "0.5.0",
       "dependencies": {
         "@koryphaios/shared": "workspace:*",
         "@modelcontextprotocol/server": "2.0.0",
@@ -179,7 +179,7 @@
     },
     "shared": {
       "name": "@koryphaios/shared",
-      "version": "0.2.0",
+      "version": "0.5.0",
     },
   },
   "overrides": {

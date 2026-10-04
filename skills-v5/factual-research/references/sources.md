@@ -4,12 +4,12 @@
 
 ## Factual-research method sources
 
-- **OpenAI model guidance: web search and research**: https://developers.openai.com/api/docs/guides/latest-model
+- **OpenAI web search guide**: https://developers.openai.com/api/docs/guides/tools-web-search
   - Type: `official-docs`
-  - Scope: current OpenAI guidance for web research, freshness-sensitive browsing, source use, and citation placement as available 2026-09-04.
-  - Verified: 2026-09-04; refresh after 30 days.
+  - Scope: OpenAI web search documentation inspected 2026-10-03. The previous `latest-model` URL was also rechecked and now serves GPT-6 model guidance rather than the research-method role recorded here.
+  - Verified: 2026-10-03; refresh after 30 days.
   - Provenance: original OpenAI documentation; paraphrased, not copied.
-  - Relevance: supports browsing for unstable/current facts, using citations for web-derived claims, comparing dates for news/current events, and preferring stronger sources for key claims.
+  - Relevance: supports retrieval of up-to-date web information and sourced URL citations. Source authority, effective-date comparison, and contradiction handling remain methodology rules supported by the source-of-record workflow and the other primary research references in this package.
 
 - **Library of Congress: Search Strategies**: https://guides.loc.gov/student-resources/search-strategies
   - Type: `official-docs`
@@ -64,11 +64,11 @@
 
 - **PracticalSwan research Agent Skill**: https://github.com/PracticalSwan/agent-skills/blob/main/research/SKILL.md
   - Type: `community-pattern`
-  - Scope: community research skill version visible on 2026-09-04 (repository reported MIT licensing and an August 2026 update).
-  - Verified: 2026-09-04; refresh after 30 days.
+  - Scope: community research skill version 2.0 with `last_updated: 2026-09-08`, inspected 2026-10-03.
+  - Verified: 2026-10-03; refresh after 30 days.
   - License: MIT.
   - Provenance: consulted only for operational comparison; no text copied.
-  - Relevance: useful community corroboration for primary-source preference, claim-level citation, and bounded fallback when delegation/tooling is unavailable. It is not treated as authority for factual claims.
+  - Relevance: useful community corroboration for primary-source preference, claim-level citation, and explicit evidence when preferred integrations are unavailable. Its background-agent and repository-file output workflow is not treated as universal guidance, and it is not authority for factual claims.
 
 ## Stewardship conclusions
 

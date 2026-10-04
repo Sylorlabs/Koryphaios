@@ -1041,12 +1041,20 @@ export const AI_PROTOCOL_CONCEPTS: readonly ConceptFixture[] = [
   {
     id: 'vector-search-systems-full-task-1-individual',
     skill: 'vector-search-systems',
+    generation: 2,
+    blockers: [
+      'Full-task qualification requires representative ANN/index execution with exact-reference recall, filtering/tenant isolation, latency, build/storage/memory, update/delete freshness, and reversible migration evidence; this pure synthetic behavior exercise does not furnish that evidence.',
+    ],
     contract: `For each query, filter ANN candidates to allowed=true and deleted=false, preserve ANN order and take k. Recall is overlap count with exact top-k divided by min(k, exact length), rounded to three decimals. ready is true only when every query recall is at least threshold. Return results [{id,ids,recall}] and ready.`,
     vectors: vectorRecallVectors,
   },
   {
     id: 'vector-search-systems-full-task-2-individual',
     skill: 'vector-search-systems',
+    generation: 2,
+    blockers: [
+      'Full-task qualification requires representative sharded/vector-index execution with global top-k, capacity/memory, filtering, freshness, update/delete, latency, and recovery evidence; this pure synthetic behavior exercise does not furnish that evidence.',
+    ],
     contract: `Merge all shard candidates, drop deleted items, deduplicate ids keeping the highest exactScore, globally rerank by exactScore descending then id, and take k. ready requires memoryMb<=memoryLimitMb. Return {ids,ready}. Shard-local order is never a substitute for global top-k.`,
     vectors: globalVectorVectors,
   },

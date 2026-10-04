@@ -4,6 +4,7 @@ import {
   leaveJoinedTeamSession,
   upsertJoinedTeamSession,
   type JoinedTeamSessionRecord,
+  parseSharedTeamFolders,
 } from './joined-team-sessions';
 
 const team = (sessionId: string, joinedAt: number): JoinedTeamSessionRecord => ({
@@ -15,6 +16,16 @@ const team = (sessionId: string, joinedAt: number): JoinedTeamSessionRecord => (
 });
 
 describe('joined team session state', () => {
+  it('retains host folder labels and rejects absolute host paths', () => {
+    const folders = parseSharedTeamFolders([
+      { id: 'workspace-1', name: 'koryphaios' },
+      { id: 'workspace-2', name: '/Users/host/private' },
+      { id: 'workspace-3', name: 'C:\\Users\\host' },
+    ]);
+    expect(folders).toEqual([{ id: 'workspace-1', name: 'koryphaios' }]);
+    const joined = { ...team('alpha', 1), hostName: 'Micah', sharedFolders: folders };
+    expect(upsertJoinedTeamSession([], joined)[0]).toMatchObject({ hostName: 'Micah', sharedFolders: folders });
+  });
   it('retains multiple teams and refreshes an existing team without duplicating it', () => {
     let sessions = upsertJoinedTeamSession([], team('alpha', 1));
     sessions = upsertJoinedTeamSession(sessions, team('beta', 2));

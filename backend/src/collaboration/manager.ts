@@ -69,6 +69,7 @@ function normalizePolicy(
     ...patch,
     accessTiers: tiers,
     defaultTierId,
+    hostName: String(patch.hostName ?? current.hostName ?? 'Host').trim().slice(0, 80) || 'Host',
     sessionName:
       String(patch.sessionName ?? current.sessionName ?? 'Team session')
         .trim()
@@ -565,6 +566,7 @@ export class CollaborationManager {
     baseSessionId: string,
     ownerId: string,
     workspacePaths: string[] = [],
+    hostName?: string,
   ): Promise<CollaborationHostSnapshot> {
     if (!relayEnabled || !relayClient) {
       throw new Error('WAN collaboration relay is not configured. Hosting was not started.');
@@ -641,7 +643,7 @@ export class CollaborationManager {
           // connection (separate from the guest-prompt/session path below).
           const hostRelay = relayClient;
           void import('./remote-provider-host').then(({ startProviderHost }) =>
-            startProviderHost(hostRelay, 'Host'),
+            startProviderHost(hostRelay, hostName?.trim() || 'Host'),
           );
 
           // Relay dispatch is synchronous, so explicitly observe the durable
@@ -666,6 +668,7 @@ export class CollaborationManager {
 
       const initialPolicy = normalizePolicy(DEFAULT_COLLABORATION_POLICY, {
         workspacePaths: requestedWorkspacePaths,
+        hostName,
       });
       await db.insert(collaborationSessions).values({
         id: sessionId,
@@ -690,9 +693,12 @@ export class CollaborationManager {
 
     let policy: CollaborationPolicy = existing
       ? readStoredPolicy(existing.aiState)
-      : normalizePolicy(DEFAULT_COLLABORATION_POLICY, { workspacePaths: requestedWorkspacePaths });
-    if (existing && requestedWorkspacePaths.length) {
-      policy = normalizePolicy(policy, { workspacePaths: requestedWorkspacePaths });
+      : normalizePolicy(DEFAULT_COLLABORATION_POLICY, { workspacePaths: requestedWorkspacePaths, hostName });
+    if (existing && (requestedWorkspacePaths.length || hostName?.trim())) {
+      policy = normalizePolicy(policy, {
+        ...(requestedWorkspacePaths.length && { workspacePaths: requestedWorkspacePaths }),
+        ...(hostName?.trim() && { hostName }),
+      });
       await db
         .update(collaborationSessions)
         .set({ aiState: JSON.stringify(policy) })
@@ -794,7 +800,7 @@ export class CollaborationManager {
     if (!existing) return null;
     if (!relayEnabled || !relayClient) return existing;
     if (relayClient.isConnected) return existing;
-    return this.hostSession(baseSessionId, existing.ownerId, existing.policy.workspacePaths ?? []);
+    return this.hostSession(baseSessionId, existing.ownerId, existing.policy.workspacePaths ?? [], existing.policy.hostName);
   }
 
   async updatePolicy(

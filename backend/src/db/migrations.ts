@@ -1605,6 +1605,170 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS checklists;
     `,
   },
+  {
+    version: '0046',
+    description: 'Separate durable note associations from document-derived links',
+    up: `
+      CREATE TABLE IF NOT EXISTS note_relationships (
+        from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        project_root TEXT NOT NULL,
+        provenance TEXT NOT NULL DEFAULT 'user' CHECK (provenance IN ('user', 'agent', 'import')),
+        evidence TEXT NOT NULL DEFAULT '' CHECK (length(evidence) <= 2000),
+        source_revision INTEGER NOT NULL CHECK (source_revision >= 1),
+        target_revision INTEGER NOT NULL CHECK (target_revision >= 1),
+        weight REAL NOT NULL DEFAULT 1 CHECK (weight > 0 AND weight <= 1),
+        revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (from_note_id, to_note_id),
+        CHECK (from_note_id <> to_note_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_note_relationships_project_from
+        ON note_relationships(project_root, from_note_id);
+      CREATE INDEX IF NOT EXISTS idx_note_relationships_project_to
+        ON note_relationships(project_root, to_note_id);
+      CREATE INDEX IF NOT EXISTS idx_note_relationships_to ON note_relationships(to_note_id);
+    `,
+    // Existing note_links cannot reliably distinguish manual edges from parsed
+    // links. Leave them untouched rather than falsely promoting references.
+    down: `DROP TABLE IF EXISTS note_relationships;`,
+  },
+  {
+    version: '0047',
+    description: 'Typed evidence relationship lifecycle and durable audit snapshots',
+    up: `
+      ALTER TABLE note_relationships ADD COLUMN type TEXT NOT NULL DEFAULT 'related_to'
+        CHECK (type IN ('related_to','supports','contradicts','depends_on','supersedes'));
+      ALTER TABLE note_relationships ADD COLUMN status TEXT NOT NULL DEFAULT 'accepted'
+        CHECK (status IN ('proposed','accepted','rejected'));
+      ALTER TABLE note_relationships ADD COLUMN actor_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(actor_json));
+      CREATE INDEX idx_note_relationships_status ON note_relationships(project_root,status,updated_at);
+      CREATE TABLE note_relationship_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_note_id TEXT NOT NULL, to_note_id TEXT NOT NULL, project_root TEXT NOT NULL,
+        revision INTEGER NOT NULL, action TEXT NOT NULL, snapshot_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX idx_note_relationship_history_pair ON note_relationship_history(project_root,from_note_id,to_note_id,id);
+      ${['INSERT', 'UPDATE', 'DELETE']
+        .map((action) => {
+          const row = action === 'DELETE' ? 'OLD' : 'NEW';
+          return `CREATE TRIGGER note_relationship_audit_${action.toLowerCase()} AFTER ${action} ON note_relationships BEGIN
+          INSERT INTO note_relationship_history(from_note_id,to_note_id,project_root,revision,action,snapshot_json,created_at)
+          VALUES (${row}.from_note_id,${row}.to_note_id,${row}.project_root,${row}.revision,'${action.toLowerCase()}',
+            json_object('type',${row}.type,'status',${row}.status,'evidence',${row}.evidence,'weight',${row}.weight,
+              'provenance',${row}.provenance,'actor',json(${row}.actor_json),'sourceRevision',${row}.source_revision,
+              'targetRevision',${row}.target_revision,'createdAt',${row}.created_at,'updatedAt',${row}.updated_at),
+            CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)); END;`;
+        })
+        .join('\n')}
+      INSERT INTO note_relationship_history(from_note_id,to_note_id,project_root,revision,action,snapshot_json,created_at)
+        SELECT from_note_id,to_note_id,project_root,revision,'legacy',json_object('type',type,'status',status,
+          'evidence',evidence,'weight',weight,'provenance',provenance,'actor',json(actor_json),
+          'sourceRevision',source_revision,'targetRevision',target_revision,'createdAt',created_at,'updatedAt',updated_at),updated_at
+        FROM note_relationships;
+    `,
+    down: `DROP TRIGGER IF EXISTS note_relationship_audit_insert;
+      DROP TRIGGER IF EXISTS note_relationship_audit_update;
+      DROP TRIGGER IF EXISTS note_relationship_audit_delete;
+      DROP TABLE IF EXISTS note_relationship_history;
+      DROP INDEX IF EXISTS idx_note_relationships_status;
+      ALTER TABLE note_relationships DROP COLUMN actor_json;
+      ALTER TABLE note_relationships DROP COLUMN status;
+      ALTER TABLE note_relationships DROP COLUMN type;`,
+  },
+  {
+    version: '0048',
+    description: 'Persistent opt-in revision-aware note semantic index',
+    up: `
+      CREATE TABLE IF NOT EXISTS note_semantic_index_state (
+        project_root TEXT PRIMARY KEY, provider_identity TEXT NOT NULL,
+        cursor TEXT NOT NULL DEFAULT '', opted_in_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS note_semantic_vectors (
+        project_root TEXT NOT NULL, note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+        provider_identity TEXT NOT NULL, revision INTEGER NOT NULL, content_hash TEXT NOT NULL,
+        vector_json TEXT NOT NULL, indexed_at INTEGER NOT NULL,
+        PRIMARY KEY(project_root,note_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_note_semantic_vectors_provider ON note_semantic_vectors(project_root,provider_identity);
+    `,
+    down: `DROP TABLE IF EXISTS note_semantic_vectors; DROP TABLE IF EXISTS note_semantic_index_state;`,
+  },
+  {
+    version: '0049',
+    description: 'Video generation history and wider API usage kinds',
+    up: `
+      -- Video generations are recorded exactly like images so spend, retention,
+      -- and the gallery behave identically across media modalities.
+      CREATE TABLE IF NOT EXISTS video_history (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        duration TEXT,
+        aspect_ratio TEXT,
+        resolution TEXT,
+        mode TEXT NOT NULL CHECK (mode IN ('generate', 'edit')),
+        file TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_video_history_ts ON video_history (ts DESC);
+
+      -- The api_usage CHECK lists predate video and embedding usage. SQLite
+      -- cannot alter a CHECK constraint, so rebuild the table and copy every
+      -- recorded row across unchanged. Session/run attribution lives inside the
+      -- detail JSON envelope, so there are no extra columns to carry over.
+      CREATE TABLE IF NOT EXISTS api_usage_widened (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'tts', 'stt', 'embedding')),
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        estimated_cost_usd REAL,
+        unit_measure TEXT CHECK (unit_measure IN ('images', 'videos', 'characters', 'minutes', 'tokens')),
+        unit_amount REAL,
+        detail TEXT
+      );
+      INSERT OR IGNORE INTO api_usage_widened
+        SELECT id, ts, kind, provider, model, estimated_cost_usd,
+               unit_measure, unit_amount, detail
+        FROM api_usage;
+      DROP TABLE api_usage;
+      ALTER TABLE api_usage_widened RENAME TO api_usage;
+      CREATE INDEX IF NOT EXISTS idx_api_usage_ts ON api_usage (ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_api_usage_kind_ts ON api_usage (kind, ts DESC);
+    `,
+    // Rebuilding the usage table back to the narrow kind list would reject the
+    // video and embedding rows that now exist, so the down step preserves them.
+    down: `
+      DROP INDEX IF EXISTS idx_api_usage_kind_ts;
+      DROP INDEX IF EXISTS idx_api_usage_ts;
+      DROP TABLE IF EXISTS api_usage;
+      CREATE TABLE api_usage (
+        id TEXT PRIMARY KEY,
+        ts INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('image', 'video', 'tts', 'stt', 'embedding')),
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        estimated_cost_usd REAL,
+        unit_measure TEXT CHECK (unit_measure IN ('images', 'videos', 'characters', 'minutes', 'tokens')),
+        unit_amount REAL,
+        detail TEXT
+      );
+      INSERT OR IGNORE INTO api_usage
+        SELECT id, ts, kind, provider, model, estimated_cost_usd,
+               unit_measure, unit_amount, detail
+        FROM api_usage_widened;
+      DROP TABLE api_usage_widened;
+      CREATE INDEX IF NOT EXISTS idx_api_usage_ts ON api_usage (ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_api_usage_kind_ts ON api_usage (kind, ts DESC);
+      DROP INDEX IF EXISTS idx_video_history_ts;
+      DROP TABLE IF EXISTS video_history;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

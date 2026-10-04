@@ -199,4 +199,74 @@ describe('OpenAI stream usage and completion framing', () => {
     expect(serialized).toContain('image_url');
     expect(serialized).toContain('data:image/png;base64,');
   });
+
+  it.each([
+    ['openai', 'synthetic-model', true],
+    ['anthropic', 'synthetic-model', false],
+    ['openai', 'another-model', false],
+  ] as const)(
+    'applies image correction only to the authorized route %s/%s',
+    async (name, model, allowed) => {
+      const selectedProvider = provider();
+      selectedProvider.listModels = () => [
+        {
+          id: 'synthetic-model',
+          name: 'Synthetic',
+          provider: 'openai',
+          contextWindow: 0,
+          maxOutputTokens: 0,
+          vision: false,
+          supportsAttachments: false,
+        },
+      ];
+      installFetch(['[DONE]']);
+      const { bodies } = await collect(
+        selectedProvider,
+        request({
+          imageInputOverride: { provider: name, model },
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Inspect this' },
+                { type: 'image', imageData: PNG_1x1, imageMimeType: 'image/png' },
+              ],
+            },
+          ],
+        }),
+      );
+      expect(JSON.stringify(bodies[0]).includes('data:image/png;base64,')).toBe(allowed);
+    },
+  );
+
+  it('surfaces a confirmed-image rejection instead of retrying text-only', async () => {
+    let calls = 0;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      // Catalog enrichment may fetch concurrently; count only inference calls.
+      if (init?.body && JSON.parse(init.body as string).messages) calls++;
+      return Response.json(
+        {
+          error: {
+            message: 'This model does not support image input',
+            type: 'invalid_request_error',
+          },
+        },
+        { status: 400 },
+      );
+    }) as typeof fetch;
+    const { events } = await collect(
+      provider(),
+      request({
+        imageInputOverride: { provider: 'openai', model: 'synthetic-model' },
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image', imageData: PNG_1x1, imageMimeType: 'image/png' }],
+          },
+        ],
+      }),
+    );
+    expect(calls).toBe(1);
+    expect(events.some((event) => event.type === 'error')).toBe(true);
+  });
 });

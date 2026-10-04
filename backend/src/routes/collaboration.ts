@@ -1,9 +1,9 @@
 import { Elysia, t } from 'elysia';
 import { collaborationManager } from '../collaboration/manager';
+import { RelayJoinError } from '../collaboration/join-code';
 import { requireLocalRouteAuth } from '../auth/local-route-auth';
-import { relayAvailable } from '../collaboration/relay-client';
 import { getContext } from '../context';
-import { AuthenticationError, NotFoundError, ConfigurationError } from '../errors/types';
+import { AuthenticationError, ConfigurationError, NotFoundError, ValidationError } from '../errors/types';
 import type { CollaborationAccessTier, SandboxPolicy } from '@koryphaios/shared';
 
 export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
@@ -31,11 +31,12 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       // Body shape is validated by the Elysia schema below; cast bridges the
       // inferred route type to the local handler contract.
-      const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[] };
+      const input = body as { sessionId: string; ownerId?: string; workspacePaths?: string[]; hostName?: string };
       const result = await collaborationManager.hostSession(
         input.sessionId,
         input.ownerId || 'local-user',
         input.workspacePaths || [],
+        input.hostName,
       );
       return { ok: true, data: result };
     },
@@ -44,6 +45,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         sessionId: t.String(),
         ownerId: t.Optional(t.String()),
         workspacePaths: t.Optional(t.Array(t.String())),
+        hostName: t.Optional(t.String({ maxLength: 80 })),
       }),
     },
   )
@@ -72,17 +74,21 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
     },
   )
 
-  // Join via legacy 6-char code (fallback for local network use)
+  // Exchange the host's eight-character code for a live signed relay invitation.
   .post(
     '/join',
-    async ({ request, body }) => {
+    async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
-      if (!relayAvailable)
-        throw new ConfigurationError('WAN collaboration relay is not configured');
       // Body shape is validated by the Elysia schema below.
       const input = body as { joinCode: string };
-      const session = await collaborationManager.joinRelaySession(input.joinCode);
-      return { ok: true, data: session };
+      try {
+        const session = await collaborationManager.joinRelaySession(input.joinCode);
+        return { ok: true, data: session };
+      } catch (error) {
+        if (!(error instanceof RelayJoinError)) throw error;
+        set.status = error.statusCode;
+        return { ok: false, error: error.message, code: error.code };
+      }
     },
     {
       body: t.Object({
@@ -116,6 +122,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
           reasoningLevels: string[];
         }>;
         sessionName?: string;
+        hostName?: string;
         workspacePaths?: string[];
       };
       return { ok: true, data: await collaborationManager.updatePolicy(id, input) };
@@ -133,6 +140,7 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
         accessTiers: t.Optional(t.Array(t.Any())),
         modelCatalog: t.Optional(t.Array(t.Any())),
         sessionName: t.Optional(t.String({ maxLength: 80 })),
+        hostName: t.Optional(t.String({ maxLength: 80 })),
         workspacePaths: t.Optional(t.Array(t.String(), { maxItems: 24 })),
       }),
     },
@@ -290,6 +298,34 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   })
 
   // ─── Shared providers (host side): which providers to serve remotely ──────
+  .get('/providers/sharing', async ({ request }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { modelSharingStatus } = await import('../collaboration/model-sharing');
+    return { ok: true, data: modelSharingStatus() };
+  })
+  .post('/providers/sharing/start', async ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { startModelSharing } = await import('../collaboration/model-sharing');
+    try {
+      return { ok: true, data: await startModelSharing(body.hostName || 'Host') };
+    } catch (error) {
+      if (error instanceof ValidationError || error instanceof RelayJoinError) throw error;
+      set.status = 503;
+      return { ok: false, error: error instanceof ConfigurationError
+        ? error.message : 'Could not connect to the model-sharing relay. Try again in a moment.' };
+    }
+  }, { body: t.Object({ hostName: t.Optional(t.String({ maxLength: 80 })) }) })
+  .post('/providers/sharing/stop', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { stopModelSharing } = await import('../collaboration/model-sharing');
+    try {
+      await stopModelSharing();
+      return { ok: true };
+    } catch {
+      set.status = 503;
+      return { ok: false, error: 'Could not revoke model sharing. Check the relay connection and try again.' };
+    }
+  })
   .get('/providers/shared', async ({ request }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const { getSharedProviders, getSharedModels, isAgenticProvider } =
@@ -311,7 +347,10 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
           label: p.label ?? p.name,
           modelCount: p.allAvailableModels.length || p.models.length,
           models: p.allAvailableModels.map((model) => ({ id: model.id, name: model.name })),
-          available: p.adapterAvailable && p.enabled,
+           available: p.adapterAvailable && p.enabled && !isAgenticProvider(p.name) && !p.name.startsWith('remote-'),
+           ...(isAgenticProvider(p.name) || p.name.startsWith('remote-') ? {
+             sharingBlockedReason: 'Native agents are unavailable for model-code sharing: host tool execution has no verified inference-only contract.',
+           } : {}),
           // CLI harnesses run on the host and see the guest's files.
           agentic: isAgenticProvider(p.name),
           ...classifyProviderShare(p.name),
@@ -373,13 +412,19 @@ export const collaborationRoutes = new Elysia({ prefix: '/api/collab' })
   // ─── Remote providers (client side): consume a host's shared providers ────
   .post(
     '/providers/connect',
-    async ({ request, body }) => {
+    async ({ request, body, set }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { connectToProviderHost } = await import('../collaboration/remote-provider-client');
       // Body shape is validated by the Elysia schema below.
       const input = body as { joinCode: string; name?: string };
-      const result = await connectToProviderHost(input.joinCode, input.name || 'Koryphaios client');
-      return { ok: true, data: result };
+      try {
+        const result = await connectToProviderHost(input.joinCode, input.name || 'Koryphaios client');
+        return { ok: true, data: result };
+      } catch (error) {
+        if (!(error instanceof RelayJoinError)) throw error;
+        set.status = error.statusCode;
+        return { ok: false, error: error.message, code: error.code };
+      }
     },
     { body: t.Object({ joinCode: t.String(), name: t.Optional(t.String()) }) },
   )

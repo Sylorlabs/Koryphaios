@@ -421,14 +421,18 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     envKeys: ['ZENMUX_API_KEY'],
   },
   {
+    // Keep in sync with OPENCODE_DEFAULT_BASE_URL in constants.ts, which takes
+    // precedence in providerDefaultBaseUrl(). The OpenAI SDK appends
+    // `/chat/completions` to this value verbatim, and these endpoints live
+    // under `/zen/v1` — a copy without `/v1` silently returns an HTML page.
     name: 'opencodezen',
-    baseUrl: 'https://opencode.ai/zen',
+    baseUrl: 'https://opencode.ai/zen/v1',
     authMode: 'api_key',
     envKeys: ['OPENCODE_ZEN_API_KEY'],
   },
   {
     name: 'opencodego',
-    baseUrl: 'https://opencode.ai/zen/go',
+    baseUrl: 'https://opencode.ai/zen/go/v1',
     authMode: 'api_key',
     envKeys: ['OPENCODE_GO_API_KEY', 'OPENCODE_ZEN_API_KEY'],
   },
@@ -459,9 +463,15 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
     authMode: 'api_key',
     envKeys: ['PERPLEXITY_API_KEY'],
   },
-  // Note: Luma AI (lu.ma) is for event management - not an LLM API
-  // For Luma Dream Machine (video generation), use fal.ai provider
-  { name: 'luma', baseUrl: 'https://api.luma.ai', authMode: 'api_key', envKeys: ['LUMA_API_KEY'] },
+  // Luma Dream Machine: video and image generation through the asynchronous
+  // generation API. This is `api.lumalabs.ai` (Dream Machine), not `api.luma.ai`
+  // and not lu.ma event management. No chat-completions endpoint exists here.
+  {
+    name: 'luma',
+    baseUrl: 'https://api.lumalabs.ai/dream-machine/v1',
+    authMode: 'api_key',
+    envKeys: ['LUMA_API_KEY'],
+  },
   { name: 'fal', baseUrl: 'https://queue.fal.run', authMode: 'api_key', envKeys: ['FAL_API_KEY'] },
 
   // Audio/Speech
@@ -542,13 +552,17 @@ export const PROVIDER_CONFIGS: ProviderConfig[] = [
   },
   {
     name: 'klingai',
-    baseUrl: 'https://api.klingai.com/v1',
+    // Kling moved off api.klingai.com; the documented endpoint is the
+    // Singapore host, which also covers non-CN accounts.
+    baseUrl: 'https://api-singapore.klingai.com',
     authMode: 'api_key',
     envKeys: ['KLINGAI_API_KEY'],
   },
   {
     name: 'prodia',
-    baseUrl: 'https://api.prodia.com/v1',
+    // Prodia v2 unified inference job endpoint. The legacy v1 SD endpoints on
+    // api.prodia.com require a different credential and are not used here.
+    baseUrl: 'https://inference.prodia.com/v2/job',
     authMode: 'api_key',
     envKeys: ['PRODIA_API_KEY'],
   },

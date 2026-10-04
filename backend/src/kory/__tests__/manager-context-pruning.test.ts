@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { KoryphaiosConfig } from '@koryphaios/shared';
 import type { ProviderRegistry, ToolRegistry } from '../../providers';
 import type { IMessageStore } from '../../stores/message-store';
+import type { ISessionStore } from '../../stores/session-store';
 import type { InternalMessage } from '../../providers/types';
 import { KoryManager } from '../manager';
 import { getContextArchive } from '../context-archive';
@@ -23,12 +24,25 @@ function createManager(dir: string): KoryManager {
     getStatus: () => [],
     isQuotaError: () => false,
   } as unknown as ProviderRegistry;
+  // Pruning runs against the chat's own isolated checkout, so the manager needs
+  // a readable session row it can migrate that checkout from and persist back.
+  const rows = new Map<string, { id: string; workingDirectory: string; version: number }>();
+  const sessions = {
+    get: async (id: string) => rows.get(id) ?? { id, workingDirectory: dir, version: 1 },
+    update: async (id: string, updates: { gitWorkspace?: unknown }, version: number) => {
+      const current = (await sessions.get(id)) as { version: number };
+      if (current.version !== version) return undefined;
+      const next = { ...current, ...updates, version: version + 1 };
+      rows.set(id, next);
+      return next;
+    },
+  };
   return new KoryManager(
     providers,
     {} as ToolRegistry,
     dir,
     {} as KoryphaiosConfig,
-    undefined,
+    sessions as unknown as ISessionStore,
     {} as IMessageStore,
   );
 }

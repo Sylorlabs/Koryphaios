@@ -1358,7 +1358,13 @@ export function evaluateSkillPromotion(
   const infrastructureFailures = revisionRuns.filter((run) => run.infrastructureFailure).length;
   const observedRuns = revisionRuns.filter((run) => !run.infrastructureFailure);
   const candidateRuns = observedRuns.filter((run) => run.variant !== 'without-skill');
-  const noSkillRuns = observedRuns.filter((run) => run.variant === 'without-skill');
+  // A corrupted no-skill arm is invalid baseline evidence. It must not block the
+  // candidate skill (the candidate did not produce that mutation), and it must not
+  // make the candidate look better by contributing an artificially low baseline.
+  // Preserve the run in history, but exclude it from promotion comparisons.
+  const noSkillRuns = observedRuns.filter(
+    (run) => run.variant === 'without-skill' && !run.integrityFailure,
+  );
   const deterministicCandidateRuns = candidateRuns.filter(
     (run) => run.evaluator === 'deterministic',
   );
@@ -1447,7 +1453,7 @@ export function evaluateSkillPromotion(
       'V5 promotion requires individually authored concrete full-task scenarios; migration scaffolds cannot qualify a skill.',
     );
   }
-  if (observedRuns.some((run) => run.integrityFailure)) {
+  if (candidateRuns.some((run) => run.integrityFailure)) {
     reasons.push('At least one run recorded an integrity failure.');
   }
   if (!observedRuns.length && infrastructureFailures) {
@@ -1529,7 +1535,7 @@ export function evaluateSkillPromotion(
 
   const blocked =
     qualificationContracts.conflicts.length > 0 ||
-    observedRuns.some((run) => run.integrityFailure) ||
+    candidateRuns.some((run) => run.integrityFailure) ||
     failedProvenancedBlindReviews > 0 ||
     (baselineDelta !== null && baselineDelta < 0) ||
     (modernProtocol &&

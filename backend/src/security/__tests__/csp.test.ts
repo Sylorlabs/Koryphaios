@@ -364,6 +364,8 @@ describe('Security Headers', () => {
     expect(headers['X-XSS-Protection']).toBe('1; mode=block');
     expect(headers['Referrer-Policy']).toBe('strict-origin-when-cross-origin');
     expect(headers['Permissions-Policy']).toBeTruthy();
+    expect(headers['Permissions-Policy']).toContain('microphone=(self)');
+    expect(headers['Content-Security-Policy']).toContain("media-src 'self' data: blob:");
     expect(headers['Strict-Transport-Security']).toContain('max-age=31536000');
     expect(headers['Content-Security-Policy']).toBeTruthy();
   });

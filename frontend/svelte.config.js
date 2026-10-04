@@ -14,10 +14,16 @@ const config = {
   compilerOptions: {
     // Svelte 5 with runes support
     css: 'injected',
-    // WebKitGTK can retain a half-updated Svelte DOM runtime after a component
-    // hot swap (`next_sibling_getter` becomes undefined). The native launcher
-    // sets KORYPHAIOS_DESKTOP_DEV, so use Vite's safe full-page reload there.
-    // Browser development keeps normal component HMR.
+    // The native shell loads a Vite dev server, and a component-level hot swap
+    // in WKWebView can leave a half-updated DOM runtime. The native launcher
+    // sets KORYPHAIOS_DESKTOP_DEV, so compile without HMR boundaries there and
+    // let Vite fall back to a full page reload. Browser development keeps
+    // normal component HMR.
+    //
+    // Note: this is NOT what caused "next_sibling_getter.call" failures. That
+    // error comes from two Vite servers sharing one node_modules/.vite cache —
+    // see frontend/vite.config.ts cacheDir and the dev-server reaper in
+    // scripts/desktop-frontend-reaper.ts.
     ...(isDesktopDev ? { hmr: false } : {}),
   },
   kit: {

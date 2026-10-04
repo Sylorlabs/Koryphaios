@@ -2,26 +2,18 @@
   "schema_version": 1,
   "items": [
     {
-      "title": "Create a reversible git checkpoint of the current state",
-      "status": "in-progress"
+      "title": "Inspect Freebuff CLI integration and current provider failure",
+      "status": "done"
     },
     {
-      "title": "Audit UI surfaces and identify high-value cleanup targets",
-      "status": "pending"
+      "title": "Implement supported Freebuff bridge or compatibility fixes",
+      "status": "done"
     },
     {
-      "title": "Implement flatter spacing-conscious UI cleanup",
-      "status": "pending"
-    },
-    {
-      "title": "Run the app with Playwright and verify key screens",
-      "status": "pending"
-    },
-    {
-      "title": "Commit the cleanup and summarize revert points",
-      "status": "pending"
+      "title": "Validate sandbox, Notes invocation, and provider behavior",
+      "status": "done"
     }
   ],
-  "updated_at": "2026-10-02T05:21:19.739Z",
-  "session_id": "01a0faf8-d67d-705b-9632-3c007b99a7ae"
+  "updated_at": "2026-10-03T02:21:02.078Z",
+  "session_id": "01a0feaf-4be3-719d-967b-6a2e82cf4957"
 }

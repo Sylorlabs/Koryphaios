@@ -1,4 +1,24 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+const workspaceScope = new AsyncLocalStorage<string>();
+/** Keep grants created by a CLI turn bound to the host-selected worker/chat
+ * checkout. Each iterator step executes in its own async-local scope. */
+export async function* withBridgeWorkspace<T>(
+  root: string | undefined,
+  stream: AsyncGenerator<T>,
+): AsyncGenerator<T> {
+  try {
+    for (;;) {
+      const next = root ? await workspaceScope.run(root, () => stream.next()) : await stream.next();
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    if (root) await workspaceScope.run(root, () => stream.return(undefined as never));
+    else await stream.return(undefined as never);
+  }
+}
 import { lstatSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -27,6 +47,7 @@ interface BridgeGrantFilePayload {
 }
 
 interface BridgeGrantRecord extends Omit<BridgeGrantFilePayload, 'secret'> {
+  workspaceRoot?: string;
   secret: Buffer;
   artifact: PrivateCliArtifact;
   usedNonces: Map<string, number>;
@@ -40,6 +61,8 @@ export interface BridgeGrantHandle {
 }
 
 export interface VerifiedBridgeGrant {
+  /** Host-owned root, never read from a request body or mutable grant file. */
+  workspaceRoot?: string;
   grantId: string;
   sessionId: string;
   role: string;
@@ -165,6 +188,7 @@ export function getKoryBridgeGrant(
   const artifact = createPrivateCliTextArtifact('bridge-grant', JSON.stringify(payload), 'json');
   const record: BridgeGrantRecord = {
     ...payload,
+    workspaceRoot: workspaceScope.getStore(),
     secret,
     artifact,
     usedNonces: new Map(),
@@ -314,6 +338,7 @@ export function verifySignedBridgeRequest(
     grantId,
     sessionId: grant.sessionId,
     role: grant.role,
+    workspaceRoot: grant.workspaceRoot,
     audience,
     action,
   };

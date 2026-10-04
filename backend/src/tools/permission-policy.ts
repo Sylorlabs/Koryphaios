@@ -158,6 +158,19 @@ export type ToolPermissionDecision =
 const INTERACTION_TOOLS = new Set(['ask_user', 'ask_manager']);
 
 export const READ_ONLY_TOOLS = new Set([
+  'git_inspect',
+  'computer_status',
+  'computer_list_apps',
+  'computer_observe',
+  'computer_wait',
+  'computer_click',
+  'computer_double_click',
+  'computer_move',
+  'computer_drag',
+  'computer_type',
+  'computer_key',
+  'computer_scroll',
+  'computer_focus',
   'read_file',
   'grep',
   'glob',
@@ -173,6 +186,7 @@ export const READ_ONLY_TOOLS = new Set([
   'search_notes',
   'read_note',
   'recall_notes',
+  'retrieve_note_context',
   'render_note',
   'get_note_backlinks',
   'get_note_graph_summary',
@@ -194,11 +208,20 @@ export const FILE_EDIT_TOOLS = new Set([
 ]);
 
 const RISKY_TOOLS = new Set([
+  'computer_click',
+  'computer_double_click',
+  'computer_move',
+  'computer_drag',
+  'computer_type',
+  'computer_key',
+  'computer_scroll',
+  'computer_focus',
   'delete_file',
   'delete_note',
   'shell_manage',
   'delegate_to_jules',
   'commit_and_create_pr',
+  'git_switch',
   'manage_mcp_server',
   'delete_checklist',
 ]);

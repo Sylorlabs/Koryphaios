@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { requireCapabilityConfig } from '../providers/capability-service';
 
 /** Opt-in OpenAI-compatible embeddings. No endpoint, model, or credential is inferred. */
 export interface EmbeddingConfig {
@@ -218,5 +219,127 @@ export class EmbeddingClient {
 
 export function configuredEmbeddingClient(): EmbeddingClient | null {
   const config = embeddingConfigFromEnv();
-  return config ? new EmbeddingClient(config) : null;
+  if (config) return new EmbeddingClient(config);
+  return voyageEmbeddingClient();
+}
+
+/**
+ * Whether the operator explicitly chose Voyage for semantic embeddings.
+ *
+ * A connected Voyage credential is deliberately NOT enough. Semantic retrieval
+ * feeds memory documents, note content, and user queries to the embedding
+ * provider, so auto-selecting a paid third-party service merely because a key
+ * exists would silently move content off the machine and start billing. The
+ * choice has to be stated, exactly as the `KORY_EMBEDDINGS_ENABLED` gate
+ * already requires for the generic endpoint.
+ */
+function voyageEmbeddingsOptedIn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.KORY_EMBEDDINGS_PROVIDER?.trim().toLowerCase() === 'voyageai';
+}
+
+// ─── Voyage AI (capability adapter) ────────────────────────────────────────
+
+/**
+ * Voyage AI can back semantic retrieval without pointing at a raw endpoint: the
+ * credential lives in the provider registry, so enabling
+ * `KORY_EMBEDDINGS_PROVIDER=voyageai` is enough.
+ *
+ * Both gates are required — the opt-in flag and a connected provider — because
+ * every call sends user content to Voyage. With neither satisfied this returns
+ * `null` and callers fall back to lexical search exactly as before.
+ */
+export function voyageEmbeddingClient(): EmbeddingClient | null {
+  if (!voyageEmbeddingsOptedIn()) return null;
+  const resolved = tryResolveCapabilityEmbedding('voyageai');
+  return resolved ? new EmbeddingClient(resolved.config, resolved.transport) : null;
+}
+
+/** Model Voyage uses when the user has not chosen one. */
+const VOYAGE_DEFAULT_MODEL = 'voyage-3.5-lite';
+/** 1024 is a dimension every current Voyage embedding model can produce. */
+const VOYAGE_DEFAULT_DIMENSIONS = 1024;
+
+function tryResolveCapabilityEmbedding(
+  provider: string,
+): { config: EmbeddingConfig; transport: EmbeddingTransport } | null {
+  try {
+    const { adapter, config } = requireCapabilityConfig(provider);
+    if (!adapter.embed) return null;
+    const embeddingConfig: EmbeddingConfig = {
+      // The endpoint is validated by `EmbeddingConfig`, so point it at the
+      // adapter's embeddings path rather than its base URL.
+      endpoint: `${config.baseUrl}/embeddings`,
+      model: VOYAGE_DEFAULT_MODEL,
+      apiKey: config.apiKey,
+      dimensions: VOYAGE_DEFAULT_DIMENSIONS,
+      timeoutMs: 30_000,
+    };
+    return {
+      config: embeddingConfig,
+      // The generic OpenAI-shaped transport works: Voyage's /embeddings takes
+      // `input` and returns `data[].embedding`, and sending an unused
+      // `encoding_format` is ignored.
+      transport: (url, init) =>
+        adapter.embed!({
+          config,
+          model: embeddingConfig.model,
+          inputs: readInputs(init),
+          inputType: 'document',
+          signal: init?.signal ?? AbortSignal.timeout(embeddingConfig.timeoutMs!),
+        }).then((vectors) => jsonResponse(vectors)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readInputs(init: RequestInit | undefined): string[] {
+  if (typeof init?.body !== 'string') return [];
+  try {
+    const parsed = JSON.parse(init.body) as { input?: unknown };
+    return Array.isArray(parsed.input)
+      ? parsed.input.filter((v): v is string => typeof v === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function jsonResponse(vectors: number[][]): Response {
+  return new Response(
+    JSON.stringify({
+      data: vectors.map((embedding, index) => ({ index, embedding })),
+    }),
+    { headers: { 'content-type': 'application/json' } },
+  );
+}
+
+/**
+ * Rerank candidate chunks with Voyage when it is configured.
+ *
+ * Semantic retrieval by cosine similarity alone routinely misses lexical
+ * matches, and a reranker is the standard second pass over the top candidates.
+ * Returns `null` when Voyage is not connected so callers keep the unreranked
+ * ordering rather than failing the request.
+ */
+export async function rerankWithVoyage(
+  query: string,
+  documents: string[],
+  options: { limit?: number; signal?: AbortSignal } = {},
+): Promise<Array<{ index: number; relevanceScore: number }> | null> {
+  if (!query.trim() || !documents.length) return null;
+  try {
+    const { adapter, config } = requireCapabilityConfig('voyageai');
+    if (!adapter.rerank) return null;
+    return await adapter.rerank({
+      config,
+      model: 'rerank-3',
+      query,
+      documents,
+      topK: options.limit,
+      signal: options.signal ?? AbortSignal.timeout(30_000),
+    });
+  } catch {
+    return null;
+  }
 }

@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path';
 import { whichBinary } from './cli-detection';
 import { getCliBridge } from './cli-bridges';
 import { ClaudeCodeCliBridge } from './cli-bridges';
+import type { CliHookConfig } from './cli-bridge';
 import {
   type Provider,
   type ProviderEvent,
@@ -579,6 +580,27 @@ const DISALLOWED_TOOLS = ['Task', 'Agent'].join(',');
 // --resume` list (and theirs never appear in ours), while symlinking the auth
 // files so the shared subscription login still works.
 let cachedClaudeConfigDir: string | null = null;
+/**
+ * Build the per-turn `--settings` payload carrying Koryphaios's lifecycle hooks.
+ *
+ * Claude Code reads hooks from the `hooks` key of a settings file, and
+ * `--settings <json>` layers one over the config hierarchy for a single run.
+ * It is the only lever that works here: this provider's `settings.json` is a
+ * symlink to the user's real file so auth is shared, so writing the key into it
+ * would mutate the user's configuration. A sibling `hooks.json` is not read by
+ * Claude Code at all.
+ *
+ * Returns null when there is nothing to inject, so the flag is omitted entirely
+ * rather than passed as an empty object.
+ */
+export function buildClaudePerTurnSettings(
+  hooks: CliHookConfig[] | null | undefined,
+  serialize: (hooks: CliHookConfig[]) => string,
+): string | null {
+  if (!hooks || hooks.length === 0) return null;
+  return JSON.stringify({ hooks: JSON.parse(serialize(hooks)) });
+}
+
 export function getKoryphaiosClaudeConfigDir(): string {
   if (cachedClaudeConfigDir) return cachedClaudeConfigDir;
   const dir = join(homedir(), '.koryphaios', 'claude-home');
@@ -713,6 +735,7 @@ function buildCliCommands(names: string[]): CliCommand[] {
 }
 
 export class ClaudeCodeProvider implements Provider {
+  readonly imageInputTransport = 'file' as const;
   readonly name = 'claude' as const;
 
   constructor(readonly config: ProviderConfig) {}
@@ -940,21 +963,20 @@ export class ClaudeCodeProvider implements Provider {
       }
     }
 
-    // Write hooks config to the isolated Claude home — this enforces native
-    // tool blocking at the CLI level (defense in depth before the MCP layer).
+    // Claude Code reads hooks from the `hooks` key of settings.json (or plugin
+    // hooks.json, or skill/subagent frontmatter) — there is no sibling
+    // `hooks.json`, so the file written here previously was never read and the
+    // native-tool gate never ran. settings.json in this isolated home is a
+    // symlink to the user's real file (auth is shared), so it must not be
+    // rewritten. Claude's documented per-run override `--settings <json>` is the
+    // correct lever: it layers on top for this turn only.
     const hookConfigs = researchOnly ? null : claudeBridge?.buildHooks(bridgeCtx);
-    if (hookConfigs && hookConfigs.length > 0 && claudeBridge) {
-      try {
-        const hooksJson = claudeBridge.serializeHooks(hookConfigs);
-        const hooksPath = join(env.CLAUDE_CONFIG_DIR!, 'hooks.json');
-        writeManagedCliFile(hooksPath, hooksJson);
-      } catch (hookErr) {
-        providerLog.warn(
-          safeProviderDiagnostic('claude', 'configuration', hookErr),
-          'Failed to write hooks config for Claude Code',
-        );
-      }
-    }
+    const settingsJson = claudeBridge
+      ? buildClaudePerTurnSettings(hookConfigs, (h) => claudeBridge!.serializeHooks(h))
+      : null;
+    // Claude layers `--settings` over the config hierarchy rather than
+    // replacing it, so the symlinked user settings (and its auth) still apply.
+    if (settingsJson) args.push('--settings', settingsJson);
 
     // Remote sandbox, two stacked layers:
     //   1. Soft jail (ALL platforms): scrub the host's other secrets from the
@@ -976,6 +998,7 @@ export class ClaudeCodeProvider implements Provider {
     } = sandbox
       ? wrapCommand('claude', args, {
           cwd,
+          homeDir: env.HOME,
           configDirs: [
             env.CLAUDE_CONFIG_DIR!,
             ...(bridgeGrantDirectory ? [bridgeGrantDirectory] : []),

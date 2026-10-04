@@ -129,34 +129,34 @@
     {
       "url": "https://developers.openai.com/api/docs/guides/structured-outputs",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI structured-output documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI structured-output documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Current schema-constrained output, refusal, streaming and provider-specific structured-response mechanics.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://developers.openai.com/api/docs/guides/function-calling",
       "sourceType": "official-docs",
-      "versionScope": "Rolling OpenAI function/tool-calling documentation as available 2026-09-19",
+      "versionScope": "Rolling OpenAI function/tool-calling documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "JSON-Schema function definitions and strict-mode behavior; application authorization remains outside the model/tool proposal.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform tool-use documentation as available 2026-09-19",
+      "versionScope": "Rolling Claude Platform tool-use documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Client tool input_schema and tool_use/tool_result round-trip semantics plus server/client execution boundary.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
       "sourceType": "official-docs",
-      "versionScope": "Rolling Claude Platform prompt-caching documentation as available 2026-09-19",
+      "versionScope": "Rolling Claude Platform prompt-caching documentation as available 2026-10-02",
       "staleAfterDays": 14,
       "notes": "Prompt-prefix caching as latency/cost optimization with current 5-minute default and optional 1-hour lifetime; not durable application memory.",
-      "verifiedAt": "2026-09-19"
+      "verifiedAt": "2026-10-02"
     },
     {
       "url": "https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence",

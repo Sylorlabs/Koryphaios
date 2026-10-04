@@ -36,6 +36,7 @@ import { whichBinary } from './cli-detection';
 import { providerLog } from '../logger';
 import { isModelListCacheFresh } from './model-list-cache';
 import { getCliBridge, getKoryphaiosGrokHome } from './cli-bridges';
+import { mcpConfigCandidates } from './cli-config-paths';
 import { createKoryBridgeGrantLease } from './bridge-grant';
 import {
   assertPrivateValuesAbsentFromArgv,
@@ -72,6 +73,7 @@ export function grokCapabilityBoundary(profile: StreamRequest['capabilityProfile
 }
 
 export class GrokBuildProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name = 'grok' as const;
 
   constructor(readonly config: ProviderConfig) {}
@@ -178,20 +180,25 @@ export class GrokBuildProvider implements Provider {
         // MCP: write the kory server config so the CLI gets kory__ tools.
         const mcpConfigs = grokBridge?.buildMcpConfig(bridgeCtx);
         if (mcpConfigs && mcpConfigs.length > 0) {
-          const mcpConfigPath = join(grokHome, 'mcp.json');
-          if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
-          const existing = existsSync(mcpConfigPath)
-            ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
-            : {};
-          existing.mcpServers = existing.mcpServers ?? {};
-          for (const srv of mcpConfigs) {
-            existing.mcpServers[srv.name] = {
-              command: srv.command,
-              args: srv.args,
-              env: srv.env,
-            };
+          // The grok CLI is not installed on the authoring host, so whether it
+          // resolves mcp.json against GROK_HOME itself or against a ~/.grok
+          // directory inside it is unmeasured. Write every candidate so a turn
+          // can never silently end up with no kory__* tools.
+          for (const mcpConfigPath of mcpConfigCandidates(grokHome, '.grok')) {
+            if (existsSync(mcpConfigPath)) healManagedCliFile(mcpConfigPath);
+            const existing = existsSync(mcpConfigPath)
+              ? JSON.parse(readFileSync(mcpConfigPath, 'utf-8'))
+              : {};
+            existing.mcpServers = existing.mcpServers ?? {};
+            for (const srv of mcpConfigs) {
+              existing.mcpServers[srv.name] = {
+                command: srv.command,
+                args: srv.args,
+                env: srv.env,
+              };
+            }
+            writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
           }
-          writeManagedCliFile(mcpConfigPath, JSON.stringify(existing, null, 2));
         }
         // Rules: write .grokrules with the Kory session rules.
         const ruleFiles = grokBridge?.buildRules(bridgeCtx);
@@ -291,10 +298,16 @@ export class GrokBuildProvider implements Provider {
       HOME: grokHome,
       USERPROFILE: grokHome,
     });
-    const jail = request.sandbox ? buildSoftJail(baseEnv, [grokHome]) : null;
+    // As with Antigravity: the soft jail replaces HOME, so link the dot-dir
+    // the CLI actually resolves (`$HOME/.grok`) to the staged home holding the
+    // kory MCP config and the credential links. Additive with GROK_HOME.
+    const jail = request.sandbox
+      ? buildSoftJail(baseEnv, [join(grokHome, '.grok')])
+      : null;
     const wrapped = request.sandbox
       ? wrapCommand(bin, args, {
           cwd,
+          homeDir: jail?.env.HOME,
           configDirs: [
             grokHome,
             promptArtifact.directory,

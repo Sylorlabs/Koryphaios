@@ -1,3 +1,4 @@
+import type { ProviderName } from '@koryphaios/shared';
 import { Elysia, t } from 'elysia';
 import { randomUUID } from 'node:crypto';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
@@ -17,6 +18,18 @@ import {
   ValidationError,
 } from '../../errors/types';
 import { serverLog } from '../../logger';
+import { getProviderDisplay } from '../../providers/provider-display';
+import {
+  capabilityAdapterProviders,
+  getCapabilityAdapter,
+  resolveCapabilityConfig,
+} from '../../providers/capabilities';
+import {
+  KLING_IMAGE_MODELS,
+  LUMA_IMAGE_MODELS,
+  PRODIA_IMAGE_MODELS,
+  REPLICATE_MODEL_PRESETS,
+} from '../../providers/capabilities/adapters/models';
 import { reserveSpendCapacity } from '../../security/spend-caps-enforced';
 
 const EFFECT_PROMPTS: Record<string, string> = {
@@ -30,7 +43,7 @@ const EFFECT_PROMPTS: Record<string, string> = {
 };
 
 /** How a provider's image-generation API is addressed. */
-type ImageAdapter = 'openai-images' | 'google-gemini' | 'openrouter-chat';
+type ImageAdapter = 'openai-images' | 'google-gemini' | 'openrouter-chat' | 'capability-adapter';
 
 interface ImageModelDef {
   id: string;
@@ -78,10 +91,7 @@ export interface ImageJobRuntime {
  * written to the durable gallery and will be visible after the next load.
  */
 const studioImageJobs = new Map<string, AbortController>();
-const completedStudioImageJobs = new Map<
-  string,
-  { completedAt: number; historyId?: string }
->();
+const completedStudioImageJobs = new Map<string, { completedAt: number; historyId?: string }>();
 const STUDIO_IMAGE_JOB_RESULT_RETENTION_MS = 10 * 60_000;
 
 function pruneCompletedStudioImageJobs(now = Date.now()): void {
@@ -101,11 +111,7 @@ function startStudioImageJob(jobId: string): AbortController {
   return controller;
 }
 
-async function runStudioImageJob(
-  jobId: string,
-  body: ImageJobBody,
-  sourceImage?: SourceImage,
-) {
+async function runStudioImageJob(jobId: string, body: ImageJobBody, sourceImage?: SourceImage) {
   const controller = startStudioImageJob(jobId);
   try {
     const response = await runImageJob(body, sourceImage, {
@@ -139,13 +145,16 @@ function cancelStudioImageJob(jobId: string): boolean {
   return true;
 }
 
-function getStudioImageJobStatus(
-  jobId: string,
-): { status: 'running' | 'completed' | 'unknown'; historyId?: string } {
+function getStudioImageJobStatus(jobId: string): {
+  status: 'running' | 'completed' | 'unknown';
+  historyId?: string;
+} {
   if (studioImageJobs.has(jobId)) return { status: 'running' };
   pruneCompletedStudioImageJobs();
   const completed = completedStudioImageJobs.get(jobId);
-  return completed ? { status: 'completed', historyId: completed.historyId } : { status: 'unknown' };
+  return completed
+    ? { status: 'completed', historyId: completed.historyId }
+    : { status: 'unknown' };
 }
 
 interface ImageProviderDef {
@@ -217,6 +226,72 @@ const IMAGEN_IMAGE_MODELS: ImageModelDef[] = [
 ];
 
 /** Built-in image-capable providers. Custom OpenAI/Gemini-compatible providers are appended dynamically. */
+/**
+ * Build image-picker entries for every capability adapter that can generate
+ * images. Models come from the adapters themselves, so adding a provider there
+ * makes it appear here with no change to this route.
+ */
+function capabilityImageProviders(): ImageProviderDef[] {
+  const defs: ImageProviderDef[] = [];
+  for (const id of capabilityAdapterProviders()) {
+    const adapter = getCapabilityAdapter(id);
+    if (!adapter?.capabilities.includes('image') || !adapter.generate) continue;
+    defs.push({
+      id,
+      label: getProviderDisplay(id as ProviderName)?.label ?? id,
+      adapter: 'capability-adapter',
+      baseUrl: '',
+      path: '',
+      models: capabilityImageModels(id),
+    });
+  }
+  return defs;
+}
+
+/**
+ * Static model lists per capability image provider, kept next to the adapters
+ * that generate them. An empty list means the models come from the adapter at
+ * request time, and the user may type any other model id.
+ */
+function capabilityImageModels(provider: string): ImageModelDef[] {
+  switch (provider) {
+    case 'prodia':
+      return PRODIA_IMAGE_MODELS.map((model) => ({
+        id: model.id,
+        label: model.label,
+        sizes: model.sizes,
+        edits: model.edits,
+        formats: ['jpeg', 'png'],
+      }));
+    case 'luma':
+      return LUMA_IMAGE_MODELS.map((model) => ({
+        id: model.id,
+        label: model.label,
+        edits: model.edits,
+        formats: ['png', 'jpeg'],
+      }));
+    case 'klingai':
+      return KLING_IMAGE_MODELS.map((model) => ({
+        id: model.id,
+        label: model.label,
+        edits: model.edits,
+        formats: ['png', 'jpeg'],
+      }));
+    case 'replicate':
+      return REPLICATE_MODEL_PRESETS.filter((model) => model.capability === 'image').map(
+        (model) => ({
+          id: model.id,
+          label: model.label,
+          sizes: model.sizes,
+          formats: ['png', 'jpeg', 'webp'],
+          custom: true,
+        }),
+      );
+    default:
+      return [];
+  }
+}
+
 export const IMAGE_PROVIDERS: ImageProviderDef[] = [
   {
     id: 'openai',
@@ -328,6 +403,10 @@ export const IMAGE_PROVIDERS: ImageProviderDef[] = [
       },
     ],
   },
+  // Media-first providers with no `/images/generations` route. Each is reached
+  // through its capability adapter, which owns its own submit/poll/download
+  // contract and authentication scheme.
+  ...capabilityImageProviders(),
   {
     id: 'local',
     label: 'Local endpoint',
@@ -404,6 +483,9 @@ const DISCOVERED_IMAGE_MODEL_PATTERN =
  * list. Chat models are ignored; curated entries win over discovered duplicates.
  */
 function mergeDiscoveredImageModels(def: ImageProviderDef): ImageModelDef[] {
+  // Capability adapters are absent from the chat provider registry, so there is
+  // no `/v1/models` catalog to merge — their model lists come from the adapter.
+  if (def.adapter === 'capability-adapter') return def.models;
   let registryProvider:
     | {
         listModels(): Array<{ id: string; name?: string; apiModelId?: string }>;
@@ -472,7 +554,60 @@ function authHeaders(
   if (def.adapter === 'google-gemini') {
     return { 'Content-Type': 'application/json', 'x-goog-api-key': token };
   }
+  // Capability adapters own their own auth headers (X-API-Key, Token, custom
+  // version pins), so this path is never used for them.
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+}
+
+/**
+ * Generate through a dedicated capability adapter.
+ *
+ * Media-first providers (Luma, Kling, Prodia, Replicate) have no
+ * `/images/generations` route. They are reached here through their adapter,
+ * which owns submit/poll/download for its own async contract.
+ */
+async function generateWithCapabilityAdapter(
+  def: ImageProviderDef,
+  model: ImageModelDef,
+  config: ProviderSettingsConfig,
+  prompt: string,
+  options: GenerateOptions,
+  signal: AbortSignal,
+  sourceImage?: SourceImage,
+): Promise<ImageGenerationResult> {
+  const adapter = getCapabilityAdapter(def.id);
+  if (!adapter?.generate) {
+    throw new ValidationError(`${def.label} does not support image generation.`);
+  }
+  const resolved = resolveCapabilityConfig(adapter, config);
+  const result = await adapter.generate({
+    config: resolved,
+    capability: 'image',
+    model: model.id,
+    prompt,
+    options: {
+      size: options.size,
+      quality: options.quality,
+      aspectRatio: options.size,
+      outputFormat: options.outputFormat,
+      ...(sourceImage ? { seed: undefined } : {}),
+    },
+    signal,
+    ...(sourceImage
+      ? { sourceImage: { base64: sourceImage.base64, mimeType: sourceImage.mimeType } }
+      : {}),
+    timeoutMs: 300_000,
+  });
+  if (result.capability !== 'image') {
+    throw new ValidationError(
+      `${def.label} returned ${result.capability} output for an image request.`,
+    );
+  }
+  return {
+    imageBase64: result.dataBase64,
+    mimeType: result.mimeType,
+    revisedPrompt: result.revisedPrompt,
+  };
 }
 
 interface ImageGenerationResult {
@@ -862,15 +997,25 @@ export async function runImageJob(
           ? await generateWithGoogle(def, model, config, prompt, options, signal, sourceImage)
           : def.adapter === 'openrouter-chat'
             ? await generateWithOpenRouter(def, model, config, prompt, signal)
-            : await generateWithOpenAIImages(
-                def,
-                model,
-                config,
-                prompt,
-                options,
-                signal,
-                sourceImage,
-              );
+            : def.adapter === 'capability-adapter'
+              ? await generateWithCapabilityAdapter(
+                  def,
+                  model,
+                  config,
+                  prompt,
+                  options,
+                  signal,
+                  sourceImage,
+                )
+              : await generateWithOpenAIImages(
+                  def,
+                  model,
+                  config,
+                  prompt,
+                  options,
+                  signal,
+                  sourceImage,
+                );
       if (signal.aborted) {
         throw signal.reason instanceof Error
           ? signal.reason
@@ -999,22 +1144,16 @@ export const imageRoutes = new Elysia({ prefix: '/api/images' })
       })),
     };
   })
-  .post(
-    '/generate',
-    async ({ body }) => runStudioImageJob(body.jobId ?? randomUUID(), body),
-    { body: ImageRequest },
-  )
+  .post('/generate', async ({ body }) => runStudioImageJob(body.jobId ?? randomUUID(), body), {
+    body: ImageRequest,
+  })
   .post(
     '/edit',
     async ({ body }) =>
-      runStudioImageJob(
-        body.jobId ?? randomUUID(),
-        body,
-        {
-          base64: body.imageBase64,
-          mimeType: 'image/png',
-        },
-      ),
+      runStudioImageJob(body.jobId ?? randomUUID(), body, {
+        base64: body.imageBase64,
+        mimeType: 'image/png',
+      }),
     { body: ImageEditRequest },
   )
   .post(
@@ -1022,11 +1161,9 @@ export const imageRoutes = new Elysia({ prefix: '/api/images' })
     ({ params }) => ({ ok: true, data: { cancelled: cancelStudioImageJob(params.id) } }),
     { params: t.Object({ id: t.String({ minLength: 1, maxLength: 128 }) }) },
   )
-  .get(
-    '/jobs/:id',
-    ({ params }) => ({ ok: true, data: getStudioImageJobStatus(params.id) }),
-    { params: t.Object({ id: t.String({ minLength: 1, maxLength: 128 }) }) },
-  )
+  .get('/jobs/:id', ({ params }) => ({ ok: true, data: getStudioImageJobStatus(params.id) }), {
+    params: t.Object({ id: t.String({ minLength: 1, maxLength: 128 }) }),
+  })
   .get('/history', async ({ request }) => {
     const rawLimit = new URL(request.url).searchParams.get('limit');
     const limit = Number.isFinite(Number(rawLimit)) ? Number(rawLimit) : 24;

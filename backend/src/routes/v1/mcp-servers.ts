@@ -8,6 +8,8 @@
 import { Elysia, t } from 'elysia';
 import { requireLocalRouteAuth } from '../../auth/local-route-auth';
 import { getRequestProjectRoot } from '../../runtime/request-project';
+import { loadProjectMcpServers } from '../../runtime/config';
+import { getContext } from '../../context';
 import {
   listServers,
   addServer,
@@ -18,6 +20,14 @@ import {
   getServerEnvKeys,
   type McpServerInput,
 } from '../../mcp/server-service';
+import {
+  beginAuthorization,
+  cancelFlow,
+  completeAuthorization,
+  disconnect as disconnectAuthorization,
+  authorizationStatus,
+} from '../../mcp/oauth-service';
+import { McpOAuthError } from '../../mcp/oauth';
 import { KoryphaiosError, ValidationError, NotFoundError } from '../../errors/types';
 
 const mcpServerBodySchema = t.Object({
@@ -45,10 +55,49 @@ function projectRootFromRequest(request: Request): string {
   return getRequestProjectRoot(request);
 }
 
+/**
+ * The URL a stored server should authorize against, or null when the server is
+ * unknown or is a local stdio process (which never uses OAuth).
+ */
+function readServerUrl(projectRoot: string, name: string): string | null {
+  const configured = loadProjectMcpServers(projectRoot)[name];
+  if (!configured || configured.type !== 'sse') return null;
+  const url = typeof configured.url === 'string' ? configured.url.trim() : '';
+  return url.length > 0 ? url : null;
+}
+
+/**
+ * The `WWW-Authenticate` challenge from a live client for this server, if one
+ * has connected. Servers advertise their own metadata URL there, which is more
+ * reliable than guessing well-known paths.
+ */
+function getLiveChallenge(name: string, projectRoot: string): string | null {
+  try {
+    return (
+      getContext().mcpManager.getClient(name, projectRoot)?.authorizationChallengeHeader ?? null
+    );
+  } catch {
+    // No live context (e.g. a direct route test); discovery falls back to
+    // probing the documented well-known locations.
+    return null;
+  }
+}
+
+function statusFor(projectRoot: string, name: string): unknown {
+  return listServers(projectRoot).find((server) => server.name === name) ?? null;
+}
+
 // Elysia's `set.status` is a wide union of number | status-name strings.
 // Use a loose type here so the helper accepts the route handler's `set`.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function errorResponse(err: unknown, set: any) {
+  if (err instanceof McpOAuthError) {
+    // The OAuth error codes are actionable for the user (no dynamic
+    // registration, no published metadata, denied consent), so surface them
+    // rather than collapsing to a 500.
+    set.status = err.code === 'authorization_denied' ? 400 : 502;
+    return { ok: false, error: err.message, code: err.code };
+  }
   if (err instanceof KoryphaiosError) {
     set.status = err.statusCode;
     return { ok: false, error: err.message, code: err.code };
@@ -137,6 +186,87 @@ export const mcpServerRoutes = new Elysia({ prefix: '/api/v1/mcp-servers' })
     }
   })
   // Get the env var keys for a server (values are never returned — secret store).
+  // ─── OAuth (remote servers only) ────────────────────────────────────────
+  // The flow is: start -> user completes consent in their browser -> the
+  // loopback listener captures the redirect -> complete exchanges the code and
+  // stores the token. Tokens live only in .koryphaios/mcp-oauth.json, never in
+  // koryphaios.json.
+  .post(
+    '/:name/oauth/start',
+    async ({ request, set, params, body }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      try {
+        const projectRoot = projectRootFromRequest(request);
+        const configured = readServerUrl(projectRoot, params.name);
+        if (!configured) {
+          throw new ValidationError(`MCP server "${params.name}" has no URL to authorize against`);
+        }
+        // A live client's challenge is the most accurate discovery hint; fall back
+        // to well-known probing when the server has never been connected.
+        const challenge = getLiveChallenge(params.name, projectRoot);
+        const result = await beginAuthorization({
+          projectRoot,
+          serverName: params.name,
+          resourceUrl: configured,
+          wwwAuthenticate: challenge,
+          // Servers that allow no dynamic registration need the user's own app
+          // credentials; the UI asks for them after the first attempt explains why.
+          manualClient: body?.clientId
+            ? { clientId: body.clientId, clientSecret: body.clientSecret }
+            : undefined,
+        });
+        return { ok: true, data: result };
+      } catch (err) {
+        return errorResponse(err, set);
+      }
+    },
+    {
+      // Optional overall: the common case (dynamic registration) sends no body
+      // at all, and an absent body must not be a validation failure.
+      body: t.Optional(
+        t.Object({
+          clientId: t.Optional(t.String({ maxLength: 512 })),
+          clientSecret: t.Optional(t.String({ maxLength: 1024 })),
+        }),
+      ),
+    },
+  )
+  .post('/:name/oauth/complete', async ({ request, set, params }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const projectRoot = projectRootFromRequest(request);
+      const summary = await completeAuthorization({
+        projectRoot,
+        serverName: params.name,
+      });
+      // Reconnect so the new token is exercised immediately and tools register.
+      await reloadServer(projectRoot, params.name).catch(() => undefined);
+      return { ok: true, data: { oauth: summary, server: statusFor(projectRoot, params.name) } };
+    } catch (err) {
+      return errorResponse(err, set);
+    }
+  })
+  .get('/:name/oauth', ({ request, set, params }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const projectRoot = projectRootFromRequest(request);
+    return { ok: true, data: authorizationStatus(projectRoot, params.name) };
+  })
+  .post('/:name/oauth/cancel', async ({ request, set, params }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const projectRoot = projectRootFromRequest(request);
+    const cancelled = await cancelFlow(projectRoot, params.name);
+    return { ok: true, data: { cancelled } };
+  })
+  .delete('/:name/oauth', async ({ request, set, params }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    try {
+      const projectRoot = projectRootFromRequest(request);
+      const revoked = await disconnectAuthorization({ projectRoot, serverName: params.name });
+      return { ok: true, data: { revoked } };
+    } catch (err) {
+      return errorResponse(err, set);
+    }
+  })
   .get('/:name/env', ({ request, set, params }) => {
     if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
     try {

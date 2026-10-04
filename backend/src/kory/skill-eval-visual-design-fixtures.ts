@@ -66,6 +66,20 @@ interface VisualSystem {
   cardNesting?: number;
 }
 
+interface EditorVisualSystem {
+  tokens?: {
+    spacing?: unknown;
+    radius?: unknown;
+    accent?: unknown;
+    brandAccent?: unknown;
+  };
+  themes?: unknown;
+  platformAdaptations?: Record<string, unknown>;
+  states?: unknown;
+  density?: Record<string, unknown>;
+  accessibility?: Record<string, unknown>;
+}
+
 function text(root: string, path: string): string | null {
   try {
     const s = lstatSync(join(root, path));
@@ -83,41 +97,115 @@ const sameNumbers = (a: unknown, b: readonly number[]) =>
 const containsAllStrings = (value: unknown, expected: readonly string[]) =>
   Array.isArray(value) && expected.every((v) => value.includes(v));
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function containsAllNamedValues(value: unknown, expected: readonly string[]): boolean {
+  if (Array.isArray(value)) return expected.every((item) => value.includes(item));
+  const record = asRecord(value);
+  if (!record) return false;
+  const names = new Set(Object.keys(record).map((key) => key.toLowerCase()));
+  return expected.every((item) => names.has(item.toLowerCase()));
+}
+
+function hasStructuredContent(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.some(hasStructuredContent);
+  const record = asRecord(value);
+  return Boolean(record && Object.values(record).some(hasStructuredContent));
+}
+
+function platformAdaptationsReady(
+  value: Record<string, unknown> | undefined,
+  platforms: readonly string[],
+): boolean {
+  if (!value) return false;
+  return platforms.every((platform) => {
+    const match = Object.entries(value).find(
+      ([key]) => key.toLowerCase() === platform.toLowerCase(),
+    );
+    return Boolean(match && hasStructuredContent(match[1]));
+  });
+}
+
+function editorRadiusMatches(value: unknown, expected: number): boolean {
+  if (value === expected) return true;
+  const record = asRecord(value);
+  return Boolean(
+    record &&
+      [record.control, record.base, record.default].some(
+        (candidate) => typeof candidate === 'number' && candidate === expected,
+      ),
+  );
+}
+
+function rowHeight(
+  density: Record<string, unknown> | undefined,
+  directKey: string,
+  nestedKeys: readonly string[],
+): number | null {
+  if (!density) return null;
+  const direct = density[directKey];
+  if (typeof direct === 'number') return direct;
+  for (const key of nestedKeys) {
+    const nested = asRecord(density[key]);
+    if (typeof nested?.rowHeight === 'number') return nested.rowHeight;
+  }
+  return null;
+}
+
+function editorAccessibilityReady(value: Record<string, unknown> | undefined): boolean {
+  if (!value) return false;
+  const focusText = String(value.focus ?? '').toLowerCase();
+  const colorText = String(value.colorIndependence ?? value.colorSemantics ?? '').toLowerCase();
+  const scale = value.minTextScale ?? value.textScale;
+  const scaleNumber =
+    typeof scale === 'number'
+      ? scale
+      : typeof scale === 'string'
+        ? Number(scale.match(/\d+(?:\.\d+)?/u)?.[0] ?? Number.NaN)
+        : Number.NaN;
+  const localization = String(value.longLabelStrategy ?? value.localization ?? '').toLowerCase();
+  const focusReady =
+    value.focusVisible === true || /visible|ring|outline/u.test(focusText);
+  const colorReady =
+    value.colorNotSoleSignal === true ||
+    /icon|text|label|border|pattern|addition to color|more than color/u.test(colorText);
+  const labelsReady =
+    typeof value.longLabelStrategy === 'string' ||
+    (/label/u.test(localization) && /wrap|expand|clip|truncat/u.test(localization));
+  return focusReady && colorReady && scaleNumber >= 1.25 && labelsReady;
+}
+
 function scoreEditor(root: string): SkillEvalDeterministicScore {
   const intact = fixed(root, 'evidence/editor.json', json(EDITOR_PACKET));
-  const system = readJsonArtifact<VisualSystem>(root, 'visual-system.json');
+  const system = readJsonArtifact<EditorVisualSystem>(root, 'visual-system.json');
   const verification = text(root, 'verification.md');
+  const compactRow = rowHeight(system?.density, 'compactRow', ['compact', 'dense']);
+  const comfortableRow = rowHeight(system?.density, 'comfortableRow', ['comfortable']);
   const checks: [string, boolean][] = [
     ['packet integrity', intact],
     [
       'brand tokens preserved',
-      system?.tokens?.accent === EDITOR_PACKET.brand.accent &&
-        system?.tokens?.radius === EDITOR_PACKET.brand.radius &&
+      (system?.tokens?.accent === EDITOR_PACKET.brand.accent ||
+        system?.tokens?.brandAccent === EDITOR_PACKET.brand.accent) &&
+        editorRadiusMatches(system?.tokens?.radius, EDITOR_PACKET.brand.radius) &&
         sameNumbers(system?.tokens?.spacing, EDITOR_PACKET.brand.spacing),
     ],
-    ['theme coverage', containsAllStrings(system?.themes, EDITOR_PACKET.constraints.themes)],
+    ['theme coverage', containsAllNamedValues(system?.themes, EDITOR_PACKET.constraints.themes)],
     [
       'platform adaptations',
-      EDITOR_PACKET.constraints.platforms.every(
-        (v) =>
-          Array.isArray(system?.platformAdaptations?.[v]) &&
-          system!.platformAdaptations![v]!.length > 0,
-      ),
+      platformAdaptationsReady(system?.platformAdaptations, EDITOR_PACKET.constraints.platforms),
     ],
-    ['full state set', containsAllStrings(system?.states, EDITOR_PACKET.states)],
+    ['full state set', containsAllNamedValues(system?.states, EDITOR_PACKET.states)],
     [
       'density defined',
-      typeof system?.density?.compactRow === 'number' &&
-        typeof system?.density?.comfortableRow === 'number' &&
-        system!.density!.compactRow! < system!.density!.comfortableRow!,
+      compactRow !== null && comfortableRow !== null && compactRow < comfortableRow,
     ],
-    [
-      'accessibility boundaries',
-      system?.accessibility?.focusVisible === true &&
-        system?.accessibility?.colorNotSoleSignal === true &&
-        (system?.accessibility?.minTextScale ?? 0) >= 1.25 &&
-        typeof system?.accessibility?.longLabelStrategy === 'string',
-    ],
+    ['accessibility boundaries', editorAccessibilityReady(system?.accessibility)],
     [
       'verification matrix',
       !!verification &&
@@ -244,7 +332,7 @@ export const VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMa
 ];
 export const VISUAL_DESIGN_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
-    id: 'visual-interface-design/cross-platform-system-scorer@2',
+    id: 'visual-interface-design/cross-platform-system-scorer@3',
     scenarioIds: [EDITOR],
     score: ({ workingDirectory }) => scoreEditor(workingDirectory),
   },

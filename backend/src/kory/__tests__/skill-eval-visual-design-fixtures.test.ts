@@ -135,6 +135,74 @@ describe('visual design closed-packet fixtures', () => {
     expect(score.integrityFailure).toBe(true);
   });
 
+  test('cross-platform scorer accepts equivalent structured visual-system shapes', async () => {
+    const skill = loadV5SkillPackages().packages.find(
+      (item) => item.sidecar.name === 'visual-interface-design',
+    )!;
+    const scenario = buildSkillEvalSuiteV3(skill).scenarios.find(
+      (item) => item.id === 'visual-interface-design-full-task-cross-platform-editor',
+    )!;
+    const root = mkdtempSync(join(tmpdir(), 'kory-visual-design-structured-'));
+    roots.push(root);
+    const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
+      item.matches(scenario),
+    )!;
+    const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(scenario.id),
+    )!;
+    await materializer.materialize(root, scenario);
+    writeFixtureFile(
+      root,
+      'visual-system.json',
+      `${JSON.stringify(
+        {
+          tokens: {
+            brandAccent: '#5B63FF',
+            radius: { control: 6, panel: 8 },
+            spacing: [4, 8, 12, 16, 24],
+          },
+          themes: { light: { surface: '#fff' }, dark: { surface: '#111' } },
+          platformAdaptations: {
+            macOS: { chrome: 'native titlebar spacing', controls: 'platform controls' },
+            Windows: { chrome: 'caption button spacing', controls: 'platform controls' },
+          },
+          states: {
+            loading: 'stable geometry',
+            empty: 'explain recovery',
+            normal: 'default',
+            dense: 'reduced rows',
+            error: 'icon and text',
+            selected: 'fill and border',
+            disabled: 'readable label',
+          },
+          density: { dense: { rowHeight: 28 }, comfortable: { rowHeight: 36 } },
+          accessibility: {
+            focus: '2px ring remains visible on every keyboard focus target',
+            colorIndependence: 'status uses icon, text, and border in addition to color',
+            textScale: '1.25x without clipping',
+            localization: 'long labels wrap or expand instead of clipping',
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFixtureFile(
+      root,
+      'verification.md',
+      '# Verification matrix\n\nVerify 640 minimum width in light and dark themes, long label handling, loading and empty states, and dense editor surfaces.\n',
+    );
+    const score = await scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+    });
+    expect(scorer.id).toEndWith('@3');
+    expect(score.passed).toBe(true);
+    expect(score.quality).toBe(1);
+  });
+
   test('malformed collection shapes score red instead of crashing', async () => {
     const skill = loadV5SkillPackages().packages.find(
       (item) => item.sidecar.name === 'visual-interface-design',

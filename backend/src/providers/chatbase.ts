@@ -113,6 +113,7 @@ function inferAgentCapabilities(underlyingModel = ''): {
 }
 
 export class ChatbaseProvider implements Provider {
+  readonly imageInputTransport = 'none' as const;
   readonly name: ProviderName = 'chatbase';
   readonly config: ProviderConfig;
 

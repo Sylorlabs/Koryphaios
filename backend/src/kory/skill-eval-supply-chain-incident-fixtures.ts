@@ -18,12 +18,13 @@ const QUEUE_INCIDENT = 'incident-response-full-task-2';
 
 const SUPPLY_SIM = `export interface ReleaseQualification {
   artifactDigest:string;sourceRevision:string;approvedBuilder:string;approvedWorkflow:string;allowedParameters:Record<string,string>;
-  lockfileEnforced:boolean;inputs:Array<{kind:string;name:string;identity:string;immutable:boolean}>;
-  sbom:{format:string;components:string[];omissions:string[];completenessClaim:boolean};
-  privilegedJobs:string[];mutablePrivilegedInputs:string[];
+  lockfileEnforced:boolean;lockfileEvidence:{path:string;installCommand:string;enforced:boolean};inputs:Array<{kind:string;name:string;identity:string;immutable:boolean}>;inputInventoryComplete:boolean;absentInputKinds:string[];
+  sbom:{format:string;version:string;generationPoint:string;components:string[];omissions:string[];completenessClaim:boolean};
+  privilegedJobs:string[];mutablePrivilegedInputs:string[];ciBoundary:{untrustedJobs:string[];privilegedJobs:string[]};
   provenance:{subjectDigest:string;sourceRevision:string;builder:string;workflow:string;parameters:Record<string,string>;valid:boolean};
   signature:{subjectDigest:string;cryptographicallyValid:boolean;issuer:string;workflowIdentity:string;authorized:boolean};
-  cleanRebuild:{digest:string;matched:boolean};verdict:'accept'|'reject';liveProviderVerified:boolean;
+  verificationOutput:{provenance:string;signature:string;identityPolicy:string};
+  cleanRebuild:{digest:string;matched:boolean;corroborativeOnly:boolean;claimsApprovedSlsaBuildLevel:boolean};verdict:'accept'|'reject';liveProviderVerified:boolean;evidenceLimits:string[];
   ownership:{pipelineMechanics:string;keyCustody:string};
 }
 export function qualifyRelease(s:ReleaseQualification):boolean {
@@ -31,7 +32,7 @@ export function qualifyRelease(s:ReleaseQualification):boolean {
   const identity=s.provenance.builder===s.approvedBuilder&&s.provenance.workflow===s.approvedWorkflow&&s.signature.workflowIdentity===s.approvedWorkflow;
   const subject=s.provenance.subjectDigest===s.artifactDigest&&s.signature.subjectDigest===s.artifactDigest&&s.provenance.sourceRevision===s.sourceRevision;
   const mutable=s.inputs.filter(x=>!x.immutable).map(x=>x.identity).sort();
-  return s.lockfileEnforced&&s.sbom.omissions.length>0&&!s.sbom.completenessClaim&&s.privilegedJobs.length>0&&JSON.stringify(mutable)===JSON.stringify([...s.mutablePrivilegedInputs].sort())&&subject&&params&&s.provenance.valid&&s.signature.cryptographicallyValid&&!s.signature.authorized&&!identity&&s.cleanRebuild.matched&&s.cleanRebuild.digest===s.artifactDigest&&s.verdict==='reject'&&!s.liveProviderVerified&&s.ownership.pipelineMechanics==='cicd-engineering'&&s.ownership.keyCustody==='secrets-key-management';
+  return s.lockfileEnforced&&s.lockfileEvidence.enforced&&s.inputInventoryComplete&&s.sbom.omissions.length>0&&!s.sbom.completenessClaim&&s.privilegedJobs.length>0&&s.ciBoundary.untrustedJobs.length>0&&s.ciBoundary.privilegedJobs.length>0&&JSON.stringify(mutable)===JSON.stringify([...s.mutablePrivilegedInputs].sort())&&subject&&params&&s.provenance.valid&&s.signature.cryptographicallyValid&&!s.signature.authorized&&!identity&&s.verificationOutput.provenance.length>0&&s.verificationOutput.signature.length>0&&s.verificationOutput.identityPolicy.length>0&&s.cleanRebuild.matched&&s.cleanRebuild.digest===s.artifactDigest&&s.cleanRebuild.corroborativeOnly&&!s.cleanRebuild.claimsApprovedSlsaBuildLevel&&s.verdict==='reject'&&!s.liveProviderVerified&&s.evidenceLimits.length>0&&s.ownership.pipelineMechanics==='cicd-engineering'&&s.ownership.keyCustody==='secrets-key-management';
 }
 
 export interface SupplyIncidentResponse {
@@ -59,14 +60,30 @@ const RELEASE_CORPUS = `${JSON.stringify(
       'https://github.com/kory/release/.github/workflows/release.yml@refs/heads/main',
     approvedWorkflow: 'kory/release/.github/workflows/release.yml@refs/heads/main',
     allowedParameters: { platform: 'linux/amd64,linux/arm64', mode: 'release' },
+    lockfile: {
+      path: 'bun.lock',
+      installCommand: 'bun install --frozen-lockfile',
+      enforced: true,
+    },
     inputs: [
       { kind: 'action', name: 'checkout', identity: 'actions/checkout@8ade135a', immutable: true },
       { kind: 'action', name: 'setup-bun', identity: 'vendor/setup-bun@v2', immutable: false },
       { kind: 'base-image', name: 'distroless', identity: 'sha256:base123', immutable: true },
+      { kind: 'package-manager', name: 'bun', identity: 'bun@1.3.2', immutable: true },
       { kind: 'toolchain', name: 'bun', identity: '1.3.2', immutable: true },
     ],
+    absentInputKinds: ['reusable-workflow', 'plugin'],
     resolvedComponents: ['app@1.8.0', 'codec-helper@2.4.0', 'native-pack@3.2.1'],
     sbomComponents: ['app@1.8.0', 'codec-helper@2.4.0'],
+    sbom: {
+      format: 'CycloneDX',
+      version: '1.6',
+      generationPoint: 'post-resolution/pre-image-assembly',
+    },
+    ciBoundary: {
+      untrustedJobs: ['pull-request-test'],
+      privilegedJobs: ['release-sign', 'publish-image'],
+    },
     privilegedJobs: ['release-sign', 'publish-image'],
     provenance: {
       subjectDigest: 'sha256:4f8d9a1c-release',
@@ -81,6 +98,14 @@ const RELEASE_CORPUS = `${JSON.stringify(
       cryptographicallyValid: true,
       issuer: 'https://token.actions.githubusercontent.com',
       workflowIdentity: 'fork/release/.github/workflows/release.yml@refs/heads/main',
+    },
+    verificationOutput: {
+      provenance:
+        'subject=sha256:4f8d9a1c-release source=git:9b7f1d2 builder=https://github.com/fork/release/.github/workflows/release.yml@refs/heads/main valid=true',
+      signature:
+        'subject=sha256:4f8d9a1c-release issuer=https://token.actions.githubusercontent.com identity=fork/release/.github/workflows/release.yml@refs/heads/main cryptographicallyValid=true',
+      identityPolicy:
+        'authorized=false reason=builder/workflow identity outside approved kory/release policy',
     },
     cleanRebuildDigest: 'sha256:4f8d9a1c-release',
   },
@@ -160,7 +185,7 @@ function fixed(root: string, path: string, expected: string): boolean {
 }
 
 const releaseMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'supply-chain-security/release-trust-qualification@1',
+  id: 'supply-chain-security/release-trust-qualification@2',
   matches: (s) => s.id === SUPPLY_RELEASE,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-supply-release'));
@@ -172,19 +197,22 @@ const releaseMaterializer: SkillEvalFixtureMaterializer = {
       'README.md',
       `# Supply-chain release qualification fixture
 
-Inspect the fixed synthetic release evidence and write \`.kory-eval/release-qualification.json\` as \`ReleaseQualification\`. Establish artifact/source/builder/workflow/parameter expectations first. Reconcile the SBOM against the resolved graph, inventory all artifact-changing inputs, flag mutable inputs crossing the privileged release boundary, and distinguish cryptographic validity from signer/builder authorization. A matching clean rebuild is corroborative only. The correct fixture verdict is rejection. Set \`liveProviderVerified:false\`; this corpus is synthetic. Pipeline mechanics belong to \`cicd-engineering\`; key custody belongs to \`secrets-key-management\`.
+Inspect the fixed synthetic release evidence and write \`.kory-eval/release-qualification.json\` as \`ReleaseQualification\`. Establish artifact/source/builder/workflow/parameter expectations first. Preserve the supplied lockfile path/install command as enforcement evidence. Reconcile the CycloneDX format/version/generation point against the resolved graph, inventory every supplied artifact-changing input, explicitly record the supplied absent reusable-workflow/plugin kinds, flag mutable inputs crossing the privileged release boundary, and distinguish ordinary untrusted CI execution from release/signing/publishing authority. Preserve the exact supplied provenance/signature/identity-policy verification output and distinguish cryptographic validity from signer/builder authorization. A matching clean rebuild is corroborative only: it cannot override identity policy or establish an approved SLSA Build level. The correct fixture verdict is rejection. Set \`liveProviderVerified:false\`, record the synthetic/unavailable evidence limit, and keep pipeline mechanics with \`cicd-engineering\` and key custody with \`secrets-key-management\`.
 `,
     );
   },
 };
 
 const releaseScorer: SkillEvalDeterministicScorer = {
-  id: 'supply-chain-security/release-trust-qualification-scorer@1',
+  id: 'supply-chain-security/release-trust-qualification-scorer@2',
   scenarioIds: [SUPPLY_RELEASE],
   score: ({ workingDirectory }) => {
     const hidden = runHiddenBunTest(
       workingDirectory,
-      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{qualifyRelease,type ReleaseQualification}from'../src/supply-sim';const c=JSON.parse(readFileSync('evidence/release.json','utf8'));const s=JSON.parse(readFileSync('.kory-eval/release-qualification.json','utf8')) as ReleaseQualification;test('hidden: valid crypto/reproducibility cannot override unapproved identity',()=>{expect(s.artifactDigest).toBe(c.artifactDigest);expect(s.sourceRevision).toBe(c.sourceRevision);expect(s.approvedBuilder).toBe(c.approvedBuilder);expect(s.approvedWorkflow).toBe(c.approvedWorkflow);expect(s.sbom.omissions).toContain('native-pack@3.2.1');expect(s.mutablePrivilegedInputs).toContain('vendor/setup-bun@v2');expect(s.signature.cryptographicallyValid).toBe(true);expect(s.signature.authorized).toBe(false);expect(qualifyRelease(s)).toBe(true);});\n`,
+      `import{expect,test}from'bun:test';import{readFileSync}from'node:fs';import{qualifyRelease,type ReleaseQualification}from'../src/supply-sim';const c=JSON.parse(readFileSync('evidence/release.json','utf8'));const s=JSON.parse(readFileSync('.kory-eval/release-qualification.json','utf8')) as ReleaseQualification;
+test('hidden: lockfile, complete input inventory and SBOM evidence are reproduced',()=>{expect(s.lockfileEnforced).toBe(true);expect(s.lockfileEvidence).toEqual(c.lockfile);expect(s.inputInventoryComplete).toBe(true);for(const input of c.inputs)expect(s.inputs.some((x:any)=>x.kind===input.kind&&x.name===input.name&&x.identity===input.identity&&x.immutable===input.immutable)).toBe(true);for(const kind of c.absentInputKinds)expect(s.absentInputKinds).toContain(kind);expect(s.sbom.format).toBe(c.sbom.format);expect(s.sbom.version).toBe(c.sbom.version);expect(s.sbom.generationPoint).toBe(c.sbom.generationPoint);expect(s.sbom.omissions).toContain('native-pack@3.2.1');expect(s.sbom.completenessClaim).toBe(false);});
+test('hidden: CI privilege and exact verifier evidence remain distinct from crypto validity',()=>{for(const job of c.ciBoundary.untrustedJobs)expect(s.ciBoundary.untrustedJobs).toContain(job);for(const job of c.ciBoundary.privilegedJobs)expect(s.ciBoundary.privilegedJobs).toContain(job);expect(s.mutablePrivilegedInputs).toContain('vendor/setup-bun@v2');expect(s.verificationOutput).toEqual(c.verificationOutput);expect(s.signature.cryptographicallyValid).toBe(true);expect(s.signature.authorized).toBe(false);});
+test('hidden: valid crypto/reproducibility cannot override unapproved identity',()=>{expect(s.artifactDigest).toBe(c.artifactDigest);expect(s.sourceRevision).toBe(c.sourceRevision);expect(s.approvedBuilder).toBe(c.approvedBuilder);expect(s.approvedWorkflow).toBe(c.approvedWorkflow);expect(s.cleanRebuild.digest).toBe(c.cleanRebuildDigest);expect(s.cleanRebuild.matched).toBe(true);expect(s.cleanRebuild.corroborativeOnly).toBe(true);expect(s.cleanRebuild.claimsApprovedSlsaBuildLevel).toBe(false);expect(s.evidenceLimits.join(' ').toLowerCase()).toMatch(/synthetic|unavailable/);expect(qualifyRelease(s)).toBe(true);});\n`,
     );
     const integrity =
       fixed(workingDirectory, 'src/supply-sim.ts', SUPPLY_SIM) &&
@@ -205,7 +233,7 @@ const releaseScorer: SkillEvalDeterministicScorer = {
 };
 
 const supplyIncidentMaterializer: SkillEvalFixtureMaterializer = {
-  id: 'supply-chain-security/compromised-dependency-response@1',
+  id: 'supply-chain-security/compromised-dependency-response@2',
   matches: (s) => s.id === SUPPLY_INCIDENT,
   materialize: (d) => {
     writeFixtureFile(d, 'package.json', packageJson('kory-eval-supply-incident'));
