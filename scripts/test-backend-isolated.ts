@@ -11,12 +11,21 @@
  *
  * Replaces the bash-only `test-backend-isolated.sh` so `bun run test:core`
  * works on macOS, Windows, and Linux without requiring bash.
+ *
+ * Isolated runtime setup: explicitly prefix a focused invocation with
+ * BUN_INSTALL_CACHE_DIR, PLAYWRIGHT_BROWSERS_PATH, and/or DEVELOPER_DIR to
+ * reuse existing credential-free asset directories. Relative paths resolve
+ * from the caller's cwd; shell-expand home paths before invoking this script.
+ * Unset selectors stay unset (no host HOME lookup); invalid directories fail
+ * before launch. PLAYWRIGHT_BROWSERS_PATH=0 is unsupported: supply an existing
+ * browser directory instead. HOME, XDG roots, and temp remain disposable.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { canonicalizePath } from '../backend/src/runtime/platform';
 
 const PROJECT_ROOT = join(import.meta.dir, '..');
 const BACKEND_DIR = join(PROJECT_ROOT, 'backend');
@@ -24,6 +33,11 @@ const BACKEND_TEST_TIMEOUT_MS = 60_000;
 /** A file slower than this is called out so slow tiers stay visible. */
 const SLOW_FILE_WARN_MS = 30_000;
 const LIVE_PROVIDER_TEST_FLAG = 'KORY_RUN_LIVE_PROVIDER_TESTS';
+const ASSET_DIRECTORY_ENV = [
+  'BUN_INSTALL_CACHE_DIR',
+  'PLAYWRIGHT_BROWSERS_PATH',
+  'DEVELOPER_DIR',
+] as const;
 const SAFE_HOST_ENV = new Set([
   'PATH',
   'PATHEXT',
@@ -60,6 +74,26 @@ export function createIsolatedTestEnvironment(
     for (const name of SAFE_HOST_ENV) {
       if (source[name] !== undefined) {
         env[name] = source[name];
+      }
+    }
+    for (const name of ASSET_DIRECTORY_ENV) {
+      const value = source[name];
+      if (!Object.prototype.hasOwnProperty.call(source, name) || value === undefined) continue;
+      if (name === 'PLAYWRIGHT_BROWSERS_PATH' && value === '0') {
+        throw new Error(
+          'PLAYWRIGHT_BROWSERS_PATH=0 (hermetic mode) is not supported by the isolated runner; supply an existing browser directory instead.',
+        );
+      }
+      const invalidPath = `${name} must name an existing directory; shell-expand home paths before invoking the isolated runner.`;
+      if (!value.trim() || /[\x00-\x1f\x7f]/.test(value)) throw new Error(invalidPath);
+      try {
+        // Freeze caller-relative paths before runBackendTests changes cwd.
+        const directory = canonicalizePath(resolve(value));
+        if (!statSync(directory).isDirectory()) throw new Error(invalidPath);
+        env[name] = directory;
+      } catch {
+        // Never silently fall back to HOME/default assets after a bad selector.
+        throw new Error(invalidPath);
       }
     }
     env[LIVE_PROVIDER_TEST_FLAG] = '0';
@@ -174,12 +208,12 @@ function main() {
   const testArguments = runnerArguments.filter((argument) => argument !== '--single-process');
   const testDbDir = mkdtempSync(join(tmpdir(), 'kory-test-'));
   const testHome = join(testDbDir, 'home');
-  mkdirSync(join(testHome, 'tmp'), { recursive: true });
-  mkdirSync(join(testHome, 'project'), { recursive: true });
-  const env = createIsolatedTestEnvironment(process.env, testHome);
   let exitCode = 0;
 
   try {
+    mkdirSync(join(testHome, 'tmp'), { recursive: true });
+    mkdirSync(join(testHome, 'project'), { recursive: true });
+    const env = createIsolatedTestEnvironment(process.env, testHome);
     if (singleProcess) {
       console.log('Testing backend in one process with a disposable database');
       const result = runBackendTests(
