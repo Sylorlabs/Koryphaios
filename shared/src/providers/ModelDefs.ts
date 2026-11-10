@@ -68,9 +68,29 @@ export interface ModelDef {
   /** True when contextWindow came from (or was confirmed against) a live provider/CLI
    *  response rather than a hand-maintained catalog entry. Trusted for UI telemetry. */
   contextVerified?: boolean;
+  /** The provider's own selectable context budgets (tokens), ascending, from
+   *  the CLI product catalog's `contextWindow.supportedLengths`. Present only
+   *  when the vendor reports at least two tiers — a single tier is not a
+   *  choice. These are real vendor values, never a generated ladder. */
+  contextWindowOptions?: number[];
+  /** The vendor's own default tier, when it differs from the maximum. Kept
+   *  separately so Koryphaios can say what it is overriding. */
+  contextWindowVendorDefault?: number;
   /** Live quota info from the provider's quota API (e.g. Antigravity's
    *  RetrieveUserQuota). Present only when the provider exposes per-model quota. */
   quota?: ModelQuota;
+  /** Provider-reported Freebuff model rate shown in the model picker. */
+  freebuckCost?: number;
+  /** Provider-reported price label from a CLI's own product catalog
+   *  (e.g. "x0.03 credits"). Kept as the vendor's own text, never converted
+   *  into a currency amount we cannot substantiate. */
+  creditsLabel?: string;
+  /** Output modalities the provider reports for this model, lowercased
+   *  ('text', 'image', 'video', 'audio', 'embedding'). Present only when the
+   *  provider publishes them; never inferred from the model name. The image and
+   *  video surfaces use this to decide which models can actually produce media,
+   *  so a text model can never appear in those pickers. */
+  outputModalities?: string[];
 }
 
 export interface ProviderConfig {
@@ -83,6 +103,11 @@ export interface ProviderConfig {
   selectedModels?: string[];
   /** Whether to skip the model selection dialog in the future. */
   hideModelSelector?: boolean;
+  /** Effective context budget (tokens) for CLI-backed providers that publish
+   *  selectable tiers. Undefined means use the maximum tier, which is the
+   *  default. Both the user (Settings selector) and Koryphaios (provider API)
+   *  can set this; adapters validate it against the live model's own tiers. */
+  contextWindow?: number;
   lastVerifiedAt?: number;
   lastVerificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
   /**

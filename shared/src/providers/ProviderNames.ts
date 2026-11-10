@@ -11,16 +11,23 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs with implementations)
   OpenRouter: 'openrouter',
+  AgentRouter: 'agentrouter',
   UnoRouter: 'unorouter',
   TokenRouter: 'tokenrouter',
   ExperientialLabs: 'experientiallabs',
+  TokenHarbor: 'tokenharbor',
+  Logfare: 'logfare',
+  APInex: 'apinex',
+  Gwarden: 'gwarden',
+  VyceAI: 'vyceai',
+  Respan: 'respan',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',
   CommandCode: 'commandcode',
-  Chatbase: 'chatbase',
   Notion: 'notion',
 
   // Hosted API-key providers
+  Beam: 'beam',
   Cline: 'cline',
 
   // Auth-only providers (OAuth/CLI based)
@@ -32,11 +39,16 @@ export const ProviderName = {
   Cursor: 'cursor',
   Devin: 'devin',
   Freebuff: 'freebuff',
+  Omnirush: 'omnirush',
+  OpenCodeCli: 'opencode',
   Codebuff: 'codebuff',
   Grok: 'grok',
-  Jules: 'jules',
+  CodeBuddy: 'codebuddy',
   Hoplite: 'hoplite',
   KiloCode: 'kilocode',
+  // WorkBuddy AI desktop app host runtime (distinct from the `codebuddy`
+  // standalone CLI and the `workbuddy` cloud API).
+  WorkBuddyDesktop: 'workbuddy-desktop',
 
   // Curated coding models
   OpenCodeZen: 'opencodezen',
@@ -50,7 +62,6 @@ export const ProviderName = {
   // Local/Custom endpoints (OpenAI-compatible)
   Local: 'local',
   Ollama: 'ollama',
-  AutoClaw: 'autoclaw',
 
   // OpenCode parity and additional providers
   '302AI': '302ai',

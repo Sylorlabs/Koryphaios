@@ -12,6 +12,10 @@ export interface PermissionRequest {
   path?: string;
   description: string;
   createdAt: number;
+  agentId?: string;
+  agentName?: string;
+  command?: string;
+  options?: string[];
 }
 
 export type PermissionResponse = 'granted' | 'denied' | 'granted_session';

@@ -46,6 +46,8 @@ export interface StoredMessage {
   sessionId: string;
   role: 'user' | 'assistant' | 'system';
   content: string; // JSON string of ContentBlock[] or raw text
+  /** Verbatim assistant reasoning, persisted as a thinking content block. */
+  reasoningContent?: string;
   model?: string;
   provider?: ProviderName;
   tokensIn?: number;

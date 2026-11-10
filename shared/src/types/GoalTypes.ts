@@ -51,7 +51,6 @@ export interface GoalExecutionConfig {
   attemptStartedAt?: number;
   reasoningLevel?: string;
   instructions?: string;
-  remotePlanApproved?: boolean;
 }
 export interface Goal {
   id: string;
@@ -77,7 +76,7 @@ export interface Goal {
 export interface GoalExecutionRecord {
   provider: string;
   mode: 'managed' | 'native-passthrough' | 'cloud';
-  verification: 'eligible' | 'unverified' | 'remote-pending-review';
+  verification: 'eligible' | 'unverified';
   reason?: string;
 }
 

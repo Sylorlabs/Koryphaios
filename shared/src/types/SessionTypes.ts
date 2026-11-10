@@ -12,11 +12,12 @@ import type { CreatedGitWorkspace } from '../git-workspace';
  * the project default while a chat that did keeps its own choice.
  */
 export interface SessionAgentOverrides {
-  /** Approval preset (yolo / guarded / accept-edits / ask / plan / custom). */
-  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'plan' | 'custom';
+  criticMode?: import('../critic-mode').CriticMode;
+  /** Approval preset (yolo / guarded / accept-edits / ask / custom). */
+  permissionMode?: 'yolo' | 'guarded' | 'edits' | 'ask' | 'custom';
   /** Delegation mode (Kory decides / solo / multi-agent). */
   agentExecutionMode?: 'auto' | 'single' | 'multi';
-  /** Whether the independent critic gate runs for this chat. */
+  /** Legacy compatibility input; criticMode takes precedence within this layer. */
   criticGateEnabled?: boolean;
 }
 
@@ -33,9 +34,9 @@ export interface Session {
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;
-  /** Immutable origin of a persistent isolated Git chat workspace. */
+  /** Immutable origin of a persistent isolated revision chat workspace, when selected. */
   gitWorkspace?: CreatedGitWorkspace;
-  /** Persisted per-conversation capability mode. Plan mode is read-only apart
+  /** Persisted per-conversation interaction mode. Plan mode is read-only apart
    * from its dedicated planning note and explicit durable-preference writes. */
   interactionMode?: 'act' | 'plan';
   /** Stable note owned by this planning conversation. */
@@ -57,12 +58,6 @@ export type SessionStatus = 'active' | 'archived' | 'deleted';
 export type SessionRuntimeState =
   'idle' | 'processing' | 'compacting' | 'waiting' | 'error' | 'paused';
 
-export interface JulesSessionLink {
-  sessionId: string;
-  url?: string;
-  updatedAt: number;
-}
-
 export interface SessionMetadata {
   agentCount?: number;
   messageCount?: number;
@@ -70,8 +65,6 @@ export interface SessionMetadata {
   totalCost?: number;
   providerUsage?: Record<string, number>;
   lastActivityAt?: number;
-  /** Active Google Jules cloud session for continuity across turns */
-  jules?: JulesSessionLink;
 }
 
 export interface SessionSnapshot {

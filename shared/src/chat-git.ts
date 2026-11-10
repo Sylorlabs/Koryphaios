@@ -44,7 +44,8 @@ export interface ChatGitSelectionRecord {
 
 export interface ChatGitState extends GitWorkspaceSelection {
   sessionId: string;
-  isolated: true;
+  /** True for revision-picker checkouts; false for ordinary in-place chats. */
+  isolated: boolean;
   changedFiles: number;
   operationInProgress: boolean;
   githubRepository: string | null;

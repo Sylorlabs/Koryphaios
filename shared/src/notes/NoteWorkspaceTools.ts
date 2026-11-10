@@ -1,0 +1,173 @@
+export const NOTE_WORKSPACE_TOOL_DEFINITIONS = [
+  {
+    name: 'list_note_bases',
+    label: 'List Bases',
+    description: 'Discover saved views and their revisions',
+    category: 'read',
+  },
+  {
+    name: 'read_note_base',
+    label: 'Read Base',
+    description: 'Read a saved view definition',
+    category: 'read',
+  },
+  {
+    name: 'create_note_base',
+    label: 'Create Base',
+    description: 'Save a validated structured view',
+    category: 'write',
+  },
+  {
+    name: 'update_note_base',
+    label: 'Edit Base',
+    description: 'Change a view at its expected revision',
+    category: 'write',
+  },
+  {
+    name: 'trash_note_base',
+    label: 'Trash Base',
+    description: 'Recoverably remove a saved view',
+    category: 'write',
+  },
+  {
+    name: 'restore_note_base',
+    label: 'Restore Base',
+    description: 'Recover a trashed view',
+    category: 'write',
+  },
+  {
+    name: 'list_note_canvases',
+    label: 'List canvases',
+    description: 'Discover saved visual boards',
+    category: 'read',
+  },
+  {
+    name: 'read_note_canvas',
+    label: 'Read canvas',
+    description: 'Read a validated board and revision',
+    category: 'read',
+  },
+  {
+    name: 'create_note_canvas',
+    label: 'Create canvas',
+    description: 'Save a board with project-scoped note cards',
+    category: 'write',
+  },
+  {
+    name: 'patch_note_canvas',
+    label: 'Edit canvas',
+    description: 'Patch cards and connectors without blind replacement',
+    category: 'write',
+  },
+  {
+    name: 'remove_note_property',
+    label: 'Remove property',
+    description: 'Remove one YAML field at an expected revision',
+    category: 'write',
+  },
+  {
+    name: 'patch_note_properties',
+    label: 'Edit properties',
+    description: 'Apply a bounded atomic batch of YAML changes',
+    category: 'write',
+  },
+  {
+    name: 'list_note_appearances',
+    label: 'Find note appearances',
+    description:
+      'Show where a note appears: document backlinks, relationship pairs, canvases and saved Bases',
+    category: 'read',
+  },
+  {
+    name: 'list_note_relationships',
+    label: 'List relationships',
+    description: 'Inspect evidence, status and stale endpoints',
+    category: 'read',
+  },
+  {
+    name: 'refresh_note_relationship',
+    label: 'Refresh relationship evidence',
+    description: 'Replace evidence with a new revision-bound proposal',
+    category: 'write',
+  },
+  {
+    name: 'remove_note_relationship',
+    label: 'Remove relationship',
+    description: 'Remove an association without changing document links',
+    category: 'write',
+  },
+  {
+    name: 'list_note_trash',
+    label: 'Read Notes Trash',
+    description: 'List recoverable notes',
+    category: 'read',
+  },
+  {
+    name: 'restore_note',
+    label: 'Restore note',
+    description: 'Recover a trashed note at its expected revision',
+    category: 'write',
+  },
+  {
+    name: 'list_note_revisions',
+    label: 'List note history',
+    description: 'Read immutable revision metadata',
+    category: 'read',
+  },
+  {
+    name: 'read_note_revision',
+    label: 'Read note revision',
+    description: 'Read a bounded historical body',
+    category: 'read',
+  },
+  {
+    name: 'restore_note_revision',
+    label: 'Restore note revision',
+    description: 'Restore reviewed history without overwriting newer work',
+    category: 'write',
+  },
+  {
+    name: 'list_note_drafts',
+    label: 'List recovery drafts',
+    description: 'Discover durable unsaved branches',
+    category: 'read',
+  },
+  {
+    name: 'read_note_draft',
+    label: 'Read recovery draft',
+    description: 'Read a bounded durable draft',
+    category: 'read',
+  },
+  {
+    name: 'discard_note_draft',
+    label: 'Discard recovery draft',
+    description: 'Discard one reviewed draft revision',
+    category: 'write',
+  },
+  {
+    name: 'list_note_attachments',
+    label: 'List note attachments',
+    description: 'Read attachment metadata without exposing storage paths',
+    category: 'read',
+  },
+  {
+    name: 'read_note_attachment',
+    label: 'Read text attachment',
+    description: 'Read bounded text, Markdown or JSON attachment contents',
+    category: 'read',
+  },
+  {
+    name: 'add_note_attachment',
+    label: 'Add note attachment',
+    description: 'Attach bounded text or binary data to a reviewed note revision',
+    category: 'write',
+  },
+  {
+    name: 'remove_note_attachment',
+    label: 'Remove note attachment',
+    description: 'Delete one attachment from a reviewed note revision',
+    category: 'write',
+  },
+] as const;
+export type NoteWorkspaceToolName = (typeof NOTE_WORKSPACE_TOOL_DEFINITIONS)[number]['name'];
+export const NOTE_WORKSPACE_TOOL_NAMES = NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool) => tool.name);

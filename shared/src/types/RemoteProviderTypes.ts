@@ -36,9 +36,14 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   xai: { risk: 'ok', reason: 'Your xAI API key — you pay for their usage.' },
   groq: { risk: 'ok', reason: 'Your Groq API key — you pay for their usage.' },
   openrouter: { risk: 'ok', reason: 'Your OpenRouter key — you pay for their usage.' },
+  agentrouter: { risk: 'ok', reason: 'Your AgentRouter key — you pay for their usage.' },
   unorouter: { risk: 'ok', reason: 'Your UnoRouter key — you pay for their usage.' },
   tokenrouter: { risk: 'ok', reason: 'Your TokenRouter key — you pay for their usage.' },
   experientiallabs: { risk: 'ok', reason: 'Your Experiential Labs key — you pay for their usage.' },
+  tokenharbor: { risk: 'ok', reason: 'Your Token Harbor key — you pay for their usage.' },
+  logfare: { risk: 'ok', reason: 'Your Logfare key — you pay for their usage.' },
+  apinex: { risk: 'ok', reason: 'Your APInex key — you pay for their usage.' },
+  gwarden: { risk: 'ok', reason: 'Your Gwarden AI key — you pay for their usage.' },
   digitalocean: { risk: 'ok', reason: 'Your DigitalOcean API key — you pay for their usage.' },
   mistral: { risk: 'ok', reason: 'Your API key — you pay for their usage.' },
   azure: { risk: 'ok', reason: 'Your Azure deployment — you pay for their usage.' },
@@ -88,6 +93,11 @@ export const PROVIDER_SHARE_RISK: Record<string, ProviderShareClassification> = 
   antigravity: {
     risk: 'caution',
     reason: 'Sharing a Google/Antigravity subscription is risky; a metered API key is safer.',
+  },
+  opencode: {
+    risk: 'caution',
+    reason:
+      'Sharing an OpenCode login (and any subscription behind its configured providers) is risky; a metered API key is safer.',
   },
   cline: {
     risk: 'caution',
@@ -168,8 +178,11 @@ export interface RemoteInferenceRequestPayload {
    * access tiers, and whether its adapter can transport images. */
   imageInputOverride?: { provider: string; model: string };
   harnessRole?: 'manager' | 'worker' | 'critic';
+  interactionMode?: 'act' | 'plan';
   promptManifestHash?: string;
   taskContractHash?: string;
+  /** Nonlinear history must not resume a provider-owned conversation. */
+  forceFreshConversation?: boolean;
   /** CLIENT's working directory — passed through for agentic-remote turns only;
    *  ignored for pure-inference providers (the client runs its own tools). */
   workingDirectory?: string;

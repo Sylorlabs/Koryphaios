@@ -10,13 +10,23 @@ export const ProviderName = {
 
   // Aggregators (OpenAI-compatible APIs)
   OpenRouter: 'openrouter',
+  AgentRouter: 'agentrouter',
   UnoRouter: 'unorouter',
   TokenRouter: 'tokenrouter',
   ExperientialLabs: 'experientiallabs',
+  TokenHarbor: 'tokenharbor',
+  Logfare: 'logfare',
+  APInex: 'apinex',
+  Gwarden: 'gwarden',
+  VyceAI: 'vyceai',
+  Respan: 'respan',
   Groq: 'groq',
   DigitalOcean: 'digitalocean',
   CommandCode: 'commandcode',
   Cline: 'cline',
+
+  // Hosted API-key providers
+  Beam: 'beam',
 
   // Auth-only providers (CLI-based)
   Claude: 'claude',
@@ -24,14 +34,15 @@ export const ProviderName = {
   KimiCode: 'kimicode',
   CodexAuth: 'codex-auth',
   Grok: 'grok',
+  CodeBuddy: 'codebuddy',
   Antigravity: 'antigravity',
   Cursor: 'cursor',
   Devin: 'devin',
-  Jules: 'jules',
   Hoplite: 'hoplite',
   Copilot: 'copilot',
   Freebuff: 'freebuff',
   Codebuff: 'codebuff',
+  OpenCodeCli: 'opencode',
 
   // Curated coding models (OpenCode Zen)
   OpenCodeZen: 'opencodezen',
@@ -45,7 +56,6 @@ export const ProviderName = {
   // Local/Custom endpoints (OpenAI-compatible)
   Local: 'local',
   Ollama: 'ollama',
-  AutoClaw: 'autoclaw',
 
   // OpenCode parity — API-key or base-URL providers (OpenAI-compatible unless noted)
   A302AI: '302ai',
@@ -78,6 +88,10 @@ export const ProviderName = {
   ZenMux: 'zenmux',
   Poe: 'poe',
   WorkBuddy: 'workbuddy',
+  // WorkBuddy AI desktop app (com.workbuddy.workbuddy-ai) — runs the app's own
+  // host runtime (sidecar + bundled CLI in --serve mode), distinct from the
+  // standalone CodeBuddy CLI and from the WorkBuddy cloud API (`workbuddy`).
+  WorkBuddyDesktop: 'workbuddy-desktop',
 } as const;
 
 export type ProviderName = (typeof ProviderName)[keyof typeof ProviderName] | string;
@@ -86,28 +100,37 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'anthropic',
   'claude',
   'codex',
+  'codebuddy',
   'codex-auth',
   'grok',
   'antigravity',
   'cline',
   'cursor',
   'devin',
-  'jules',
   'hoplite',
   'openai',
+  'beam',
   'google',
   'aistudio',
   'xai',
   'openrouter',
+  'agentrouter',
   'unorouter',
   'tokenrouter',
   'experientiallabs',
+  'tokenharbor',
+  'logfare',
+  'apinex',
+  'gwarden',
+  'vyceai',
+  'respan',
   'groq',
   'digitalocean',
   'commandcode',
   'copilot',
   'freebuff',
   'codebuff',
+  'opencode',
   'opencodezen',
   'opencodego',
   'azure',
@@ -115,7 +138,6 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'vertexai',
   'local',
   'ollama',
-  'autoclaw',
   '302ai',
   'azurecognitive',
   'baseten',
@@ -146,9 +168,9 @@ export const IMPLEMENTED_PROVIDERS: ProviderName[] = [
   'zai',
   'zenmux',
   'poe',
-  'chatbase',
   'notion',
   'workbuddy',
+  'workbuddy-desktop',
 ];
 
 export type ModelTier = 'flagship' | 'fast' | 'cheap' | 'reasoning';
@@ -201,7 +223,7 @@ export type ProviderAuthMode =
 
 /** Maps provider names to their authentication modes */
 export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
-  anthropic: 'api_key_or_auth',
+  anthropic: 'api_key',
   claude: 'auth_only',
   codex: 'auth_only',
   'codex-auth': 'auth_only',
@@ -209,20 +231,28 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   cursor: 'auth_only',
   devin: 'auth_only',
   openai: 'api_key',
+  beam: 'api_key',
   google: 'api_key',
   aistudio: 'api_key',
   xai: 'api_key',
   openrouter: 'api_key',
+  agentrouter: 'api_key',
   unorouter: 'api_key',
   tokenrouter: 'api_key',
   experientiallabs: 'api_key',
+  tokenharbor: 'api_key',
+  logfare: 'api_key',
+  apinex: 'api_key',
+  gwarden: 'api_key',
+  vyceai: 'api_key',
+  respan: 'api_key',
   groq: 'api_key',
   digitalocean: 'api_key',
   commandcode: 'api_key',
   copilot: 'auth_only',
   freebuff: 'auth_only',
+  opencode: 'auth_only',
   codebuff: 'api_key',
-  jules: 'api_key',
   hoplite: 'api_key',
   opencodezen: 'api_key',
   opencodego: 'api_key',
@@ -231,7 +261,6 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   vertexai: 'api_key',
   local: 'base_url_only',
   ollama: 'base_url_only',
-  autoclaw: 'api_key',
   '302ai': 'api_key',
   azurecognitive: 'api_key',
   baseten: 'api_key',
@@ -262,10 +291,12 @@ export const PROVIDER_AUTH_MODES: Record<ProviderName, ProviderAuthMode> = {
   zai: 'api_key',
   zenmux: 'api_key',
   poe: 'api_key',
-  chatbase: 'api_key',
   cline: 'api_key',
   notion: 'api_key',
   workbuddy: 'api_key',
+  // The desktop app owns auth (its runtime inherits the desktop login
+  // context); no separate credential is entered in Koryphaios.
+  'workbuddy-desktop': 'auth_only',
 };
 
 /** Environment variable mappings for providers */
@@ -276,22 +307,30 @@ export const PROVIDER_ENV_VARS: Record<
   anthropic: { apiKey: 'ANTHROPIC_API_KEY' },
   claude: { authToken: 'CLAUDE_CODE_OAUTH_TOKEN' },
   openai: { apiKey: 'OPENAI_API_KEY' },
+  beam: { apiKey: 'REFLECTION_API_KEY' },
   grok: { authToken: 'GROK_CODE_XAI_API_KEY' },
   google: { apiKey: 'GOOGLE_API_KEY' },
   aistudio: { apiKey: 'GEMINI_API_KEY' },
   xai: { apiKey: 'XAI_API_KEY' },
   openrouter: { apiKey: 'OPENROUTER_API_KEY', baseUrl: 'OPENROUTER_BASE_URL' },
+  agentrouter: { apiKey: 'AGENTROUTER_API_KEY' },
   unorouter: { apiKey: 'UNOROUTER_API_KEY' },
   cline: { apiKey: 'CLINE_API_KEY' },
   tokenrouter: { apiKey: 'TOKENROUTER_API_KEY' },
   experientiallabs: { apiKey: 'EXPERIENTIALLABS_API_KEY' },
+  tokenharbor: { apiKey: 'TOKENHARBOR_API_KEY' },
+  logfare: { apiKey: 'LOGFARE_API_KEY' },
+  apinex: { apiKey: 'APINEX_API_KEY' },
+  gwarden: { apiKey: 'GWARDEN_API_KEY' },
+  vyceai: { apiKey: 'VYCEAI_API_KEY' },
+  respan: { apiKey: 'RESPAN_API_KEY' },
   groq: { apiKey: 'GROQ_API_KEY' },
   digitalocean: { apiKey: 'DIGITALOCEAN_API_KEY' },
   commandcode: { apiKey: 'COMMAND_CODE_API_KEY' },
   copilot: { authToken: 'GITHUB_TOKEN' },
   freebuff: {},
+  opencode: {},
   codebuff: { apiKey: 'CODEBUFF_API_KEY' },
-  jules: { apiKey: 'JULES_API_KEY' },
   hoplite: { apiKey: 'HOPLITE_API_KEY' },
   opencodezen: { apiKey: 'OPENCODE_ZEN_API_KEY' },
   opencodego: { apiKey: 'OPENCODE_GO_API_KEY' },
@@ -300,7 +339,6 @@ export const PROVIDER_ENV_VARS: Record<
   vertexai: { apiKey: 'GOOGLE_VERTEX_AI_API_KEY' },
   local: { baseUrl: 'LOCAL_ENDPOINT' },
   ollama: { baseUrl: 'OLLAMA_BASE_URL' },
-  autoclaw: { apiKey: 'AUTOCLAW_GATEWAY_TOKEN' },
   codex: { authToken: 'CODEX_AUTH_TOKEN' },
   '302ai': { apiKey: 'A302AI_API_KEY' },
   azurecognitive: { apiKey: 'AZURE_COGNITIVE_API_KEY', baseUrl: 'AZURE_COGNITIVE_RESOURCE_URL' },
@@ -332,7 +370,10 @@ export const PROVIDER_ENV_VARS: Record<
   zai: { apiKey: 'ZAI_API_KEY' },
   zenmux: { apiKey: 'ZENMUX_API_KEY' },
   poe: { apiKey: 'POE_API_KEY' },
-  chatbase: { apiKey: 'CHATBASE_API_KEY' },
   notion: { apiKey: 'NOTION_API_KEY' },
   workbuddy: { apiKey: 'WORKBUDDY_API_KEY' },
+  // Auth flows through the desktop app's own login state (shared CodeBuddy
+  // home); no dedicated env key. WORKBUDDY_DESKTOP_APP_PATH only pins the
+  // install root for discovery.
+  'workbuddy-desktop': {},
 };

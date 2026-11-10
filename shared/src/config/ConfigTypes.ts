@@ -67,6 +67,7 @@ export interface ServerConfig {
 }
 
 export interface AgentSettings {
+  criticMode?: import('../critic-mode').CriticMode;
   /** Rule enforcement level - always applied, but critic can be strict/moderate/lenient */
   ruleEnforcementLevel: 'strict' | 'moderate' | 'lenient';
   /** Agent orchestration mode preference. Auto lets Kory decide when to delegate. */
@@ -124,8 +125,6 @@ export interface KoryphaiosConfig {
   };
   /** Enable critic quality gate after worker completion. Disabled = faster/cheaper but less thorough. @default true */
   enableCritic?: boolean;
-  /** UI Mode - beginner or advanced. @default "beginner" */
-  mode?: 'beginner' | 'advanced';
   /** Full agent behavioral settings. If provided, overrides enableCritic. */
   agentSettings?: AgentSettings;
   /** Mapping of worker domains to specific models. Example: "ui": "openai:gpt-4.1" */

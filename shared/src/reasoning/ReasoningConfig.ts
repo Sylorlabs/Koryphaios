@@ -21,6 +21,11 @@ export const STANDARD_REASONING_OPTIONS: Record<string, ReasoningOption> = {
   high: { value: 'high', label: 'High', description: 'Standard deep reasoning' },
   xhigh: { value: 'xhigh', label: 'Xhigh', description: 'Extended reasoning depth' },
   max: { value: 'max', label: 'Max', description: 'Absolute maximum reasoning capability' },
+  ultracode: {
+    value: 'ultracode',
+    label: 'Ultracode',
+    description: 'CodeBuddy ultra-deep collaborative reasoning tier',
+  },
   auto: {
     value: 'auto',
     label: 'Auto',

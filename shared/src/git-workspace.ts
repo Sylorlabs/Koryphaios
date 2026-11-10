@@ -35,7 +35,7 @@ export interface CreateGitWorkspaceRequest {
 export interface CreatedGitWorkspace {
   /** Current explicit revision/PR selection for this chat; live Git remains authoritative. */
   selection?: import('./chat-git').ChatGitSelectionRecord;
-  /** New chats own independent Git metadata, not a shared worktree commondir. */
+  /** Revision-picker chats own independent Git metadata, not a shared worktree commondir. */
   isolation?: 'independent-repository';
   path: string;
   branch: string;

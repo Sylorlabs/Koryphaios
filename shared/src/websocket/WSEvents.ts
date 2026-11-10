@@ -2,13 +2,16 @@
 // Domain: Real-time communication protocol between frontend and backend
 
 export type WSEventType =
+  | 'device.event'
   // Agent lifecycle
   | 'agent.spawned'
   | 'agent.status'
   | 'agent.completed'
   | 'agent.error'
   | 'agent.thread_message'
+  | 'agent.updated'
   | 'agent.message'
+  | 'agent.steering_queue'
   | 'agent.heartbeat'
   // Streaming content
   | 'stream.delta'
@@ -35,6 +38,8 @@ export type WSEventType =
   | 'session.actionable_waits'
   | 'session.actionable_waits.request'
   | 'session.timeline_rewritten'
+  // Ephemeral replay placeholder for a filtered durable sequence position.
+  | 'session.replay_skipped'
   | 'run.state'
   | 'compaction.started'
   | 'compaction.progress'
@@ -67,12 +72,45 @@ export type WSEventType =
   | 'notes.updated'
   // Workspace navigation (authoritative desktop workspace snapshots)
   | 'workspace.updated'
+  // Desktop UI settings controlled by another connected client
+  | 'desktop.ui.updated'
   // Goal mode
   | 'goals.updated'
   // App-wide checklists
   | 'checklists.updated'
   // Native CLI slash command output (attributed to a CLI provider harness)
   | 'native.command';
+
+export type RemoteProtocolOperationState =
+  | 'queued'
+  | 'sent'
+  | 'accepted'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'outcome_uncertain'
+  | 'expired'
+  | 'rejected';
+
+export interface RemoteOperationEnvelope {
+  protocol: 2;
+  commandId: string;
+  operationId: string;
+  target: import('../remote-target').ExecutionTarget;
+  state: RemoteProtocolOperationState;
+  cursor?: string;
+  issuedAt: number;
+  attempt: number;
+}
+
+export interface RemoteReplayRequest {
+  protocol: 2;
+  sessionId: string;
+  target: import('../remote-target').ExecutionTarget;
+  afterCursor?: string;
+  commandId?: string;
+}
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -111,8 +149,10 @@ export type WSMessagePayload =
   // Agent payloads
   | AgentSpawnedPayload
   | AgentStatusPayload
+  | AgentUpdatedPayload
   | AgentHeartbeatPayload
   | AgentThreadMessagePayload
+  | AgentSteeringQueuePayload
   | AgentMessageEventPayload
   | ThinkingPayload
   | ToolCallPayload
@@ -140,8 +180,10 @@ import type {
   MessageCompletePayload,
   AgentSpawnedPayload,
   AgentStatusPayload,
+  AgentUpdatedPayload,
   AgentHeartbeatPayload,
   AgentThreadMessagePayload,
+  AgentSteeringQueuePayload,
   AgentMessageEventPayload,
   ThinkingPayload,
   ToolCallPayload,

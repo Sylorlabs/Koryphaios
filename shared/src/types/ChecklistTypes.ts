@@ -14,6 +14,7 @@ export type ChecklistItemStatus = 'pending' | 'done' | 'skipped';
 /**
  * Ownership scope. A workspace checklist is reachable from every chat;
  * `session` and `project` narrow visibility to one chat or one project.
+ * A checklist created from a chat defaults to `session` for that chat.
  */
 export type ChecklistScope = 'workspace' | 'project' | 'session';
 

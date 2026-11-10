@@ -1,3 +1,4 @@
+export * from './critic-mode';
 // Koryphaios Shared Types — The contract between backend and frontend.
 //
 // This file now serves as the main export point, re-exporting from domain-specific modules.
@@ -24,9 +25,17 @@ export * from './computer-use';
 export * from './git-workspace';
 export * from './chat-git';
 export * from './provider-execution';
+export * from './desktop-ui-settings';
+export * from './notes/NoteIcons';
+export * from './project-identity';
+export * from './remote-target';
+export * from './run/RunRefs';
+export * from './source-control';
+export * from './remote-protocol';
 
 // ============== Agent & Worker Types ==============
 export type { AgentRole, AgentStatus, WorkerDomain, AgentIdentity } from './types/AgentTypes';
+export type { AgentSteeringCommand, AgentSteeringStatus } from './types/AgentSteeringTypes';
 
 // ============== Tool System ==============
 export type { ToolName, ToolCall, ToolResult } from './types/ToolTypes';
@@ -173,6 +182,7 @@ export type {
   AgentStatusPayload,
   AgentHeartbeatPayload,
   AgentThreadMessagePayload,
+  AgentSteeringQueuePayload,
   ThinkingPayload,
   StreamThinkingPayload,
   StreamDeltaPayload,
@@ -292,23 +302,14 @@ export {
   parseConfig,
 } from './config';
 
-// ============== Mode System ==============
-export type { UIMode, ModeConfig, UIModeConfig, ModeContext } from './types/ModeTypes';
-
-export { MODE_DISPLAY_NAMES, MODE_DESCRIPTIONS } from './types/ModeTypes';
-
-export {
-  DEFAULT_BEGINNER_CONFIG,
-  DEFAULT_ADVANCED_CONFIG,
-  DEFAULT_UI_MODE_CONFIG,
-  BEGINNER_TOOL_WHITELIST,
-  BEGINNER_TOOL_BLACKLIST,
-} from './config/ModeConfig';
-
 // ============== Notes Network ==============
 export * from './types/NoteTypes';
 export * from './types/NoteWorkspaceTypes';
 export * from './notes/NoteProperties';
+export * from './notes/NoteCanvas';
+export * from './notes/NoteWorkspaceTools';
+export * from './notes/NotePermissionPolicy';
+export * from './notes/NoteWorkspaceTemplates';
 
 // ============== Voice Types ==============
 export type {
@@ -327,3 +328,5 @@ export { MAX_CHAT_MEDIA_BYTES, chatMediaMimeType, chatMediaKind } from './media'
 // ─────────────────────────────────────────────────────────────────────────────
 // The following exports maintain backward compatibility with the original monolithic index.ts.
 // New code should import directly from the specific modules above.
+export { hasOpaqueContextHarness, reconcileContextBreakdown } from './context-accounting';
+export type { FreebuffBalance, FreebuffAccountSnapshot } from './freebuff-billing';

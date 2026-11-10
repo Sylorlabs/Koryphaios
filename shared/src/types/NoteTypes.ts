@@ -1,3 +1,9 @@
+import {
+  NOTE_WORKSPACE_TOOL_DEFINITIONS,
+  NOTE_WORKSPACE_TOOL_NAMES,
+} from '../notes/NoteWorkspaceTools';
+import type { NoteIcon } from '../notes/NoteIcons';
+
 export interface Note {
   id: string;
   title: string;
@@ -11,6 +17,8 @@ export interface Note {
   updatedAt: Date;
   /** Monotonic revision used for optimistic save/conflict detection. */
   revision: number;
+  /** Optional presentation icon, stored separately from note document text. */
+  icon?: NoteIcon;
   /** Project-relative path when this note mirrors a real .md or .html file. */
   sourcePath?: string;
   format?: 'markdown' | 'html';
@@ -110,6 +118,7 @@ export interface GraphNode {
   tags: string[];
   linkCount: number;
   includeInContext: boolean;
+  icon?: NoteIcon;
   /** True for a placeholder node representing a [[wikilink]] whose target note
    *  doesn't exist yet (an "unresolved"/ghost node, like Obsidian). */
   unresolved?: boolean;
@@ -237,11 +246,79 @@ export interface NoteRelationship {
   updatedAt: Date;
 }
 
+/** A note that references the queried note — document wikilinks and accepted
+ * relationship endpoints, matching the product's unified backlink view. */
+export interface NoteAppearanceRef {
+  noteId: string;
+  title: string;
+  folderPath: string;
+}
+
+export interface NoteRelationshipAppearance {
+  fromId: string;
+  toId: string;
+  fromTitle: string;
+  toTitle: string;
+  type: NoteRelationshipType;
+  status: NoteRelationshipStatus;
+  stale: boolean;
+  revision: number;
+  /** 'outgoing' when this note is the pair's source, 'incoming' when its target. */
+  direction: 'outgoing' | 'incoming';
+  /** The note on the other end of the pair. */
+  counterpartyId: string;
+  counterpartyTitle: string;
+}
+
+export interface NoteCanvasAppearance {
+  noteId: string;
+  title: string;
+  cardId: string;
+  cardText: string;
+}
+
+export interface NoteBaseAppearance {
+  baseId: string;
+  name: string;
+  revision: number;
+}
+
+/** Every place a note appears in the workspace: document links, relationship
+ * pairs, canvas cards and saved Base membership. */
+export interface NoteAppearances {
+  noteId: string;
+  title: string;
+  revision: number;
+  backlinks: NoteAppearanceRef[];
+  relationships: NoteRelationshipAppearance[];
+  canvases: NoteCanvasAppearance[];
+  bases: NoteBaseAppearance[];
+  counts: { backlinks: number; relationships: number; canvases: number; bases: number };
+  /** True when the scan stopped at a safety bound; appearances may be missing. */
+  truncated: boolean;
+}
+
+/** Host-recorded provenance for a chat finding saved as a sourced note. */
+export interface ChatFindingSource {
+  sessionId: string;
+  messageId?: string;
+  role?: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface ChatFindingInput {
+  title: string;
+  body: string;
+  source: ChatFindingSource;
+}
+
 export type NotePermissionLevel = 'auto' | 'ask' | 'block';
 
 export type NotesPermissionPreset = 'default' | 'allow_all' | 'ask_all' | 'block_all' | 'custom';
 
 export const NOTE_TOOL_NAMES = [
+  ...NOTE_WORKSPACE_TOOL_NAMES,
   'read_note',
   'search_notes',
   'list_notes',
@@ -273,6 +350,7 @@ export interface NoteToolDefinition {
 }
 
 export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
+  ...NOTE_WORKSPACE_TOOL_DEFINITIONS,
   {
     name: 'propose_note_relationship',
     label: 'Propose relationship',
@@ -283,7 +361,7 @@ export const NOTE_TOOL_DEFINITIONS: NoteToolDefinition[] = [
     name: 'review_note_relationship',
     label: 'Review relationship',
     description:
-      'Accept or reject a proposed relationship; always requires separate human approval',
+      'Accept or reject current evidence; dedicated approval policy and stale-evidence protection',
     category: 'write',
   },
   {
@@ -395,9 +473,17 @@ export type NoteToolPermissions = Record<NoteToolName, NotePermissionLevel>;
 export interface NotesAgentPermissions {
   preset: NotesPermissionPreset;
   tools: NoteToolPermissions;
+  /** Explicit user choices survive Guarded/YOLO defaults, including Ask. */
+  overrides?: Partial<NoteToolPermissions>;
 }
 
 export const DEFAULT_NOTE_TOOL_PERMISSIONS: NoteToolPermissions = {
+  ...(Object.fromEntries(
+    NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool) => [
+      tool.name,
+      tool.category === 'read' ? 'auto' : 'ask',
+    ]),
+  ) as Record<(typeof NOTE_WORKSPACE_TOOL_NAMES)[number], NotePermissionLevel>),
   read_note: 'auto',
   search_notes: 'auto',
   list_notes: 'auto',
@@ -448,6 +534,7 @@ export function applyNotesPermissionPreset(
   return {
     preset,
     tools: { ...NOTES_PERMISSION_PRESET_LEVELS[preset] },
+    overrides: preset === 'default' ? {} : { ...NOTES_PERMISSION_PRESET_LEVELS[preset] },
   };
 }
 
@@ -481,8 +568,18 @@ export function normalizeNotesAgentPermissions(
     }
   }
 
-  return {
-    preset: detectNotesPermissionPreset(tools),
-    tools,
-  };
+  const overrides: Partial<NoteToolPermissions> = {};
+  // Legacy custom Ask choices are conservative explicit overrides. Legacy
+  // default presets retain mode-aware defaults rather than freezing every Ask.
+  const source =
+    input?.overrides ??
+    (input?.preset && input.preset !== 'default' ? (input.tools ?? tools) : undefined);
+  for (const name of NOTE_TOOL_NAMES) {
+    const level = source?.[name];
+    if (level === 'auto' || level === 'ask' || level === 'block') {
+      overrides[name] = level;
+      tools[name] = level;
+    }
+  }
+  return { preset: detectNotesPermissionPreset(tools), tools, overrides };
 }

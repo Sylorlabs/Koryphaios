@@ -31,6 +31,10 @@ export type ContextBreakdown = {
   /** Generated output tokens from the provider usage report, patched in
    *  post-dispatch when usageKnown. 0 at dispatch (unknown yet). */
   output: number;
+  /** Native CLI-owned prompt/history not exposed as individual categories. */
+  cliHarness?: number;
+  /** Request context when an older provider snapshot has no composition data. */
+  request?: number;
 };
 
 export type StreamUsage = {
@@ -88,6 +92,15 @@ export interface AgentStatusPayload {
   continuationNeeded?: boolean;
 }
 
+/** Explicit worker-control changes, independent of usage telemetry. */
+export interface AgentUpdatedPayload {
+  agentId: string;
+  model?: string;
+  provider?: ProviderName;
+  reasoningLevel?: string;
+  contextPruned?: number;
+}
+
 /** agent.heartbeat — periodic "the run is still alive" signal emitted by the
  *  backend while a turn is active. Lets the client watchdog distinguish
  *  "alive but quiet" (e.g. a long tool call) from "dead — terminal event
@@ -107,6 +120,11 @@ export interface AgentThreadMessagePayload {
     content: string;
     createdAt: number;
   };
+}
+
+export interface AgentSteeringQueuePayload {
+  agentId: string;
+  commands: import('../types/AgentSteeringTypes').AgentSteeringCommand[];
 }
 
 /** Payload for the `agent.message` event (inter-agent mailbox updates). */
@@ -183,6 +201,11 @@ export interface StreamToolResultPayload {
     output: string;
     isError: boolean;
     durationMs: number;
+    computerUse?: import('../computer-use').ComputerUseReceipt;
+    /** Critic-specific outcome so a runner error is not confused with a
+     * completed review that rejected the work. */
+    criticOutcome?:
+      'run_failed' | 'run_failed_after_output' | 'verdict_failed' | 'passed' | 'skipped';
   };
 }
 
@@ -222,6 +245,11 @@ export interface CompactionProgressPayload {
   model: string;
   automatic: boolean;
   message: string;
+  /** Accumulated or final compaction checkpoint text, when available. */
+  summary?: string;
+  /** Raw model output for the compaction checkpoint, when available. */
+  raw?: string;
+  text?: string;
   sourceMessages?: number;
   sourceTokens?: number;
   checkpointTokens?: number;
@@ -237,12 +265,15 @@ export interface KorySessionChangesPayload {
   changes: ChangeSummary[];
   /** Stable durable review identity. Absent only for legacy operational rows. */
   reviewId?: string;
+  /** Exact publication displayed by the controller, including identical refreshes. */
+  reviewRevision?: string;
 }
 
 /** Terminal control for a prior session.changes projection. The matching
  * review is no longer actionable, so reconnecting clients must remove it. */
 export interface KorySessionChangesResolvedPayload {
   reviewId?: string;
+  reviewRevision?: string;
   status: 'accepted' | 'rejected' | 'terminalized' | 'not_pending';
   /** Structural reason only; never includes file or prompt contents. */
   reason?: string;
@@ -362,9 +393,17 @@ export interface ProviderInfo {
   verificationScope?: 'credential' | 'account' | 'endpoint' | 'catalog' | 'runtime';
   /** Last probe failure. Never contains raw credential material. */
   verificationError?: string;
+  /** Effective provider base URL used for inference and discovery. */
+  endpointUrl?: string;
+  /** Exact model-catalog URL used for provider discovery, when applicable. */
+  modelCatalogUrl?: string;
+  /** HTTP status from the last model-catalog failure, when available. */
+  modelDiscoveryHttpStatus?: number;
   authSource?: 'API Key' | 'Subscription' | 'CLI session';
   models: string[];
   allAvailableModels: ModelDef[];
+  /** A successful empty catalog is meaningful and must clear removed models. */
+  modelCatalogAuthoritative?: boolean;
   selectedModels: string[];
   hideModelSelector: boolean;
   authMode:
@@ -387,9 +426,9 @@ export interface ProviderInfo {
   extraAuthModes?: Array<{ id: string; label: string; description: string }>;
   error?: string;
   circuitOpen?: boolean;
-  /** Human-friendly name (e.g. "Google Jules") */
+  /** Human-friendly name (e.g. "Claude Code") */
   label?: string;
-  /** Static icon path served by the frontend (e.g. /provider-icons/jules.svg) */
+  /** Static icon path served by the frontend (e.g. /provider-icons/lobehub/claude.svg) */
   iconPath?: string;
   /** Authenticated custom-provider icon asset and presentation metadata. */
   customIcon?: CustomProviderIconConfig;

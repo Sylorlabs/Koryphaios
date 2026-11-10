@@ -30,19 +30,6 @@ export function providerExecutionCapabilities(
       defaultMode: 'local',
     };
   }
-  if (name === 'jules') {
-    return {
-      modes: [
-        {
-          id: 'cloud',
-          available: false,
-          reason:
-            'Jules cloud delegation requires an approval-capable workflow that is not implemented in Koryphaios.',
-        },
-      ],
-      defaultMode: 'cloud',
-    };
-  }
   const mode = deployment === 'cloud' ? 'cloud' : 'local';
   return { modes: [{ id: mode, available: true }], defaultMode: mode };
 }

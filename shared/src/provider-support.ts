@@ -89,13 +89,33 @@ const capabilityAdapter = (
 export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> = {
   anthropic: compatible(['chat'], 'provider-specific-contract'),
   openai: compatible(['chat', 'image', 'audio'], 'provider-specific-contract'),
+  beam: preview(
+    ['chat'],
+    'openai-compatible-contract',
+    'Reflection AI uses the documented OpenAI-compatible Chat Completions and Models endpoints with Bearer API-key authentication. Models come from the live catalog; live account and runtime qualification is still required.',
+  ),
   google: compatible(['chat'], 'provider-specific-contract'),
   aistudio: compatible(['chat'], 'provider-specific-contract'),
   xai: compatible(['chat'], 'openai-compatible-contract'),
   openrouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  agentrouter: compatible(
+    ['chat', 'gateway'],
+    'openai-compatible-contract',
+    'AgentRouter exposes the documented OpenAI-compatible /v1/models and /v1/chat/completions APIs with Bearer API-key authentication. Available models are account-scoped and read from the live catalog; a successful probe does not prove quota or entitlement for every model.',
+  ),
   unorouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   tokenrouter: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
   experientiallabs: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  tokenharbor: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  logfare: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  apinex: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  gwarden: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  respan: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
+  vyceai: compatible(
+    ['chat', 'gateway'],
+    'openai-compatible-contract',
+    'Vyce AI exposes the documented OpenAI-compatible /v1/models and /v1/chat/completions APIs with Bearer API-key authentication. Its /v1/models publishes the callable ids, so context windows and reasoning tiers are resolved per model from the upstream lab’s models.dev entry when Vyce itself reports neither.',
+  ),
   groq: compatible(['chat'], 'openai-compatible-contract'),
   digitalocean: compatible(['chat'], 'openai-compatible-contract'),
   commandcode: compatible(['chat', 'gateway'], 'openai-compatible-contract'),
@@ -112,7 +132,6 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   llamacpp: compatible(['chat', 'local-runtime'], 'openai-compatible-contract'),
   kimicode: compatible(['chat', 'coding-agent'], 'provider-specific-contract'),
   opencodego: compatible(['chat', 'gateway'], 'provider-specific-contract'),
-  chatbase: compatible(['chat'], 'provider-specific-contract'),
   notion: compatible(['chat'], 'provider-specific-contract'),
 
   claude: preview(
@@ -150,13 +169,23 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
     'cli-contract',
     'Grok Build is an external CLI harness and remains version-sensitive.',
   ),
+  codebuddy: preview(
+    ['chat', 'coding-agent'],
+    'cli-contract',
+    "CodeBuddy is an external versioned CLI harness (a Claude Code fork). Model catalogs come from the installed CLI's own product*.json and runtime verification of the real login is still required. The Upstream international endpoint (www.codebuddy.ai) is currently unreachable, so the CLI must be pointed at the reachable endpoint before login.",
+  ),
+  'workbuddy-desktop': preview(
+    ['chat', 'coding-agent'],
+    'cli-contract',
+    "WorkBuddy Desktop runs the installed WorkBuddy AI app's own host runtime (bundled CLI in --serve mode, ACP over HTTP SSE). It is a separate product from the standalone CodeBuddy CLI and carries the desktop app's limits and login context. The model catalog is read from the app bundle's product.json; the app must be installed for the provider to be available.",
+  ),
   antigravity: preview(
     ['chat', 'coding-agent'],
     'cli-contract',
     'Antigravity is a moving CLI integration and requires a live installed-version check. ' +
       'Tool authority is enforced through the agy permission engine (settings.json permissions + toolPermission): ' +
       'native shell, writes, and web are denied, and host effects are reachable only through the authenticated ' +
-      'kory__ MCP bridge. Note that agy ignores --mode in headless runs, so no CLI flag carries Koryphaios\' ' +
+      "kory__ MCP bridge. Note that agy ignores --mode in headless runs, so no CLI flag carries Koryphaios' " +
       'permission mode.',
   ),
 
@@ -169,18 +198,24 @@ export const PROVIDER_SUPPORT: Readonly<Record<string, ProviderSupportRecord>> =
   freebuff: preview(
     ['chat', 'coding-agent'],
     'cli-contract',
-    'Runs the real Freebuff 0.0.162 TUI through a tmux PTY. A mandatory OS sandbox confines native Freebuff tools to a disposable checkout; authoritative project actions use the authenticated Kory MCP bridge.',
-    '0.0.162',
+    'Runs the real Freebuff 0.2.16 OpenTUI through a private tmux PTY with mandatory Linux bubblewrap (native or Docker/Colima). Connect prepares the pinned runtime automatically and loads available account models with provider-reported capabilities. Authoritative project actions use the authenticated Kory MCP bridge. Billing reports account-attributed input usage and live Freebuck balances.',
+    '0.2.16',
+  ),
+  omnirush: preview(
+    ['chat', 'coding-agent'],
+    'cli-contract',
+    'Omnirush is a moving external CLI. Koryphaios reads its structured live model catalog and thinking controls at runtime, then routes host actions through the session-scoped Kory MCP bridge.',
+  ),
+  opencode: preview(
+    ['chat', 'coding-agent'],
+    'cli-contract',
+    'OpenCode is a moving external CLI (ACP v1). Koryphaios reads its authenticated live model catalog (`opencode api model.list`) at runtime for real model ids, context windows, output limits, and reasoning-effort ladders, then routes host actions through the session-scoped Kory MCP bridge passed per ACP session. Native tool permissions stay with the user\'s OpenCode configuration; anything that asks is vetoed by Koryphaios.',
   ),
   codebuff: preview(
     ['chat', 'coding-agent'],
     'provider-specific-contract',
     'Uses the official @codebuff/sdk with a user-owned Codebuff API key and the documented codebuff/base@0.0.16 agent. Supported filesystem and command tools are overridden through Kory ToolRegistry; SDK-local artifacts stay disposable and live account verification is still required.',
     '@codebuff/sdk 0.10.7',
-  ),
-  jules: unavailable(
-    ['async-agent'],
-    'Jules mutation requires an approval-capable remote workflow that is not safely implemented in this release.',
   ),
   hoplite: unavailable(
     ['async-agent'],

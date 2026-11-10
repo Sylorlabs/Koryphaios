@@ -52,21 +52,23 @@ export function normalizeReasoningLevel(
 ): string | undefined {
   if (!reasoningLevel) return undefined;
 
-  const normalizedLevel = reasoningLevel.toLowerCase().trim();
+  const normalizedLevel = reasoningLevel.trim();
+  const normalizedToken = normalizedLevel.toLowerCase();
 
-  if (normalizedLevel === 'adaptive') {
+  if (normalizedToken === 'adaptive') {
     return undefined;
   }
 
   // Auto means manager decides based on task complexity
-  if (normalizedLevel === 'auto') {
+  if (normalizedToken === 'auto') {
     return 'auto';
   }
 
-  // Pass the level through unchanged. The reasoning picker only offers levels
-  // the model itself reported via reasoningLevels, so the value is already in
-  // the provider's native format. Each provider's backend code handles any
-  // API-specific mapping (e.g. OpenAI maps budget tokens to effort strings).
+  // Pass the level through unchanged, including its casing. The reasoning
+  // picker only offers levels the model itself reported via reasoningLevels,
+  // and provider-specific states may be case-sensitive or opaque tokens.
+  // Each provider's backend code handles any API-specific mapping (e.g.
+  // OpenAI maps budget tokens to effort strings).
   // Providers that publish effort as separate models rather than a parameter
   // (Antigravity) map the level onto their own per-tier model id instead.
   return normalizedLevel;
