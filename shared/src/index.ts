@@ -30,6 +30,7 @@ export * from './notes/NoteIcons';
 export * from './project-identity';
 export * from './remote-target';
 export * from './run/RunRefs';
+export * from './transcript';
 export * from './source-control';
 export * from './remote-protocol';
 
@@ -154,7 +155,12 @@ export type {
 export type { PermissionRequest, PermissionResponse } from './permissions/PermissionTypes';
 
 // ============== WebSocket Protocol ==============
-export type { WSEventType, WSMessage, WSMessagePayload } from './websocket/WSEvents';
+export type { WSEventType, WSMessage, WSMessagePayload, SessionWSMessage } from './websocket/WSEvents';
+export {
+  SESSION_SCOPED_EVENT_TYPES,
+  isSessionScopedEventType,
+  hasRequiredSessionIdentity,
+} from './websocket/WSEvents';
 export {
   SESSION_RUN_ACTIVE_PHASES,
   SESSION_RUN_WAITING_PHASES,
@@ -220,6 +226,7 @@ export type {
   ProviderInfo,
   RateLimitPayload,
   NativeCommandPayload,
+  StreamCompletePayload,
 } from './websocket/WSPayloads';
 
 // ============== REST API Types ==============

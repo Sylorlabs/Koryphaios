@@ -2,6 +2,7 @@
 // Domain: Message and content block structures
 
 import type { ProviderName, ToolCall, ToolResult } from '../index';
+import type { TranscriptPart } from '../transcript/TranscriptParts';
 
 export type ContentBlockType = 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image';
 
@@ -48,6 +49,9 @@ export interface StoredMessage {
   content: string; // JSON string of ContentBlock[] or raw text
   /** Verbatim assistant reasoning, persisted as a thinking content block. */
   reasoningContent?: string;
+  /** Ordered display parts for an assistant turn (reasoning/text/tool). Display only;
+   *  reasoningContent stays the provider replay input. See docs/architecture/transcript-integrity.md. */
+  parts?: TranscriptPart[];
   model?: string;
   provider?: ProviderName;
   tokensIn?: number;

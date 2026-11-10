@@ -138,6 +138,10 @@ export interface ThinkingPayload {
   /** Estimated reasoning tokens so far — used when the provider redacts the
    *  thinking text (Claude Code headless) but reports progress. */
   thinkingTokens?: number;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
 }
 export type StreamThinkingPayload = ThinkingPayload;
 
@@ -145,10 +149,18 @@ export interface StreamDeltaPayload {
   agentId: string;
   content: string;
   model: string;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
 }
 
 export interface StreamClearContentPayload {
   agentId: string;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
 }
 
 export interface ContextDetectedPayload {
@@ -184,6 +196,10 @@ export interface MessageCompletePayload {
 export interface ToolCallPayload {
   agentId: string;
   sourceProvider?: string;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
   toolCall: {
     id: string;
     name: string;
@@ -195,6 +211,10 @@ export type StreamToolCallPayload = ToolCallPayload;
 export interface StreamToolResultPayload {
   agentId: string;
   sourceProvider?: string;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
   toolResult: {
     callId: string;
     name: string;
@@ -207,6 +227,18 @@ export interface StreamToolResultPayload {
     criticOutcome?:
       'run_failed' | 'run_failed_after_output' | 'verdict_failed' | 'passed' | 'skipped';
   };
+}
+
+/** stream.complete: terminal event for a manager or worker turn. */
+export interface StreamCompletePayload {
+  agentId: string;
+  model?: string;
+  tokensIn?: number;
+  tokensOut?: number;
+  /** Id of the assistant message this event belongs to. Allocated when the manager turn starts;
+   *  the frontend replaces a live turn with persisted history by this id, never by text.
+   *  See docs/architecture/transcript-integrity.md. */
+  messageId?: string;
 }
 
 export interface SessionCreatedPayload {

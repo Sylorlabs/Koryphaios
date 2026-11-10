@@ -198,3 +198,81 @@ import type {
 } from './WSPayloads';
 
 export type { ChangeSummary, StreamUsage } from './WSPayloads';
+
+// ============== Session identity (docs/architecture/transcript-integrity.md, Invariant 4) ==============
+
+/**
+ * Every event that touches a chat transcript, agent, run or review. The backend
+ * refuses to publish one of these without a sessionId, and the frontend drops one.
+ *
+ * Deliberately excluded:
+ * - `session.actionable_waits`: the response to a global index request carries no sessionId.
+ * - `session.actionable_waits.request`: a client request, not a session event.
+ * - `session.created` / `session.updated` / `session.deleted`: session lifecycle, handled by
+ *   the session list rather than a transcript.
+ * - `permission.request` / `permission.response`: session-bound at every emitter, but
+ *   not yet part of the scoped contract.
+ */
+export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEventType>([
+  // Agent lifecycle
+  'agent.spawned',
+  'agent.status',
+  'agent.completed',
+  'agent.error',
+  'agent.thread_message',
+  'agent.updated',
+  'agent.message',
+  'agent.steering_queue',
+  'agent.heartbeat',
+  // Streaming content
+  'stream.delta',
+  'stream.thinking',
+  'stream.tool_call',
+  'stream.tool_result',
+  'stream.usage',
+  'stream.complete',
+  'stream.clear_content',
+  'stream.file_delta',
+  'stream.file_complete',
+  // Context
+  'context.detected',
+  // Session transcript and review
+  'session.changes',
+  'session.changes_resolved',
+  'session.accept_changes',
+  'session.user_message',
+  'session.idle',
+  'session.timeline_rewritten',
+  'session.replay_skipped',
+  'run.state',
+  // Compaction
+  'compaction.started',
+  'compaction.progress',
+  'compaction.completed',
+  'compaction.failed',
+  // Kory
+  'kory.thought',
+  'kory.routing',
+  'kory.verification',
+  'kory.task_breakdown',
+  'kory.ask_user',
+  'kory.ask_user_resolved',
+  'permission.request',
+  'permission.response',
+]);
+
+/** A WebSocket message whose type is session-scoped. The sessionId is required. */
+export type SessionWSMessage<T = unknown> = WSMessage<T> & { sessionId: string };
+
+export function isSessionScopedEventType(type: WSEventType): boolean {
+  return SESSION_SCOPED_EVENT_TYPES.has(type);
+}
+
+/**
+ * True when the message is not session-scoped, or when it is session-scoped and
+ * carries a non-empty sessionId. False only for a scoped message missing its identity.
+ */
+export function hasRequiredSessionIdentity(msg: WSMessage): boolean {
+  if (!isSessionScopedEventType(msg.type)) return true;
+  return typeof msg.sessionId === 'string' && msg.sessionId.trim().length > 0;
+}
